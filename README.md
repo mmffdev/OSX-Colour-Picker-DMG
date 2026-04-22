@@ -19,7 +19,10 @@ Two entry points:
 
 ## Install
 
-Grab the latest DMG from [Releases](https://github.com/mmffdev/OSX-Colour-Picker-DMG/releases), mount it, and drag **MMFFDev Colour.app** onto the **Applications** shortcut.
+Two options from the latest [Release](https://github.com/mmffdev/OSX-Colour-Picker-DMG/releases):
+
+- **DMG** (`MMFFDev-Colour.dmg`) — mount and drag **MMFFDev Colour.app** onto the **Applications** shortcut.
+- **PKG** (`MMFFDev-Colour.pkg`) — double-click, step through Apple's installer; lands the app in `/Applications`. Handy for MDM / scripted deployment.
 
 The app is ad-hoc signed — on first launch you may need to right-click → **Open** to get past Gatekeeper.
 
@@ -30,6 +33,7 @@ Requires Xcode command line tools (`xcode-select --install`).
 ```bash
 ./build.sh        # compiles and installs to ~/Applications/MMFFDev Colour.app
 ./make_dmg.sh     # compiles and packages a drag-to-Applications DMG
+./make_pkg.sh     # compiles and packages a .pkg installer for /Applications
 ```
 
 ## Files
@@ -38,6 +42,7 @@ Requires Xcode command line tools (`xcode-select --install`).
 - `make_icon.swift` — generates the iconset from a procedural design.
 - `build.sh` — compile + install to `~/Applications`.
 - `make_dmg.sh` — compile + package as `MMFFDev-Colour.dmg`.
+- `make_pkg.sh` — compile + package as `MMFFDev-Colour.pkg`.
 - `Info.plist` — bundle metadata.
 - `AppIcon.icns` — compiled icon.
 
