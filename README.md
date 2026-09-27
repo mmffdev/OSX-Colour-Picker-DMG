@@ -46,6 +46,26 @@ Requires Xcode command line tools (`xcode-select --install`).
 - `Info.plist` — bundle metadata.
 - `AppIcon.icns` — compiled icon.
 
+## Version 2 — swatches
+
+`v2/` is a separate app, **MMFFDev Colour 2**, that installs alongside the original. It adds named swatches (collections of colours), an All Colours / Swatches switch, sorting, and copy-all per swatch.
+
+Install from `v2/MMFFDev-Colour-2.dmg` (drag to Applications) or `v2/MMFFDev-Colour-2.pkg` (installs to `/Applications`). Ad-hoc signed like the original, so right-click → **Open** on first launch.
+
+```bash
+v2/build.sh       # compiles, runs the self-test, installs to ~/Applications/MMFFDev Colour 2.app
+v2/make_dmg.sh    # compiles, runs the self-test, packages v2/MMFFDev-Colour-2.dmg
+v2/make_pkg.sh    # compiles, runs the self-test, packages v2/MMFFDev-Colour-2.pkg
+```
+
+- **New Swatch** (⌘N) creates a swatch with a default name and opens the name for editing. Rename later with the pencil or a double-click.
+- **Picks go to** chooses which swatch new picks land in. A new swatch becomes the target automatically; the eyedropper on a swatch header does the same.
+- **Copy all** on a swatch header copies its colours as `#FF0000, #FF6600, #0033FF`, in the order shown.
+- **Sort** — Newest First, Oldest First, or Colour Order (by hue, light to dark, greys last).
+- Right-click a colour to add it to a swatch, remove it from one, or delete it from the library.
+
+Its library is `~/Library/Application Support/MMFFDev Colour 2/library.json`. On first launch it copies in the colours from the original app; **File → Import from MMFFDev Colour** pulls in anything picked there since. The original app's library is only ever read.
+
 ## Status
 
 Prototype quality. It works, we use it daily, but there are no tests, no localisation, and no notarisation. Pull requests welcome if you want to push it further.
