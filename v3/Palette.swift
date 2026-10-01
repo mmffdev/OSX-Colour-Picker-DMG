@@ -130,15 +130,13 @@ private typealias RGB = (r: Float, g: Float, b: Float)
 /// (Display P3 screenshots) come out as the sRGB hex values a user would expect.
 private final class SRGBBitmap {
     let width: Int, height: Int
-    private var bytes: [UInt8]
-    private let context: CGContext
+    private let context: CGContext // owns its pixel memory
 
     init?(_ cg: CGImage, maxSide: Int) {
         let scale = min(1, CGFloat(maxSide) / CGFloat(max(cg.width, cg.height)))
         width = max(1, Int(CGFloat(cg.width) * scale))
         height = max(1, Int(CGFloat(cg.height) * scale))
-        bytes = [UInt8](repeating: 0, count: width * height * 4)
-        guard let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8,
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                                   bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
         ctx.interpolationQuality = .medium
@@ -223,9 +221,7 @@ private func stripImage(_ seeds: [RGB]) -> CIImage? {
         bytes[i * 4 + 1] = UInt8((s.g * 255).rounded())
         bytes[i * 4 + 2] = UInt8((s.b * 255).rounded())
     }
-    guard let ctx = CGContext(data: &bytes, width: seeds.count, height: 1, bitsPerComponent: 8,
-                              bytesPerRow: seeds.count * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-          let cg = ctx.makeImage() else { return nil }
-    return CIImage(cgImage: cg, options: [.colorSpace: NSNull()])
+    // The image must own its pixels: Core Image reads them later, after `bytes` is gone.
+    return CIImage(bitmapData: Data(bytes), bytesPerRow: seeds.count * 4,
+                   size: CGSize(width: seeds.count, height: 1), format: .RGBA8, colorSpace: nil)
 }

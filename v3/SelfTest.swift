@@ -206,10 +206,12 @@ private func testImage(width: Int, height: Int, pixel: (Int, Int) -> (UInt8, UIn
             bytes[i] = r; bytes[i + 1] = g; bytes[i + 2] = b
         }
     }
-    let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                        bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-    return ctx.makeImage()!
+    // The provider keeps its own copy of the pixels, so the image outlives `bytes`.
+    return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                   provider: CGDataProvider(data: Data(bytes) as CFData)!, decode: nil,
+                   shouldInterpolate: false, intent: .defaultIntent)!
 }
 
 // ---------- Sync, merge and catalogues ----------
