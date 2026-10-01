@@ -4,28 +4,61 @@ import Foundation
 
 struct Colour: Codable, Equatable {
     let hex: String
-    let pickedAt: Date
+    var pickedAt: Date
+    /// Free-form labels. The date lets a sync keep the newer set.
+    var tags: [String]?
+    var tagsChangedAt: Date?
+
+    init(hex: String, pickedAt: Date, tags: [String]? = nil, tagsChangedAt: Date? = nil) {
+        self.hex = hex; self.pickedAt = pickedAt; self.tags = tags; self.tagsChangedAt = tagsChangedAt
+    }
+}
+
+/// A folder of palettes in the sidebar: a client, a product, a piece of work.
+struct Project: Codable, Equatable {
+    let id: UUID
+    var name: String
+    var createdAt: Date
+    var nameChangedAt: Date?
+    var position: Int?
+    var positionChangedAt: Date?
 }
 
 struct SwatchEntry: Codable, Equatable {
     let hex: String
-    let addedAt: Date
+    var addedAt: Date
 }
 
 /// A named collection of colours. Colours always live in the catalogue too.
 struct Swatch: Codable, Equatable {
     let id: UUID
     var name: String
-    let createdAt: Date
+    var createdAt: Date
     var entries: [SwatchEntry]
     /// When the name was last edited, so a sync keeps the newer name. nil = never renamed.
     var nameChangedAt: Date?
+    /// Starred palettes are listed under Favourites. The date lets a sync keep the newer choice.
+    var isFavourite: Bool?
+    var favouriteChangedAt: Date?
+    /// Built from colours already in the library, rather than picked or taken from an image.
+    var isCustom: Bool?
+    /// The project this palette sits in; nil is the loose "Palettes" list.
+    var projectID: UUID?
+    /// Order within its project. `placedAt` lets a sync keep the newer arrangement.
+    var position: Int?
+    var placedAt: Date?
+    var tags: [String]?
+    var tagsChangedAt: Date?
+
+    var favourite: Bool { isFavourite ?? false }
+    var custom: Bool { isCustom ?? false }
+    var tagList: [String] { tags ?? [] }
 }
 
 /// A record that something was deleted, and when. Lets a sync tell "deleted on this Mac"
 /// apart from "added on the other one", so deletions stick and later re-additions survive.
 struct Tombstone: Codable, Equatable {
-    enum Kind: String, Codable { case colour, swatch, entry }
+    enum Kind: String, Codable { case colour, swatch, entry, project }
     let kind: Kind
     /// Colour: its hex. Swatch: its UUID. Entry: "UUID/hex".
     let key: String
@@ -39,8 +72,9 @@ struct Library: Codable, Equatable {
     /// The swatch new picks are added to. nil = catalogue only.
     var activeSwatchID: UUID?
     var deleted: [Tombstone] = []
+    var projects: [Project] = []
 
-    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted }
+    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted, projects }
 }
 
 extension Library {
@@ -53,6 +87,7 @@ extension Library {
         swatches = try c.decode([Swatch].self, forKey: .swatches)
         activeSwatchID = try c.decodeIfPresent(UUID.self, forKey: .activeSwatchID)
         deleted = try c.decodeIfPresent([Tombstone].self, forKey: .deleted) ?? []
+        projects = try c.decodeIfPresent([Project].self, forKey: .projects) ?? []
     }
 
     static func entryKey(_ swatch: UUID, _ hex: String) -> String { "\(swatch.uuidString)/\(hex)" }
@@ -175,14 +210,14 @@ extension Library {
         return sortedHexes(s.entries.map { ($0.hex, $0.addedAt) }, by: order)
     }
 
-    /// "Swatch N", one higher than the highest default-style name in use.
+    /// "Palette N", one higher than the highest default-style name in use.
     func nextDefaultSwatchName() -> String {
         let numbers = swatches.compactMap { s -> Int? in
             let parts = s.name.lowercased().split(separator: " ")
-            guard parts.count == 2, parts[0] == "swatch" else { return nil }
+            guard parts.count == 2, parts[0] == "palette" else { return nil }
             return Int(parts[1])
         }
-        return "Swatch \((numbers.max() ?? 0) + 1)"
+        return "Palette \((numbers.max() ?? 0) + 1)"
     }
 
     /// Creates a swatch with a default name and makes it the target for new picks.
@@ -204,6 +239,135 @@ extension Library {
             swatches[i].nameChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
         }
         return true
+    }
+
+    // MARK: Projects and order
+
+    func project(_ id: UUID) -> Project? { projects.first { $0.id == id } }
+
+    /// Projects in sidebar order.
+    var orderedProjects: [Project] {
+        projects.sorted { a, b in
+            let (x, y) = (a.position ?? Int.max, b.position ?? Int.max)
+            return x != y ? x < y : a.createdAt < b.createdAt
+        }
+    }
+
+    /// Palettes in one project (nil = the loose list), in their kept order, newest first when unplaced.
+    func palettes(in projectID: UUID?) -> [Swatch] {
+        swatches.filter { $0.projectID == projectID }.sorted { a, b in
+            let (x, y) = (a.position ?? Int.max, b.position ?? Int.max)
+            return x != y ? x < y : a.createdAt > b.createdAt
+        }
+    }
+
+    @discardableResult
+    mutating func createProject(named raw: String, at date: Date = Date()) -> UUID {
+        let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = uniqueName(base.isEmpty ? "New Project" : base, among: projects.map { $0.name })
+        let p = Project(id: UUID(), name: name, createdAt: date, nameChangedAt: nil,
+                        position: (projects.compactMap { $0.position }.max() ?? -1) + 1, positionChangedAt: date)
+        projects.append(p)
+        return p.id
+    }
+
+    @discardableResult
+    mutating func renameProject(_ id: UUID, to raw: String, at date: Date = Date()) -> Bool {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let i = projects.firstIndex(where: { $0.id == id }) else { return false }
+        if projects[i].name != name {
+            projects[i].name = name
+            projects[i].nameChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
+        }
+        return true
+    }
+
+    /// Removes the project only; its palettes drop into the loose list.
+    mutating func deleteProject(_ id: UUID, at date: Date = Date()) {
+        guard projects.contains(where: { $0.id == id }) else { return }
+        bury(.project, id.uuidString, at: date)
+        projects.removeAll { $0.id == id }
+        for i in swatches.indices where swatches[i].projectID == id {
+            swatches[i].projectID = nil
+            swatches[i].placedAt = date
+        }
+    }
+
+    /// Puts a palette at `index` within `project` (nil = loose list), renumbering both lists.
+    mutating func move(_ paletteID: UUID, to project: UUID?, index: Int, at date: Date = Date()) {
+        guard let s = swatches.firstIndex(where: { $0.id == paletteID }) else { return }
+        if let p = project, self.project(p) == nil { return }
+        let from = swatches[s].projectID
+        var order = palettes(in: project).map { $0.id }.filter { $0 != paletteID }
+        order.insert(paletteID, at: min(max(0, index), order.count))
+        swatches[s].projectID = project
+        place(order, at: date)
+        if from != project { place(palettes(in: from).map { $0.id }, at: date) }
+    }
+
+    /// Gives an ordered set of palettes positions 0, 1, 2 …
+    mutating func place(_ ids: [UUID], at date: Date = Date()) {
+        for (n, id) in ids.enumerated() {
+            guard let i = swatches.firstIndex(where: { $0.id == id }) else { continue }
+            if swatches[i].position != n { swatches[i].position = n; swatches[i].placedAt = date }
+        }
+    }
+
+    mutating func placeProjects(_ ids: [UUID], at date: Date = Date()) {
+        for (n, id) in ids.enumerated() {
+            guard let i = projects.firstIndex(where: { $0.id == id }) else { continue }
+            if projects[i].position != n { projects[i].position = n; projects[i].positionChangedAt = date }
+        }
+    }
+
+    // MARK: Tags
+
+    /// Trimmed, de-duplicated without regard to case, in the order given.
+    static func cleanTags(_ raw: [String]) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for t in raw {
+            let tag = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !tag.isEmpty, seen.insert(tag.lowercased()).inserted else { continue }
+            out.append(tag)
+        }
+        return out
+    }
+
+    mutating func setTags(ofPalette id: UUID, _ raw: [String], at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }) else { return }
+        let tags = Library.cleanTags(raw)
+        guard tags != swatches[i].tagList else { return }
+        swatches[i].tags = tags.isEmpty ? nil : tags
+        swatches[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
+    }
+
+    mutating func setTags(ofColour hex: String, _ raw: [String], at date: Date = Date()) {
+        guard let i = colours.firstIndex(where: { $0.hex == hex }) else { return }
+        let tags = Library.cleanTags(raw)
+        guard tags != (colours[i].tags ?? []) else { return }
+        colours[i].tags = tags.isEmpty ? nil : tags
+        colours[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
+    }
+
+    /// Every tag in use, on swatches or palettes, sorted.
+    var allTags: [String] {
+        var seen: [String: String] = [:]
+        for t in colours.flatMap({ $0.tags ?? [] }) + swatches.flatMap({ $0.tagList }) where seen[t.lowercased()] == nil { seen[t.lowercased()] = t }
+        return seen.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Swatches carrying the tag themselves or sitting in a palette that carries it.
+    func hexes(tagged tag: String) -> Set<String> {
+        let t = tag.lowercased()
+        var out = Set(colours.filter { ($0.tags ?? []).contains { $0.lowercased() == t } }.map { $0.hex })
+        for s in swatches where s.tagList.contains(where: { $0.lowercased() == t }) { out.formUnion(s.entries.map { $0.hex }) }
+        return out
+    }
+
+    mutating func setFavourite(_ id: UUID, _ on: Bool, at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), swatches[i].favourite != on else { return }
+        swatches[i].isFavourite = on
+        swatches[i].favouriteChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
     }
 
     /// Removes the swatch only; its colours stay in the catalogue.
@@ -312,10 +476,10 @@ struct ExportFile: Equatable {
 extension Library {
     /// Creates a swatch with the given (uniqued) name holding `hexes`, and makes it the pick target.
     @discardableResult
-    mutating func createSwatch(named raw: String, hexes: [String], at date: Date = Date()) -> UUID {
+    mutating func createSwatch(named raw: String, hexes: [String], custom: Bool = false, at date: Date = Date()) -> UUID {
         let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = uniqueName(base.isEmpty ? nextDefaultSwatchName() : base, among: swatches.map { $0.name })
-        let s = Swatch(id: UUID(), name: name, createdAt: date, entries: [])
+        let s = Swatch(id: UUID(), name: name, createdAt: date, entries: [], isCustom: custom ? true : nil)
         swatches.append(s)
         add(hexes, toSwatch: s.id, at: date)
         activeSwatchID = s.id
@@ -338,12 +502,12 @@ extension Library {
     }
 }
 
-/// Writes library.json and the text files into a new "MMFFDev Colour 2 Export" folder under `folder`.
+/// Writes library.json and the text files into a new "MMFFDev Colour 3 Export" folder under `folder`.
 /// Returns the folder written. Never overwrites: a second export gets "... Export 2".
 func writeExport(_ lib: Library, to folder: URL, by order: SortOrder) throws -> URL {
     let fm = FileManager.default
     let existing = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
-    let dir = folder.appendingPathComponent(uniqueName("MMFFDev Colour 2 Export", among: existing))
+    let dir = folder.appendingPathComponent(uniqueName("MMFFDev Colour 3 Export", among: existing))
     try fm.createDirectory(at: dir, withIntermediateDirectories: false)
     try JSONEncoder.library.encode(lib).write(to: dir.appendingPathComponent("library.json"), options: .atomic)
     for f in lib.exportFiles(by: order) {
@@ -386,13 +550,16 @@ final class LibraryStore {
     let url: URL
     /// The v1 library. Read for import, never written.
     let legacyURL: URL?
+    /// The v2 library. Read for import, never written.
+    let previousURL: URL?
     /// Set when an unreadable library file was moved aside during load.
     private(set) var quarantinedFile: URL?
 
-    init(directory: URL, legacyURL: URL?) {
+    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         self.url = directory.appendingPathComponent("library.json")
         self.legacyURL = legacyURL
+        self.previousURL = previousURL
     }
 
     /// The store for the catalogue last opened on this Mac.
@@ -409,7 +576,12 @@ final class LibraryStore {
         return (try? decoder.decode([Colour].self, from: data)) ?? []
     }
 
-    /// First run seeds the library with a copy of the v1 colours.
+    func loadPrevious() -> Library? {
+        guard let previousURL = previousURL, let data = try? Data(contentsOf: previousURL) else { return nil }
+        return try? decoder.decode(Library.self, from: data)
+    }
+
+    /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
@@ -422,7 +594,7 @@ final class LibraryStore {
             try? fm.moveItem(at: url, to: aside)
             quarantinedFile = aside
         }
-        var lib = Library()
+        var lib = loadPrevious() ?? Library()
         lib.mergeLegacy(loadLegacy())
         try save(lib)
         return lib

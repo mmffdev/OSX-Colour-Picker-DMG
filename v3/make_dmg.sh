@@ -1,32 +1,32 @@
 #!/bin/bash
-# Build MMFFDev Colour 2.app and package it as a drag-to-Applications DMG.
-# Output: ./MMFFDev-Colour-2.dmg
+# Build MMFFDev Colour 3.app and package it as a drag-to-Applications DMG.
+# Output: ./MMFFDev-Colour-3.dmg
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./signing.sh
 
-APP_NAME="MMFFDev Colour 2"
-DMG_BASENAME="MMFFDev-Colour-2"
+APP_NAME="MMFFDev Colour 3"
+DMG_BASENAME="MMFFDev-Colour-3"
 DMG="./${DMG_BASENAME}.dmg"
 
-STAGE="$(mktemp -d -t mmffdev-colour2-dmg)"
-BUILD="$(mktemp -d -t mmffdev-colour2-build)"
+STAGE="$(mktemp -d -t mmffdev-colour3-dmg)"
+BUILD="$(mktemp -d -t mmffdev-colour3-build)"
 trap 'rm -rf "$STAGE" "$BUILD"' EXIT
 
 APP="$STAGE/$APP_NAME.app"
 
 echo "compiling swift..."
-swiftc -O Model.swift Helpers.swift Palette.swift Sync.swift LibraryWindow.swift SettingsWindow.swift SelfTest.swift main.swift -o "$BUILD/MMFFDevColour2"
+swiftc -O *.swift -o "$BUILD/MMFFDevColour3"
 
 echo "running self-test..."
-"$BUILD/MMFFDevColour2" --self-test > /dev/null || { "$BUILD/MMFFDevColour2" --self-test; exit 1; }
+"$BUILD/MMFFDevColour3" --self-test > /dev/null || { "$BUILD/MMFFDevColour3" --self-test; exit 1; }
 
 echo "assembling bundle..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
-mv "$BUILD/MMFFDevColour2" "$APP/Contents/MacOS/MMFFDevColour2"
+mv "$BUILD/MMFFDevColour3" "$APP/Contents/MacOS/MMFFDevColour3"
 cp ../AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-chmod +x "$APP/Contents/MacOS/MMFFDevColour2"
+chmod +x "$APP/Contents/MacOS/MMFFDevColour3"
 sign_app "$APP"
 
 echo "staging dmg layout..."

@@ -1,17 +1,17 @@
 #!/bin/bash
-# Build MMFFDev Colour 2.app and package it as a .pkg installer
+# Build MMFFDev Colour 3.app and package it as a .pkg installer
 # that deposits the app into /Applications.
-# Output: ./MMFFDev-Colour-2.pkg
+# Output: ./MMFFDev-Colour-3.pkg
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./signing.sh
 
-APP_NAME="MMFFDev Colour 2"
-PKG_IDENTIFIER="com.mmffdev.colour2"
-PKG_VERSION="2.0.0"
-PKG="./MMFFDev-Colour-2.pkg"
+APP_NAME="MMFFDev Colour 3"
+PKG_IDENTIFIER="com.mmffdev.colour3"
+PKG_VERSION="3.0.0"
+PKG="./MMFFDev-Colour-3.pkg"
 
-STAGE="$(mktemp -d -t mmffdev-colour2-pkg)"
+STAGE="$(mktemp -d -t mmffdev-colour3-pkg)"
 trap 'rm -rf "$STAGE"' EXIT
 
 ROOT="$STAGE/root"
@@ -19,17 +19,17 @@ APP="$ROOT/Applications/$APP_NAME.app"
 mkdir -p "$ROOT/Applications"
 
 echo "compiling swift..."
-swiftc -O Model.swift Helpers.swift Palette.swift Sync.swift LibraryWindow.swift SettingsWindow.swift SelfTest.swift main.swift -o "$STAGE/MMFFDevColour2"
+swiftc -O *.swift -o "$STAGE/MMFFDevColour3"
 
 echo "running self-test..."
-"$STAGE/MMFFDevColour2" --self-test > /dev/null || { "$STAGE/MMFFDevColour2" --self-test; exit 1; }
+"$STAGE/MMFFDevColour3" --self-test > /dev/null || { "$STAGE/MMFFDevColour3" --self-test; exit 1; }
 
 echo "assembling bundle..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
-mv "$STAGE/MMFFDevColour2" "$APP/Contents/MacOS/MMFFDevColour2"
+mv "$STAGE/MMFFDevColour3" "$APP/Contents/MacOS/MMFFDevColour3"
 cp ../AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-chmod +x "$APP/Contents/MacOS/MMFFDevColour2"
+chmod +x "$APP/Contents/MacOS/MMFFDevColour3"
 sign_app "$APP"
 
 # Without this the installer "relocates": if a copy of the app already exists

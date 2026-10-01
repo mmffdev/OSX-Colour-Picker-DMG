@@ -35,6 +35,19 @@ func runPickMode() -> Never {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var wc: LibraryWindowController?
+    var settings: SettingsWindowController?
+
+    @objc func showSettings() {
+        guard let wc = wc else { return }
+        if settings == nil {
+            let s = SettingsWindowController(library: wc)
+            wc.onStateChanged = { [weak s] in s?.refresh() }
+            settings = s
+        }
+        settings?.refresh()
+        settings?.showWindow(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
+    }
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -51,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""))
         appMenu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(
             title: "Quit MMFFDev Colour 2",
             action: #selector(NSApplication.terminate(_:)),
@@ -62,9 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(NSMenuItem(title: "Pick a Colour", action: #selector(LibraryWindowController.pickFromWindow), keyEquivalent: "p"))
         fileMenu.addItem(NSMenuItem(title: "New Swatch", action: #selector(LibraryWindowController.newSwatch), keyEquivalent: "n"))
+        let catalogueItem = NSMenuItem(title: "Catalogue", action: nil, keyEquivalent: "")
+        catalogueItem.submenu = wc.catalogueMenu
+        fileMenu.addItem(catalogueItem)
+        fileMenu.addItem(NSMenuItem(title: "Sync Now", action: #selector(LibraryWindowController.syncNow), keyEquivalent: "S"))
         fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Palette from Image\u{2026}", action: #selector(LibraryWindowController.paletteFromImage), keyEquivalent: "i"))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Export Library\u{2026}", action: #selector(LibraryWindowController.exportLibrary), keyEquivalent: "e"))
         fileMenu.addItem(NSMenuItem(title: "Import from MMFFDev Colour", action: #selector(LibraryWindowController.importFromV1), keyEquivalent: ""))
-        fileMenu.items.forEach { if !$0.isSeparatorItem { $0.target = wc } }
+        fileMenu.items.forEach { if !$0.isSeparatorItem && $0.submenu == nil { $0.target = wc } }
         fileItem.submenu = fileMenu
 
         let editItem = NSMenuItem()
@@ -80,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         wc.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { wc.sync() } // on open: look for changes from the other Mac
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }

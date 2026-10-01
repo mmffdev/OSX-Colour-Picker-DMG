@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "vector": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "/Users/rick/Documents/MMFFDev - Projects/MMFFDev - Platform/dev/scripts/mcp/vector-mcp.sh"
+      ],
+      "env": {
+        "VECTOR_MCP_REPOSITORY_WORKSPACE": "de3bfb2c-9f1b-4c4a-bf75-bc872e32b1bd",
+        "VECTOR_MCP_REPOSITORY_NODE": "R26GHQXV"
+      }
+    }
+  }
+}

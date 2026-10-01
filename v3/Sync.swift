@@ -1,0 +1,587 @@
+import Foundation
+
+// ---------- Merging two copies of a library ----------
+//
+// Nothing is dropped unless one side deliberately deleted it *after* the other side last
+// added it. Everything else from both sides is kept.
+
+/// Combines both copies. Order follows `local`, with anything new from `remote` after it.
+func mergeLibraries(local: Library, remote: Library) -> Library {
+    var out = Library()
+    out.version = max(local.version, remote.version)
+
+    // Latest deletion per thing.
+    var buried: [String: Tombstone] = [:]
+    var buriedOrder: [String] = []
+    for t in local.deleted + remote.deleted {
+        let k = "\(t.kind.rawValue)|\(t.key)"
+        if let seen = buried[k] { if t.deletedAt > seen.deletedAt { buried[k] = t } }
+        else { buried[k] = t; buriedOrder.append(k) }
+    }
+    out.deleted = buriedOrder.map { buried[$0]! }
+    func deletedAt(_ kind: Tombstone.Kind, _ key: String) -> Date { buried["\(kind.rawValue)|\(key)"]?.deletedAt ?? .distantPast }
+
+    // Projects: union, newer name and position win, deleted ones stay deleted.
+    var projectIDs: [UUID] = []
+    var projectSides: [UUID: (Project?, Project?)] = [:]
+    for p in local.projects { projectIDs.append(p.id); projectSides[p.id] = (p, nil) }
+    for p in remote.projects {
+        if projectSides[p.id] == nil { projectIDs.append(p.id); projectSides[p.id] = (nil, p) } else { projectSides[p.id]!.1 = p }
+    }
+    for id in projectIDs {
+        let (l, r) = projectSides[id]!
+        var p = (l ?? r)!
+        guard deletedAt(.project, id.uuidString) < p.createdAt else { continue }
+        if let l = l, let r = r {
+            if (r.nameChangedAt ?? r.createdAt) > (l.nameChangedAt ?? l.createdAt) { p.name = r.name; p.nameChangedAt = r.nameChangedAt }
+            if (r.positionChangedAt ?? .distantPast) > (l.positionChangedAt ?? .distantPast) { p.position = r.position; p.positionChangedAt = r.positionChangedAt }
+        }
+        out.projects.append(p)
+    }
+
+    // Swatches that survive, local order first.
+    var swatchIDs: [UUID] = []
+    var sides: [UUID: (local: Swatch?, remote: Swatch?)] = [:]
+    for s in local.swatches { swatchIDs.append(s.id); sides[s.id] = (s, nil) }
+    for s in remote.swatches {
+        if sides[s.id] == nil { swatchIDs.append(s.id); sides[s.id] = (nil, s) } else { sides[s.id]!.remote = s }
+    }
+    swatchIDs.removeAll { id in
+        let created = (sides[id]!.local ?? sides[id]!.remote)!.createdAt
+        return deletedAt(.swatch, id.uuidString) >= created
+    }
+
+    for id in swatchIDs {
+        let (l, r) = sides[id]!
+        let base = (l ?? r)!
+        var name = base.name, changed = base.nameChangedAt
+        if let l = l, let r = r, (r.nameChangedAt ?? r.createdAt) > (l.nameChangedAt ?? l.createdAt) {
+            name = r.name; changed = r.nameChangedAt
+        }
+        var favourite = base.isFavourite, favouriteChanged = base.favouriteChangedAt
+        if let l = l, let r = r, (r.favouriteChangedAt ?? .distantPast) > (l.favouriteChangedAt ?? .distantPast) {
+            favourite = r.isFavourite; favouriteChanged = r.favouriteChangedAt
+        }
+        var placed = (project: base.projectID, position: base.position, at: base.placedAt)
+        if let l = l, let r = r, (r.placedAt ?? .distantPast) > (l.placedAt ?? .distantPast) {
+            placed = (r.projectID, r.position, r.placedAt)
+        }
+        if let p = placed.project, !out.projects.contains(where: { $0.id == p }) { placed.project = nil } // its project is gone
+        var tags = (list: base.tags, at: base.tagsChangedAt)
+        if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = (r.tags, r.tagsChangedAt) }
+        var order: [String] = [], dates: [String: Date] = [:]
+        for e in (l?.entries ?? []) + (r?.entries ?? []) {
+            let cutoff = max(deletedAt(.entry, Library.entryKey(id, e.hex)), deletedAt(.colour, e.hex))
+            guard e.addedAt > cutoff else { continue }
+            if let seen = dates[e.hex] { dates[e.hex] = min(seen, e.addedAt) }
+            else { dates[e.hex] = e.addedAt; order.append(e.hex) }
+        }
+        out.swatches.append(Swatch(id: id, name: name, createdAt: base.createdAt,
+                                   entries: order.map { SwatchEntry(hex: $0, addedAt: dates[$0]!) },
+                                   nameChangedAt: changed, isFavourite: favourite,
+                                   favouriteChangedAt: favouriteChanged,
+                                   isCustom: l?.isCustom ?? r?.isCustom,
+                                   projectID: placed.project, position: placed.position, placedAt: placed.at,
+                                   tags: tags.list, tagsChangedAt: tags.at))
+    }
+
+    // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.
+    var order: [String] = [], dates: [String: Date] = [:]
+    func keep(_ hex: String, _ date: Date) {
+        guard date > deletedAt(.colour, hex) else { return }
+        if let seen = dates[hex] { dates[hex] = min(seen, date) } else { dates[hex] = date; order.append(hex) }
+    }
+    for c in local.colours + remote.colours { keep(c.hex, c.pickedAt) }
+    for s in out.swatches { for e in s.entries where dates[e.hex] == nil { keep(e.hex, e.addedAt) } }
+    out.colours = order.map { hex in
+        let l = local.colours.first { $0.hex == hex }, r = remote.colours.first { $0.hex == hex }
+        var tags = (l ?? r)?.tags, at = (l ?? r)?.tagsChangedAt
+        if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = r.tags; at = r.tagsChangedAt }
+        return Colour(hex: hex, pickedAt: dates[hex]!, tags: tags, tagsChangedAt: at)
+    }
+
+    if let active = local.activeSwatchID, out.swatch(active) != nil { out.activeSwatchID = active }
+    return out
+}
+
+/// `winner`, plus a record that everything only `loser` had was deliberately dropped —
+/// so the choice holds when the other Mac next syncs.
+func replacing(_ loser: Library, with winner: Library, at date: Date = Date()) -> Library {
+    var out = winner
+    let kept = Set(winner.colours.map { $0.hex })
+    for c in loser.colours where !kept.contains(c.hex) { out.bury(.colour, c.hex, at: date) }
+    for p in loser.projects where winner.project(p.id) == nil { out.bury(.project, p.id.uuidString, at: date) }
+    for s in loser.swatches {
+        guard let w = winner.swatch(s.id) else { out.bury(.swatch, s.id.uuidString, at: date); continue }
+        let entries = Set(w.entries.map { $0.hex })
+        for e in s.entries where !entries.contains(e.hex) { out.bury(.entry, Library.entryKey(s.id, e.hex), at: date) }
+    }
+    // Anything the loser had deleted but the winner keeps counts as re-created just after that
+    // deletion, so the other Mac's deletion record no longer outranks it.
+    for t in loser.deleted {
+        let revived = t.deletedAt.addingTimeInterval(1)
+        switch t.kind {
+        case .colour:
+            if let i = out.colours.firstIndex(where: { $0.hex == t.key }), out.colours[i].pickedAt <= t.deletedAt { out.colours[i].pickedAt = revived }
+        case .swatch:
+            if let i = out.swatches.firstIndex(where: { $0.id.uuidString == t.key }), out.swatches[i].createdAt <= t.deletedAt { out.swatches[i].createdAt = revived }
+        case .project:
+            if let i = out.projects.firstIndex(where: { $0.id.uuidString == t.key }), out.projects[i].createdAt <= t.deletedAt { out.projects[i].createdAt = revived }
+        case .entry:
+            let parts = t.key.split(separator: "/", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let i = out.swatches.firstIndex(where: { $0.id.uuidString == parts[0] }),
+                  let e = out.swatches[i].entries.firstIndex(where: { $0.hex == parts[1] }) else { continue }
+            if out.swatches[i].entries[e].addedAt <= t.deletedAt { out.swatches[i].entries[e].addedAt = revived }
+        }
+    }
+    if let active = loser.activeSwatchID, out.swatch(active) != nil { out.activeSwatchID = active }
+    return out
+}
+
+/// The same library regardless of ordering or which swatch is the pick target on this Mac.
+func canonical(_ lib: Library) -> Library {
+    var out = lib
+    out.activeSwatchID = nil
+    out.colours.sort { $0.hex < $1.hex }
+    out.projects.sort { $0.id.uuidString < $1.id.uuidString }
+    out.swatches.sort { $0.id.uuidString < $1.id.uuidString }
+    for i in out.swatches.indices { out.swatches[i].entries.sort { $0.hex < $1.hex } }
+    out.deleted.sort { ($0.kind.rawValue, $0.key) < ($1.kind.rawValue, $1.key) }
+    return out
+}
+
+/// What a person would notice changing between two copies.
+struct LibraryChange: Equatable {
+    var coloursAdded = 0, coloursRemoved = 0
+    var swatchesAdded = 0, swatchesRemoved = 0, swatchesChanged = 0
+    var projectsAdded = 0, projectsRemoved = 0
+
+    var isEmpty: Bool { self == LibraryChange() }
+
+    var lines: [String] {
+        var out: [String] = []
+        if coloursAdded > 0 { out.append("\(plural(coloursAdded, "new colour"))") }
+        if swatchesAdded > 0 { out.append("\(plural(swatchesAdded, "new swatch", "new swatches"))") }
+        if swatchesChanged > 0 { out.append("\(plural(swatchesChanged, "changed swatch", "changed swatches"))") }
+        if coloursRemoved > 0 { out.append("\(plural(coloursRemoved, "colour")) deleted") }
+        if swatchesRemoved > 0 { out.append("\(plural(swatchesRemoved, "swatch", "swatches")) deleted") }
+        if projectsAdded > 0 { out.append("\(plural(projectsAdded, "new project"))") }
+        if projectsRemoved > 0 { out.append("\(plural(projectsRemoved, "project")) deleted") }
+        return out
+    }
+}
+
+func change(from a: Library, to b: Library) -> LibraryChange {
+    var c = LibraryChange()
+    let ah = Set(a.colours.map { $0.hex }), bh = Set(b.colours.map { $0.hex })
+    c.coloursAdded = bh.subtracting(ah).count
+    c.coloursRemoved = ah.subtracting(bh).count
+    for s in b.swatches {
+        guard let old = a.swatch(s.id) else { c.swatchesAdded += 1; continue }
+        if old.name != s.name || Set(old.entries.map { $0.hex }) != Set(s.entries.map { $0.hex }) { c.swatchesChanged += 1 }
+    }
+    c.swatchesRemoved = a.swatches.filter { b.swatch($0.id) == nil }.count
+    c.projectsAdded = b.projects.filter { a.project($0.id) == nil }.count
+    c.projectsRemoved = a.projects.filter { b.project($0.id) == nil }.count
+    return c
+}
+
+// ---------- Catalogues ----------
+//
+// A catalogue is a whole library — colours and swatches — kept in its own folder.
+// "Main" is the original library, left exactly where it always was.
+
+struct Catalogues {
+    static let mainName = "Main"
+    static let currentKey = "currentCatalogue"
+
+    let root: URL
+    /// The v1 colour list and the v2 library. Read once to seed Main, never written.
+    let legacyURL: URL?
+    var previousURL: URL? = nil
+
+    static let standard: Catalogues = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // MMFFDEV_COLOUR3_HOME points the app at another folder, for trying things without touching real data.
+        let override = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"].map { URL(fileURLWithPath: $0) }
+        return Catalogues(
+            root: override ?? support.appendingPathComponent("MMFFDev Colour 3"),
+            legacyURL: support.appendingPathComponent("MMFFDev Colour").appendingPathComponent("library.json"),
+            previousURL: support.appendingPathComponent("MMFFDev Colour 2").appendingPathComponent("library.json"))
+    }()
+
+    /// The catalogue last opened on this Mac.
+    static var currentName: String {
+        get {
+            let names = standard.names()
+            let saved = preferences.string(forKey: currentKey) ?? mainName
+            return names.contains(saved) ? saved : (names.first ?? mainName)
+        }
+        set { preferences.set(newValue, forKey: currentKey) }
+    }
+
+    var folder: URL { root.appendingPathComponent("Catalogues") }
+
+    func directory(for name: String) -> URL {
+        name == Catalogues.mainName ? root : folder.appendingPathComponent(filesystemName(name))
+    }
+
+    /// Earlier versions' libraries seed Main on a fresh install only — never after a rename.
+    func store(for name: String) -> LibraryStore {
+        let fresh = name == Catalogues.mainName && !hasMain && others().isEmpty
+        return LibraryStore(directory: directory(for: name), legacyURL: fresh ? legacyURL : nil,
+                            previousURL: fresh ? previousURL : nil)
+    }
+
+    private var hasMain: Bool { FileManager.default.fileExists(atPath: root.appendingPathComponent("library.json").path) }
+
+    private func others() -> [String] {
+        Catalogues.subfoldersHoldingLibraries(in: folder)
+            .filter { $0 != Catalogues.mainName }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Main first (while it exists), then the rest alphabetically. A fresh install has just Main.
+    func names() -> [String] {
+        let rest = others()
+        return hasMain || rest.isEmpty ? [Catalogues.mainName] + rest : rest
+    }
+
+    /// Moves the catalogue's folder. Main lives at the root, so renaming it moves its files into a
+    /// folder of their own. Returns the name as it was actually used.
+    @discardableResult
+    func rename(_ old: String, to raw: String) throws -> String {
+        let new = filesystemName(raw)
+        guard names().contains(old) else { throw CatalogueError.missing(old) }
+        guard new.lowercased() != old.lowercased() else { return old }
+        guard !names().contains(where: { $0.lowercased() == new.lowercased() }) else { throw CatalogueError.nameTaken(new) }
+        let fm = FileManager.default
+        let dest = directory(for: new)
+        if old == Catalogues.mainName {
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            for item in ["library.json", "Backups"] {
+                let from = root.appendingPathComponent(item)
+                if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
+            }
+        } else {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try fm.moveItem(at: directory(for: old), to: dest)
+        }
+        if Catalogues.currentName == old || preferences.string(forKey: Catalogues.currentKey) == old {
+            Catalogues.currentName = new
+        }
+        return new
+    }
+
+    static func subfoldersHoldingLibraries(in dir: URL) -> [String] {
+        let fm = FileManager.default
+        return ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { name in
+            let d = dir.appendingPathComponent(name)
+            return fm.fileExists(atPath: d.appendingPathComponent("library.json").path)
+                || fm.fileExists(atPath: d.appendingPathComponent(".library.json.icloud").path)
+        }
+    }
+
+    /// Creates an empty catalogue. The name is made unique and safe for a folder.
+    @discardableResult
+    func create(_ raw: String, holding library: Library = Library()) throws -> String {
+        let name = uniqueName(filesystemName(raw), among: names())
+        let dir = directory(for: name)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try LibraryStore(directory: dir, legacyURL: nil).save(library)
+        return name
+    }
+
+    /// Opens a library file from anywhere — an export, a backup — as a new catalogue. The file is only read.
+    @discardableResult
+    func importFile(_ url: URL, named raw: String? = nil) throws -> String {
+        let data = try Data(contentsOf: url)
+        guard let lib = try? JSONDecoder.library.decode(Library.self, from: data) else { throw SyncError.unreadable(url) }
+        let fallback = url.deletingLastPathComponent().lastPathComponent
+        return try create(raw ?? fallback, holding: lib)
+    }
+}
+
+enum CatalogueError: LocalizedError {
+    case missing(String)
+    case nameTaken(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missing(let n): return "There is no catalogue called \u{201C}\(n)\u{201D}."
+        case .nameTaken(let n): return "There is already a catalogue called \u{201C}\(n)\u{201D}. Choose another name."
+        }
+    }
+}
+
+// ---------- Sync ----------
+
+enum SyncError: LocalizedError {
+    case folderMissing(URL)
+    case stillDownloading(URL)
+    case unreadable(URL)
+    case backupFailed(URL, Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .folderMissing(let u):
+            return "The sync folder isn\u{2019}t available: \(u.path). Nothing was changed."
+        case .stillDownloading(let u):
+            return "\(u.lastPathComponent) is still downloading from the cloud. Try Sync Now in a moment."
+        case .unreadable(let u):
+            return "\(u.path) could not be read as a library. It has been left untouched."
+        case .backupFailed(let u, let e):
+            return "Could not write a backup to \(u.path), so nothing was changed: \(e.localizedDescription)"
+        }
+    }
+}
+
+struct SyncPlan {
+    let local: Library, remote: Library, merged: Library
+    /// What this Mac would gain or lose by merging.
+    let incoming: LibraryChange
+    /// What the synced copy would gain or lose.
+    let outgoing: LibraryChange
+    /// Conflicted copies left by the cloud service, already folded into `remote`.
+    let strays: [URL]
+}
+
+enum SyncState {
+    /// The other Mac renamed this catalogue; this Mac should follow before syncing.
+    case renamed(to: String)
+    /// Nothing in the sync folder yet for this catalogue.
+    case firstSync
+    /// Both sides already hold the same thing.
+    case inSync
+    /// Nothing for the user to decide — just bring the two files level.
+    case quiet(SyncPlan)
+    /// The synced copy has changes this Mac hasn't seen.
+    case incoming(SyncPlan)
+}
+
+enum SyncChoice { case merge, useSynced, keepLocal }
+
+final class SyncEngine {
+    static let folderName = "MMFFDev Colour 3 Sync"
+
+    let store: LibraryStore
+    /// The "MMFFDev Colour 3 Sync" folder.
+    let syncRoot: URL
+    let catalogue: String
+    let machine: String
+    /// 0 keeps every backup.
+    var backupsToKeep: Int
+
+    init(store: LibraryStore, chosenFolder: URL, catalogue: String, machine: String, backupsToKeep: Int = 50) {
+        self.store = store
+        self.syncRoot = SyncEngine.root(in: chosenFolder)
+        self.catalogue = catalogue
+        self.machine = filesystemName(machine)
+        self.backupsToKeep = backupsToKeep
+    }
+
+    /// The user may pick the cloud folder, or the sync folder inside it — both work.
+    static func root(in chosen: URL) -> URL {
+        chosen.lastPathComponent == folderName ? chosen : chosen.appendingPathComponent(folderName)
+    }
+
+    /// Catalogues present in the sync folder, whether or not this Mac has opened them.
+    static func catalogues(in chosenFolder: URL) -> [String] {
+        Catalogues.subfoldersHoldingLibraries(in: root(in: chosenFolder))
+    }
+
+    var folder: URL { syncRoot.appendingPathComponent(filesystemName(catalogue)) }
+
+    /// Left behind in a renamed catalogue's old folder, holding the new name, so the other Mac follows.
+    static let renamedMarker = "renamed-to.txt"
+
+    static func renamedName(in chosen: URL, of catalogue: String) -> String? {
+        let marker = root(in: chosen).appendingPathComponent(filesystemName(catalogue)).appendingPathComponent(renamedMarker)
+        return (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Renames the catalogue's folder in the sync location and leaves a marker in the old one.
+    /// Nothing to do if the catalogue has never been synced.
+    static func rename(in chosen: URL, from old: String, to new: String) throws {
+        let fm = FileManager.default
+        let root = root(in: chosen)
+        let from = root.appendingPathComponent(filesystemName(old)), to = root.appendingPathComponent(filesystemName(new))
+        guard fm.fileExists(atPath: from.path) else { return }
+        guard fm.fileExists(atPath: root.deletingLastPathComponent().path) else { throw SyncError.folderMissing(root.deletingLastPathComponent()) }
+        if fm.fileExists(atPath: to.path) {
+            // Only a marker-only folder (an earlier rename away from this name) may be reused.
+            guard !Catalogues.subfoldersHoldingLibraries(in: root).contains(filesystemName(new)),
+                  fm.fileExists(atPath: to.appendingPathComponent(renamedMarker).path) else { throw CatalogueError.nameTaken(new) }
+            try fm.removeItem(at: to)
+        }
+        try fm.moveItem(at: from, to: to)
+        try fm.createDirectory(at: from, withIntermediateDirectories: true)
+        try new.write(to: from.appendingPathComponent(renamedMarker), atomically: true, encoding: .utf8)
+    }
+    var remoteURL: URL { folder.appendingPathComponent("library.json") }
+    var remoteBackups: URL { folder.appendingPathComponent("Backups") }
+    var localBackups: URL { store.url.deletingLastPathComponent().appendingPathComponent("Backups") }
+
+    // MARK: Reading
+
+    /// The synced copy with any conflicted copies folded in, or nil if there is none yet.
+    func readRemote() throws -> (library: Library, strays: [URL])? {
+        let fm = FileManager.default
+        let parent = syncRoot.deletingLastPathComponent()
+        guard fm.fileExists(atPath: parent.path) else { throw SyncError.folderMissing(parent) }
+
+        let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
+        if let placeholder = names.first(where: { $0.hasPrefix(".library") && $0.hasSuffix(".icloud") }) {
+            try? fm.startDownloadingUbiquitousItem(at: remoteURL)
+            throw SyncError.stillDownloading(folder.appendingPathComponent(placeholder))
+        }
+
+        // "library (conflicted copy).json", "library 2.json" … whatever the cloud service left behind.
+        let strays = names
+            .filter { $0.lowercased().hasPrefix("library") && $0.lowercased().hasSuffix(".json") && $0 != "library.json" }
+            .sorted().map { folder.appendingPathComponent($0) }
+
+        var found: Library?
+        for url in (fm.fileExists(atPath: remoteURL.path) ? [remoteURL] : []) + strays {
+            guard let data = try? Data(contentsOf: url),
+                  let lib = try? JSONDecoder.library.decode(Library.self, from: data) else { throw SyncError.unreadable(url) }
+            found = found.map { mergeLibraries(local: $0, remote: lib) } ?? lib
+        }
+        return found.map { ($0, strays) }
+    }
+
+    func check() throws -> SyncState {
+        if let new = SyncEngine.renamedName(in: syncRoot, of: catalogue), new != catalogue { return .renamed(to: new) }
+        let local = try store.load()
+        guard let (remote, strays) = try readRemote() else { return .firstSync }
+        let merged = mergeLibraries(local: local, remote: remote)
+        let plan = SyncPlan(local: local, remote: remote, merged: merged,
+                            incoming: change(from: local, to: merged),
+                            outgoing: change(from: remote, to: merged), strays: strays)
+
+        if strays.isEmpty && canonical(local) == canonical(remote) { return .inSync }
+        // A catalogue this Mac has never used simply takes the synced copy.
+        let untouched = local.colours.isEmpty && local.swatches.isEmpty && local.deleted.isEmpty
+        return plan.incoming.isEmpty || untouched ? .quiet(plan) : .incoming(plan)
+    }
+
+    // MARK: Writing
+
+    /// Saves this Mac's library into the sync folder. Only for `.firstSync`.
+    func push(_ lib: Library) throws {
+        let parent = syncRoot.deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: parent.path) else { throw SyncError.folderMissing(parent) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder.library.encode(lib).write(to: remoteURL, options: .atomic)
+    }
+
+    /// Brings both sides level without asking. Backs up the synced copy first if it is about to lose anything.
+    @discardableResult
+    func settle(_ plan: SyncPlan, at date: Date = Date()) throws -> Library {
+        if plan.outgoing.coloursRemoved + plan.outgoing.swatchesRemoved > 0 || !plan.strays.isEmpty {
+            try backup(plan.remote, label: "synced copy", at: date)
+        }
+        return try write(plan.merged, plan: plan, at: date)
+    }
+
+    /// Backs up both sides, then applies the choice to this Mac and the sync folder.
+    @discardableResult
+    func perform(_ choice: SyncChoice, plan: SyncPlan, at date: Date = Date()) throws -> Library {
+        try backup(plan.local, label: "this Mac (\(machine))", at: date)
+        try backup(plan.remote, label: "synced copy", at: date)
+        let result: Library
+        switch choice {
+        case .merge: result = plan.merged
+        case .useSynced: result = replacing(plan.local, with: plan.remote, at: date)
+        case .keepLocal: result = replacing(plan.remote, with: plan.local, at: date)
+        }
+        return try write(result, plan: plan, at: date)
+    }
+
+    private func write(_ lib: Library, plan: SyncPlan, at date: Date) throws -> Library {
+        if canonical(lib) != canonical(plan.local) || lib.activeSwatchID != plan.local.activeSwatchID { try store.save(lib) }
+        try push(lib)
+        // Conflicted copies are now part of the library; move them out of the way, never delete them.
+        for stray in plan.strays {
+            try? FileManager.default.createDirectory(at: remoteBackups, withIntermediateDirectories: true)
+            let name = uniqueName("\(stamp(date)) \(stray.deletingPathExtension().lastPathComponent)",
+                                  among: existing(in: remoteBackups))
+            try? FileManager.default.moveItem(at: stray, to: remoteBackups.appendingPathComponent(name + ".json"))
+        }
+        prune()
+        return lib
+    }
+
+    // MARK: Backups
+
+    private func stamp(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return f.string(from: date)
+    }
+
+    private func existing(in dir: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasSuffix(".json") }.map { String($0.dropLast(5)) }
+    }
+
+    /// Written to the sync folder and to this Mac, so a problem with either still leaves a copy.
+    func backup(_ lib: Library, label: String, at date: Date = Date()) throws {
+        let data = try JSONEncoder.library.encode(lib)
+        for dir in [remoteBackups, localBackups] {
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let name = uniqueName("\(stamp(date)) \(filesystemName(label))", among: existing(in: dir))
+                try data.write(to: dir.appendingPathComponent(name + ".json"), options: .atomic)
+            } catch {
+                throw SyncError.backupFailed(dir, error)
+            }
+        }
+    }
+
+    func backups(in dir: URL) -> [URL] {
+        existing(in: dir).sorted().map { dir.appendingPathComponent($0 + ".json") }
+    }
+
+    /// Removes the oldest backups beyond the limit. Names start with the date, so name order is age order.
+    func prune() {
+        guard backupsToKeep > 0 else { return }
+        for dir in [remoteBackups, localBackups] {
+            for old in backups(in: dir).dropLast(backupsToKeep) { try? FileManager.default.removeItem(at: old) }
+        }
+    }
+}
+
+// ---------- Settings (per Mac) ----------
+
+/// Preferences for this Mac. A trial run (MMFFDEV_COLOUR3_HOME set) gets its own, so it can
+/// never pick up — or sync into — the real sync folder.
+let preferences: UserDefaults = {
+    guard ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"] != nil else { return .standard }
+    return UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial") ?? .standard
+}()
+
+enum SyncSettings {
+    private static let d = preferences
+
+    /// The folder the user chose — the cloud folder, or the sync folder inside it. nil = sync off.
+    static var folder: URL? {
+        get { d.string(forKey: "syncFolder").map { URL(fileURLWithPath: $0) } }
+        set { d.set(newValue?.path, forKey: "syncFolder") }
+    }
+
+    /// false = merge without asking.
+    static var askBeforeMerging: Bool {
+        get { d.object(forKey: "syncAsk") as? Bool ?? true }
+        set { d.set(newValue, forKey: "syncAsk") }
+    }
+
+    /// 0 = keep all.
+    static var backupsToKeep: Int {
+        get { d.object(forKey: "backupsToKeep") as? Int ?? 50 }
+        set { d.set(newValue, forKey: "backupsToKeep") }
+    }
+
+    static var machineName: String { Host.current().localizedName ?? "Mac" }
+}

@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 enum ViewMode: Int {
     case all, swatches
@@ -247,6 +248,100 @@ final class GridCollectionView: NSCollectionView {
     }
 }
 
+// ---------- Drop target ----------
+
+/// Shown over the window while an image is being dragged in: grey dashed frame, icon, caption.
+final class DropOverlayView: NSView {
+    private let icon = NSImageView()
+    private let caption = NSTextField(labelWithString: "Drop image to create a palette")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        autoresizingMask = [.width, .height]
+
+        let config = NSImage.SymbolConfiguration(pointSize: 54, weight: .light)
+        icon.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Drop here")?
+            .withSymbolConfiguration(config)
+        icon.contentTintColor = .secondaryLabelColor
+
+        caption.font = NSFont.systemFont(ofSize: 15, weight: .medium)
+        caption.textColor = .secondaryLabelColor
+        caption.alignment = .center
+
+        let stack = NSStackView(views: [icon, caption])
+        stack.orientation = .vertical
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    // Never takes clicks or drags away from the window underneath.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.withAlphaComponent(0.94).setFill()
+        bounds.fill()
+
+        let frame = NSBezierPath(roundedRect: bounds.insetBy(dx: 18, dy: 18), xRadius: 16, yRadius: 16)
+        NSColor.gray.withAlphaComponent(0.10).setFill()
+        frame.fill()
+        frame.lineWidth = 2
+        frame.setLineDash([10, 7], count: 2, phase: 0)
+        NSColor.gray.setStroke()
+        frame.stroke()
+    }
+}
+
+/// Content view that accepts image files dragged in from Finder.
+final class DropTargetView: NSView {
+    var onDropImage: ((URL) -> Void)?
+    private let overlay = DropOverlayView(frame: .zero)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func imageURL(in info: NSDraggingInfo) -> URL? {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true,
+            .urlReadingContentsConformToTypes: [UTType.image.identifier],
+        ]) as? [URL]
+        return urls?.first
+    }
+
+    private func setOverlay(visible: Bool) {
+        if visible {
+            overlay.frame = bounds
+            addSubview(overlay, positioned: .above, relativeTo: nil) // on top of everything added since
+        } else {
+            overlay.removeFromSuperview()
+        }
+    }
+
+    override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation {
+        guard imageURL(in: info) != nil else { return [] }
+        setOverlay(visible: true)
+        return .copy
+    }
+
+    override func draggingExited(_ info: NSDraggingInfo?) { setOverlay(visible: false) }
+    override func draggingEnded(_ info: NSDraggingInfo) { setOverlay(visible: false) }
+
+    override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
+        setOverlay(visible: false)
+        guard let url = imageURL(in: info) else { return false }
+        onDropImage?(url)
+        return true
+    }
+}
+
 // ---------- Window ----------
 
 final class LibraryWindowController: NSWindowController, NSCollectionViewDataSource,
@@ -267,6 +362,20 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
     private var modeControl: NSSegmentedControl!
     private var sortPopup: NSPopUpButton!
     private var targetPopup: NSPopUpButton!
+    private var pickBtn: NSButton!
+    private var picking = false
+
+    /// The catalogue this window is showing.
+    private(set) var catalogue = Catalogues.mainName
+    /// Filled by the File ▸ Catalogue submenu each time it opens.
+    let catalogueMenu = NSMenu(title: "Catalogue")
+    /// Called when the catalogue or sync state changes, so Settings can redraw.
+    var onStateChanged: (() -> Void)?
+
+    private(set) var syncStatus = "Not synced yet."
+    private var syncAsking = false
+    private var syncPaused = false
+    private var lastSyncComplaint: String?
 
     private let modeKey = "viewMode"
     private let sortKey = "sortOrder"
@@ -280,8 +389,14 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
         win.minSize = NSSize(width: 600, height: 360)
         win.center()
         win.setFrameAutosaveName("MMFFDevColour2MainWindow")
+        let drop = DropTargetView(frame: win.contentView?.bounds ?? .zero)
+        win.contentView = drop
         self.init(window: win)
         self.store = store
+        catalogue = Catalogues.currentName
+        win.title = "MMFFDev Colour 2 \u{2014} \(catalogue)"
+        catalogueMenu.delegate = self
+        drop.onDropImage = { [weak self] url in self?.importPalette(from: url) }
         mode = ViewMode(rawValue: UserDefaults.standard.integer(forKey: modeKey)) ?? .all
         sortOrder = SortOrder(rawValue: UserDefaults.standard.integer(forKey: sortKey)) ?? .newest
         build()
@@ -320,7 +435,7 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
         guard let content = window?.contentView else { return }
 
         // Action bar
-        let pickBtn = NSButton(title: "Pick a Colour", target: self, action: #selector(pickFromWindow))
+        pickBtn = NSButton(title: "Pick a Colour", target: self, action: #selector(pickFromWindow))
         pickBtn.bezelStyle = .rounded
         let newSwatchBtn = NSButton(title: "New Swatch", target: self, action: #selector(newSwatch))
         newSwatchBtn.bezelStyle = .rounded
@@ -335,7 +450,7 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
         targetPopup.toolTip = "Where newly picked colours are added"
         targetPopup.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
 
-        let actionBar = bar(leading: [pickBtn, newSwatchBtn],
+        let actionBar = bar(leading: [pickBtn!, newSwatchBtn],
                             trailing: [caption("Picks go to"), targetPopup])
 
         // Filter bar
@@ -434,8 +549,8 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
 
     @objc private func reloadOnFocus() {
         if window?.firstResponder is NSText { return } // inline rename in progress
-        if store.modificationDate == loadedStamp { return }
-        reload()
+        if store.modificationDate != loadedStamp { reload() }
+        sync()
     }
 
     func reload() {
@@ -464,6 +579,7 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
             show(error)
         }
         rebuild()
+        sync()
     }
 
     private func show(_ error: Error) {
@@ -515,6 +631,12 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
 
     private func updateStatus() {
         flashToken += 1
+        if picking {
+            let into = library.activeSwatch.map { " into \($0.name)" } ?? ""
+            countLabel.stringValue = "Picking\(into) — press Esc or click this window to stop"
+            countLabel.textColor = .labelColor
+            return
+        }
         let colours = plural(library.colours.count, "colour")
         switch mode {
         case .all: countLabel.stringValue = library.colours.isEmpty ? "" : colours
@@ -613,6 +735,7 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
     // MARK: Context menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === catalogueMenu { fillCatalogueMenu(); return }
         menu.removeAllItems()
         let count = collectionView.selectionIndexPaths.count
         guard count > 0 else { return }
@@ -643,10 +766,33 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
 
     // MARK: Actions — colours
 
+    /// Starts a picking session: the loupe comes back after every pick until Esc,
+    /// a click on this window, or a second press of the button / ⌘P.
     @objc func pickFromWindow() {
-        let sampler = NSColorSampler()
-        sampler.show { [weak self] color in
-            guard let self = self, let color = color, let hex = hexOf(color) else { return }
+        if picking { stopPicking(); return }
+        picking = true
+        pickBtn.title = "Stop Picking"
+        updateStatus()
+        sampleNext()
+    }
+
+    private func stopPicking() {
+        guard picking else { return }
+        picking = false
+        pickBtn.title = "Pick a Colour"
+        updateStatus()
+        sync() // held back while the loupe was up
+    }
+
+    private func sampleNext() {
+        guard picking else { return }
+        NSColorSampler().show { [weak self] color in
+            guard let self = self, self.picking else { return }
+            // Esc gives no colour; a click on our own window means "I'm done".
+            guard let color = color, let hex = hexOf(color), !self.clickLandedOnThisWindow() else {
+                self.stopPicking()
+                return
+            }
             playShutter()
             copyToClipboard(hex)
             self.apply { $0.addPick(hex) }
@@ -656,7 +802,16 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
             } else {
                 self.flash("Picked \(hex)")
             }
+            DispatchQueue.main.async { self.sampleNext() }
         }
+    }
+
+    private func clickLandedOnThisWindow() -> Bool {
+        guard let w = window else { return false }
+        let p = NSEvent.mouseLocation
+        guard w.frame.contains(p) else { return false }
+        let top = NSWindow.windowNumber(at: p, belowWindowWithWindowNumber: 0)
+        return top <= 0 || top == w.windowNumber || NSApp.window(withWindowNumber: top) != nil
     }
 
     @objc func copySelected() {
@@ -818,5 +973,265 @@ final class LibraryWindowController: NSWindowController, NSCollectionViewDataSou
         apply { added = $0.mergeLegacy(legacy) }
         flash(added == 0 ? "Nothing new to import from MMFFDev Colour"
                          : "Imported \(plural(added, "colour")) from MMFFDev Colour")
+    }
+
+    // MARK: Actions — export and palettes
+
+    @objc func exportLibrary() {
+        guard let w = window else { return }
+        if library.colours.isEmpty { flash("Nothing to export yet"); return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Export"
+        panel.message = "Choose where to put the export folder"
+        panel.beginSheetModal(for: w) { [weak self] response in
+            guard let self = self, response == .OK, let folder = panel.url else { return }
+            do {
+                let out = try writeExport(self.library, to: folder, by: self.sortOrder)
+                self.flash("Exported \(plural(self.library.colours.count, "colour")) to \(out.lastPathComponent)")
+                NSWorkspace.shared.activateFileViewerSelecting([out])
+            } catch {
+                self.show(error)
+            }
+        }
+    }
+
+    @objc func paletteFromImage() {
+        guard let w = window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Create Palette"
+        panel.message = "Choose an image to build a swatch from"
+        panel.beginSheetModal(for: w) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            self.importPalette(from: url)
+        }
+    }
+
+    func importPalette(from url: URL, colours count: Int = 8) {
+        let title = url.deletingPathExtension().lastPathComponent
+        guard let image = loadCGImage(url) else {
+            flash("Couldn\u{2019}t read \(url.lastPathComponent) as an image")
+            return
+        }
+        let hexes = extractPalette(from: image, count: count)
+        guard !hexes.isEmpty else { flash("No colours found in \(url.lastPathComponent)"); return }
+        var id: UUID!
+        apply { id = $0.createSwatch(named: title, hexes: hexes) }
+        if mode != .swatches {
+            mode = .swatches
+            modeControl.selectedSegment = mode.rawValue
+            UserDefaults.standard.set(mode.rawValue, forKey: modeKey)
+            rebuild()
+        }
+        if let first = hexes.first { reveal(first) }
+        flash("Created \(library.swatch(id)?.name ?? title) with \(plural(hexes.count, "colour")) from the image")
+    }
+
+    // MARK: Catalogues
+
+    /// Catalogues on this Mac, plus any in the sync folder that this Mac hasn't opened yet.
+    func availableCatalogues() -> [String] {
+        var names = Catalogues.standard.names()
+        if let folder = SyncSettings.folder {
+            for n in SyncEngine.catalogues(in: folder).sorted() where !names.contains(n) { names.append(n) }
+        }
+        return names
+    }
+
+    private func fillCatalogueMenu() {
+        catalogueMenu.removeAllItems()
+        for name in availableCatalogues() {
+            let item = catalogueMenu.addItem(withTitle: name, action: #selector(catalogueMenuChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.state = name == catalogue ? .on : .off
+        }
+        catalogueMenu.addItem(.separator())
+        catalogueMenu.addItem(withTitle: "New Catalogue\u{2026}", action: #selector(newCatalogue), keyEquivalent: "").target = self
+        catalogueMenu.addItem(withTitle: "Open Catalogue File\u{2026}", action: #selector(openCatalogueFile), keyEquivalent: "").target = self
+    }
+
+    @objc private func catalogueMenuChosen(_ sender: NSMenuItem) { open(catalogue: sender.title) }
+
+    func open(catalogue requested: String) {
+        guard requested != catalogue else { return }
+        stopPicking()
+        var name = requested
+        if !Catalogues.standard.names().contains(name) { // so far it only exists in the sync folder
+            do { name = try Catalogues.standard.create(name) } catch { show(error); return }
+        }
+        catalogue = name
+        Catalogues.currentName = name
+        store = Catalogues.standard.store(for: name)
+        reportedQuarantine = nil
+        syncPaused = false
+        lastSyncComplaint = nil
+        syncStatus = "Not synced yet."
+        window?.title = "MMFFDev Colour 2 \u{2014} \(name)"
+        collectionView.deselectAll(nil)
+        reload()
+        flash("Opened \(name)")
+        sync()
+        onStateChanged?()
+    }
+
+    @objc func newCatalogue() {
+        let a = NSAlert()
+        a.messageText = "New Catalogue"
+        a.informativeText = "A catalogue is a separate library with its own colours and swatches."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "Catalogue name"
+        a.accessoryView = field
+        a.addButton(withTitle: "Create")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = field
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        do { open(catalogue: try Catalogues.standard.create(name)) } catch { show(error) }
+    }
+
+    @objc func openCatalogueFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.json]
+        panel.prompt = "Open as Catalogue"
+        panel.message = "Choose a library.json from an export or a backup. It is copied, never changed."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { open(catalogue: try Catalogues.standard.importFile(url)) } catch { show(error) }
+    }
+
+    // MARK: Sync
+
+    private func engine() -> SyncEngine? {
+        SyncSettings.folder.map {
+            SyncEngine(store: store, chosenFolder: $0, catalogue: catalogue,
+                       machine: SyncSettings.machineName, backupsToKeep: SyncSettings.backupsToKeep)
+        }
+    }
+
+    /// File ▸ Sync Now, and the button in Settings. Also un-pauses after "Not Now".
+    @objc func syncNow() {
+        syncPaused = false
+        lastSyncComplaint = nil
+        guard SyncSettings.folder != nil else { flash("Choose a sync folder in Settings first"); return }
+        sync(loud: true)
+    }
+
+    func syncTurnedOff() {
+        syncPaused = false
+        syncStatus = "Not synced yet."
+        onStateChanged?()
+    }
+
+    /// Runs after launch, on returning to the window, and after every change.
+    /// `loud` reports problems in a sheet; otherwise they only show in the status line.
+    func sync(loud: Bool = false) {
+        guard let engine = engine(), !syncAsking, !picking, !syncPaused || loud else { return }
+        do {
+            switch try engine.check() {
+            case .firstSync:
+                try engine.push(try store.load())
+                synced("Saved \(catalogue) to the sync folder", announce: true)
+            case .inSync:
+                synced(nil, announce: loud)
+            case .quiet(let plan):
+                try engine.settle(plan)
+                if !plan.incoming.isEmpty || canonical(plan.merged) != canonical(plan.local) { reloadAfterSync() }
+                synced(plan.incoming.isEmpty ? nil : "Loaded \(catalogue) from the sync folder",
+                       announce: loud || !plan.incoming.isEmpty)
+            case .incoming(let plan):
+                if SyncSettings.askBeforeMerging { ask(plan) } else { finish(.merge) }
+            }
+        } catch {
+            complain(error, loud: loud)
+        }
+    }
+
+    private func ask(_ plan: SyncPlan) {
+        guard let w = window else { return }
+        syncAsking = true
+        func bullets(_ c: LibraryChange) -> String { c.lines.map { "   \u{2022} \($0)" }.joined(separator: "\n") }
+        var text = "From the synced copy:\n" + bullets(plan.incoming)
+        if !plan.outgoing.isEmpty { text += "\n\nFrom this Mac:\n" + bullets(plan.outgoing) }
+        text += "\n\nMerge keeps everything from both. Whatever you choose, both copies are backed up first."
+
+        let a = NSAlert()
+        a.messageText = "The synced copy of \u{201C}\(catalogue)\u{201D} has changes"
+        a.informativeText = text
+        a.addButton(withTitle: "Merge")
+        a.addButton(withTitle: "Use Synced Copy")
+        a.addButton(withTitle: "Keep This Mac\u{2019}s")
+        a.addButton(withTitle: "Not Now")
+        a.beginSheetModal(for: w) { [weak self] response in
+            guard let self = self else { return }
+            self.syncAsking = false
+            switch response {
+            case .alertFirstButtonReturn: self.finish(.merge)
+            case .alertSecondButtonReturn: self.finish(.useSynced)
+            case .alertThirdButtonReturn: self.finish(.keepLocal)
+            default:
+                self.syncPaused = true
+                self.syncStatus = "Paused \u{2014} the synced copy has changes. Choose Sync Now to decide."
+                self.onStateChanged?()
+            }
+        }
+    }
+
+    /// Checks again first, so the decision is applied to what is there now, not when the question was asked.
+    private func finish(_ choice: SyncChoice) {
+        guard let engine = engine() else { return }
+        do {
+            switch try engine.check() {
+            case .incoming(let plan), .quiet(let plan):
+                try engine.perform(choice, plan: plan)
+                reloadAfterSync()
+                switch choice {
+                case .merge: synced("Merged: " + (plan.incoming.lines + plan.outgoing.lines.map { $0 + " sent" }).joined(separator: ", "), announce: true)
+                case .useSynced: synced("Now using the synced copy", announce: true)
+                case .keepLocal: synced("Kept this Mac\u{2019}s copy", announce: true)
+                }
+            case .firstSync:
+                try engine.push(try store.load())
+                synced(nil, announce: false)
+            case .inSync:
+                synced(nil, announce: false)
+            }
+        } catch {
+            complain(error, loud: true)
+        }
+    }
+
+    private func reloadAfterSync() {
+        do { library = try store.load() } catch { show(error) }
+        loadedStamp = store.modificationDate
+        rebuild()
+    }
+
+    private func synced(_ message: String?, announce: Bool) {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        syncStatus = "In sync \u{2014} last checked \(f.string(from: Date()))."
+        lastSyncComplaint = nil
+        syncPaused = false
+        if announce { flash(message ?? "\(catalogue) is in sync") }
+        onStateChanged?()
+    }
+
+    private func complain(_ error: Error, loud: Bool) {
+        let text = error.localizedDescription
+        syncStatus = "Not synced: \(text)"
+        onStateChanged?()
+        if loud { show(error) }
+        else if text != lastSyncComplaint { flash("Sync: \(text)") } // once, not on every change
+        lastSyncComplaint = text
     }
 }
