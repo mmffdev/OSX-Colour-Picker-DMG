@@ -49,7 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         let main = MainWindowController(library: library)
         self.main = main
-        NSApp.mainMenu = menus(for: main)
+        let bar = menus(for: main)
+        Shortcuts.install(on: bar)   // before macOS adds its own items to the Edit menu
+        NSApp.mainMenu = bar
         main.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
@@ -57,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
-    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>" or "search:<text>". Ignored otherwise.
+    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
     private func rehearse(_ main: MainWindowController) {
         let env = ProcessInfo.processInfo.environment
         guard env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_SHOW"] else { return }
@@ -75,6 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.settings?.showPanel(Int(arg) ?? 0)
             case "search":
                 main.rehearseSearch(arg)
+            case "tags":
+                if arg.hasPrefix("bar") { main.rehearseTagBar(typing: String(arg.dropFirst(4))) } else { self.library.showTagEditor() }
+            case "labels":
+                main.rehearseLabels()
+            case "project":
+                if arg == "templates" { self.library.manageProjectTemplates() } else { self.library.newProject() }
             default: break
             }
         }
@@ -112,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m.addItem(.separator())
             add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)
             add(m, "New Project\u{2026}", #selector(LibraryController.newProject), "n", library, [.command, .option])
+            add(m, "Project Templates\u{2026}", #selector(LibraryController.manageProjectTemplates), "", library)
             add(m, "Build Palette from Swatches\u{2026}", #selector(MainWindowController.buildPalette), "n", main, [.command, .shift])
             add(m, "New Palette from Image\u{2026}", #selector(LibraryController.paletteFromImage), "i", library)
             add(m, "New Palette from Clipboard", #selector(LibraryController.paletteFromClipboard), "v", library, [.command, .shift])
@@ -159,6 +168,8 @@ if CommandLine.arguments.contains("--self-test") {
     runSelfTest()
 } else if CommandLine.arguments.contains("--pick") {
     runPickMode()
+} else if CommandLine.arguments.contains("--halo-demo") {
+    runHaloDemo()
 } else {
     let app = NSApplication.shared
     let delegate = AppDelegate()

@@ -2,7 +2,7 @@ import Foundation
 
 // ---------- Colour values, formats, names, contrast, harmonies ----------
 //
-// All conversions are plain sRGB maths. CMYK here is the naive device conversion — fine as a
+// Stored colours are sRGB; every other system is worked out from that. CMYK here is the naive device conversion — fine as a
 // starting value, not a substitute for a print profile.
 
 struct ColourValues {
@@ -61,6 +61,49 @@ struct ColourValues {
         return (toLinear(u.r), toLinear(u.g), toLinear(u.b))
     }
 
+    // The same colour written in wider colour spaces, 0–255 per channel. A stored colour is
+    // sRGB, so it always fits inside these; the numbers are what to type to get the same colour.
+
+    private func converted(_ m: [Double], encode: (Double) -> Double) -> (r: Int, g: Int, b: Int) {
+        let l = linear
+        func channel(_ row: Int) -> Int {
+            let v = m[row * 3] * l.r + m[row * 3 + 1] * l.g + m[row * 3 + 2] * l.b
+            return whole(min(max(encode(min(max(v, 0), 1)), 0), 1) * 255)
+        }
+        return (channel(0), channel(1), channel(2))
+    }
+
+    /// Display P3: P3 primaries with the sRGB curve.
+    var p3: (r: Int, g: Int, b: Int) {
+        converted([0.8224621, 0.1775380, 0.0000000, 0.0331941, 0.9668058, 0.0000000, 0.0170827, 0.0723974, 0.9105199]) {
+            $0 <= 0.0031308 ? $0 * 12.92 : 1.055 * pow($0, 1 / 2.4) - 0.055
+        }
+    }
+
+    /// Adobe RGB (1998): its own primaries and a 2.2 gamma (563/256).
+    var adobeRGB: (r: Int, g: Int, b: Int) {
+        converted([0.7151627, 0.2848373, 0.0000000, 0.0000000, 1.0000000, 0.0000000, 0.0000000, 0.0411619, 0.9588381]) {
+            pow($0, 256.0 / 563)
+        }
+    }
+
+    /// ITU-R BT.2020, with the standard's own transfer curve.
+    var rec2020: (r: Int, g: Int, b: Int) {
+        converted([0.6274039, 0.3292830, 0.0433131, 0.0690973, 0.9195404, 0.0113623, 0.0163914, 0.0880133, 0.8955953]) {
+            $0 < 0.0181 ? 4.5 * $0 : 1.0993 * pow($0, 0.45) - 0.0993
+        }
+    }
+
+    /// CIE L*a*b* under D50, the white point print and ColorSync use.
+    var lab: (l: Double, a: Double, b: Double) {
+        let c = linear
+        func f(_ t: Double) -> Double { t > 216.0 / 24389 ? cbrt(t) : (24389.0 / 27 * t + 16) / 116 }
+        let x = f((0.4360747 * c.r + 0.3850649 * c.g + 0.1430804 * c.b) / 0.96422)
+        let y = f(0.2225045 * c.r + 0.7168786 * c.g + 0.0606169 * c.b)
+        let z = f((0.0139322 * c.r + 0.0971045 * c.g + 0.7141733 * c.b) / 0.82521)
+        return (116 * y - 16, 500 * (x - y), 200 * (y - z))
+    }
+
     /// WCAG relative luminance, 0 (black) to 1 (white).
     var luminance: Double { let l = linear; return 0.2126 * l.r + 0.7152 * l.g + 0.0722 * l.b }
 
@@ -102,9 +145,12 @@ func labOf(_ rgb: (r: Double, g: Double, b: Double)) -> (l: Double, a: Double, b
 
 enum ColourFormat: String, CaseIterable {
     case hex, hexBare, rgb, cssRGB, hsl, cssHSL, hsv, cmyk, float, linear, swiftUI, nsColor, uiColor
+    case p3, adobeRGB, rec2020, lab
 
-    /// The rows on a colour card, in order.
-    static let cardRows: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk]
+    /// The rows a colour card can show, in order.
+    static let cardRows: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab]
+    /// The rows a card shows until Settings says otherwise.
+    static let defaultCardRows: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk]
 
     var title: String {
         switch self {
@@ -121,6 +167,10 @@ enum ColourFormat: String, CaseIterable {
         case .swiftUI: return "SwiftUI Color"
         case .nsColor: return "AppKit NSColor"
         case .uiColor: return "UIKit UIColor"
+        case .p3: return "Display P3  \u{2014}  " + text("#4F8093")
+        case .adobeRGB: return "Adobe RGB  \u{2014}  " + text("#4F8093")
+        case .rec2020: return "BT.2020  \u{2014}  " + text("#4F8093")
+        case .lab: return "L*a*b* (D50)  \u{2014}  " + text("#4F8093")
         }
     }
 
@@ -137,6 +187,10 @@ enum ColourFormat: String, CaseIterable {
         case .swiftUI: return "SwiftUI"
         case .nsColor: return "NSColor"
         case .uiColor: return "UIColor"
+        case .p3: return "P3"
+        case .adobeRGB: return "Adobe"
+        case .rec2020: return "BT.2020"
+        case .lab: return "L*a*b*"
         }
     }
 
@@ -158,6 +212,7 @@ enum ColourFormat: String, CaseIterable {
         case .swiftUI: return "Color(red: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)))"
         case .nsColor: return "NSColor(srgbRed: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)), alpha: 1)"
         case .uiColor: return "UIColor(red: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)), alpha: 1)"
+        case .p3, .adobeRGB, .rec2020, .lab: return fields(raw).joined(separator: ", ")
         }
     }
 
@@ -170,6 +225,10 @@ enum ColourFormat: String, CaseIterable {
         case .hsl, .cssHSL: return ["\(v.hsl.h)", "\(v.hsl.s)", "\(v.hsl.l)"]
         case .hsv: return ["\(v.hsv.h)", "\(v.hsv.s)", "\(v.hsv.v)"]
         case .cmyk: return ["\(v.cmyk.c)", "\(v.cmyk.m)", "\(v.cmyk.y)", "\(v.cmyk.k)"]
+        case .p3: return ["\(v.p3.r)", "\(v.p3.g)", "\(v.p3.b)"]
+        case .adobeRGB: return ["\(v.adobeRGB.r)", "\(v.adobeRGB.g)", "\(v.adobeRGB.b)"]
+        case .rec2020: return ["\(v.rec2020.r)", "\(v.rec2020.g)", "\(v.rec2020.b)"]
+        case .lab: return [v.lab.l, v.lab.a, v.lab.b].map { String(format: "%.1f", $0 == 0 ? 0 : $0) }
         default: return [text(raw, lowercase: lowercase)]
         }
     }

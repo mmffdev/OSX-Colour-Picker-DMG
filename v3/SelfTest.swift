@@ -185,6 +185,11 @@ func runSelfTest() -> Never {
 
     runSyncTests(in: root, check: check)
     runColourTests(in: root, check: check)
+    runHaloTests(check: check)
+    runShortcutTests(check: check)
+    runProjectTests(check: check)
+    runColourSpaceTests(check: check)
+    runTagTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
     exit(failed == 0 ? 0 : 1)
@@ -703,4 +708,179 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && real.previousURL != real.store(for: Catalogues.mainName).url,
           "the app looks for earlier libraries in the version 1 and version 2 folders, not its own")
     check(real.store(for: "Some other catalogue").previousURL == nil, "only Main is seeded from an earlier version")
+}
+
+func runHaloTests(check: (Bool, String) -> Void) {
+    print("halo")
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let under = HaloGeometry.frame(below: CGRect(x: 700, y: 600, width: 40, height: 20), in: screen)
+    check(under == CGRect(x: 548, y: 248, width: 344, height: 344), "the dial opens centred under its trigger, 8 points clear")
+    let corner = HaloGeometry.frame(below: CGRect(x: 1420, y: 10, width: 20, height: 20), in: screen)
+    check(corner == CGRect(x: 1088, y: 8, width: 344, height: 344), "near a screen edge the dial stays 8 points inside it")
+    let small = HaloGeometry.frame(below: CGRect(x: 100, y: 100, width: 20, height: 20), in: CGRect(x: 0, y: 0, width: 300, height: 260))
+    check(small.width == 244 && small.height == 244 && small.minY == 8, "on a small screen the dial shrinks to fit")
+    check(HaloGeometry.wrap(-1, 6) == 5 && HaloGeometry.wrap(13, 6) == 1 && HaloGeometry.wrap(3, 0) == 0, "positions wrap round the ring in both directions")
+    check(abs(HaloGeometry.orbitRadius(344) - 142.54) < 0.001, "glyphs ride midway across the band")
+    check(HaloGeometry.targetSize(344, count: 6) == 40 && HaloGeometry.targetSize(344, count: 40) == 24, "glyph targets stay between 24 and 40 points")
+    check(HaloGeometry.sector(count: 3) == 36 && HaloGeometry.sector(count: 12) == 30 && HaloGeometry.sector(count: 30) == 20, "the wedge narrows as actions are added, within limits")
+    let top = HaloGeometry.offset(of: 2, count: 6, turn: 2, radius: 100)
+    check(abs(top.x) < 0.0001 && abs(top.y + 100) < 0.0001, "the selected action sits at twelve o'clock")
+    let off = [false, true, true, false]
+    check(HaloGeometry.step(from: 0, direction: 1, disabled: off) == 3 && HaloGeometry.step(from: 0, direction: -1, disabled: off) == -1,
+          "turning skips actions that are switched off")
+    check(HaloGeometry.step(from: 0, direction: 1, disabled: [true, true]) == nil && HaloGeometry.step(from: 0, direction: 1, disabled: []) == nil,
+          "a ring with nothing to choose does not turn")
+    check(HaloGeometry.opening(disabled: [true, false, false], checked: [nil, nil, true], showPositions: false) == 1
+          && HaloGeometry.opening(disabled: [true, false, false], checked: [nil, nil, true], showPositions: true) == 2,
+          "the dial opens on the first usable action, or on the ticked one when positions are shown")
+    check(HaloGeometry.nudge(0.3, by: 1) == 0.4 && HaloGeometry.nudge(0.95, by: 1) == 1 && HaloGeometry.nudge(0, by: -1) == 0,
+          "arrow keys slide the confirmation a tenth at a time and stop at the ends")
+}
+
+func runShortcutTests(check: (Bool, String) -> Void) {
+    print("shortcuts")
+    let newPalette = Shortcut(key: "N", modifiers: .command)
+    check(newPalette.key == "n" && Shortcut(encoded: newPalette.encoded) == newPalette, "a shortcut survives being saved and read back")
+    check(Shortcut(encoded: "") == nil && Shortcut(encoded: "x") == nil && Shortcut(encoded: "1:") == nil, "a damaged saved shortcut is ignored")
+    check(Shortcut(key: "n", modifiers: [.command, .shift, .option, .control]).display == "\u{2303}\u{2325}\u{21E7}\u{2318}N"
+          && Shortcut(key: " ", modifiers: .command).display == "\u{2318}Space" && Shortcut(key: "\u{F704}", modifiers: .control).display == "\u{2303}F1",
+          "shortcuts are written the way the menu bar writes them")
+
+    let reserved = Shortcuts.standard + [(Shortcut(key: "c", modifiers: .command), "Copy")]
+    let assigned = [(id: "newPalette", title: "New Palette", shortcut: newPalette), (id: "exportShown", title: "Export", shortcut: Shortcut(key: "e", modifiers: .command))]
+    let system = [(keyCode: 20, modifiers: ShortcutModifiers([.command, .shift]))]
+    func problem(_ key: String, _ modifiers: ShortcutModifiers, keyCode: Int? = nil, for id: String = "newPalette") -> ShortcutProblem? {
+        Shortcuts.problem(with: Shortcut(key: key, modifiers: modifiers), keyCode: keyCode, for: id, reserved: reserved, system: system, assigned: assigned)
+    }
+    check(problem("c", .command) == .reserved("Copy"), "\u{2318}C cannot be taken from Copy")
+    check(problem("w", .command) == .reserved("Close Window") && problem("\t", .command) == .reserved("switch apps"),
+          "shortcuts every Mac app shares cannot be taken")
+    check(problem("n", .shift) == .needsModifier && problem("n", .option) == .needsModifier && problem("n", .control) == nil,
+          "a shortcut must hold \u{2318} or \u{2303}")
+    check(problem("3", [.command, .shift], keyCode: 20) == .system && problem("3", [.command, .shift], keyCode: 21) == nil
+          && problem("3", .command, keyCode: 20) == nil, "a shortcut macOS has switched on for itself cannot be taken")
+    check(problem("e", .command) == .taken("Export") && problem("e", .command, for: "exportShown") == nil,
+          "a shortcut on another command cannot be taken, but a command may keep its own")
+    check(problem("k", [.command, .option]) == nil, "a free shortcut is accepted")
+    check(ShortcutProblem.reserved("Copy").message(for: Shortcut(key: "c", modifiers: .command)).hasPrefix("\u{2318}C is Copy"),
+          "the refusal says what the shortcut already does")
+}
+
+func runProjectTests(check: (Bool, String) -> Void) {
+    print("project details and templates")
+    check(Set(ProjectField.allCases.map { $0.rawValue }).count == ProjectField.allCases.count
+          && ProjectField.Section.allCases.allSatisfy { s in
+              let titles = ProjectField.fields(in: s).map { $0.title }
+              return !titles.isEmpty && Set(titles).count == titles.count },
+          "every section of the form has fields, and no two in a section share a label")
+    let answers = ["clientCompany": "  Acme Ltd ", "clientEmail": "jo@acme.com", "description": "Rebrand", "notes": "   ", "made-up": "x"]
+    check(ProjectField.tidy(answers) == ["clientCompany": "Acme Ltd", "clientEmail": "jo@acme.com", "description": "Rebrand"],
+          "answers are trimmed, and blank or unknown ones dropped")
+    check(ProjectField.problem(name: " ", values: [:]) == "Give the project a name."
+          && ProjectField.problem(name: "A", values: ["clientEmail": "jo.acme.com"]) != nil
+          && ProjectField.problem(name: "A", values: ["ownerEmail": "jo@acme"]) != nil
+          && ProjectField.problem(name: "A", values: ["clientEmail": "jo@acme.com", "ownerEmail": ""]) == nil,
+          "the form asks for a name and for emails that look like emails")
+
+    var templates = ProjectTemplate.saving(answers, named: "Acme", into: [])
+    check(templates.count == 1 && templates[0].values == ["clientCompany": "Acme Ltd", "clientEmail": "jo@acme.com"],
+          "a template keeps who the client and studio are, not the one job's description")
+    templates = ProjectTemplate.saving(["ownerCompany": "MMFFDev"], named: "Studio", into: templates)
+    templates = ProjectTemplate.saving(["clientCompany": "Acme Group"], named: "acme", into: templates)
+    check(templates.map { $0.name } == ["acme", "Studio"] && templates[0].values == ["clientCompany": "Acme Group"],
+          "saving under an existing name replaces that template; the list stays in name order")
+    let filled = templates[0].filling(["clientCompany": "Old", "description": "Rebrand", "clientPhone": "0161"])
+    check(filled == ["clientCompany": "Acme Group", "description": "Rebrand", "clientPhone": "0161"],
+          "filling from a template replaces what the template holds and leaves the rest")
+
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    var lib = Library()
+    let id = lib.createProject(named: "Client A", at: t)
+    lib.setProjectDetails(id, ["clientCompany": "Acme", "notes": " "], at: t.addingTimeInterval(10))
+    check(lib.project(id)?.details == ["clientCompany": "Acme"] && lib.project(id)?.detailsChangedAt == t.addingTimeInterval(10),
+          "a project keeps its details")
+    lib.setProjectDetails(id, ["clientCompany": "Acme"], at: t.addingTimeInterval(15))
+    check(lib.project(id)?.detailsChangedAt == t.addingTimeInterval(10), "saving the same details again changes nothing")
+    var other = lib
+    other.setProjectDetails(id, ["clientCompany": "Acme Ltd"], at: t.addingTimeInterval(20))
+    check(mergeLibraries(local: lib, remote: other).project(id)?.details == ["clientCompany": "Acme Ltd"]
+          && mergeLibraries(local: other, remote: lib).project(id)?.details == ["clientCompany": "Acme Ltd"],
+          "the newer details win a sync, whichever Mac holds them")
+    let old = try! JSONEncoder.library.encode(lib)
+    let stripped = String(data: old, encoding: .utf8)!
+    check(stripped.contains("\"details\"") && (try? JSONDecoder.library.decode(Library.self, from: old)) == lib,
+          "details are saved in the library file and read back")
+    var plain = Library()
+    plain.createProject(named: "No details", at: t)
+    check(!String(data: try! JSONEncoder.library.encode(plain), encoding: .utf8)!.contains("\"details\""),
+          "a project without details saves as it always did")
+}
+
+func runColourSpaceTests(check: (Bool, String) -> Void) {
+    print("wider colour spaces")
+    func f(_ format: ColourFormat, _ hex: String) -> String { format.text(hex) }
+    check(f(.p3, "#FFFFFF") == "255, 255, 255" && f(.adobeRGB, "#FFFFFF") == "255, 255, 255" && f(.rec2020, "#FFFFFF") == "255, 255, 255"
+          && f(.p3, "#000000") == "0, 0, 0" && f(.lab, "#000000") == "0.0, 0.0, 0.0",
+          "white and black are the same in every space")
+    let white = ColourValues("#FFFFFF")!.lab
+    check(abs(white.l - 100) < 0.01 && abs(white.a) < 0.05 && abs(white.b) < 0.05, "white is L* 100 with no colour")
+    check(f(.p3, "#FF0000") == "234, 51, 35", "sRGB red in Display P3: \(f(.p3, "#FF0000"))")
+    check(f(.adobeRGB, "#FF0000") == "219, 0, 0" && f(.adobeRGB, "#00FF00") == "144, 255, 60",
+          "sRGB red and green in Adobe RGB: \(f(.adobeRGB, "#FF0000")) / \(f(.adobeRGB, "#00FF00"))")
+    check(f(.rec2020, "#FF0000") == "202, 59, 19", "sRGB red in BT.2020: \(f(.rec2020, "#FF0000"))")
+    let red = ColourValues("#FF0000")!.lab
+    check(abs(red.l - 54.29) < 0.05 && abs(red.a - 80.81) < 0.05 && abs(red.b - 69.89) < 0.05,
+          "sRGB red in L*a*b* under D50: \(f(.lab, "#FF0000"))")
+    check(f(.p3, "#808080") == "128, 128, 128" && abs(ColourValues("#808080")!.lab.a) < 0.05, "a grey stays grey")
+    check(ColourFormat.defaultCardRows == [.hex, .rgb, .hsl, .hsv, .cmyk] && ColourFormat.cardRows.count == 9,
+          "cards keep their five rows until more are switched on")
+}
+
+func runTagTests(check: (Bool, String) -> Void) {
+    print("tags: colour, scope, rename, delete")
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    var lib = Library()
+    lib.addPick("#111111", at: t)
+    lib.addPick("#222222", at: t)
+    let palette = lib.createSwatch(named: "Web", hexes: ["#111111"], at: t)
+    let project = lib.createProject(named: "Client A", at: t)
+    lib.setTags(ofColour: "#111111", ["Brand", "dark"], at: t)
+    lib.setTags(ofPalette: palette, ["brand"], at: t)
+    check(lib.allTags == ["Brand", "dark"] && lib.info(forTag: "Brand") == nil, "tags in use need no record of their own")
+
+    lib.setTag("Print", colour: "#ff6600", project: project, at: t.addingTimeInterval(1))
+    check(lib.allTags == ["Brand", "dark", "Print"] && lib.info(forTag: "print")?.colour == "#FF6600" && lib.project(ofTag: "Print") == project,
+          "a tag can be made before anything wears it, with a colour and a project")
+    check(lib.tags(offeredIn: nil) == ["Brand", "dark"] && lib.tags(offeredIn: project) == ["Brand", "dark", "Print"],
+          "a project tag is offered only inside its project; global tags everywhere")
+
+    lib.setTag("Brand", colour: "#00AA88", project: nil, at: t.addingTimeInterval(2))
+    lib.renameTag("brand", to: "Identity", at: t.addingTimeInterval(3))
+    check(lib.colours.first { $0.hex == "#111111" }?.tags == ["Identity", "dark"] && lib.swatch(palette)?.tagList == ["Identity"]
+          && lib.allTags == ["dark", "Identity", "Print"] && lib.info(forTag: "Identity")?.colour == "#00AA88",
+          "renaming a tag changes it on every swatch and palette and keeps its colour")
+    lib.renameTag("dark", to: "Identity", at: t.addingTimeInterval(4))
+    check(lib.colours.first { $0.hex == "#111111" }?.tags == ["Identity"] && lib.allTags == ["Identity", "Print"],
+          "renaming onto an existing tag merges the two")
+    let uses = lib.uses(ofTag: "identity")
+    check(uses.swatches == ["#111111"] && uses.palettes.map { $0.id } == [palette] && lib.hexes(tagged: "Identity") == ["#111111"],
+          "a tag knows which swatches and palettes wear it")
+
+    var other = lib
+    other.setTag("Print", colour: "#0000FF", project: nil, at: t.addingTimeInterval(10))
+    check(mergeLibraries(local: lib, remote: other).info(forTag: "Print")?.colour == "#0000FF"
+          && mergeLibraries(local: other, remote: lib).project(ofTag: "Print") == nil,
+          "the newer colour and scope win a sync")
+    lib.deleteTag("Identity", at: t.addingTimeInterval(20))
+    check(lib.allTags == ["Print"] && lib.colours.allSatisfy { ($0.tags ?? []).isEmpty } && lib.swatch(palette)?.tagList == [],
+          "deleting a tag takes it off everything")
+    check(mergeLibraries(local: lib, remote: other).allTags == ["Print"] && mergeLibraries(local: other, remote: lib).allTags == ["Print"],
+          "a deleted tag's record does not come back from the other Mac")
+    lib.deleteProject(project, at: t.addingTimeInterval(30))
+    check(lib.project(ofTag: "Print") == nil && lib.tags(offeredIn: nil) == ["Print"], "a tag whose project is gone becomes global")
+    let data = try! JSONEncoder.library.encode(lib)
+    check((try? JSONDecoder.library.decode(Library.self, from: data)) == lib, "tag records are saved in the library file and read back")
+    var plain = Library()
+    plain.addPick("#333333", at: t)
+    check(!String(data: try! JSONEncoder.library.encode(plain), encoding: .utf8)!.contains("\"tags\" : ["), "a library with no tag records saves as it always did")
 }

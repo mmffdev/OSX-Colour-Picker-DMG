@@ -21,7 +21,7 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
     out.deleted = buriedOrder.map { buried[$0]! }
     func deletedAt(_ kind: Tombstone.Kind, _ key: String) -> Date { buried["\(kind.rawValue)|\(key)"]?.deletedAt ?? .distantPast }
 
-    // Projects: union, newer name and position win, deleted ones stay deleted.
+    // Projects: union, newer name, position and details win, deleted ones stay deleted.
     var projectIDs: [UUID] = []
     var projectSides: [UUID: (Project?, Project?)] = [:]
     for p in local.projects { projectIDs.append(p.id); projectSides[p.id] = (p, nil) }
@@ -35,9 +35,19 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         if let l = l, let r = r {
             if (r.nameChangedAt ?? r.createdAt) > (l.nameChangedAt ?? l.createdAt) { p.name = r.name; p.nameChangedAt = r.nameChangedAt }
             if (r.positionChangedAt ?? .distantPast) > (l.positionChangedAt ?? .distantPast) { p.position = r.position; p.positionChangedAt = r.positionChangedAt }
+            if (r.detailsChangedAt ?? .distantPast) > (l.detailsChangedAt ?? .distantPast) { p.details = r.details; p.detailsChangedAt = r.detailsChangedAt }
         }
         out.projects.append(p)
     }
+
+    // What is known about each tag: one record per name, the newer one kept.
+    var infos: [String: TagInfo] = [:]
+    for t in local.tagInfo + remote.tagInfo {
+        let k = t.name.lowercased()
+        if let have = infos[k], have.changedAt >= t.changedAt { continue }
+        infos[k] = t
+    }
+    out.tagInfo = infos.values.sorted { $0.name.lowercased() < $1.name.lowercased() }
 
     // Swatches that survive, local order first.
     var swatchIDs: [UUID] = []
@@ -144,6 +154,7 @@ func canonical(_ lib: Library) -> Library {
     out.activeSwatchID = nil
     out.colours.sort { $0.hex < $1.hex }
     out.projects.sort { $0.id.uuidString < $1.id.uuidString }
+    out.tagInfo.sort { $0.name.lowercased() < $1.name.lowercased() }
     out.swatches.sort { $0.id.uuidString < $1.id.uuidString }
     for i in out.swatches.indices { out.swatches[i].entries.sort { $0.hex < $1.hex } }
     out.deleted.sort { ($0.kind.rawValue, $0.key) < ($1.kind.rawValue, $1.key) }

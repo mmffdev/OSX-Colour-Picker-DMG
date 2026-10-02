@@ -31,6 +31,8 @@ final class LibraryController: NSObject {
     var onShow: ((Selection, _ rename: Bool) -> Void)?
     /// Asks the visible page to scroll to and select a swatch.
     var onReveal: ((String) -> Void)?
+    /// Lays a form over the page (nil takes it away), filling its width or in a centred column; set by the window.
+    var onCover: ((NSViewController?, _ fills: Bool) -> Void)?
 
     private(set) var picking = false
     private(set) var syncStatus = "Not synced yet."
@@ -200,26 +202,51 @@ final class LibraryController: NSObject {
 
     // MARK: Projects
 
-    @objc func newProject() {
-        let a = NSAlert()
-        a.messageText = "New Project"
-        a.informativeText = "A project groups palettes in the sidebar. Drag palettes into it, or use the + on its header."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "Project name"
-        a.accessoryView = field
-        a.addButton(withTitle: "Create")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = field
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        var id: UUID?
-        apply { id = $0.createProject(named: name) }
-        // If a palette is open, it moves into the new project so the project is not born empty.
-        if let id = id, case .palette(let open)? = current, library.swatch(open)?.projectID == nil {
-            apply { $0.move(open, to: id, index: 0) }
+    /// Opens the project form; saving it creates the project.
+    @objc func newProject() { startProject(moving: nil) }
+
+    /// The same, putting `palette` into the project once it is made.
+    func startProject(moving palette: UUID?) {
+        showProjectForm(mode: .newProject, name: "", values: [:]) { [weak self] name, values in
+            guard let self = self else { return }
+            var id: UUID?
+            self.apply { lib in
+                let made = lib.createProject(named: name)
+                lib.setProjectDetails(made, values)
+                // The palette asked for moves in; failing that the open one, so the project is not born empty.
+                if let palette = palette { lib.move(palette, to: made, index: 0) }
+                else if case .palette(let open)? = self.current, lib.swatch(open)?.projectID == nil { lib.move(open, to: made, index: 0) }
+                id = made
+            }
+            self.flash("Created project \(id.flatMap { self.library.project($0)?.name } ?? name)")
         }
-        flash("Created project \(library.project(id ?? UUID())?.name ?? name)")
+    }
+
+    /// Opens the project form on an existing project.
+    func editProject(_ id: UUID) {
+        guard let p = library.project(id) else { return }
+        showProjectForm(mode: .project, name: p.name, values: p.details ?? [:]) { [weak self] name, values in
+            self?.apply { lib in
+                lib.renameProject(id, to: name)
+                lib.setProjectDetails(id, values)
+            }
+        }
+    }
+
+    /// The project form fills the page; with no page to fill (no window wiring) it falls back to a sheet.
+    private func showProjectForm(mode: ProjectFormController.Mode, name: String, values: [String: String],
+                                 onSave: @escaping (String, [String: String]) -> Void) {
+        guard let cover = onCover else {
+            if let window = window { ProjectFormController.present(over: window, mode: mode, name: name, values: values, onSave: onSave) }
+            return
+        }
+        let form = ProjectFormController(mode: mode, name: name, values: values, onSave: onSave)
+        form.onClose = { cover(nil, false) }
+        cover(form, false)
+    }
+
+    @objc func manageProjectTemplates() {
+        if let window = window { ProjectTemplatesController.present(over: window) }
     }
 
     /// What the window is showing; set by the window so project creation can use it.
@@ -266,24 +293,42 @@ final class LibraryController: NSObject {
 
     // MARK: Tags
 
-    func setTags(ofPalette id: UUID, _ tags: [String]) { apply { $0.setTags(ofPalette: id, tags) } }
+    /// `scoped` are the new tags that were given to a project as they were typed.
+    func setTags(ofPalette id: UUID, _ tags: [String], scoped: [String: UUID] = [:]) {
+        apply { lib in
+            lib.setTags(ofPalette: id, tags)
+            for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
+        }
+    }
 
-    func editTags(ofSwatches hexes: [String]) {
-        guard let first = hexes.first else { return }
-        let current = library.colours.first { $0.hex == first }?.tags ?? []
-        let a = NSAlert()
-        a.messageText = hexes.count == 1 ? "Tags for \(colourName(first))  \(first)" : "Tags for \(plural(hexes.count, "swatch", "swatches"))"
-        a.informativeText = "Separate tags with commas. Tags help you search and filter, and travel with exports."
-        let field = NSTokenField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.tokenStyle = .rounded
-        field.objectValue = current
-        a.accessoryView = field
-        a.addButton(withTitle: "Save")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = field
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let tags = (field.objectValue as? [String]) ?? []
-        apply { lib in for h in hexes { lib.setTags(ofColour: h, tags) } }
+    func setTags(ofSwatches hexes: [String], _ tags: [String], scoped: [String: UUID] = [:]) {
+        apply { lib in
+            for h in hexes { lib.setTags(ofColour: h, tags) }
+            for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
+        }
+    }
+
+    func setTag(_ name: String, colour: String?, project: UUID?) { apply { $0.setTag(name, colour: colour, project: project) } }
+    func renameTag(_ old: String, to new: String) { apply { $0.renameTag(old, to: new) } }
+    func deleteTag(_ name: String) { apply { $0.deleteTag(name) } }
+    func deleteTags(_ names: [String]) { apply { lib in for name in names { lib.deleteTag(name) } } }
+
+    /// Makes an unused tag with a name of its own and returns that name.
+    @discardableResult
+    func newTag() -> String {
+        let name = uniqueName("New Tag", among: library.allTags)
+        apply { $0.setTag(name, colour: nil, project: nil) }
+        return name
+    }
+
+    /// Opens the tag editor over the page, with one tag's name ready to type over if asked.
+    @objc func showTagEditor() { showTagEditor(focusing: nil) }
+
+    func showTagEditor(focusing name: String?) {
+        guard let cover = onCover else { return }
+        let editor = TagEditorController(library: self, focus: name)
+        editor.onClose = { cover(nil, false) }
+        cover(editor, true)
     }
 
     /// Creates a palette holding `hexes` and opens it.
@@ -308,6 +353,15 @@ final class LibraryController: NSObject {
         guard let s = library.swatch(id) else { return }
         apply { $0.setFavourite(id, !s.favourite) }
         flash(s.favourite ? "Removed \(s.name) from Favourites" : "Added \(s.name) to Favourites")
+    }
+
+    /// Stars every palette in a project, or unstars them all when every one is starred already.
+    func toggleFavourites(inProject id: UUID) {
+        let palettes = library.palettes(in: id)
+        guard let p = library.project(id), !palettes.isEmpty else { return }
+        let on = !palettes.allSatisfy { $0.favourite }
+        apply { lib in for s in palettes { lib.setFavourite(s.id, on) } }
+        flash(on ? "Added the palettes in \(p.name) to Favourites" : "Removed the palettes in \(p.name) from Favourites")
     }
 
     func setTarget(_ id: UUID?) {

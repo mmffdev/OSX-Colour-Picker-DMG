@@ -1,13 +1,19 @@
 import AppKit
 
-// ---------- Rail 1: favourites, library, projects with their palettes, loose palettes, tags ----------
+// ---------- Rail 1: library, favourites, projects with their palettes, loose palettes, tags ----------
 
 final class SidebarNode: NSObject {
     enum Kind: Equatable {
         case favourites, library, loose, tags
+        /// The "Projects" heading; each project sits under it with its palettes inside.
+        case projects
         case project(UUID)
         case all
         case tag(String)
+        /// The "Edit Tags…" row at the foot of the tag list.
+        case editTags
+        /// The "Tags" bucket at the foot of a project, holding the tags that belong to it.
+        case projectTags(UUID)
         case palette(UUID)
     }
 
@@ -18,9 +24,15 @@ final class SidebarNode: NSObject {
 
     var isGroup: Bool {
         switch kind {
-        case .favourites, .library, .loose, .tags, .project: return true
+        case .favourites, .library, .loose, .tags, .projects: return true
         default: return false
         }
+    }
+
+    /// Headings open and close, and so do projects and the tag bucket inside each.
+    var isExpandable: Bool {
+        if case .projectTags = kind { return true }
+        return isGroup || projectID != nil
     }
 
     var paletteID: UUID? { if case .palette(let id) = kind { return id }; return nil }
@@ -31,30 +43,20 @@ final class SidebarNode: NSObject {
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
 let projectDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.project")
 
-/// A round dot in the palette's identity colour.
-final class DotView: NSView {
-    var colour: NSColor = .gray { didSet { needsDisplay = true } }
-    override var intrinsicContentSize: NSSize { NSSize(width: 10, height: 10) }
-    override func draw(_ dirtyRect: NSRect) {
-        colour.setFill()
-        NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5)).fill()
-    }
-}
-
-/// A palette row: dot, name, pick mark, count, then star · duplicate · delete.
+/// A palette row: favourite star, a small strip of its colours, name, pick mark, count, then a gear that opens the palette's menu.
 final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("palette")
 
     var onRename: ((String) -> Void)?
+    /// The gear was pressed; hands over the button so the menu can open under it.
+    var onGear: ((NSView) -> Void)?
     var onStar: (() -> Void)?
-    var onDuplicate: (() -> Void)?
-    var onDelete: (() -> Void)?
 
-    private let dot = DotView()
+    private let strip = SpectrumView()
+    private var star: NSButton!
     private let name = NSTextField(labelWithString: "")
     private let count = NSTextField(labelWithString: "")
     private let target = NSImageView()
-    private var star: NSButton!
     private var committed = ""
 
     override init(frame: NSRect) {
@@ -71,15 +73,18 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
 
         count.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         count.textColor = .tertiaryLabelColor
+        strip.radius = 3
+        strip.outlinesWhenEmpty = true
         target.image = symbol("eyedropper", "Picks go here", size: 10)
         target.contentTintColor = .controlAccentColor
         target.toolTip = "New picks are added to this palette"
-        star = symbolButton("star", tooltip: "Add to Favourites", target: self, action: #selector(starTapped))
-        let duplicate = symbolButton("plus.square.on.square", tooltip: "Duplicate palette", target: self, action: #selector(duplicateTapped))
-        let delete = symbolButton("trash", tooltip: "Delete palette", target: self, action: #selector(deleteTapped))
-        for b in [duplicate, delete] { b.image = symbol(b.image == duplicate.image ? "plus.square.on.square" : "trash", "", size: 11); b.contentTintColor = .tertiaryLabelColor }
+        let gear = symbolButton("gearshape", tooltip: "Palette actions", target: self, action: #selector(gearTapped(_:)))
+        gear.image = symbol("gearshape", "Palette actions", size: 11)
+        gear.contentTintColor = .tertiaryLabelColor
 
-        let stack = NSStackView(views: [dot, name, target, count, star, duplicate, delete])
+        star = symbolButton("star", tooltip: "Add to Favourites", target: self, action: #selector(starTapped))
+
+        let stack = NSStackView(views: [star, strip, name, target, count, gear])
         stack.orientation = .horizontal
         stack.spacing = 5
         stack.alignment = .centerY
@@ -90,8 +95,8 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 10),
-            dot.heightAnchor.constraint(equalToConstant: 10),
+            strip.widthAnchor.constraint(equalToConstant: 36),
+            strip.heightAnchor.constraint(equalToConstant: 12),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -99,20 +104,19 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     func configure(_ s: Swatch, isTarget: Bool) {
         committed = s.name
         name.stringValue = s.name
-        dot.colour = identityColour(s.id)
-        count.stringValue = "\(s.entries.count)"
-        target.isHidden = !isTarget
+        strip.hexes = s.entries.map { $0.hex }
         star.image = symbol(s.favourite ? "star.fill" : "star", "Favourite", size: 11)
         star.contentTintColor = s.favourite ? .systemYellow : .tertiaryLabelColor
-        star.toolTip = s.favourite ? "Remove from Favourites" : "Add to Favourites"
+        star.toolTip = (s.favourite ? "Remove from Favourites" : "Add to Favourites") + " (\u{21E7}F)"
+        count.stringValue = "\(s.entries.count)"
+        target.isHidden = !isTarget
         toolTip = s.tagList.isEmpty ? nil : "Tags: " + s.tagList.joined(separator: ", ")
     }
 
     func beginRenaming() { window?.makeFirstResponder(name) }
 
+    @objc private func gearTapped(_ sender: NSButton) { onGear?(sender) }
     @objc private func starTapped() { onStar?() }
-    @objc private func duplicateTapped() { onDuplicate?() }
-    @objc private func deleteTapped() { onDelete?() }
 
     func controlTextDidEndEditing(_ obj: Notification) {
         let typed = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,11 +134,12 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     }
 }
 
-/// A project header: name plus a button for a new palette inside it.
+/// A row with a plus button: a project (new palette inside it) or the Projects heading (new project).
 final class ProjectHeaderCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("project")
     var onAdd: (() -> Void)?
     private let title = NSTextField(labelWithString: "")
+    private let folder = NSImageView()
     private var add: NSButton!
 
     override init(frame: NSRect) {
@@ -142,11 +147,15 @@ final class ProjectHeaderCell: NSTableCellView {
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField = title
+        folder.image = symbol("folder", "Project", size: 12)
+        folder.contentTintColor = .secondaryLabelColor
         add = symbolButton("plus.circle", tooltip: "New palette in this project", target: self, action: #selector(addTapped))
         add.image = symbol("plus.circle", "", size: 12)
         add.contentTintColor = .tertiaryLabelColor
-        let stack = NSStackView(views: [title, add])
+        add.imagePosition = .imageOnly
+        let stack = NSStackView(views: [folder, title, add])
         stack.orientation = .horizontal
+        stack.alignment = .centerY
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -154,18 +163,32 @@ final class ProjectHeaderCell: NSTableCellView {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // The plus sits on the title's own middle line, whatever height the button would take.
+            add.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            add.widthAnchor.constraint(equalToConstant: 16),
+            add.heightAnchor.constraint(equalToConstant: 16),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String) { title.stringValue = name }
+    func configure(name: String, heading: Bool = false, tooltip: String) {
+        title.stringValue = name
+        folder.isHidden = heading
+        add.toolTip = tooltip
+        add.setAccessibilityLabel(tooltip)
+    }
     @objc private func addTapped() { onAdd?() }
 }
 
 final class SidebarOutlineView: NSOutlineView {
     var onDeleteKey: (() -> Void)?
+    /// Shift-F on a row.
+    var onFavouriteKey: (() -> Void)?
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 51 || event.keyCode == 117 { onDeleteKey?() } else { super.keyDown(with: event) }
+        let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if event.keyCode == 51 || event.keyCode == 117 { onDeleteKey?() }
+        else if event.keyCode == 3, held == .shift { onFavouriteKey?() }
+        else { super.keyDown(with: event) }
     }
 }
 
@@ -179,6 +202,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let outline = SidebarOutlineView()
     private let favourites = SidebarNode(.favourites)
     private let libraryGroup = SidebarNode(.library)
+    private let projectsGroup = SidebarNode(.projects)
+    private var tagBuckets: [UUID: SidebarNode] = [:]
     private let loose = SidebarNode(.loose)
     private let tags = SidebarNode(.tags)
     private var projectNodes: [UUID: SidebarNode] = [:]
@@ -213,6 +238,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             self.library.delete(palette: id)
         }
 
+        // Shift-F stars the selected palette, or every palette in the selected project.
+        outline.onFavouriteKey = { [weak self] in
+            guard let self = self, let node = self.outline.item(atRow: self.outline.selectedRow) as? SidebarNode else { return }
+            if let id = node.paletteID { self.library.toggleFavourite(id) }
+            else if let id = node.projectID { self.library.toggleFavourites(inProject: id) }
+        }
+
         let menu = NSMenu()
         menu.delegate = self
         outline.menu = menu
@@ -235,20 +267,30 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func reload() {
         let lib = library.library
         favourites.children = library.favourites.map { SidebarNode(.palette($0.id)) }
-        var projects: [SidebarNode] = []
+        var projects: [SidebarNode] = [], buckets: [SidebarNode] = []
         for p in lib.orderedProjects {
             let node = projectNodes[p.id] ?? SidebarNode(.project(p.id))
             projectNodes[p.id] = node
             node.children = lib.palettes(in: p.id).map { SidebarNode(.palette($0.id)) }
+            // The project's own tags sit in a bucket of their own, under its palettes.
+            let own = lib.allTags.filter { lib.project(ofTag: $0) == p.id }
+            if !own.isEmpty {
+                let bucket = tagBuckets[p.id] ?? SidebarNode(.projectTags(p.id))
+                tagBuckets[p.id] = bucket
+                bucket.children = own.map { SidebarNode(.tag($0)) }
+                node.children.append(bucket)
+                buckets.append(bucket)
+            }
             projects.append(node)
         }
         loose.children = lib.palettes(in: nil).map { SidebarNode(.palette($0.id)) }
-        tags.children = lib.allTags.map { SidebarNode(.tag($0)) }
-        roots = [favourites, libraryGroup] + projects + [loose] + (tags.children.isEmpty ? [] : [tags])
+        tags.children = lib.allTags.filter { lib.project(ofTag: $0) == nil }.map { SidebarNode(.tag($0)) } + [SidebarNode(.editTags)]
+        projectsGroup.children = projects
+        roots = [libraryGroup, favourites, projectsGroup, loose, tags]
 
         settingSelection = true
         outline.reloadData()
-        for group in roots where !isCollapsed(group) { outline.expandItem(group) }
+        for group in roots + projects + buckets where !isCollapsed(group) { outline.expandItem(group) }
         settingSelection = false
         select(selection)
     }
@@ -297,9 +339,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ o: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { (item as? SidebarNode)?.children.count ?? roots.count }
     func outlineView(_ o: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { (item as? SidebarNode)?.children[index] ?? roots[index] }
-    func outlineView(_ o: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? SidebarNode)?.isGroup ?? false }
+    func outlineView(_ o: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? SidebarNode)?.isExpandable ?? false }
     func outlineView(_ o: NSOutlineView, isGroupItem item: Any) -> Bool { (item as? SidebarNode)?.isGroup ?? false }
-    func outlineView(_ o: NSOutlineView, shouldSelectItem item: Any) -> Bool { !((item as? SidebarNode)?.isGroup ?? true) }
+    func outlineView(_ o: NSOutlineView, shouldSelectItem item: Any) -> Bool {
+        guard let node = item as? SidebarNode, !node.isGroup else { return false }
+        if case .projectTags = node.kind { return false }
+        return true
+    }
     func outlineView(_ o: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 28 }
 
     func outlineView(_ o: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -312,15 +358,39 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.configure(s, isTarget: lib.activeSwatchID == id)
             cell.onRename = { [weak self] name in self?.library.rename(id, to: name) }
             cell.onStar = { [weak self] in self?.library.toggleFavourite(id) }
-            cell.onDuplicate = { [weak self] in self?.library.duplicate(id) }
-            cell.onDelete = { [weak self] in self?.library.delete(palette: id) }
+            cell.onGear = { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forPalette: id)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            }
             return cell
         }
         if let id = node.projectID {
             let cell = o.makeView(withIdentifier: ProjectHeaderCell.identifier, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = ProjectHeaderCell.identifier; return c }()
-            cell.configure(name: lib.project(id)?.name ?? "")
+            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project")
             cell.onAdd = { [weak self] in self?.library.addPalette(to: id) }
+            return cell
+        }
+        if node.kind == .tags {
+            let heading = NSUserInterfaceItemIdentifier("tags")
+            let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
+                let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
+            cell.configure(name: "Tags", heading: true, tooltip: "New tag")
+            cell.onAdd = { [weak self] in
+                guard let self = self else { return }
+                self.library.showTagEditor(focusing: self.library.newTag())
+            }
+            return cell
+        }
+        if node.kind == .projects {
+            let heading = NSUserInterfaceItemIdentifier("projects")
+            let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
+                let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
+            cell.configure(name: "Projects", heading: true, tooltip: "New project")
+            cell.toolTip = node.children.isEmpty ? "Group palettes by client or piece of work. Press + to make the first project." : nil
+            cell.onAdd = { [weak self] in self?.library.newProject() }
             return cell
         }
 
@@ -330,14 +400,29 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
         case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Palettes outside any project"
-        case .tags: cell.textField?.stringValue = "Tags"
+        case .projectTags:
+            cell.textField?.stringValue = "Tags"
+            cell.imageView?.image = symbol("tag", "Project tags", size: 11)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.toolTip = "Tags that belong to this project"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
+        case .editTags:
+            cell.textField?.stringValue = "Edit Tags\u{2026}"
+            cell.imageView?.image = symbol("slider.horizontal.3", "Edit tags", size: 11)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.toolTip = "Rename, colour, scope and delete tags"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .all:
             cell.textField?.stringValue = "All Swatches"
             cell.imageView?.image = symbol("square.grid.3x3.fill", "All swatches", size: 12)
+            cell.imageView?.contentTintColor = .controlAccentColor
+            cell.toolTip = nil
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(lib.colours.count)"
         case .tag(let t):
             cell.textField?.stringValue = t
-            cell.imageView?.image = symbol("tag", "Tag", size: 11)
+            cell.imageView?.image = symbol(lib.info(forTag: t)?.colour == nil ? "tag" : "tag.fill", "Tag", size: 11)
+            cell.imageView?.contentTintColor = tagColour(lib.info(forTag: t))
+            cell.toolTip = lib.project(ofTag: t).flatMap { lib.project($0)?.name }.map { "Project tag: \($0)" }
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(lib.hexes(tagged: t).count)"
         default: break
         }
@@ -383,6 +468,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .palette(let id): selection = .palette(id)
         case .all: selection = .all
         case .tag(let t): selection = .tag(t)
+        case .editTags:
+            // Not a place to be: open the editor and put the highlight back where it was.
+            library.showTagEditor()
+            select(selection)
+            return
         default: return
         }
         onSelect?(selection)
@@ -426,10 +516,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             return []
         }
         if project != nil {
-            // Projects reorder among themselves at the top level.
-            if target == nil, index >= 0 { return .move }
-            if let t = target, t.projectID != nil, let i = roots.firstIndex(where: { $0 === t }) {
-                o.setDropItem(nil, dropChildIndex: i)
+            // Projects reorder among themselves under the Projects heading.
+            if target === projectsGroup, index >= 0 { return .move }
+            if let t = target, t.projectID != nil, let i = projectsGroup.children.firstIndex(where: { $0 === t }) {
+                o.setDropItem(projectsGroup, dropChildIndex: i)
                 return .move
             }
             return []
@@ -443,17 +533,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = palette, let t = target {
             let destination = t.projectID
             guard destination != nil || t.kind == .loose else { return false }
-            var at = index < 0 ? t.children.count : index
+            // Palettes come first in a project; its tag bucket, when it has one, is always last.
+            let palettes = t.children.filter { $0.paletteID != nil }.count
+            var at = index < 0 ? palettes : min(index, palettes)
             // Moving down within the same list: the row's own slot is about to close up.
             if let from = t.children.firstIndex(where: { $0.paletteID == id }), from < at { at -= 1 }
             library.move(palette: id, to: destination, index: at)
             return true
         }
-        if let id = project, target == nil {
-            let firstProject = 2, lastProject = 2 + projectNodes.count // roots: favourites, library, projects…, loose
-            var ids = roots.compactMap { $0.projectID }
+        if let id = project, target === projectsGroup {
+            var ids = projectsGroup.children.compactMap { $0.projectID }
             guard let from = ids.firstIndex(of: id) else { return false }
-            var to = min(max(index, firstProject), lastProject) - firstProject
+            var to = min(max(index, 0), ids.count)
             ids.remove(at: from)
             if from < to { to -= 1 }
             ids.insert(id, at: min(to, ids.count))
@@ -467,14 +558,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private var clicked: SidebarNode? { outline.clickedRow >= 0 ? outline.item(atRow: outline.clickedRow) as? SidebarNode : nil }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
+    /// A palette's actions, for a right-click on its row and for the row's gear.
+    private func fill(_ menu: NSMenu, forPalette id: UUID) {
+        guard let s = library.library.swatch(id) else { return }
         func add(_ title: String, _ action: Selector, _ object: Any? = nil) {
             let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
             item.target = self
             item.representedObject = object
         }
-        if let id = clicked?.paletteID, let s = library.library.swatch(id) {
+        do {
             add("Rename", #selector(renameClicked(_:)), id)
             add(s.favourite ? "Remove from Favourites" : "Add to Favourites", #selector(starClicked(_:)), id)
             add(library.library.activeSwatchID == id ? "Stop Sending Picks Here" : "Send Picks Here", #selector(targetClicked(_:)), id)
@@ -489,7 +581,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 let i = move.addItem(withTitle: "Out of its project", action: #selector(moveClicked(_:)), keyEquivalent: "")
                 i.target = self; i.representedObject = [id]
             }
-            if !move.items.isEmpty { menu.addItem(withTitle: "Move to Project", action: nil, keyEquivalent: "").submenu = move }
+            if !move.items.isEmpty { move.addItem(.separator()) }
+            let fresh = move.addItem(withTitle: "New Project\u{2026}", action: #selector(moveToNewClicked(_:)), keyEquivalent: "")
+            fresh.target = self; fresh.representedObject = id
+            menu.addItem(withTitle: "Move to Project", action: nil, keyEquivalent: "").submenu = move
             menu.addItem(.separator())
             add("Copy All", #selector(copyClicked(_:)), id)
             add("Export\u{2026}", #selector(exportClicked(_:)), id)
@@ -497,8 +592,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             add("Add to macOS Colour Panel", #selector(panelClicked(_:)), id)
             menu.addItem(.separator())
             add("Delete Palette", #selector(deleteClicked(_:)), id)
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        func add(_ title: String, _ action: Selector, _ object: Any? = nil) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+        }
+        if let id = clicked?.paletteID {
+            fill(menu, forPalette: id)
         } else if let id = clicked?.projectID {
             add("New Palette in Project", #selector(newInProjectClicked(_:)), id)
+            add("Project Details\u{2026}", #selector(projectDetailsClicked(_:)), id)
             add("Rename Project\u{2026}", #selector(renameProjectClicked(_:)), id)
             add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
             menu.addItem(.separator())
@@ -506,6 +614,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         } else {
             menu.addItem(withTitle: "New Palette", action: #selector(LibraryController.newPalette), keyEquivalent: "").target = library
             menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
+            menu.addItem(withTitle: "Project Templates\u{2026}", action: #selector(LibraryController.manageProjectTemplates), keyEquivalent: "").target = library
         }
     }
 
@@ -528,7 +637,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let ids = s.representedObject as? [UUID], let palette = ids.first else { return }
         library.move(palette: palette, to: ids.count > 1 ? ids[1] : nil, index: Int.max)
     }
+    @objc private func moveToNewClicked(_ s: NSMenuItem) { if let id = id(s) { library.startProject(moving: id) } }
     @objc private func newInProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.addPalette(to: id) } }
+    @objc private func projectDetailsClicked(_ s: NSMenuItem) { if let id = id(s) { library.editProject(id) } }
     @objc private func renameProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.renameProject(id) } }
     @objc private func projectPackClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportDesignPack(project: id) } }
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }

@@ -96,10 +96,16 @@ enum Prefs {
         set { d.set(newValue.rawValue, forKey: "arrange") }
     }
 
+    /// What is written under each tile in All Swatches, in order: "name" and ColourFormat raw values.
+    static var tileLabels: [String] {
+        get { d.stringArray(forKey: "tileLabels") ?? (showNames ? ["name", "hex"] : ["hex"]) }
+        set { d.set(newValue, forKey: "tileLabels"); changed() }
+    }
+
     /// Which rows a colour card shows.
     static var cardRows: [ColourFormat] {
         get {
-            guard let saved = d.stringArray(forKey: "cardRows") else { return ColourFormat.cardRows }
+            guard let saved = d.stringArray(forKey: "cardRows") else { return ColourFormat.defaultCardRows }
             return ColourFormat.cardRows.filter { saved.contains($0.rawValue) }
         }
         set { d.set(newValue.map { $0.rawValue }, forKey: "cardRows"); changed() }
@@ -136,6 +142,18 @@ enum Prefs {
     static var licenceText: String {
         get { d.string(forKey: "licenceText") ?? DesignPack.defaultLicence }
         set { d.set(newValue, forKey: "licenceText") }
+    }
+
+    /// Saved project templates, encoded; see ProjectTemplates.
+    static var projectTemplates: Data? {
+        get { d.data(forKey: "projectTemplates") }
+        set { d.set(newValue, forKey: "projectTemplates") }
+    }
+
+    /// Shortcuts the user has changed, by command; an empty string is one taken off altogether.
+    static var shortcuts: [String: String] {
+        get { d.dictionary(forKey: "shortcuts") as? [String: String] ?? [:] }
+        set { d.set(newValue, forKey: "shortcuts") }
     }
 
     /// The text for a click on a swatch, in the chosen copy format.

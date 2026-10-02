@@ -23,6 +23,7 @@ final class ContentViewController: NSViewController {
     private let status = caption("")
     private let host = NSView()
     private var showing: NSViewController?
+    private var cover: (view: NSView, form: NSViewController)?
     private var flashToken = 0
 
     init(library: LibraryController) {
@@ -60,6 +61,38 @@ final class ContentViewController: NSViewController {
         ])
     }
 
+    /// Lays a form over the whole page, in a column down the middle, until `uncover()`.
+    func cover(with form: NSViewController, fills: Bool = false) {
+        _ = view
+        uncover()
+        let back = NSBox()
+        back.boxType = .custom
+        back.borderWidth = 0
+        back.fillColor = .windowBackgroundColor
+        back.translatesAutoresizingMaskIntoConstraints = false
+        form.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(form)
+        back.addSubview(form.view)
+        host.addSubview(back)
+        NSLayoutConstraint.activate([
+            back.topAnchor.constraint(equalTo: host.topAnchor),
+            back.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            back.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            back.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            form.view.topAnchor.constraint(equalTo: back.topAnchor),
+            form.view.bottomAnchor.constraint(equalTo: back.bottomAnchor),
+        ] + (fills ? [form.view.leadingAnchor.constraint(equalTo: back.leadingAnchor),
+                      form.view.trailingAnchor.constraint(equalTo: back.trailingAnchor)]
+                   : [form.view.centerXAnchor.constraint(equalTo: back.centerXAnchor)]))
+        cover = (back, form)
+    }
+
+    func uncover() {
+        cover?.form.removeFromParent()
+        cover?.view.removeFromSuperview()
+        cover = nil
+    }
+
     func show(_ page: NSViewController) {
         _ = view
         guard showing !== page else { return }
@@ -85,9 +118,9 @@ final class ContentViewController: NSViewController {
             status.textColor = .labelColor
             return
         }
-        var parts = [plural(lib.colours.count, "swatch", "swatches"), plural(lib.swatches.count, "palette")]
-        parts.append(lib.activeSwatch.map { "picks go to \($0.name)" } ?? "picks go to the library only")
-        parts.append("click copies \(Prefs.copyFormat.label)")
+        var parts = [plural(lib.colours.count, "Swatch", "Swatches"), plural(lib.swatches.count, "Palette")]
+        parts.append(lib.activeSwatch.map { "Picks go to \($0.name)" } ?? "Picks go to the library only")
+        parts.append("Click copies \(Prefs.copyFormat.label)")
         if library.catalogue != Catalogues.mainName { parts.insert(library.catalogue, at: 0) }
         status.stringValue = parts.joined(separator: "  \u{00B7}  ")
         status.textColor = .secondaryLabelColor
@@ -130,7 +163,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
                            backing: .buffered, defer: false)
         super.init(window: win)
         win.minSize = NSSize(width: 760, height: 460)
-        win.titleVisibility = .visible
+        win.titleVisibility = .hidden   // the page shows its own name; the title is kept for the Window menu
         win.toolbarStyle = .unified
         win.delegate = self
         library.window = win
@@ -167,6 +200,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
         wire()
         library.reload()
+        // Opens on the palette last looked at, even if All Swatches was visited since.
         let saved = preferences.string(forKey: "lastPalette").flatMap(UUID.init(uuidString:))
         show(saved.flatMap { library.library.swatch($0) != nil ? .palette($0) : nil } ?? .all)
     }
@@ -177,8 +211,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         sidebar.onExport = { [weak self] id in self?.library.export(self?.library.exportPalettes(for: .palette(id)) ?? []) }
         sidebar.onColourPanel = { [weak self] id in self?.library.addToColourPanel(self?.library.exportPalettes(for: .palette(id)) ?? []) }
         sidebar.onDesignPack = { [weak self] sel in self?.library.exportDesignPack(for: sel) }
-        content.all.onEditTags = { [weak self] hexes in self?.library.editTags(ofSwatches: hexes) }
-        content.palette.onEditTags = { [weak self] hexes in self?.library.editTags(ofSwatches: hexes) }
         content.palette.onPage = { [weak self] d in self?.step(d, fromWheel: true) }
         content.all.onBuilding = { [weak self] on in self?.setBuilder(open: on) }
         content.all.onDraftChanged = { [weak self] in self?.builder.reload() }
@@ -191,6 +223,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             if rename, case .palette = s {
                 DispatchQueue.main.async { self.content.palette.beginRenaming() }
             }
+        }
+        library.onCover = { [weak self] form, fills in
+            if let form = form { self?.content.cover(with: form, fills: fills) } else { self?.content.uncover() }
         }
         library.onReveal = { [weak self] hex in
             guard let self = self else { return }
@@ -209,6 +244,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: What is showing
 
     func show(_ requested: Selection) {
+        content.uncover()   // going somewhere else leaves an open form behind
         var s = requested
         if case .palette(let id) = s, library.library.swatch(id) == nil { s = .all }
         if s != .all, content.all.building { content.all.stopBuilding() }
@@ -219,11 +255,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case .all:
             content.show(content.all)
             content.all.setTag(nil)
-            preferences.removeObject(forKey: "lastPalette")
         case .tag(let t):
             content.show(content.all)
             content.all.setTag(t)
-            preferences.removeObject(forKey: "lastPalette")
         case .palette(let id):
             content.show(content.palette)
             content.palette.show(id)
@@ -239,13 +273,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         switch selection {
         case .all:
             window?.title = "All Swatches" + where_
-            window?.subtitle = plural(library.library.colours.count, "swatch", "swatches")
         case .palette(let id):
             window?.title = (library.library.swatch(id)?.name ?? "Palette") + where_
-            window?.subtitle = plural(library.library.swatch(id)?.entries.count ?? 0, "swatch", "swatches")
         case .tag(let t):
             window?.title = "Tagged \(t)" + where_
-            window?.subtitle = plural(library.library.hexes(tagged: t).count, "swatch", "swatches")
         }
     }
 
@@ -293,6 +324,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     func rehearseBuilder(with hexes: [String]) {
         content.all.rehearse(name: "Launch page", hexes: hexes)
+    }
+
+    /// Opens the tag bar on the first palette that sits in a project (or the one showing) and types into it.
+    func rehearseTagBar(typing text: String) {
+        if let inProject = library.paletteOrder.first(where: { $0.projectID != nil }) { show(.palette(inProject.id)) }
+        content.palette.rehearseTagBar(typing: text)
+    }
+
+    func rehearseLabels() {
+        if case .palette = selection { content.palette.rehearseLabels() } else { content.all.rehearseLabels() }
     }
 
     func rehearseSearch(_ text: String) {

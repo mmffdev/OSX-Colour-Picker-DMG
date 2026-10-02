@@ -22,6 +22,9 @@ struct Project: Codable, Equatable {
     var nameChangedAt: Date?
     var position: Int?
     var positionChangedAt: Date?
+    /// The project form's answers, by ProjectField; nil until some are given.
+    var details: [String: String]? = nil
+    var detailsChangedAt: Date? = nil
 }
 
 struct SwatchEntry: Codable, Equatable {
@@ -65,6 +68,19 @@ struct Tombstone: Codable, Equatable {
     let deletedAt: Date
 }
 
+/// What is known about a tag beyond its name. Tags themselves live on the swatches and palettes
+/// that carry them; this adds a colour and a scope, and lets a tag exist before anything wears it.
+struct TagInfo: Codable, Equatable {
+    var name: String
+    /// "#RRGGBB"; nil is the standard tag colour.
+    var colour: String?
+    /// The project the tag belongs to; nil is a global tag.
+    var projectID: UUID?
+    /// A deleted tag keeps its record, so that a sync does not bring it back.
+    var removed: Bool?
+    var changedAt: Date
+}
+
 struct Library: Codable, Equatable {
     var version = 2
     var colours: [Colour] = []
@@ -73,8 +89,21 @@ struct Library: Codable, Equatable {
     var activeSwatchID: UUID?
     var deleted: [Tombstone] = []
     var projects: [Project] = []
+    var tagInfo: [TagInfo] = []
 
-    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted, projects }
+    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted, projects, tagInfo = "tags" }
+
+    // The "tags" key is left out while there is nothing to say, so older libraries stay as they were.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(colours, forKey: .colours)
+        try c.encode(swatches, forKey: .swatches)
+        try c.encodeIfPresent(activeSwatchID, forKey: .activeSwatchID)
+        try c.encode(deleted, forKey: .deleted)
+        try c.encode(projects, forKey: .projects)
+        if !tagInfo.isEmpty { try c.encode(tagInfo, forKey: .tagInfo) }
+    }
 }
 
 extension Library {
@@ -88,6 +117,7 @@ extension Library {
         activeSwatchID = try c.decodeIfPresent(UUID.self, forKey: .activeSwatchID)
         deleted = try c.decodeIfPresent([Tombstone].self, forKey: .deleted) ?? []
         projects = try c.decodeIfPresent([Project].self, forKey: .projects) ?? []
+        tagInfo = try c.decodeIfPresent([TagInfo].self, forKey: .tagInfo) ?? []
     }
 
     static func entryKey(_ swatch: UUID, _ hex: String) -> String { "\(swatch.uuidString)/\(hex)" }
@@ -282,6 +312,15 @@ extension Library {
         return true
     }
 
+    /// Keeps the project form's answers. Blank ones are dropped; nothing changes if they are the same.
+    mutating func setProjectDetails(_ id: UUID, _ values: [String: String], at date: Date = Date()) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        let kept = ProjectField.tidy(values)
+        guard kept != (projects[i].details ?? [:]) else { return }
+        projects[i].details = kept.isEmpty ? nil : kept
+        projects[i].detailsChangedAt = date
+    }
+
     /// Removes the project only; its palettes drop into the loose list.
     mutating func deleteProject(_ id: UUID, at date: Date = Date()) {
         guard projects.contains(where: { $0.id == id }) else { return }
@@ -349,11 +388,90 @@ extension Library {
         colours[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
     }
 
-    /// Every tag in use, on swatches or palettes, sorted.
+    /// Every tag: those in use on swatches or palettes, and those made in the tag editor. Sorted.
     var allTags: [String] {
         var seen: [String: String] = [:]
-        for t in colours.flatMap({ $0.tags ?? [] }) + swatches.flatMap({ $0.tagList }) where seen[t.lowercased()] == nil { seen[t.lowercased()] = t }
+        let made = tagInfo.filter { $0.removed != true }.map { $0.name }
+        for t in made + colours.flatMap({ $0.tags ?? [] }) + swatches.flatMap({ $0.tagList }) where seen[t.lowercased()] == nil { seen[t.lowercased()] = t }
         return seen.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// The tag's colour and scope, if it has been given any.
+    func info(forTag name: String) -> TagInfo? {
+        tagInfo.first { $0.name.lowercased() == name.lowercased() && $0.removed != true }
+    }
+
+    /// The project a tag belongs to, while that project still exists; nil is global.
+    func project(ofTag name: String) -> UUID? {
+        info(forTag: name)?.projectID.flatMap { project($0)?.id }
+    }
+
+    /// The tags to offer when tagging something in `project` (nil = outside any project): the
+    /// global ones and that project's own.
+    func tags(offeredIn project: UUID?) -> [String] {
+        allTags.filter { let home = self.project(ofTag: $0); return home == nil || home == project }
+    }
+
+    /// Makes the tag, or changes its colour and scope.
+    mutating func setTag(_ raw: String, colour: String?, project: UUID?, at date: Date = Date()) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let fresh = TagInfo(name: name, colour: colour.flatMap(normaliseHex), projectID: project, removed: nil, changedAt: date)
+        if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+            var kept = fresh
+            kept.name = tagInfo[i].removed == true ? name : tagInfo[i].name
+            if tagInfo[i].colour != kept.colour || tagInfo[i].projectID != kept.projectID || tagInfo[i].removed == true { tagInfo[i] = kept }
+        } else {
+            tagInfo.append(fresh)
+        }
+    }
+
+    /// Changes the tag's name wherever it is worn. Renaming onto an existing tag merges the two.
+    @discardableResult
+    mutating func renameTag(_ old: String, to raw: String, at date: Date = Date()) -> Bool {
+        let new = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !new.isEmpty, new != old, allTags.contains(where: { $0.lowercased() == old.lowercased() }) else { return false }
+        func swap(_ tags: [String]) -> [String] { Library.cleanTags(tags.map { $0.lowercased() == old.lowercased() ? new : $0 }) }
+        for i in colours.indices where (colours[i].tags ?? []).contains(where: { $0.lowercased() == old.lowercased() }) {
+            setTags(ofColour: colours[i].hex, swap(colours[i].tags ?? []), at: date)
+        }
+        for i in swatches.indices where swatches[i].tagList.contains(where: { $0.lowercased() == old.lowercased() }) {
+            setTags(ofPalette: swatches[i].id, swap(swatches[i].tagList), at: date)
+        }
+        let was = info(forTag: old)
+        if new.lowercased() != old.lowercased() {
+            if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == old.lowercased() }) { tagInfo[i].removed = true; tagInfo[i].changedAt = date }
+            // The tag it merges into keeps its own colour and scope; a new name inherits the old one's.
+            if info(forTag: new) == nil { setTag(new, colour: was?.colour, project: was?.projectID, at: date) }
+        } else if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == old.lowercased() }) {
+            tagInfo[i].name = new
+            tagInfo[i].changedAt = date
+        }
+        return true
+    }
+
+    /// Takes the tag off everything that wears it and forgets its colour and scope.
+    mutating func deleteTag(_ name: String, at date: Date = Date()) {
+        let gone = name.lowercased()
+        for i in colours.indices where (colours[i].tags ?? []).contains(where: { $0.lowercased() == gone }) {
+            setTags(ofColour: colours[i].hex, (colours[i].tags ?? []).filter { $0.lowercased() != gone }, at: date)
+        }
+        for i in swatches.indices where swatches[i].tagList.contains(where: { $0.lowercased() == gone }) {
+            setTags(ofPalette: swatches[i].id, swatches[i].tagList.filter { $0.lowercased() != gone }, at: date)
+        }
+        if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == gone }) {
+            tagInfo[i].removed = true
+            tagInfo[i].changedAt = date
+        } else {
+            tagInfo.append(TagInfo(name: name, colour: nil, projectID: nil, removed: true, changedAt: date))
+        }
+    }
+
+    /// What wears the tag: swatches tagged themselves, and palettes tagged as a whole.
+    func uses(ofTag name: String) -> (swatches: [String], palettes: [Swatch]) {
+        let t = name.lowercased()
+        return (colours.filter { ($0.tags ?? []).contains { $0.lowercased() == t } }.map { $0.hex },
+                swatches.filter { $0.tagList.contains { $0.lowercased() == t } })
     }
 
     /// Swatches carrying the tag themselves or sitting in a palette that carries it.

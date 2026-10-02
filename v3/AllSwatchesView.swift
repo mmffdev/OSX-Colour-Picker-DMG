@@ -46,7 +46,57 @@ final class TileView: NSView {
 
     static let gap: CGFloat = 5
     static let overlap: CGFloat = 3
-    static let labels: CGFloat = 34
+    /// What is written under the chip, top to bottom; set from Prefs when the grid is sized.
+    static var shown: [String] = ["name", "hex"]
+    /// Offered in the Labels menu, in this order.
+    static let labelChoices: [(key: String, title: String)] = [("name", "Name")]
+        + ColourFormat.cardRows.map { ($0.rawValue, $0.label) }
+    static var labels: CGFloat { shown.isEmpty ? 2 : 8 + shown.reduce(0) { $0 + ($1 == "name" ? 15 : 13) } }
+    /// Room for the "RGB", "BT.2020" column in front of each value.
+    static let labelColumn: CGFloat = 44
+    /// How wide a tile must be to show its widest value whole, with its label and copy mark.
+    static var widthNeeded: CGFloat {
+        let longest = shown.compactMap { ColourFormat(rawValue: $0) }.map { format -> Int in
+            switch format {
+            case .hex: return 7
+            case .hsl, .hsv: return 14
+            case .cmyk, .lab: return 18
+            default: return 13
+            }
+        }.max()
+        guard let characters = longest else { return 0 }
+        return gap * 2 + 2 + labelColumn + CGFloat(characters) * 5.8 + 16
+    }
+
+    /// A copy mark was pressed: "name" or a ColourFormat raw value.
+    var onCopy: ((String) -> Void)?
+    private var pressed: String?
+
+    /// The lines under the chip, top to bottom, each with the square its copy mark sits in.
+    private func lines() -> [(key: String, row: NSRect, mark: NSRect)] {
+        let chipBottom = bounds.height - TileView.labels - TileView.barHeight(tall: tall) - 4
+        var y = chipBottom + 5
+        return TileView.shown.map { key in
+            let h: CGFloat = key == "name" ? 15 : 13
+            let row = NSRect(x: TileView.gap + 1, y: y, width: bounds.width - TileView.gap * 2 - 2, height: h)
+            y += h
+            return (key, row, NSRect(x: row.maxX - 13, y: row.minY, width: 13, height: h))
+        }
+    }
+
+    // A press on a copy mark copies that line; anywhere else goes on to the grid, to select.
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        pressed = lines().first { $0.mark.insetBy(dx: -3, dy: 0).contains(p) }?.key
+        if pressed == nil { super.mouseDown(with: event) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let key = pressed else { super.mouseUp(with: event); return }
+        pressed = nil
+        let p = convert(event.locationInWindow, from: nil)
+        if lines().contains(where: { $0.key == key && $0.mark.insetBy(dx: -3, dy: 0).contains(p) }) { onCopy?(key) }
+    }
     static func barHeight(tall: Bool) -> CGFloat { Prefs.showPaletteBars ? (tall ? 15 : 5) : 0 }
 
     override var isFlipped: Bool { true }
@@ -89,16 +139,32 @@ final class TileView: NSView {
             tick.stroke()
         }
 
-        let name = Prefs.showNames ? colourName(hex) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
-        let code = Prefs.showNames ? ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex) : ""
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
-        let textX = TileView.gap + 1, textW = bounds.width - TileView.gap * 2 - 2
-        (name as NSString).draw(in: NSRect(x: textX, y: chip.maxY + 5, width: textW, height: 15), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
-        (code as NSString).draw(in: NSRect(x: textX, y: chip.maxY + 19, width: textW, height: 13), withAttributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor,
-            .paragraphStyle: style])
+        let mark = symbol("doc.on.doc", "Copy", size: 8)
+        for line in lines() {
+            let text = NSRect(x: line.row.minX, y: line.row.minY, width: line.row.width - 16, height: line.row.height)
+            if line.key == "name" {
+                (colourName(hex) as NSString).draw(in: text, withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
+            } else if let format = ColourFormat(rawValue: line.key) {
+                (format.label as NSString).draw(in: NSRect(x: text.minX, y: text.minY + 1, width: TileView.labelColumn, height: text.height), withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 8.5, weight: .bold), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style])
+                (format.text(hex, lowercase: Prefs.lowercaseHex) as NSString).draw(
+                    in: NSRect(x: text.minX + TileView.labelColumn, y: text.minY, width: text.width - TileView.labelColumn, height: text.height), withAttributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor,
+                    .paragraphStyle: style])
+            }
+            // The copy mark, tinted to sit back from the text.
+            if let ctx = NSGraphicsContext.current?.cgContext {
+                let size = mark.size, box = NSRect(x: line.mark.midX - size.width / 2, y: line.mark.midY - size.height / 2, width: size.width, height: size.height)
+                ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+                mark.draw(in: box, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                NSColor.tertiaryLabelColor.setFill()
+                box.insetBy(dx: -1, dy: -1).fill(using: .sourceAtop)
+                ctx.endTransparencyLayer()
+            }
+        }
 
         // The bar spans the full width so that neighbouring tiles join into one line.
         guard barH > 0, !bars.isEmpty else { return }
@@ -126,7 +192,8 @@ final class TileItem: NSCollectionViewItem {
 
     override var isSelected: Bool { didSet { tile.selected = isSelected } }
 
-    func configure(_ t: Tile, tall: Bool, chosen: Bool, palettes: (UUID) -> String?) {
+    func configure(_ t: Tile, tall: Bool, chosen: Bool, onCopy: @escaping (String) -> Void, palettes: (UUID) -> String?) {
+        tile.onCopy = onCopy
         tile.hex = t.hex
         tile.bars = t.bars.map(identityColour)
         tile.runTitle = t.runTitle
@@ -146,7 +213,11 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     var onBuilding: ((Bool) -> Void)?
     /// The chosen swatches changed, so rail 3 should redraw.
     var onDraftChanged: (() -> Void)?
-    var onEditTags: (([String]) -> Void)?
+    private let tagBar = TagBar()
+    private let barGap = NSView()
+    private var tagging = false
+    /// What the swatch menu calls to tag swatches: the page's own tag bar.
+    private lazy var onEditTags: ([String]) -> Void = { [weak self] hexes in self?.editTags(of: hexes) }
 
     private(set) var building = false
     private var tiles: [Tile] = []
@@ -154,9 +225,22 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     private var group: ColourGroup?
     private var tag: String?
     private var shownTags: [String] = []
+    private enum ProjectFilter: Equatable { case all, loose, project(UUID) }
+    private var projectFilter = ProjectFilter.all
+    private var shownProjects: [Project] = []
 
     private let arrange = NSPopUpButton(frame: .zero, pullsDown: false)
     private let show = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let projects = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let labels = PopoverButton(title: "Labels")
+    private var labelsPopover = NSPopover()
+    private var labelChecks: [NSButton] = []
+    private let addTo = NSPopUpButton(frame: .zero, pullsDown: true)
+    private let titleLabel = NSTextField(labelWithString: "All Swatches")
+    private let subtitle = caption("")
+    /// The bar's right-hand side: filters while browsing, actions while several swatches are selected.
+    private let browsing = NSStackView()
+    private let selecting = NSStackView()
     private var buildButton: NSButton!
     private let builderBar = NSStackView()
     private let nameField = NSTextField(string: "")
@@ -178,7 +262,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     override func loadView() {
         view = NSView()
 
-        for p in [arrange, show] {
+        for p in [arrange, show, projects, addTo] {
             p.controlSize = .small
             p.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
             p.target = self
@@ -188,6 +272,21 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         arrange.action = #selector(arrangeChanged)
         show.action = #selector(showChanged)
         fillShow()
+        projects.action = #selector(projectChanged)
+        fillProjects()
+        projects.toolTip = "Show only the swatches in one project\u{2019}s palettes"
+        labels.target = self
+        labels.action = #selector(showLabels)
+        labels.toolTip = "Choose what is written under each swatch"
+        // Ticks in a popover rather than a menu, so it stays open while several are chosen.
+        labelChecks = TileView.labelChoices.enumerated().map { at, choice in
+            let box = NSButton(checkboxWithTitle: choice.title, target: self, action: #selector(labelToggled(_:)))
+            box.tag = at
+            return box
+        }
+        labelsPopover = tickPopover(labelChecks)
+        addTo.addItem(withTitle: "Add to Palette")
+        addTo.menu?.delegate = self
 
         buildButton = NSButton(title: "Build Palette\u{2026}", target: self, action: #selector(startBuilding))
         buildButton.bezelStyle = .rounded
@@ -196,12 +295,54 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         buildButton.imagePosition = .imageLeading
         buildButton.toolTip = "Choose swatches from the library and save them as a new palette"
 
-        let filter = NSStackView()
-        filter.orientation = .horizontal
-        filter.spacing = 8
+        // Same shape as a palette page: the title on its own row, then the count on the left and the
+        // controls on the right. With several swatches selected, the controls give way to actions.
+        titleLabel.font = NSFont.systemFont(ofSize: 22, weight: .bold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        func small(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
+            let b = NSButton(title: title, target: self, action: action)
+            b.bezelStyle = .rounded
+            b.controlSize = .small
+            b.toolTip = tip
+            return b
+        }
+        arrange.toolTip = "Arrange by"
+        show.toolTip = "Show a colour group or a tag"
+        buildButton.title = ""
+        buildButton.imagePosition = .imageOnly
+        buildButton.setAccessibilityLabel("Build Palette")
+        browsing.setViews([arrange, show, projects, labels, buildButton], in: .leading)
+        selecting.setViews([small("Copy", #selector(copySelected), "Copy the selected swatches"), addTo,
+                            symbolButton("tag", tooltip: "Tag the selected swatches", target: self, action: #selector(tagSelected)),
+                            small("Delete", #selector(deleteSelected), "Delete the selected swatches from the library"),
+                            small("Deselect", #selector(deselect), "Clear the selection")], in: .leading)
+        for bar in [browsing, selecting] {
+            bar.orientation = .horizontal
+            bar.spacing = 8
+        }
+        selecting.isHidden = true
+        let gap = barGap
+        gap.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tagBar.isHidden = true
+        tagBar.onClose = { [weak self] in
+            self?.tagging = false
+            self?.updateHeader()
+            self?.view.window?.makeFirstResponder(self?.grid)
+        }
+        let bar = NSStackView(views: [subtitle, gap, browsing, selecting, tagBar])
+        bar.orientation = .horizontal
+        bar.spacing = 12
+        bar.alignment = .centerY
+        let filter = NSStackView(views: [titleLabel, bar])
+        filter.orientation = .vertical
+        filter.alignment = .leading
+        filter.spacing = 2
         filter.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
-        filter.setViews([caption("Arrange by"), arrange, caption("Show"), show], in: .leading)
-        filter.setViews([buildButton], in: .trailing)
+        NSLayoutConstraint.activate([
+            titleLabel.trailingAnchor.constraint(equalTo: filter.trailingAnchor, constant: -20),
+            bar.trailingAnchor.constraint(equalTo: filter.trailingAnchor, constant: -20),
+        ])
 
         // The builder's own bar: name, count, save.
         nameField.placeholderString = "Palette name"
@@ -249,25 +390,25 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         empty.textColor = .tertiaryLabelColor
         empty.font = NSFont.systemFont(ofSize: 13)
 
-        let line = hairline()
-        for v in [builderBar, filter, line, scroll, empty] as [NSView] {
+        for v in [builderBar, filter, scroll, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
         builderHeight = builderBar.heightAnchor.constraint(equalToConstant: 0)
+        // 66 points unless its contents need more; never left to stretch into the page below.
+        let filterHeight = filter.heightAnchor.constraint(equalToConstant: 66)
+        filterHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
             builderBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             builderBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             builderBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             builderHeight,
-            filter.topAnchor.constraint(equalTo: builderBar.bottomAnchor),
+            filter.topAnchor.constraint(equalTo: builderBar.bottomAnchor, constant: 6),
             filter.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             filter.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            filter.heightAnchor.constraint(equalToConstant: 40),
-            line.topAnchor.constraint(equalTo: filter.bottomAnchor),
-            line.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            line.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: line.bottomAnchor),
+            filter.heightAnchor.constraint(greaterThanOrEqualToConstant: 66),   // taller while the tag bar shows its second row
+            filterHeight,
+            scroll.topAnchor.constraint(equalTo: filter.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -278,8 +419,15 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     }
 
     /// Tiles touch, so that their bars join up. Called whenever a setting that changes their size does.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        layout.fitVisibleWidth()
+    }
+
     private func sizeTiles() {
-        layout.minimumWidth = CGFloat(Prefs.tileSize.points)
+        TileView.shown = Prefs.tileLabels
+        // Wide enough for the chosen size and for the longest value written under a tile.
+        layout.minimumWidth = max(CGFloat(Prefs.tileSize.points), TileView.widthNeeded)
         layout.spacing = 0
         layout.margins = NSEdgeInsets(top: 10, left: 14, bottom: 20, right: 14)
         let bar = TileView.barHeight(tall: Prefs.arrange == .palette)
@@ -324,10 +472,20 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     func reload() {
         _ = view
         if shownTags != library.library.allTags { fillShow() }
-        tiles = AllSwatchesViewController.tiles(library.library, order: library.paletteOrder, arrange: Prefs.arrange,
-                                                group: group, tag: tag, search: search)
+        if shownProjects != library.library.orderedProjects { fillProjects() }
+        // A project filter narrows both the palettes that are walked and the swatches that count.
+        var order = library.paletteOrder
+        var only: Set<String>?
+        if projectFilter != .all {
+            let wanted: UUID? = { if case .project(let id) = projectFilter { return id } else { return nil } }()
+            order = order.filter { $0.projectID == wanted }
+            only = Set(order.flatMap { $0.entries.map { $0.hex } })
+        }
+        tiles = AllSwatchesViewController.tiles(library.library, order: order, arrange: Prefs.arrange,
+                                                group: group, tag: tag, only: only, search: search)
         sizeTiles()
         grid.reloadData()
+        updateHeader()
         empty.isHidden = !tiles.isEmpty
         if library.library.colours.isEmpty {
             empty.stringValue = "No swatches yet.\nPress \u{2318}P to pick a colour from the screen, drop an image on the window, or paste colours with \u{21E7}\u{2318}V."
@@ -345,7 +503,8 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     }
 
     /// The tiles to show, in order. Pure, so it can be tested.
-    static func tiles(_ lib: Library, order: [Swatch], arrange: Arrange, group: ColourGroup?, tag: String? = nil, search: String) -> [Tile] {
+    static func tiles(_ lib: Library, order: [Swatch], arrange: Arrange, group: ColourGroup?, tag: String? = nil,
+                      only: Set<String>? = nil, search: String) -> [Tile] {
         let tagged = tag.map { lib.hexes(tagged: $0) }
         func holders(_ hex: String) -> [UUID] { order.filter { s in s.entries.contains { $0.hex == hex } }.map { $0.id } }
         func tagsOf(_ hex: String) -> [String] {
@@ -354,6 +513,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         func matches(_ hex: String, palette: String?) -> Bool {
             if let g = group, colourGroup(hex) != g { return false }
             if let t = tagged, !t.contains(hex) { return false }
+            if let o = only, !o.contains(hex) { return false }
             if search.isEmpty { return true }
             return hex.lowercased().contains(search) || colourName(hex).lowercased().contains(search)
                 || (palette?.lowercased().contains(search) ?? false)
@@ -372,7 +532,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
 
         var hexes = lib.catalogueHexes(by: arrange == .newest ? .newest : .oldest)
         hexes = hexes.filter { hex in
-            matches(hex, palette: nil) || (!search.isEmpty && group.map { colourGroup(hex) == $0 } != false
+            matches(hex, palette: nil) || only?.contains(hex) != false && (!search.isEmpty && group.map { colourGroup(hex) == $0 } != false
                 && order.contains { s in s.name.lowercased().contains(search) && s.entries.contains { $0.hex == hex } })
         }
         func v(_ hex: String) -> (h: Double, s: Double, l: Double) { ColourValues(hex)?.hslUnit ?? (0, 0, 0) }
@@ -406,10 +566,19 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     func collectionView(_ cv: NSCollectionView, itemForRepresentedObjectAt ip: IndexPath) -> NSCollectionViewItem {
         let item = cv.makeItem(withIdentifier: TileItem.identifier, for: ip) as! TileItem
         let t = tiles[ip.item]
-        item.configure(t, tall: Prefs.arrange == .palette, chosen: building && draft.contains(t.hex)) { [weak self] id in
+        item.configure(t, tall: Prefs.arrange == .palette, chosen: building && draft.contains(t.hex), onCopy: copier(t.hex)) { [weak self] id in
             self?.library.library.swatch(id)?.name
         }
         return item
+    }
+
+    /// What a tile's copy marks do: copy the name, or the colour in that line's format.
+    private func copier(_ hex: String) -> (String) -> Void {
+        { [weak self] key in
+            if let format = ColourFormat(rawValue: key) { self?.library.copy(hex, as: format); return }
+            copyToClipboard(colourName(hex))
+            self?.library.flash("Copied \(colourName(hex))")
+        }
     }
 
     private func clicked(_ ip: IndexPath) {
@@ -424,7 +593,78 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
             .filter { seen.insert($0).inserted }
     }
 
+    func collectionView(_ cv: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { updateHeader() }
+    func collectionView(_ cv: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { updateHeader() }
+
+    /// The title, the count line, and which side of the bar is showing.
+    private func updateHeader() {
+        let chosen = building ? [] : selected()
+        let many = chosen.count > 1
+        tagBar.isHidden = !tagging
+        subtitle.isHidden = tagging
+        barGap.isHidden = tagging
+        browsing.isHidden = many || tagging
+        selecting.isHidden = !many || tagging
+        if many {
+            titleLabel.stringValue = "\(chosen.count) Swatches Selected"
+            subtitle.stringValue = "Shift-click or \u{2318}-click to change the selection"
+            return
+        }
+        titleLabel.stringValue = "All Swatches"
+        let total = library.library.colours.count, showing = Set(tiles.map { $0.hex }).count
+        var parts = [plural(total, "Swatch", "Swatches")]
+        if showing != total { parts.append("\(showing) Shown") }
+        if let t = tag { parts.append("Tagged \(t)") }
+        subtitle.stringValue = parts.joined(separator: "  \u{00B7}  ")
+    }
+
+    @objc private func copySelected() { library.copy(selected()) }
+    @objc private func deleteSelected() { library.deleteFromLibrary(selected()) }
+    @objc private func deselect() { grid.deselectAll(nil); updateHeader() }
+    @objc private func tagSelected() { editTags(of: selected()) }
+
+    /// Swaps the action bar for the tag bar, on one swatch or several. They all end up with the tags left in the bar.
+    private func editTags(of hexes: [String]) {
+        guard let first = hexes.first else { return }
+        let current = library.library.colours.first { $0.hex == first }?.tags ?? []
+        let what = hexes.count == 1 ? "Tags for \(colourName(first))" : "Tags for \(plural(hexes.count, "Swatch", "Swatches"))"
+        tagging = true
+        updateHeader()
+        tagBar.begin(what, tags: current, in: library.library, project: nil, anyProject: true) { [weak self] tags, scoped in
+            self?.library.setTags(ofSwatches: hexes, tags, scoped: scoped)
+        }
+    }
+    @objc private func addSelected(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? UUID { library.add(selected(), to: id) }
+        else { library.createPalette(named: "", hexes: selected(), rename: true) }
+    }
+
+    func rehearseLabels() { showLabels() }
+
+    @objc private func showLabels() {
+        if labelsPopover.isShown { labelsPopover.close(); return }
+        let on = Prefs.tileLabels
+        for (box, choice) in zip(labelChecks, TileView.labelChoices) { box.state = on.contains(choice.key) ? .on : .off }
+        labelsPopover.show(relativeTo: labels.bounds, of: labels, preferredEdge: .maxY)
+    }
+
+    @objc private func labelToggled(_ sender: NSButton) {
+        Prefs.tileLabels = zip(labelChecks, TileView.labelChoices).filter { $0.0.state == .on }.map { $0.1.key }
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === addTo.menu {
+            menu.removeAllItems()
+            menu.addItem(withTitle: "Add to Palette", action: nil, keyEquivalent: "")
+            for s in library.paletteOrder {
+                let item = menu.addItem(withTitle: s.name, action: #selector(addSelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = s.id
+            }
+            if !library.paletteOrder.isEmpty { menu.addItem(.separator()) }
+            menu.addItem(withTitle: "New Palette", action: #selector(addSelected(_:)), keyEquivalent: "").target = self
+            return
+        }
         menu.removeAllItems()
         let chosen = selected()
         guard !chosen.isEmpty, !building else { return }
@@ -435,6 +675,33 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
 
     @objc private func arrangeChanged() {
         Prefs.arrange = Arrange(rawValue: arrange.indexOfSelectedItem) ?? .palette
+        reload()
+    }
+
+    /// "All Projects", each project, then the palettes in none. Hidden while there are no projects.
+    private func fillProjects() {
+        shownProjects = library.library.orderedProjects
+        if case .project(let id) = projectFilter, !shownProjects.contains(where: { $0.id == id }) { projectFilter = .all }
+        projects.removeAllItems()
+        projects.addItem(withTitle: "All Projects")
+        for p in shownProjects {
+            projects.addItem(withTitle: p.name)
+            projects.lastItem?.representedObject = p.id
+        }
+        projects.menu?.addItem(.separator())
+        projects.addItem(withTitle: "Not in a Project")
+        projects.isHidden = shownProjects.isEmpty
+        if shownProjects.isEmpty { projectFilter = .all }
+        switch projectFilter {
+        case .all: projects.selectItem(at: 0)
+        case .loose: projects.selectItem(at: projects.numberOfItems - 1)
+        case .project(let id): projects.selectItem(at: 1 + (shownProjects.firstIndex { $0.id == id } ?? 0))
+        }
+    }
+
+    @objc private func projectChanged() {
+        if let id = projects.selectedItem?.representedObject as? UUID { projectFilter = .project(id) }
+        else { projectFilter = projects.indexOfSelectedItem == 0 ? .all : .loose }
         reload()
     }
 
@@ -509,13 +776,13 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         defer { onDraftChanged?() }
         guard isViewLoaded else { return }
         draft.name = nameField.stringValue
-        chosenLabel.stringValue = building ? (draft.hexes.isEmpty ? "Click swatches to add them" : "\(plural(draft.hexes.count, "swatch", "swatches")) chosen") : ""
+        chosenLabel.stringValue = building ? (draft.hexes.isEmpty ? "Click swatches to add them" : "\(plural(draft.hexes.count, "Swatch", "Swatches")) chosen") : ""
         saveButton.isEnabled = !draft.hexes.isEmpty
         guard building else { return }
         for ip in grid.indexPathsForVisibleItems() {
             guard ip.item < tiles.count, let item = grid.item(at: ip) as? TileItem else { continue }
             let t = tiles[ip.item]
-            item.configure(t, tall: Prefs.arrange == .palette, chosen: draft.contains(t.hex)) { [weak self] id in
+            item.configure(t, tall: Prefs.arrange == .palette, chosen: draft.contains(t.hex), onCopy: copier(t.hex)) { [weak self] id in
                 self?.library.library.swatch(id)?.name
             }
         }
@@ -602,7 +869,7 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
     func reload() {
         guard isViewLoaded else { return }
         table.reloadData()
-        count.stringValue = plural(draft.hexes.count, "swatch", "swatches")
+        count.stringValue = plural(draft.hexes.count, "Swatch", "Swatches")
         hint.isHidden = !draft.hexes.isEmpty
         save.isEnabled = !draft.hexes.isEmpty
         if draft.hexes.count > 0 { table.scrollRowToVisible(draft.hexes.count - 1) }

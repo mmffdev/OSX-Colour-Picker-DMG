@@ -2,7 +2,7 @@ import AppKit
 
 // ---------- Settings ----------
 //
-// App menu → Settings… (⌘,). Five panels. Everything here is per Mac.
+// App menu → Settings… (⌘,). Six panels. Everything here is per Mac.
 
 private func heading(_ s: String) -> NSTextField {
     let l = NSTextField(labelWithString: s)
@@ -47,6 +47,8 @@ class SettingsPanel: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     private(set) var icon = ""
+    /// Width of the left-hand column.
+    var labelWidth: CGFloat { 170 }
 
     func rows() -> [[NSView]] { [] }
     func refresh() {}
@@ -56,7 +58,7 @@ class SettingsPanel: NSViewController {
         grid.rowSpacing = 9
         grid.columnSpacing = 10
         grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 0).width = 170
+        grid.column(at: 0).width = labelWidth
         grid.column(at: 1).width = 400
         for r in 0..<grid.numberOfRows {
             // A row with nothing on the right is a heading, and spans both columns.
@@ -158,7 +160,9 @@ final class AppearancePanel: SettingsPanel {
 
     override func rows() -> [[NSView]] {[
         [heading("Colour cards"), blank],
-        [label("Rows on each card:"), row(rowChecks)],
+        [label("Rows on each card:"), row(Array(rowChecks.prefix(5)))],
+        [blank, row(Array(rowChecks.dropFirst(5)))],
+        [blank, note("P3, Adobe RGB and BT.2020 are the same colour written in those wider spaces; L*a*b* is under D50.")],
         [blank, names],
         [blank, note("Names are the nearest of the standard web colour names, so they are approximate.")],
         [blank, contrast],
@@ -166,7 +170,7 @@ final class AppearancePanel: SettingsPanel {
         [heading("All Swatches"), blank],
         [label("Tile size:"), size],
         [blank, bars],
-        [blank, note("Each palette has its own colour, shown as a dot in the sidebar and as a bar under its swatches.")],
+        [blank, note("Each palette has its own colour, shown as a bar under its swatches.")],
     ]}
 
     override func refresh() {
@@ -407,6 +411,55 @@ final class SyncPanel: SettingsPanel {
     }
 }
 
+// MARK: Shortcuts
+
+final class ShortcutsPanel: SettingsPanel {
+    private var fields: [ShortcutField] = []
+    private var ids: [String] = []
+    private let message = note(" ")
+
+    override var labelWidth: CGFloat { 220 }
+
+    override func rows() -> [[NSView]] {
+        message.textColor = .systemRed
+        var rows: [[NSView]] = [[heading("Keyboard shortcuts"), blank]]
+        for (at, command) in Shortcuts.commands.enumerated() {
+            let field = ShortcutField(frame: .zero)
+            field.onRecord = { [weak self] shortcut, keyCode in self?.record(shortcut, keyCode, at: at) }
+            let clear = symbolButton("xmark.circle", tooltip: "Remove this shortcut", target: self, action: #selector(clear(_:)))
+            clear.tag = at
+            fields.append(field)
+            ids.append(command.id)
+            rows.append([label(command.title + ":"), row([field, clear])])
+        }
+        return rows + [
+            [blank, message],
+            [blank, button("Restore Defaults", #selector(restore))],
+            [blank, note("Click a shortcut, then type the new one. Shortcuts that macOS or the Edit menu already use, such as \u{2318}C for Copy, cannot be taken.")],
+        ]
+    }
+
+    override func refresh() {
+        let current = Dictionary(uniqueKeysWithValues: Shortcuts.commands.map { ($0.id, $0.shortcut) })
+        for (field, id) in zip(fields, ids) { field.shortcut = current[id] ?? nil }
+    }
+
+    private func record(_ shortcut: Shortcut?, _ keyCode: Int?, at: Int) {
+        let problem = Shortcuts.set(shortcut, keyCode: keyCode, for: ids[at])
+        message.stringValue = shortcut.flatMap { s in problem?.message(for: s) } ?? " "
+        view.window?.makeFirstResponder(nil)
+        refresh()
+    }
+
+    @objc private func clear(_ sender: NSButton) { record(nil, nil, at: sender.tag) }
+
+    @objc private func restore() {
+        Shortcuts.restoreDefaults()
+        message.stringValue = " "
+        refresh()
+    }
+}
+
 // MARK: Window
 
 final class SettingsWindowController: NSWindowController {
@@ -424,6 +477,7 @@ final class SettingsWindowController: NSWindowController {
             GeneralPanel(library: library, title: "General", icon: "gearshape"),
             AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
             ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
+            ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
         ]

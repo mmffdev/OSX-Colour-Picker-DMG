@@ -57,14 +57,55 @@ func caption(_ s: String, size: CGFloat = 12) -> NSTextField {
     return l
 }
 
+/// Looks like the other pop-up buttons in a bar, but a press runs its action instead of opening
+/// a menu — for a popover that has to stay open while several things are ticked.
+final class PopoverButton: NSPopUpButton {
+    init(title: String) {
+        super.init(frame: .zero, pullsDown: true)
+        addItem(withTitle: title)
+        controlSize = .small
+        font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) {
+        if let action = action { NSApp.sendAction(action, to: target, from: self) }
+    }
+}
+
+/// A popover holding a column of tick boxes, left edges in line, with room around them.
+func tickPopover(_ boxes: [NSButton]) -> NSPopover {
+    let column = NSStackView(views: boxes)
+    column.orientation = .vertical
+    column.alignment = .leading
+    column.spacing = 8
+    column.translatesAutoresizingMaskIntoConstraints = false
+    let holder = NSViewController()
+    holder.view = NSView()
+    holder.view.addSubview(column)
+    NSLayoutConstraint.activate([
+        column.topAnchor.constraint(equalTo: holder.view.topAnchor, constant: 14),
+        column.bottomAnchor.constraint(equalTo: holder.view.bottomAnchor, constant: -14),
+        column.leadingAnchor.constraint(equalTo: holder.view.leadingAnchor, constant: 16),
+        column.trailingAnchor.constraint(equalTo: holder.view.trailingAnchor, constant: -22),
+    ])
+    let popover = NSPopover()
+    popover.contentViewController = holder
+    popover.contentSize = holder.view.fittingSize
+    popover.behavior = .transient
+    return popover
+}
+
 func hairline() -> NSBox {
     let b = NSBox()
     b.boxType = .separator
+    // Without a height of its own, a tall window can stretch the line and squeeze its neighbour to nothing.
+    b.heightAnchor.constraint(equalToConstant: 1).isActive = true
     return b
 }
 
-/// A colour that stands for one palette wherever it appears — the sidebar dot and the bars under
-/// tiles. Taken from the palette's id, so it never changes when the palette's contents do.
+/// A colour that stands for one palette wherever it appears — the bars under tiles and the dots
+/// in the halo. Taken from the palette's id, so it never changes when the palette's contents do.
 func identityColour(_ id: UUID) -> NSColor {
     let u = id.uuid
     let bytes = [u.0, u.1, u.2, u.3, u.4, u.5, u.6, u.7, u.8, u.9, u.10, u.11, u.12, u.13, u.14, u.15]
@@ -233,6 +274,9 @@ final class SwatchGridView: NSCollectionView {
     var onClick: ((IndexPath) -> Void)?
     var onDelete: (() -> Void)?
     var onCopy: (() -> Void)?
+    var onFavourite: (() -> Void)?
+    /// Where a shift-click measures its run from: the last tile clicked without Shift.
+    private var anchor: IndexPath?
     /// When set, a click adds or removes the tile instead of selecting it.
     var onToggle: ((IndexPath) -> Void)?
 
@@ -243,13 +287,26 @@ final class SwatchGridView: NSCollectionView {
             if let ip = hit { toggle(ip) }
             return
         }
-        let plain = event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+        let held = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        // Shift-click takes every tile from the last one clicked to this one, in reading order.
+        if held == .shift, let to = hit, let from = anchor ?? selectionIndexPaths.min(by: { $0.item < $1.item }),
+           from.item < numberOfItems(inSection: 0) {
+            let run = Set((min(from.item, to.item)...max(from.item, to.item)).map { IndexPath(item: $0, section: 0) })
+            window?.makeFirstResponder(self)
+            selectionIndexPaths = run
+            delegate?.collectionView?(self, didSelectItemsAt: run)
+            return
+        }
+        if hit != nil { anchor = hit }
+        let plain = held.isEmpty
         super.mouseDown(with: event)
         if let ip = hit, plain, selectionIndexPaths.contains(ip) { onClick?(ip) }
     }
 
     override func keyDown(with event: NSEvent) {
+        let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if event.keyCode == 51 || event.keyCode == 117 { onDelete?() } // delete, forward delete
+        else if event.keyCode == 3, held == .shift, let star = onFavourite { star() } // shift-F
         else { super.keyDown(with: event) }
     }
 
@@ -264,6 +321,13 @@ final class SwatchGridView: NSCollectionView {
     }
 
     @objc func copy(_ sender: Any?) { onCopy?() }
+
+    // Tiles are cheap, so a good stretch beyond the visible part is kept ready; scrolling then
+    // moves over finished tiles instead of building each one as it comes into view.
+    override func prepareContent(in rect: NSRect) {
+        let ahead = max(visibleRect.height * 3, 1500)
+        super.prepareContent(in: rect.insetBy(dx: 0, dy: -ahead).intersection(bounds))
+    }
 }
 
 /// An even grid: as many columns as fit, each item stretched so the row is filled. Every frame
@@ -324,6 +388,12 @@ final class GridLayout: NSCollectionViewLayout {
 
     override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
         abs(visibleWidth - width) > 0.5
+    }
+
+    /// Call when the page is laid out. The visible width can change while the grid's own bounds
+    /// do not — a grid first measured before the window had its size stays zero wide, and blank.
+    func fitVisibleWidth() {
+        if abs(visibleWidth - width) > 0.5 { invalidateLayout() }
     }
 }
 
