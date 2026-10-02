@@ -173,6 +173,8 @@ final class ProjectHeaderCell: NSTableCellView {
 
     func configure(name: String, heading: Bool = false, tooltip: String) {
         title.stringValue = name
+        title.font = heading ? SidebarOutlineView.headingFont : NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        title.textColor = heading ? .secondaryLabelColor : .labelColor
         folder.isHidden = heading
         add.toolTip = tooltip
         add.setAccessibilityLabel(tooltip)
@@ -184,6 +186,57 @@ final class SidebarOutlineView: NSOutlineView {
     var onDeleteKey: (() -> Void)?
     /// Shift-F on a row.
     var onFavouriteKey: (() -> Void)?
+
+    // A project's tag bucket, and the tags inside it, sit one step further in, so the bucket's
+    // disclosure arrow lines up under the stars of the palettes above it.
+    private static let bucketInset: CGFloat = 16
+    static let headingFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+
+    // A click anywhere on a row that opens and closes does so, not only one on its arrow. A drag
+    // still drags, and the arrow and the plus button keep their own clicks.
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: p)
+        let node = item(atRow: row) as? SidebarNode
+        let onArrow = row >= 0 && frameOfOutlineCell(atRow: row).insetBy(dx: -4, dy: 0).contains(p)
+        let onButton = hitTest(superview?.convert(p, from: self) ?? p) is NSButton
+        super.mouseDown(with: event)
+        guard let bucket = node, bucket.isExpandable, !onArrow, !onButton, event.clickCount == 1,
+              let now = window?.mouseLocationOutsideOfEventStream,
+              hypot(now.x - event.locationInWindow.x, now.y - event.locationInWindow.y) < 4 else { return }
+        if isItemExpanded(bucket) { animator().collapseItem(bucket) } else { animator().expandItem(bucket) }
+    }
+
+    private func isInTagBucket(_ row: Int) -> Bool {
+        guard let node = item(atRow: row) as? SidebarNode else { return false }
+        if case .projectTags = node.kind { return true }
+        if case .projectTags? = (parent(forItem: node) as? SidebarNode)?.kind { return true }
+        return false
+    }
+
+    /// The space left under each main section, held as empty room at the top of the next heading's row.
+    static let sectionGap: CGFloat = 20
+
+    /// A main heading other than the first: its row is taller, and its contents sit at the bottom of it.
+    private func hasGapAbove(_ row: Int) -> Bool { row > 0 && level(forRow: row) == 0 }
+
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        var frame = super.frameOfOutlineCell(atRow: row)
+        if isInTagBucket(row) { frame.origin.x += SidebarOutlineView.bucketInset }
+        if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
+        return frame
+    }
+
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        if isInTagBucket(row) {
+            frame.origin.x += SidebarOutlineView.bucketInset
+            frame.size.width -= SidebarOutlineView.bucketInset
+        }
+        if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
+        return frame
+    }
+
     override func keyDown(with event: NSEvent) {
         let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if event.keyCode == 51 || event.keyCode == 117 { onDeleteKey?() }
@@ -340,13 +393,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ o: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { (item as? SidebarNode)?.children.count ?? roots.count }
     func outlineView(_ o: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { (item as? SidebarNode)?.children[index] ?? roots[index] }
     func outlineView(_ o: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? SidebarNode)?.isExpandable ?? false }
-    func outlineView(_ o: NSOutlineView, isGroupItem item: Any) -> Bool { (item as? SidebarNode)?.isGroup ?? false }
+    // Headings are ordinary rows dressed as headings, not AppKit group rows: a group row puts its
+    // disclosure arrow on the right and only on hover, and every arrow here is on the left.
+    func outlineView(_ o: NSOutlineView, isGroupItem item: Any) -> Bool { false }
     func outlineView(_ o: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         guard let node = item as? SidebarNode, !node.isGroup else { return false }
         if case .projectTags = node.kind { return false }
         return true
     }
-    func outlineView(_ o: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { 28 }
+    // Each main heading after the first carries the gap that separates it from the section above.
+    func outlineView(_ o: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        guard let node = item as? SidebarNode, node.isGroup, node !== roots.first else { return 28 }
+        return 28 + SidebarOutlineView.sectionGap
+    }
 
     func outlineView(_ o: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? SidebarNode else { return nil }
@@ -396,6 +455,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
         let id = NSUserInterfaceItemIdentifier(node.isGroup ? "group" : "plain")
         let cell = o.makeView(withIdentifier: id, owner: self) as? NSTableCellView ?? plainCell(id, icon: !node.isGroup)
+        if node.isGroup {
+            cell.textField?.font = SidebarOutlineView.headingFont
+            cell.textField?.textColor = .secondaryLabelColor
+        }
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
