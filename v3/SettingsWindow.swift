@@ -164,7 +164,7 @@ final class AppearancePanel: SettingsPanel {
         [blank, row(Array(rowChecks.dropFirst(5)))],
         [blank, note("P3, Adobe RGB and BT.2020 are the same colour written in those wider spaces; L*a*b* is under D50.")],
         [blank, names],
-        [blank, note("Names are the nearest of the standard web colour names, so they are approximate.")],
+        [blank, note("Names are the nearest of about 1,700 named colours, so they are approximate.")],
         [blank, contrast],
         [blank, note("The ratio and its WCAG grade: AA needs 4.5 for body text, AAA needs 7.")],
         [heading("All Swatches"), blank],

@@ -38,6 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var main: MainWindowController?
     var settings: SettingsWindowController?
 
+    /// The standard About panel, with the credit the colour name list's licence asks for.
+    @objc func showAbout() {
+        let credit = NSAttributedString(string: colourNamesCredit, attributes: [
+            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credit])
+    }
+
     @objc func showSettings() {
         if settings == nil { settings = SettingsWindowController(library: library) }
         settings?.refresh()
@@ -108,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu("MMFFDev Colour 3") { m in
-            add(m, "About MMFFDev Colour 3", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+            add(m, "About MMFFDev Colour 3", #selector(showAbout), "", self)
             m.addItem(.separator())
             add(m, "Settings\u{2026}", #selector(showSettings), ",", self)
             m.addItem(.separator())

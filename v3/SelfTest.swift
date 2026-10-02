@@ -502,14 +502,14 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
           "a catalogue pack has a folder per project and one for loose palettes, in sidebar order")
     let printPalette = pack.projects[1].palettes[0]
     check(printPalette.folder == "client-a/print" && printPalette.css == "client-a/print/print.css"
-          && printPalette.swatches[0].file == "client-a/print/swatches/01-black-222222.png",
+          && printPalette.swatches[0].file == "client-a/print/swatches/01-\(slug(colourName("#222222")))-222222.png",
           "files are named after the palette and swatch, numbered in order: \(printPalette.swatches[0].file)")
     check(printPalette.swatches[0].tags == ["print", "CMYK"], "swatch tags travel with the pack")
     let files = pack.textFiles(options: ExportOptions())
     check(files.map { $0.path }.prefix(3) == ["README.md", "pack.json", "LICENSE.md"] && files.contains { $0.path == "client-a/print/print.css" },
           "the pack holds a README, the JSON, the licence and a CSS file per palette")
     let cssText = files.first { $0.path == "client-a/print/print.css" }!.text
-    check(cssText.contains(":root {") && cssText.contains("  --swatch-black: #222222;"), "each CSS file is a :root block of --swatch tokens")
+    check(cssText.contains(":root {") && cssText.contains("  --swatch-\(slug(colourName("#222222"))): #222222;"), "each CSS file is a :root block of --swatch tokens")
     let packJSON = (try? JSONSerialization.jsonObject(with: pack.json().data(using: .utf8)!)) as? [String: Any]
     let firstProject = (packJSON?["projects"] as? [[String: Any]])?.first
     let firstSwatch = (((firstProject?["palettes"] as? [[String: Any]])?.first?["swatches"]) as? [[String: Any]])?.first
@@ -519,7 +519,7 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
           "pack.json parses and describes projects, palettes and swatches")
     check(pack.licence().contains("\u{00A9} \(Calendar.current.component(.year, from: at(100))) MMFFDev") && pack.licence().contains("\"Client A\""),
           "the licence names the owner, the year and the pack")
-    check(pack.readme().contains("### Print") && pack.readme().contains("| 1 | Black | #222222 |"), "the README lists every swatch")
+    check(pack.readme().contains("### Print") && pack.readme().contains("| 1 | \(colourName("#222222")) | #222222 |"), "the README lists every swatch")
     let onePalette = org.designPack(named: "Web", palettes: [web], owner: "", licence: "x", at: at(100))
     check(onePalette.projects.count == 1 && onePalette.projects[0].palettes[0].folder == "web" && onePalette.licence() == "x\n",
           "a single-palette pack keeps the palette folder at the top level")
@@ -690,7 +690,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "the newer star choice wins a sync, and custom palettes stay custom")
     check(change(from: lib, to: merged).isEmpty, "a change of star alone does not interrupt with a merge prompt")
     let exported = merged.exportPalette(b, by: .oldest)
-    check(exported?.name == "Built" && exported?.colours.map { $0.hex } == ["#111111", "#222222"] && exported?.colours.first?.name == "Black",
+    check(exported?.name == "Built" && exported?.colours.map { $0.hex } == ["#111111", "#222222"] && exported?.colours.first?.name == colourName("#111111"),
           "a palette exports with its colours named")
 
     print("upgrade from version 2")

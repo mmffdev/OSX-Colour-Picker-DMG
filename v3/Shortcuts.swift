@@ -106,7 +106,7 @@ enum Shortcuts {
 
     /// Commands whose shortcuts are the same in every Mac app, and stay that way.
     private static let fixedActions: Set<String> = ["cut:", "copy:", "paste:", "selectAll:", "hide:", "terminate:", "performMiniaturize:",
-                                                    "performZoom:", "showSettings", "orderFrontStandardAboutPanel:"]
+                                                    "performZoom:", "showSettings", "orderFrontStandardAboutPanel:", "showAbout"]
     private static var defaults: [String: Shortcut] = [:]
     /// The app's own commands, as the menu bar was built. macOS adds items of its own later
     /// (Start Dictation, Emoji & Symbols); those are not the app's to change.

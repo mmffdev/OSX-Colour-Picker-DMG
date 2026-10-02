@@ -382,13 +382,20 @@ let namedColours: [(name: String, hex: String)] = [
     ("White", "#FFFFFF"), ("White Smoke", "#F5F5F5"), ("Yellow", "#FFFF00"), ("Yellow Green", "#9ACD32"),
 ]
 
-private let namedLab: [(name: String, lab: (l: Double, a: Double, b: Double))] = namedColours.compactMap { n in
+/// Every name the app knows: the web colours, then the longer list for the gaps between them.
+/// Where both name the very same colour, the web name is the one kept.
+let allNamedColours: [(name: String, hex: String)] = {
+    var seen = Set(namedColours.map { $0.hex })
+    return namedColours + moreNamedColours.filter { seen.insert($0.hex).inserted }
+}()
+
+private let namedLab: [(name: String, lab: (l: Double, a: Double, b: Double))] = allNamedColours.compactMap { n in
     ColourValues(n.hex).map { (n.name, labOf($0.unit)) }
 }
 
 private var nameCache: [String: String] = [:]
 
-/// The nearest CSS colour name, judged perceptually.
+/// The nearest colour name, judged perceptually.
 func colourName(_ hex: String) -> String {
     guard let v = ColourValues(hex) else { return hex }
     if let hit = nameCache[v.hex] { return hit }
