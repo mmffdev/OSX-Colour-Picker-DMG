@@ -102,13 +102,18 @@ Linear RGB 0–1, SwiftUI `Color`, `NSColor`, `UIColor`.
 | Android `colors.xml` | app developers | |
 | Adobe Swatch Exchange `.ase` | Photoshop, Illustrator, InDesign, Affinity | binary, written by hand |
 | Adobe Color `.aco` | Photoshop, Clip Studio | Clip Studio reads ACO but not ASE |
+| Adobe Color Book `.acb` | Photoshop colour libraries | RGB book; goes in Photoshop's Presets ▸ Color Books folder. Not yet opened in Photoshop |
+| Adobe Color Table `.act` | Photoshop indexed colour, Save for Web | 256 colours at most, no names |
+| After Effects script `.jsx` | After Effects | no swatch file exists, so a script builds a comp of tiles and a layer of named colour controls. Not yet run in After Effects |
+| Procreate `.swatches` | illustrators on iPad | zip + JSON array of palettes, 30 colours each; longer palettes carry on in "Name 2". Not yet opened in Procreate |
+| Sketch `.sketchpalette` | Sketch Palettes plugin users | simple JSON |
+| Paint.NET `.txt` | Windows artists | 96 slots |
+| JASC `.pal` | PaintShop Pro, pixel art tools | |
+| Hex file `.hex` | Aseprite, Lospec | |
 | GIMP palette `.gpl` | GIMP, Inkscape, Krita, Aseprite | Krita needs the `Name:` line |
 | macOS colour list `.clr` | every Mac app's colour panel, incl. DaVinci Resolve | also "Add to macOS Colour Panel", which saves into `~/Library/Colors` |
 | PNG swatch sheet | decks, mood boards, sharing | |
 | Plain text | anywhere | |
-| Procreate `.swatches` | illustrators on iPad | **[next]** zip + JSON, 30 colours per palette. Sources disagree on the JSON root, so test against a real Procreate export first |
-| Sketch `.sketchpalette` | Sketch plugin users | **[later]** simple JSON |
-| Paint.NET `.txt` | Windows artists | **[later]** 96 fixed slots |
 | Krita `.kpl` | Krita | **[no]** GPL covers Krita |
 | Affinity `.afpalette`, Clip Studio `.cls` | | **[no]** proprietary, no public spec; ASE and ACO cover them |
 | `.cube` | | **[no]** it is a lookup table for grading, not a palette |

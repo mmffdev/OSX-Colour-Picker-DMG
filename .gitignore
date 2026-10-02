@@ -1,6 +1,5 @@
 .DS_Store
 AppIcon.iconset/
-MMFFDevColour
-v2/MMFFDevColour2
+MMFFDevColour3
 .env.notarytool
-v3/MMFFDevColour3
+release/

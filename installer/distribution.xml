@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>MMFFDev Colour 3</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <!-- Both homes: the Applications folder for everyone, or the one in the user's home folder. -->
+    <domains enable_localSystem="true" enable_currentUserHome="true"/>
+    <options customize="never" require-scripts="false" rootVolumeOnly="true"/>
+    <choices-outline>
+        <line choice="app"/>
+    </choices-outline>
+    <choice id="app" title="MMFFDev Colour 3">
+        <pkg-ref id="com.mmffdev.colour3"/>
+    </choice>
+    <pkg-ref id="com.mmffdev.colour3" version="3.0.0" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

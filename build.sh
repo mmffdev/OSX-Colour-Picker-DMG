@@ -1,32 +1,45 @@
 #!/bin/bash
-# Build and install MMFFDev Colour.app into ~/Applications.
-# Re-run after editing main.swift or make_icon.swift.
+# Build and install MMFFDev Colour 3.app into /Applications.
+# Re-run after editing any .swift file here.
+#
+# /Applications, not ~/Applications: the Adobe helper only works from there, and the .pkg installs
+# there too, so one copy of the app is kept, not two. No password is needed: /Applications lets any
+# administrator write to it, and the app is left owned by whoever built it.
 set -euo pipefail
 cd "$(dirname "$0")"
+source ./signing.sh
 
-APP="$HOME/Applications/MMFFDev Colour.app"
-
-# Rebuild icon only if sources changed or .icns is missing
-if [ ! -f AppIcon.icns ] || [ make_icon.swift -nt AppIcon.icns ]; then
-    echo "building icon..."
-    rm -rf AppIcon.iconset
-    swift make_icon.swift > /dev/null
-    iconutil -c icns AppIcon.iconset -o AppIcon.icns
-    rm -rf AppIcon.iconset
-fi
+APP="/Applications/MMFFDev Colour 3.app"
+OLD="$HOME/Applications/MMFFDev Colour 3.app"
 
 echo "compiling swift..."
-swiftc -O main.swift -o MMFFDevColour
+swiftc -O *.swift "${SPARKLE_FLAGS[@]}" -o MMFFDevColour3
+
+echo "running self-test..."
+./MMFFDevColour3 --self-test
 
 echo "assembling bundle..."
-rm -rf "$APP"
+# A copy put there by the .pkg belongs to root. Ask macOS once for the password to clear it;
+# the copy this script installs belongs to you, so later builds need no password.
+if ! rm -rf "$APP" 2>/dev/null; then
+    echo "the installed copy belongs to the system; asking for your password to replace it..."
+    osascript - "$APP" > /dev/null <<'EOS'
+on run argv
+    do shell script "rm -rf " & quoted form of (item 1 of argv) with prompt "MMFFDev Colour 3 build wants to replace the installed app." with administrator privileges
+end run
+EOS
+fi
+[ -d "$OLD" ] && rm -rf "$OLD" && echo "removed the old copy in ~/Applications"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
-cp MMFFDevColour "$APP/Contents/MacOS/MMFFDevColour"
+cp MMFFDevColour3 "$APP/Contents/MacOS/MMFFDevColour3"
 cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-chmod +x "$APP/Contents/MacOS/MMFFDevColour"
-codesign --force --deep --sign - "$APP" 2>&1 | grep -v "replacing existing signature" || true
+chmod +x "$APP/Contents/MacOS/MMFFDevColour3"
+stamp_version "$APP"
+add_sparkle "$APP"
+add_helper "$APP"
+sign_app "$APP"
 
-rm MMFFDevColour
+rm MMFFDevColour3
 
 echo "installed: $APP"

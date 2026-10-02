@@ -5,27 +5,35 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>MMFFDevColour</string>
+    <string>MMFFDevColour3</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mmffdev.mmffdevcolour</string>
+    <string>com.mmffdev.mmffdevcolour3</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>MMFFDev Colour</string>
+    <string>MMFFDev Colour 3</string>
     <key>CFBundleDisplayName</key>
-    <string>MMFFDev Colour</string>
+    <string>MMFFDev Colour 3</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>3.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/mmffdev/OSX-Colour-Picker-DMG/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>x1TjRbSlhZ2TI6D1tT1CYPKlyHdHIqrGVT98Fbj1bEc=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>

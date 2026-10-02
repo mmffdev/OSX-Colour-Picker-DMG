@@ -1,74 +1,5 @@
 import AppKit
-
-// ---------- Shared helpers ----------
-
-let shutterPath = "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif"
-
-let libraryURL: URL = {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-    let dir = support.appendingPathComponent("MMFFDev Colour")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    return dir.appendingPathComponent("library.json")
-}()
-
-struct Swatch: Codable {
-    let hex: String
-    let pickedAt: Date
-}
-
-func loadLibrary() -> [Swatch] {
-    guard let data = try? Data(contentsOf: libraryURL) else { return [] }
-    let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-    return (try? d.decode([Swatch].self, from: data)) ?? []
-}
-
-func saveLibrary(_ swatches: [Swatch]) {
-    let e = JSONEncoder()
-    e.dateEncodingStrategy = .iso8601
-    e.outputFormatting = [.prettyPrinted]
-    if let data = try? e.encode(swatches) {
-        try? data.write(to: libraryURL, options: .atomic)
-    }
-}
-
-func playShutter() {
-    let p = Process()
-    p.launchPath = "/usr/bin/afplay"
-    p.arguments = [shutterPath]
-    try? p.run()
-}
-
-func copyToClipboard(_ s: String) {
-    let pb = NSPasteboard.general
-    pb.clearContents()
-    pb.setString(s, forType: .string)
-}
-
-func hexOf(_ color: NSColor) -> String? {
-    guard let rgb = color.usingColorSpace(.sRGB) else { return nil }
-    let r = Int(round(rgb.redComponent * 255))
-    let g = Int(round(rgb.greenComponent * 255))
-    let b = Int(round(rgb.blueComponent * 255))
-    return String(format: "#%02X%02X%02X", r, g, b)
-}
-
-func colorFromHex(_ hex: String) -> NSColor? {
-    var h = hex
-    if h.hasPrefix("#") { h.removeFirst() }
-    guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
-    return NSColor(
-        red: CGFloat((v >> 16) & 0xFF) / 255,
-        green: CGFloat((v >> 8) & 0xFF) / 255,
-        blue: CGFloat(v & 0xFF) / 255,
-        alpha: 1)
-}
-
-func appendPickToLibrary(_ hex: String) {
-    var lib = loadLibrary()
-    lib.removeAll { $0.hex.uppercased() == hex.uppercased() }
-    lib.insert(Swatch(hex: hex, pickedAt: Date()), at: 0)
-    saveLibrary(lib)
-}
+import Sparkle
 
 // ---------- Pick mode (hotkey-triggered) ----------
 
@@ -84,8 +15,12 @@ func runPickMode() -> Never {
         defer { semaphore.signal() }
         guard let color = color, let hex = hexOf(color) else { return }
         playShutter()
-        copyToClipboard(hex)
-        appendPickToLibrary(hex)
+        copyToClipboard(Prefs.copyText(hex))
+        do {
+            try LibraryStore.standard.mutate { $0.addPick(hex) }
+        } catch {
+            FileHandle.standardError.write("\(error.localizedDescription)\n".data(using: .utf8)!)
+        }
         picked = hex
     }
 
@@ -97,253 +32,162 @@ func runPickMode() -> Never {
     exit(1)
 }
 
-// ---------- Library mode (window) ----------
-
-final class SwatchItem: NSCollectionViewItem {
-    var hex: String = ""
-    private let swatchView = NSView()
-    private let label = NSTextField(labelWithString: "")
-
-    override func loadView() {
-        self.view = NSView()
-        view.wantsLayer = true
-        swatchView.wantsLayer = true
-        swatchView.layer?.cornerRadius = 10
-        swatchView.layer?.borderWidth = 1
-        swatchView.layer?.borderColor = NSColor.separatorColor.cgColor
-        view.addSubview(swatchView)
-        label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        label.alignment = .center
-        label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        view.addSubview(label)
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        let w = view.bounds.width
-        let h = view.bounds.height
-        let labelH: CGFloat = 16
-        swatchView.frame = NSRect(x: 0, y: labelH + 4, width: w, height: h - labelH - 4)
-        label.frame = NSRect(x: 0, y: 0, width: w, height: labelH)
-    }
-
-    override var isSelected: Bool {
-        didSet {
-            swatchView.layer?.borderWidth = isSelected ? 3 : 1
-            swatchView.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : .separatorColor).cgColor
-        }
-    }
-
-    func configure(hex: String) {
-        self.hex = hex
-        label.stringValue = hex
-        swatchView.layer?.backgroundColor = colorFromHex(hex)?.cgColor ?? NSColor.gray.cgColor
-    }
-}
-
-final class GridCollectionView: NSCollectionView {
-    weak var controller: LibraryWindowController?
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
-            controller?.deleteSelected()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-}
-
-final class LibraryWindowController: NSWindowController, NSCollectionViewDelegate, NSCollectionViewDataSource {
-    private var library: [Swatch] = []
-    private var collectionView: GridCollectionView!
-    private var emptyLabel: NSTextField!
-    private var countLabel: NSTextField!
-
-    convenience init() {
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 520),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered, defer: false)
-        win.title = "MMFFDev Colour"
-        win.center()
-        win.setFrameAutosaveName("MMFFDevColourMainWindow")
-        self.init(window: win)
-        build()
-        reload()
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(reloadOnFocus),
-            name: NSWindow.didBecomeKeyNotification, object: win)
-    }
-
-    private func build() {
-        guard let content = window?.contentView else { return }
-
-        let toolbarHeight: CGFloat = 48
-        let toolbar = NSView(frame: NSRect(x: 0, y: content.bounds.height - toolbarHeight,
-                                           width: content.bounds.width, height: toolbarHeight))
-        toolbar.autoresizingMask = [.width, .minYMargin]
-        toolbar.wantsLayer = true
-        toolbar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-
-        let pickBtn = NSButton(title: "Pick a Colour", target: self, action: #selector(pickFromWindow))
-        pickBtn.bezelStyle = .rounded
-        pickBtn.keyEquivalent = "p"
-        pickBtn.keyEquivalentModifierMask = [.command]
-        pickBtn.frame = NSRect(x: 16, y: 10, width: 140, height: 28)
-        toolbar.addSubview(pickBtn)
-
-        countLabel = NSTextField(labelWithString: "")
-        countLabel.textColor = .secondaryLabelColor
-        countLabel.font = NSFont.systemFont(ofSize: 12)
-        countLabel.frame = NSRect(x: 170, y: 14, width: 300, height: 20)
-        countLabel.autoresizingMask = [.width]
-        toolbar.addSubview(countLabel)
-
-        let divider = NSBox(frame: NSRect(x: 0, y: content.bounds.height - toolbarHeight - 1,
-                                          width: content.bounds.width, height: 1))
-        divider.boxType = .separator
-        divider.autoresizingMask = [.width, .minYMargin]
-
-        content.addSubview(toolbar)
-        content.addSubview(divider)
-
-        // Scroll + collection
-        let scrollFrame = NSRect(x: 0, y: 0,
-                                 width: content.bounds.width,
-                                 height: content.bounds.height - toolbarHeight - 1)
-        let scroll = NSScrollView(frame: scrollFrame)
-        scroll.autoresizingMask = [.width, .height]
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-
-        let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: 100, height: 108)
-        layout.sectionInset = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        layout.minimumInteritemSpacing = 14
-        layout.minimumLineSpacing = 14
-
-        let cv = GridCollectionView(frame: scroll.bounds)
-        cv.controller = self
-        cv.collectionViewLayout = layout
-        cv.dataSource = self
-        cv.delegate = self
-        cv.isSelectable = true
-        cv.allowsMultipleSelection = true
-        cv.backgroundColors = [.clear]
-        cv.register(SwatchItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("swatch"))
-
-        let ctxMenu = NSMenu()
-        ctxMenu.addItem(NSMenuItem(title: "Copy Hex", action: #selector(copySelected), keyEquivalent: "c"))
-        ctxMenu.addItem(NSMenuItem(title: "Delete", action: #selector(deleteSelected), keyEquivalent: ""))
-        ctxMenu.items.forEach { $0.target = self }
-        cv.menu = ctxMenu
-
-        scroll.documentView = cv
-        content.addSubview(scroll)
-        collectionView = cv
-
-        emptyLabel = NSTextField(labelWithString: "No colours yet — press ⌃⌘C anywhere or click \u{201C}Pick a Colour\u{201D}.")
-        emptyLabel.textColor = .tertiaryLabelColor
-        emptyLabel.font = NSFont.systemFont(ofSize: 13)
-        emptyLabel.alignment = .center
-        emptyLabel.frame = NSRect(
-            x: 0, y: scrollFrame.height / 2 - 10,
-            width: scrollFrame.width, height: 20)
-        emptyLabel.autoresizingMask = [.width, .minYMargin, .maxYMargin]
-        scroll.addSubview(emptyLabel)
-    }
-
-    @objc private func reloadOnFocus() { reload() }
-
-    func reload() {
-        library = loadLibrary()
-        collectionView.reloadData()
-        countLabel.stringValue = library.isEmpty ? "" : "\(library.count) colour\(library.count == 1 ? "" : "s")"
-        emptyLabel.isHidden = !library.isEmpty
-    }
-
-    // MARK: Data source
-    func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { library.count }
-    func collectionView(_ cv: NSCollectionView, itemForRepresentedObjectAt ip: IndexPath) -> NSCollectionViewItem {
-        let item = cv.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("swatch"), for: ip) as! SwatchItem
-        item.configure(hex: library[ip.item].hex)
-        return item
-    }
-
-    func collectionView(_ cv: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        guard let ip = indexPaths.first else { return }
-        let hex = library[ip.item].hex
-        copyToClipboard(hex)
-        playShutter()
-    }
-
-    // MARK: Actions
-    @objc func copySelected() {
-        guard let ip = collectionView.selectionIndexPaths.first else { return }
-        copyToClipboard(library[ip.item].hex)
-        playShutter()
-    }
-
-    @objc func deleteSelected() {
-        let idxs = collectionView.selectionIndexPaths.map { $0.item }.sorted(by: >)
-        guard !idxs.isEmpty else { return }
-        for i in idxs where i < library.count { library.remove(at: i) }
-        saveLibrary(library)
-        reload()
-    }
-
-    @objc func pickFromWindow() {
-        let sampler = NSColorSampler()
-        sampler.show { [weak self] color in
-            guard let color = color, let hex = hexOf(color) else { return }
-            playShutter()
-            copyToClipboard(hex)
-            appendPickToLibrary(hex)
-            self?.reload()
-        }
-    }
-}
+// ---------- The app ----------
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var wc: LibraryWindowController?
+    let library = LibraryController()
+    /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds.
+    let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    var main: MainWindowController?
+    var settings: SettingsWindowController?
+
+    /// The standard About panel, with the credit the colour name list's licence asks for.
+    @objc func showAbout() {
+        let credit = NSAttributedString(string: colourNamesCredit, attributes: [
+            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credit])
+    }
+
+    @objc func showSettings() {
+        if settings == nil { settings = SettingsWindowController(library: library) }
+        settings?.refresh()
+        settings?.showWindow(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
+    }
+
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
-
-        let mainMenu = NSMenu()
-        let appItem = NSMenuItem()
-        mainMenu.addItem(appItem)
-        let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(
-            title: "About MMFFDev Colour",
-            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
-            keyEquivalent: ""))
-        appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(
-            title: "Quit MMFFDev Colour",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"))
-        appItem.submenu = appMenu
-
-        let editItem = NSMenuItem()
-        mainMenu.addItem(editItem)
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
-        editItem.submenu = editMenu
-
-        NSApp.mainMenu = mainMenu
-
-        wc = LibraryWindowController()
-        wc?.showWindow(nil)
+        let main = MainWindowController(library: library)
+        self.main = main
+        let bar = menus(for: main)
+        Shortcuts.install(on: bar)   // before macOS adds its own items to the Edit menu
+        NSApp.mainMenu = bar
+        main.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
+        DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
+        rehearse(main)
+    }
+
+    /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
+    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
+    private func rehearse(_ main: MainWindowController) {
+        let env = ProcessInfo.processInfo.environment
+        guard env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_SHOW"] else { return }
+        let parts = ask.split(separator: ":", maxSplits: 1).map(String.init)
+        let arg = parts.count > 1 ? parts[1] : ""
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            switch parts[0] {
+            case "palette":
+                if let s = self.library.library.swatches.first(where: { $0.name == arg }) { main.show(.palette(s.id)) }
+            case "build":
+                main.buildPalette()
+                main.rehearseBuilder(with: arg.split(separator: ",").map(String.init))
+            case "settings":
+                self.showSettings()
+                self.settings?.showPanel(Int(arg) ?? 0)
+            case "search":
+                main.rehearseSearch(arg)
+            case "tags":
+                if arg.hasPrefix("bar") { main.rehearseTagBar(typing: String(arg.dropFirst(4))) } else { self.library.showTagEditor() }
+            case "labels":
+                main.rehearseLabels()
+            case "lab":
+                if arg.isEmpty { main.showLab() } else { self.library.onOpenLab?(arg) }
+            case "project":
+                if arg == "templates" { self.library.manageProjectTemplates() } else { self.library.newProject() }
+            default: break
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
+
+    private func menus(for main: MainWindowController) -> NSMenu {
+        let bar = NSMenu()
+        func menu(_ title: String, _ build: (NSMenu) -> Void) {
+            let item = NSMenuItem()
+            let m = NSMenu(title: title)
+            build(m)
+            item.submenu = m
+            bar.addItem(item)
+        }
+        func add(_ m: NSMenu, _ title: String, _ action: Selector?, _ key: String = "", _ target: AnyObject? = nil,
+                 _ mods: NSEvent.ModifierFlags = .command) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = mods
+            item.target = target
+            m.addItem(item)
+        }
+
+        menu("MMFFDev Colour 3") { m in
+            add(m, "About MMFFDev Colour 3", #selector(showAbout), "", self)
+            add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
+            m.addItem(.separator())
+            add(m, "Settings\u{2026}", #selector(showSettings), ",", self)
+            m.addItem(.separator())
+            add(m, "Hide MMFFDev Colour 3", #selector(NSApplication.hide(_:)), "h")
+            add(m, "Quit MMFFDev Colour 3", #selector(NSApplication.terminate(_:)), "q")
+        }
+        menu("File") { m in
+            add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
+            m.addItem(.separator())
+            add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)
+            add(m, "New Typography Palette", #selector(LibraryController.newTypography), "", library)
+            add(m, "New Project\u{2026}", #selector(LibraryController.newProject), "n", library, [.command, .option])
+            add(m, "Project Templates\u{2026}", #selector(LibraryController.manageProjectTemplates), "", library)
+            add(m, "Build Palette from Swatches\u{2026}", #selector(MainWindowController.buildPalette), "n", main, [.command, .shift])
+            add(m, "New Palette from Image\u{2026}", #selector(LibraryController.paletteFromImage), "i", library)
+            add(m, "New Palette from Clipboard", #selector(LibraryController.paletteFromClipboard), "v", library, [.command, .shift])
+            m.addItem(.separator())
+            let catalogue = NSMenuItem(title: "Catalogue", action: nil, keyEquivalent: "")
+            catalogue.submenu = main.catalogueMenu
+            m.addItem(catalogue)
+            add(m, "Sync Now", #selector(LibraryController.syncNow), "s", library, [.command, .shift])
+            m.addItem(.separator())
+            add(m, "Export\u{2026}", #selector(MainWindowController.exportShown), "e", main)
+            add(m, "Export Design Pack\u{2026}", #selector(MainWindowController.exportDesignPack), "e", main, [.command, .option])
+            add(m, "Add to macOS Colour Panel", #selector(MainWindowController.addShownToColourPanel), "", main)
+            m.addItem(adobeMenuItem(target: main, action: #selector(MainWindowController.addShownToAdobe(_:))))
+            add(m, "Export Library\u{2026}", #selector(LibraryController.exportLibrary), "e", library, [.command, .shift])
+            m.addItem(.separator())
+            add(m, "Import from MMFFDev Colour 2", #selector(LibraryController.importFromV2), "", library)
+        }
+        menu("Edit") { m in
+            add(m, "Cut", #selector(NSText.cut(_:)), "x")
+            add(m, "Copy", #selector(NSText.copy(_:)), "c")
+            add(m, "Paste", #selector(NSText.paste(_:)), "v")
+            add(m, "Select All", #selector(NSText.selectAll(_:)), "a")
+            m.addItem(.separator())
+            add(m, "Find", #selector(MainWindowController.focusSearch), "f", main)
+        }
+        menu("View") { m in
+            add(m, "All Swatches", #selector(MainWindowController.showAll), "0", main)
+            add(m, "cLab", #selector(MainWindowController.showLab), "l", main)
+            add(m, "Contrast", #selector(MainWindowController.showContrast), "l", main, [.command, .shift])
+            add(m, "Next Palette", #selector(MainWindowController.nextPalette), "]", main)
+            add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)
+            m.addItem(.separator())
+            add(m, "Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", nil, [.command, .control])
+            add(m, "Customise Toolbar\u{2026}", #selector(NSWindow.runToolbarCustomizationPalette(_:)))
+        }
+        menu("Window") { m in
+            add(m, "Minimise", #selector(NSWindow.performMiniaturize(_:)), "m")
+            add(m, "Zoom", #selector(NSWindow.performZoom(_:)))
+            NSApp.windowsMenu = m
+        }
+        return bar
+    }
 }
 
 // ---------- Entry point ----------
 
-if CommandLine.arguments.contains("--pick") {
+if CommandLine.arguments.contains("--self-test") {
+    runSelfTest()
+} else if CommandLine.arguments.contains("--pick") {
     runPickMode()
+} else if CommandLine.arguments.contains("--halo-demo") {
+    runHaloDemo()
 } else {
     let app = NSApplication.shared
     let delegate = AppDelegate()
