@@ -35,6 +35,23 @@ struct SwatchEntry: Codable, Equatable {
     var nameChangedAt: Date? = nil
 }
 
+/// One pairing in a Typography palette: a text colour on a background, with the words and fonts
+/// it was tried in, so it can be shown as a real example.
+struct TypeStyle: Codable, Equatable {
+    let id: UUID
+    var name: String
+    var ink: String
+    var paper: String
+    var heading: String
+    var body: String
+    /// Font families; nil is the system font. Kept by name, so a Mac without the font can say which one is missing.
+    var headingFont: String?
+    var bodyFont: String?
+
+    /// The fonts this style names, heading first.
+    var fonts: [String] { [headingFont, bodyFont].compactMap { $0 } }
+}
+
 /// A named collection of colours. Colours always live in the catalogue too.
 struct Swatch: Codable, Equatable {
     let id: UUID
@@ -62,6 +79,12 @@ struct Swatch: Codable, Equatable {
     var favouritePlacedAt: Date? = nil
     var listPosition: Int? = nil
     var listPlacedAt: Date? = nil
+    /// Set on a Typography palette: its pairings, in order. nil is an ordinary palette of colours.
+    /// A sync keeps the newer list whole.
+    var styles: [TypeStyle]? = nil
+    var stylesChangedAt: Date? = nil
+
+    var isTypography: Bool { styles != nil }
 
     var favourite: Bool { isFavourite ?? false }
     var custom: Bool { isCustom ?? false }
@@ -317,6 +340,75 @@ extension Library {
     /// Favourites, in their own order.
     var orderedFavourites: [Swatch] { arranged(projectOrder.filter { $0.favourite }) { $0.favouritePosition } }
 
+    // MARK: Typography palettes
+
+    func nextTypographyName() -> String {
+        let numbers = swatches.compactMap { s -> Int? in
+            let parts = s.name.lowercased().split(separator: " ")
+            guard parts.count == 2, parts[0] == "typography" else { return nil }
+            return Int(parts[1])
+        }
+        return "Typography \((numbers.max() ?? 0) + 1)"
+    }
+
+    /// The name a new pairing gets in a Typography palette: "Typography Set 1", then 2, and so on.
+    func nextStyleName(in id: UUID) -> String {
+        let numbers = (swatch(id)?.styles ?? []).compactMap { s -> Int? in
+            let parts = s.name.lowercased().split(separator: " ")
+            guard parts.count == 3, parts[0] == "typography", parts[1] == "set" else { return nil }
+            return Int(parts[2])
+        }
+        return "Typography Set \((numbers.max() ?? 0) + 1)"
+    }
+
+    /// Creates an empty Typography palette. It never becomes the target for picks.
+    @discardableResult
+    mutating func createTypography(named raw: String = "", in project: UUID? = nil, at date: Date = Date()) -> UUID {
+        let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = uniqueName(base.isEmpty ? nextTypographyName() : base, among: swatches.map { $0.name })
+        swatches.append(Swatch(id: UUID(), name: name, createdAt: date, entries: [], styles: [], stylesChangedAt: date))
+        let id = swatches[swatches.count - 1].id
+        if let p = project { move(id, to: p, index: Int.max, at: date) }
+        return id
+    }
+
+    /// Adds a pairing, or replaces the one with the same id. Its two colours join the palette and the library.
+    mutating func setStyle(_ style: TypeStyle, in id: UUID, at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), var styles = swatches[i].styles,
+              let ink = normaliseHex(style.ink), let paper = normaliseHex(style.paper) else { return }
+        var clean = style
+        clean.ink = ink; clean.paper = paper
+        let name = style.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        clean.name = name.isEmpty ? (styles.first { $0.id == style.id }?.name ?? nextStyleName(in: id)) : name
+        if let at = styles.firstIndex(where: { $0.id == style.id }) {
+            guard styles[at] != clean else { return }
+            styles[at] = clean
+        } else {
+            styles.append(clean)
+        }
+        swatches[i].styles = styles
+        swatches[i].stylesChangedAt = date
+        add([ink, paper], toSwatch: id, at: date)
+    }
+
+    mutating func removeStyle(_ style: UUID, from id: UUID, at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), let styles = swatches[i].styles, styles.contains(where: { $0.id == style }) else { return }
+        swatches[i].styles = styles.filter { $0.id != style }
+        swatches[i].stylesChangedAt = date
+    }
+
+    /// Swaps one font family for another in every pairing of a Typography palette.
+    mutating func replaceFont(_ old: String, with new: String?, in id: UUID, at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), var styles = swatches[i].styles else { return }
+        for n in styles.indices {
+            if styles[n].headingFont == old { styles[n].headingFont = new }
+            if styles[n].bodyFont == old { styles[n].bodyFont = new }
+        }
+        guard styles != swatches[i].styles else { return }
+        swatches[i].styles = styles
+        swatches[i].stylesChangedAt = date
+    }
+
     /// Sets the order of the Palettes list. Order inside projects and under Favourites is untouched.
     mutating func placeInList(_ ids: [UUID], at date: Date = Date()) {
         for (n, id) in ids.enumerated() {
@@ -414,9 +506,32 @@ extension Library {
         return out
     }
 
+    /// The projects a colour sits in, through the palettes that hold it.
+    func projects(holding hex: String) -> Set<UUID> {
+        Set(swatches.filter { s in s.entries.contains { $0.hex == hex } }.compactMap { $0.projectID })
+    }
+
+    /// The projects every one of the colours sits in: where a tag has to belong to suit them all.
+    func projects(holdingAll hexes: [String]) -> Set<UUID> {
+        guard let first = hexes.first else { return [] }
+        return hexes.dropFirst().reduce(projects(holding: first)) { $0.intersection(projects(holding: $1)) }
+    }
+
+    /// Whether something in `projects` may wear the tag: a global tag always, a project's tag only inside that project.
+    func mayWear(_ tag: String, in projects: Set<UUID>) -> Bool {
+        guard let home = project(ofTag: tag) else { return true }
+        return projects.contains(home)
+    }
+
+    /// `tags` without the project tags that do not belong here. One already worn is left alone.
+    private func allowed(_ tags: [String], in projects: Set<UUID>, worn: [String]) -> [String] {
+        let have = Set(worn.map { $0.lowercased() })
+        return tags.filter { have.contains($0.lowercased()) || mayWear($0, in: projects) }
+    }
+
     mutating func setTags(ofPalette id: UUID, _ raw: [String], at date: Date = Date()) {
         guard let i = swatches.firstIndex(where: { $0.id == id }) else { return }
-        let tags = Library.cleanTags(raw)
+        let tags = allowed(Library.cleanTags(raw), in: Set([swatches[i].projectID].compactMap { $0 }), worn: swatches[i].tagList)
         guard tags != swatches[i].tagList else { return }
         swatches[i].tags = tags.isEmpty ? nil : tags
         swatches[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
@@ -424,7 +539,7 @@ extension Library {
 
     mutating func setTags(ofColour hex: String, _ raw: [String], at date: Date = Date()) {
         guard let i = colours.firstIndex(where: { $0.hex == hex }) else { return }
-        let tags = Library.cleanTags(raw)
+        let tags = allowed(Library.cleanTags(raw), in: projects(holding: hex), worn: colours[i].tags ?? [])
         guard tags != (colours[i].tags ?? []) else { return }
         colours[i].tags = tags.isEmpty ? nil : tags
         colours[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))

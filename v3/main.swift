@@ -128,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
             m.addItem(.separator())
             add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)
+            add(m, "New Typography Palette", #selector(LibraryController.newTypography), "", library)
             add(m, "New Project\u{2026}", #selector(LibraryController.newProject), "n", library, [.command, .option])
             add(m, "Project Templates\u{2026}", #selector(LibraryController.manageProjectTemplates), "", library)
             add(m, "Build Palette from Swatches\u{2026}", #selector(MainWindowController.buildPalette), "n", main, [.command, .shift])
@@ -157,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu("View") { m in
             add(m, "All Swatches", #selector(MainWindowController.showAll), "0", main)
             add(m, "cLab", #selector(MainWindowController.showLab), "l", main)
+            add(m, "Contrast", #selector(MainWindowController.showContrast), "l", main, [.command, .shift])
             add(m, "Next Palette", #selector(MainWindowController.nextPalette), "]", main)
             add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)
             m.addItem(.separator())

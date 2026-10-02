@@ -192,8 +192,11 @@ func runSelfTest() -> Never {
     runTagTests(check: check)
     runNameTests(check: check)
     runSwatchNameTests(check: check)
+    runTagScopeTests(check: check)
     runLabTests(check: check)
     runOrderTests(check: check)
+    runContrastTests(check: check)
+    runTypographyTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
     exit(failed == 0 ? 0 : 1)
@@ -935,9 +938,6 @@ func runLabTests(check: (Bool, String) -> Void) {
     check(hues(.square).prefix(4) == [0, 90, 180, 270], "square: quarter turns")
     check(hues(.compound).prefix(4) == [0, 30, 165, 195], "compound: a neighbour and the pair round the opposite")
     check(Set(hues(.shades)) == [0] && Set(hues(.monochromatic)) == [0], "shades and monochromatic stay on one hue")
-    let square = LabRule.square.arrangement(around: LabNode(h: 30, s: 0.7, v: 0.8), vivid: 0)!.nodes.prefix(4)
-    let lightness = square.compactMap { ColourValues($0.hex)?.oklch.l }
-    check(lightness.max()! - lightness.min()! < 0.02, "at even, turning the hue keeps a colour as light as it was: \(lightness)")
     check(LabNode(h: 0, s: 1, v: 1).hex == "#FF0000" && LabNode(h: 120, s: 1, v: 1).hex == "#FFFF00" && LabNode(hex: "#0000FF")!.h > 270
           && LabNode(hex: "#0000FF")!.h < 280 && LabNode(h: 200, s: 0, v: 1).hex == "#FFFFFF",
           "the artists\u{2019} wheel: red, then yellow a third of the way round, blue past two thirds, white at the centre")
@@ -947,14 +947,9 @@ func runLabTests(check: (Bool, String) -> Void) {
     check((0..<360).allSatisfy { abs(wheelAngle(ofHue: screenHue(atWheel: Double($0))) - Double($0)) < 1e-9 },
           "wheel angle and screen hue convert back and forth exactly")
     check(LabNode(h: 50, s: 0.8, v: 0).hex == "#000000", "brightness runs down to black")
-    func chroma(_ nodes: [LabNode]) -> Double { nodes.compactMap { ColourValues($0.hex)?.oklch.c }.reduce(0, +) }
-    let strongBlue = LabNode(hex: "#0000FF")!
-    let even = LabRule.splitComplementary.arrangement(around: strongBlue, vivid: 0)!.nodes
-    let bold = LabRule.splitComplementary.arrangement(around: strongBlue, vivid: 1)!.nodes
-    check(bold[1].s == 1 && bold[1].v == 1 && bold[0] == even[0],
-          "at full vivid a base on the rim gets companions on the rim, and the base is untouched")
-    check(chroma(Array(bold.prefix(3))) > chroma(Array(even.prefix(3))) * 1.3,
-          "vivid companions of a strong blue are far more colourful than equally dark ones: \(bold.prefix(3).map { $0.hex }) against \(even.prefix(3).map { $0.hex })")
+    let companions = LabRule.splitComplementary.arrangement(around: LabNode(hex: "#0000FF")!)!.nodes
+    check(companions[1].s == 1 && companions[1].v == 1 && companions[2].s == 1 && companions[2].v == 1,
+          "a base on the rim gets companions on the rim: \(companions.prefix(3).map { $0.hex })")
     let shades = LabRule.shades.arrangement(around: LabNode(h: 264, s: 0.9, v: 0.6))!.nodes
     check(Set(shades.map { $0.hex }).count == 5 && Set(shades.map { $0.s }).count == 1 && shades.map({ $0.v }) == [0.6, 1.0, 0.82, 0.46, 0.28],
           "shades are one colour at five brightnesses, the base among them")
@@ -987,12 +982,6 @@ func runLabTests(check: (Bool, String) -> Void) {
     check(state.nodes.count == LabState.most, "the strip stops at \(LabState.most) colours")
     state.makeBase(3)
     check(state.base == 3, "any colour can be made the base")
-    var dial = LabState(rule: .triad, base: base)
-    dial.setVivid(0)
-    let calm = dial.nodes[1].oklch.l
-    dial.setVivid(1)
-    check(abs(calm - base.oklch.l) < 1e-9 && dial.nodes[1].oklch.l != calm && dial.nodes[0] == base && dial.nodes[1].s == base.s && dial.nodes[1].v == base.v,
-          "the vivid control moves the companions between the base\u{2019}s lightness and their own place on the wheel, and leaves the base alone")
     state.setRule(.square)
     check(state.nodes.count == 5 && state.base == 0, "choosing a rule rebuilds five colours round the base")
     let saved = try? JSONDecoder().decode(LabState.self, from: JSONEncoder().encode(state))
@@ -1093,4 +1082,115 @@ func runOrderTests(check: (Bool, String) -> Void) {
     let merged = mergeLibraries(local: lib, remote: other)
     check(names(merged.orderedFavourites) == "BACD" && names(merged.listedPalettes) == "ABCD" && names(merged.palettes(in: project)) == "ACB",
           "a sync keeps the newer arrangement of each place separately")
+}
+
+// ---------- cLab: contrast ----------
+
+func runContrastTests(check: (Bool, String) -> Void) {
+    print("contrast tool")
+    check(ContrastPair.text(4.4999) == "4.4 : 1" && ContrastPair.text(4.5) == "4.5 : 1" && ContrastPair.text(21) == "21.0 : 1",
+          "a ratio is cut, not rounded, so a near miss never reads as a pass")
+    check(ContrastUse.smallText.aa == 4.5 && ContrastUse.smallText.aaa == 7 && ContrastUse.largeText.aa == 3 && ContrastUse.largeText.aaa == 4.5
+          && ContrastUse.graphics.aa == 3 && ContrastUse.graphics.aaa == nil, "the WCAG thresholds for text and graphics")
+    check(nearestShade(of: "#767676", against: "#FFFFFF", reaching: 4.5) == "#767676", "a colour that already passes is left alone")
+    for target in ContrastTarget.allCases {
+        let fixed = nearestShade(of: "#8FB2FF", against: "#FFFFFF", reaching: target.rawValue)
+        let hue = fixed.flatMap { ColourValues($0)?.oklch.h } ?? 0
+        check(fixed.map { contrastRatio($0, "#FFFFFF") >= target.rawValue } == true && abs(hue - ColourValues("#8FB2FF")!.oklch.h) < 6,
+              "a pale blue on white is fixed to \(ContrastPair.text(target.rawValue)) and stays blue: \(fixed ?? "none")")
+    }
+    let aa = nearestShade(of: "#8FB2FF", against: "#FFFFFF", reaching: 4.5)!, aaa = nearestShade(of: "#8FB2FF", against: "#FFFFFF", reaching: 7)!
+    check(contrastRatio(aa, "#FFFFFF") < 4.7 && ColourValues(aaa)!.luminance < ColourValues(aa)!.luminance,
+          "the fix goes only as far as it has to, and further for a stricter target")
+    let onDark = nearestShade(of: "#444444", against: "#222222", reaching: 4.5)
+    check(onDark.map { ColourValues($0)!.luminance > ColourValues("#444444")!.luminance && contrastRatio($0, "#222222") >= 4.5 } == true,
+          "on a dark background the fix goes lighter: \(onDark ?? "none")")
+    check(nearestShade(of: "#808080", against: "#777777", reaching: 7) == nil, "no shade reaches 7 : 1 against a mid grey, and the fix says so")
+    let strongest = strongestPair(in: ["#2456F5", "#F5BE24", "#0A216D", "#FFFFFF"])
+    check(strongest == ContrastPair(ink: "#0A216D", paper: "#FFFFFF") && strongestPair(in: ["#FFFFFF"]) == nil,
+          "the strongest pair in a palette is its two most different colours, the lighter as background")
+}
+
+func runTagScopeTests(check: (Bool, String) -> Void) {
+    print("project tags stay in their project")
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    var lib = Library()
+    for hex in ["#111111", "#222222"] { lib.addPick(hex, at: t) }
+    let project = lib.createProject(named: "Client A", at: t)
+    let inside = lib.createSwatch(named: "Inside", hexes: ["#111111"], at: t)
+    let outside = lib.createSwatch(named: "Outside", hexes: ["#222222"], at: t)
+    lib.move(inside, to: project, index: 0, at: t)
+    lib.setTag("Client", colour: nil, project: project, at: t)
+
+    lib.setTags(ofPalette: inside, ["Client", "Web"], at: t.addingTimeInterval(1))
+    lib.setTags(ofPalette: outside, ["Client", "Web"], at: t.addingTimeInterval(1))
+    check(lib.swatch(inside)?.tagList == ["Client", "Web"] && lib.swatch(outside)?.tagList == ["Web"],
+          "a palette outside the project cannot take the project's tag; a global tag goes anywhere")
+    lib.setTags(ofColour: "#111111", ["Client"], at: t.addingTimeInterval(2))
+    lib.setTags(ofColour: "#222222", ["Client", "Print"], at: t.addingTimeInterval(2))
+    check(lib.colours.first { $0.hex == "#111111" }?.tags == ["Client"] && lib.colours.first { $0.hex == "#222222" }?.tags == ["Print"],
+          "a swatch takes a project tag only if one of its palettes is in that project")
+    check(lib.projects(holdingAll: ["#111111"]) == [project] && lib.projects(holdingAll: ["#111111", "#222222"]).isEmpty,
+          "a selection is offered only the project tags that suit every swatch in it")
+    lib.move(inside, to: nil, index: 0, at: t.addingTimeInterval(3))
+    lib.setTags(ofPalette: inside, ["Client", "Web", "New"], at: t.addingTimeInterval(4))
+    check(lib.swatch(inside)?.tagList == ["Client", "Web", "New"], "a tag already worn is not stripped when other tags are edited")
+}
+
+// ---------- Typography palettes ----------
+
+func runTypographyTests(check: (Bool, String) -> Void) {
+    print("typography palettes")
+    func at(_ n: Double) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + n) }
+    func style(_ ink: String, _ paper: String, name: String = "", font: String? = nil) -> TypeStyle {
+        TypeStyle(id: UUID(), name: name, ink: ink, paper: paper, heading: "Hello", body: "Some words.", headingFont: font, bodyFont: nil)
+    }
+    var lib = Library()
+    let picks = lib.createSwatch(named: "Brand", hexes: ["#112233"], at: at(1))
+    let first = lib.createTypography(at: at(2)), second = lib.createTypography(at: at(3))
+    check(lib.swatch(first)?.name == "Typography 1" && lib.swatch(second)?.name == "Typography 2" && lib.swatch(first)?.isTypography == true
+          && lib.swatch(picks)?.isTypography == false, "Typography palettes are named Typography 1, 2, and are told apart from colour palettes")
+    check(lib.activeSwatchID == picks, "a Typography palette never becomes the target for picks")
+
+    let a = style("#ffffff", "#1B1B1F"), b = style("#2456F5", "#FFFFFF", font: "No Such Font")
+    lib.setStyle(a, in: first, at: at(4))
+    lib.setStyle(b, in: first, at: at(5))
+    let kept = lib.swatch(first)?.styles ?? []
+    check(kept.map { $0.name } == ["Typography Set 1", "Typography Set 2"], "pairings are named Typography Set 1, 2 as they are added")
+    check(kept.first?.ink == "#FFFFFF" && lib.swatch(first)?.entries.map { $0.hex } == ["#FFFFFF", "#1B1B1F", "#2456F5"]
+          && lib.colours.contains { $0.hex == "#2456F5" }, "a pairing\u{2019}s colours are tidied and join the palette and the library")
+    check(kept[1].heading == "Hello" && kept[1].body == "Some words." && kept[1].headingFont == "No Such Font" && kept[1].fonts == ["No Such Font"],
+          "a pairing keeps its words and the names of its fonts, installed or not")
+
+    var renamed = kept[0]
+    renamed.name = "  Dark Hero  "
+    lib.setStyle(renamed, in: first, at: at(6))
+    check(lib.swatch(first)?.styles?.map { $0.name } == ["Dark Hero", "Typography Set 2"], "a pairing is renamed in place, and keeps its position")
+    lib.setStyle(style("#000000", "#FFFF00"), in: first, at: at(7))
+    check(lib.swatch(first)?.styles?.last?.name == "Typography Set 3", "names carry on counting after a rename")
+    lib.setStyle(style("#000000", "#FFFFFF"), in: picks, at: at(8))
+    check(lib.swatch(picks)?.styles == nil, "a pairing cannot be put into a palette of colours")
+
+    lib.replaceFont("No Such Font", with: "Helvetica", in: first, at: at(9))
+    check(lib.swatch(first)?.styles?[1].headingFont == "Helvetica", "a missing font is replaced throughout the palette")
+    lib.removeStyle(kept[0].id, from: first, at: at(10))
+    check(lib.swatch(first)?.styles?.count == 2 && lib.swatch(first)?.styles?.contains { $0.id == kept[0].id } == false, "a pairing can be deleted")
+
+    let project = lib.createProject(named: "Client", at: at(11))
+    lib.move(first, to: project, index: 0, at: at(12))
+    lib.setFavourite(first, true, at: at(13))
+    check(lib.palettes(in: project).map { $0.id } == [first] && lib.orderedFavourites.map { $0.id } == [first] && lib.listedPalettes.contains { $0.id == first },
+          "a Typography palette goes into projects, Favourites and the lists like any other")
+
+    let saved = try? JSONDecoder().decode(Library.self, from: JSONEncoder().encode(lib))
+    check(saved == lib, "Typography palettes survive being saved and read back")
+    let old = try? JSONDecoder().decode(Swatch.self, from: Data("{\"id\":\"\(UUID().uuidString)\",\"name\":\"Old\",\"createdAt\":0,\"entries\":[]}".utf8))
+    check(old != nil && old?.isTypography == false, "a palette saved before Typography existed still reads, as a palette of colours")
+
+    var other = lib
+    other.setStyle(style("#FF0000", "#FFFFFF", name: "From The Other Mac"), in: first, at: at(20))
+    lib.renameSwatch(first, to: "Headlines", at: at(21))
+    let merged = mergeLibraries(local: lib, remote: other)
+    check(merged.swatch(first)?.name == "Headlines" && merged.swatch(first)?.styles?.last?.name == "From The Other Mac" && merged.swatch(first)?.styles?.count == 3,
+          "a sync keeps the newer pairings and the newer name, each on its own")
 }

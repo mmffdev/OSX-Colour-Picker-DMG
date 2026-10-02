@@ -21,6 +21,8 @@ enum Selection: Equatable {
     case tag(String)
     /// cLab: the colour wheel and its result strip.
     case lab
+    /// cTools: checking a text colour against a background.
+    case contrast
 }
 
 final class LibraryController: NSObject {
@@ -37,8 +39,12 @@ final class LibraryController: NSObject {
     var onCover: ((NSViewController?, _ fills: Bool) -> Void)?
     /// Opens cLab with this colour as the base; set by the window.
     var onOpenLab: ((String) -> Void)?
+    /// Opens Contrast on a Typography palette, to edit one of its pairings or (nil) to make a new one; set by the window.
+    var onOpenContrast: ((_ palette: UUID, _ style: UUID?) -> Void)?
     /// What cLab's strip holds, kept up to date by cLab so it can be exported and shared like a palette.
     var labPalette: ExportPalette?
+    /// The pair the Contrast tool is checking, kept up to date by the tool for the same reason.
+    var contrastPalette: ExportPalette?
 
     private(set) var picking = false
     private(set) var syncStatus = "Not synced yet."
@@ -57,9 +63,10 @@ final class LibraryController: NSObject {
     // MARK: Reading
 
     var favourites: [Swatch] { library.orderedFavourites }
-    /// Every palette once, in sidebar order: project by project, then the loose ones.
+    /// Every palette of colours once, in sidebar order: project by project, then the loose ones.
+    /// Typography palettes are left out: colours are not added to them, and they have a list of their own.
     var paletteOrder: [Swatch] {
-        library.orderedProjects.flatMap { library.palettes(in: $0.id) } + library.palettes(in: nil)
+        (library.orderedProjects.flatMap { library.palettes(in: $0.id) } + library.palettes(in: nil)).filter { !$0.isTypography }
     }
 
     var paletteSort: SortOrder {
@@ -304,16 +311,31 @@ final class LibraryController: NSObject {
     /// `scoped` are the new tags that were given to a project as they were typed.
     func setTags(ofPalette id: UUID, _ tags: [String], scoped: [String: UUID] = [:]) {
         apply { lib in
-            lib.setTags(ofPalette: id, tags)
+            // Scopes first, so that a new project tag is held to its project like any other.
             for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
+            lib.setTags(ofPalette: id, tags)
         }
+        let kept = Set((library.swatch(id)?.tagList ?? []).map { $0.lowercased() })
+        sayRefused(tags.filter { !kept.contains($0.lowercased()) })
+    }
+
+    /// Tells the user which project tags were not added, and why.
+    private func sayRefused(_ tags: [String]) {
+        guard let first = tags.first else { return }
+        let home = library.project(ofTag: first).flatMap { library.project($0)?.name } ?? "another project"
+        flash(tags.count == 1 ? "\u{201C}\(first)\u{201D} belongs to \(home), so it was not added here"
+                              : "\(tags.count) project tags were not added: they belong to other projects")
     }
 
     func setTags(ofSwatches hexes: [String], _ tags: [String], scoped: [String: UUID] = [:]) {
         apply { lib in
-            for h in hexes { lib.setTags(ofColour: h, tags) }
             for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
+            for h in hexes { lib.setTags(ofColour: h, tags) }
         }
+        // A tag counts as refused if any of the swatches could not take it.
+        sayRefused(tags.filter { tag in
+            hexes.contains { h in !(library.colours.first { $0.hex == h }?.tags ?? []).contains { $0.lowercased() == tag.lowercased() } }
+        })
     }
 
     /// Gives a colour the user's own name within one palette; blank puts the standard name back.
@@ -385,6 +407,20 @@ final class LibraryController: NSObject {
 
     func duplicate(_ id: UUID) {
         guard let s = library.swatch(id) else { return }
+        if let styles = s.styles {
+            // A Typography palette is copied with its pairings, each under a new id.
+            var copy: UUID?
+            apply { lib in
+                let new = lib.createTypography(named: "\(s.name) copy", in: s.projectID)
+                for style in styles {
+                    lib.setStyle(TypeStyle(id: UUID(), name: style.name, ink: style.ink, paper: style.paper, heading: style.heading,
+                                           body: style.body, headingFont: style.headingFont, bodyFont: style.bodyFont), in: new)
+                }
+                copy = new
+            }
+            if let copy = copy { onShow?(.palette(copy), false) }
+            return
+        }
         createPalette(named: "\(s.name) copy", hexes: library.hexes(inSwatch: id, by: .oldest), custom: s.custom)
     }
 
@@ -499,6 +535,7 @@ final class LibraryController: NSObject {
             let hexes = library.catalogueHexes(by: .colour).filter { library.hexes(tagged: t).contains($0) }
             return [ExportPalette(name: "Tagged \(t)", colours: hexes.map { ExportColour(name: colourName($0), hex: $0) })]
         case .lab: return labPalette.map { [$0] } ?? []
+        case .contrast: return contrastPalette.map { [$0] } ?? []
         }
     }
 
@@ -515,7 +552,7 @@ final class LibraryController: NSObject {
         case .palette(let id):
             guard let s = library.swatch(id) else { return }
             pack = library.designPack(named: s.name, palettes: [id], owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)
-        case .all, .tag, .lab:
+        case .all, .tag, .lab, .contrast:
             pack = library.designPack(named: catalogue == Catalogues.mainName ? "Colour Library" : catalogue,
                                       owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)
         }

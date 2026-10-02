@@ -152,9 +152,6 @@ struct LabNode: Codable, Equatable {
     }
 
     var rgb: (r: Double, g: Double, b: Double) { rgbFrom(hue: screenHue(atWheel: h), s: s, v: v) }
-    /// How the eye reads it: lightness, chroma and perceptual hue.
-    var oklch: OKLCH { oklchOf(rgb) }
-
     var hex: String {
         let c = rgb
         func byte(_ x: Double) -> Int { Int((min(max(x, 0), 1) * 255).rounded()) }
@@ -167,21 +164,6 @@ struct LabNode: Codable, Equatable {
     func darker(_ k: Double) -> LabNode { LabNode(h: h, s: s * 0.85, v: v * (1 - k)) }
     /// Towards white by `k` (0–1): paler, and brought up to full brightness.
     func lighter(_ k: Double) -> LabNode { LabNode(h: h, s: s * (1 - k * 0.85), v: v + (1 - v) * k) }
-
-    /// The same hue made as light to the eye as `lightness` (OKLCH, 0–1). Brightness is tried
-    /// first; a hue that cannot get that light at this strength gives up strength to get there.
-    func lit(_ lightness: Double) -> LabNode {
-        func search(_ make: (Double) -> LabNode, rising: Bool) -> LabNode {
-            var lo = 0.0, hi = 1.0
-            for _ in 0..<24 {
-                let mid = (lo + hi) / 2
-                if (make(mid).oklch.l < lightness) == rising { lo = mid } else { hi = mid }
-            }
-            return make((lo + hi) / 2)
-        }
-        if LabNode(h: h, s: s, v: 1).oklch.l >= lightness { return search({ LabNode(h: h, s: s, v: $0) }, rising: true) }
-        return search({ LabNode(h: h, s: s * $0, v: 1) }, rising: false)
-    }
 
     /// Where it sits on a wheel of radius 1 centred on the origin, x right and y up.
     var point: (x: Double, y: Double) { (s * cos(h * .pi / 180), s * sin(h * .pi / 180)) }
@@ -226,19 +208,11 @@ enum LabRule: String, CaseIterable, Codable {
     }
 
     /// Five colours built around `base`, and where the base sits among them. Custom has no arrangement.
-    ///
-    /// `vivid` runs from 0 to 1. At 1 a turned colour sits at the same place on the wheel as the
-    /// base, for its own hue: as strong and as bright as the wheel shows it. At 0 it is made as
-    /// light to the eye as the base instead, which is calmer but dulls hues that are only strong
-    /// when lighter or darker (a yellow as dark as a strong blue is olive).
-    func arrangement(around base: LabNode, vivid: Double = 1) -> (nodes: [LabNode], base: Int)? {
+    /// A turned colour sits at the same place on the wheel as the base, for its own hue: as strong
+    /// and as bright as the wheel shows it.
+    func arrangement(around base: LabNode) -> (nodes: [LabNode], base: Int)? {
         let b = LabNode(h: base.h, s: base.s, v: base.v)
-        func turn(_ degrees: Double) -> LabNode {
-            let n = b.turn(degrees)
-            guard vivid < 1 else { return n }
-            let even = b.oklch.l
-            return n.lit(even + vivid * (n.oklch.l - even))
-        }
+        func turn(_ degrees: Double) -> LabNode { b.turn(degrees) }
         switch self {
         case .custom: return nil
         case .analogous: return ([turn(-30), turn(-15), b, turn(15), turn(30)], 2)
@@ -265,8 +239,6 @@ struct LabState: Codable, Equatable {
     var rule = LabRule.analogous
     var nodes: [LabNode] = []
     var base = 0
-    /// 0 keeps every colour as light as the base; 1 lets each hue be as strong as the wheel shows it.
-    var vivid = 1.0
 
     /// Custom has no arrangement of its own, so it starts from the analogous one.
     init(rule: LabRule = .analogous, base: LabNode) {
@@ -280,7 +252,7 @@ struct LabState: Codable, Equatable {
 
     /// Rebuilds the colours from the base by the rule. Locked colours stay as they are.
     mutating func rearrange() {
-        guard nodes.indices.contains(base), let made = rule.arrangement(around: nodes[base], vivid: vivid) else { return }
+        guard nodes.indices.contains(base), let made = rule.arrangement(around: nodes[base]) else { return }
         let kept = nodes
         nodes = made.nodes
         nodes[made.base].locked = kept[base].locked
@@ -317,11 +289,6 @@ struct LabState: Codable, Equatable {
         guard nodes.indices.contains(i) else { return }
         nodes[i] = LabNode(h: nodes[i].h, s: nodes[i].s, v: v, locked: nodes[i].locked)
         if rule != .custom, i == base { rearrange() }
-    }
-
-    mutating func setVivid(_ amount: Double) {
-        vivid = min(max(amount, 0), 1)
-        rearrange()
     }
 
     mutating func makeBase(_ i: Int) {
@@ -373,32 +340,114 @@ struct LabState: Codable, Equatable {
     }
 }
 
-/// Steps back and forward through what the wheel has held.
-struct LabHistory {
-    private(set) var past: [LabState] = []
-    private(set) var future: [LabState] = []
+/// Steps back and forward through what a tool has held.
+struct History<State: Equatable> {
+    private(set) var past: [State] = []
+    private(set) var future: [State] = []
     private let most = 100
 
     var canUndo: Bool { !past.isEmpty }
     var canRedo: Bool { !future.isEmpty }
 
     /// Call with the state as it was before a change that has now happened.
-    mutating func record(_ before: LabState, now: LabState) {
+    mutating func record(_ before: State, now: State) {
         guard before != now else { return }
         past.append(before)
         if past.count > most { past.removeFirst() }
         future = []
     }
 
-    mutating func undo(from now: LabState) -> LabState? {
+    mutating func undo(from now: State) -> State? {
         guard let back = past.popLast() else { return nil }
         future.append(now)
         return back
     }
 
-    mutating func redo(from now: LabState) -> LabState? {
+    mutating func redo(from now: State) -> State? {
         guard let on = future.popLast() else { return nil }
         past.append(now)
         return on
     }
+}
+
+typealias LabHistory = History<LabState>
+
+// ---------- Contrast: scoring a pair, and finding the nearest shade that passes ----------
+
+/// A text colour on a background.
+struct ContrastPair: Codable, Equatable {
+    var ink: String
+    var paper: String
+
+    var ratio: Double { contrastRatio(ink, paper) }
+    var swapped: ContrastPair { ContrastPair(ink: paper, paper: ink) }
+
+    /// "4.4 : 1". Cut, not rounded, so a pair just short of a pass never reads as one.
+    static func text(_ ratio: Double) -> String { String(format: "%.1f : 1", (ratio * 10 + 1e-9).rounded(.down) / 10) }
+}
+
+/// What WCAG 2 asks of a pair, by what it is used for.
+enum ContrastUse: CaseIterable {
+    case largeText, smallText, graphics
+
+    var title: String {
+        switch self {
+        case .largeText: return "Large Text"
+        case .smallText: return "Small Text"
+        case .graphics: return "Graphics And Controls"
+        }
+    }
+    /// The ratio AA asks for.
+    var aa: Double { self == .smallText ? 4.5 : 3 }
+    /// The ratio AAA asks for; it sets none for graphics.
+    var aaa: Double? {
+        switch self {
+        case .largeText: return 4.5
+        case .smallText: return 7
+        case .graphics: return nil
+        }
+    }
+}
+
+/// The ratios a colour can be fixed to reach.
+enum ContrastTarget: Double, CaseIterable {
+    case graphics = 3, aa = 4.5, aaa = 7
+
+    var title: String {
+        switch self {
+        case .graphics: return "Large Text And Graphics  \u{00B7}  3 : 1"
+        case .aa: return "Small Text AA  \u{00B7}  4.5 : 1"
+        case .aaa: return "Small Text AAA  \u{00B7}  7 : 1"
+        }
+    }
+}
+
+/// The shade of `hex` closest to it that reaches `target` against `other`: the same hue, lighter
+/// or darker by as little as it takes, judged by eye (OKLCH lightness). nil when no shade can.
+func nearestShade(of hex: String, against other: String, reaching target: Double) -> String? {
+    guard let from = ColourValues(hex), ColourValues(other) != nil else { return nil }
+    if contrastRatio(from.hex, other) >= target { return from.hex }
+    let c = from.oklch
+    for step in 1...500 {
+        let d = Double(step) * 0.002
+        // Both ways at each step; whichever passes first is the nearest.
+        for l in [c.l - d, c.l + d] where l >= 0 && l <= 1 {
+            let shade = hexFrom(OKLCH(l: l, c: c.c, h: c.h))
+            if contrastRatio(shade, other) >= target { return shade }
+        }
+    }
+    return nil
+}
+
+/// The two colours of a palette that differ most, lighter one as the background.
+func strongestPair(in hexes: [String]) -> ContrastPair? {
+    var best: (pair: ContrastPair, ratio: Double)?
+    for (i, a) in hexes.enumerated() {
+        for b in hexes.dropFirst(i + 1) {
+            let r = contrastRatio(a, b)
+            guard r > (best?.ratio ?? 0), let x = ColourValues(a)?.luminance, let y = ColourValues(b)?.luminance else { continue }
+            best = (x < y ? ContrastPair(ink: a, paper: b) : ContrastPair(ink: b, paper: a), r)
+        }
+    }
+    return best?.pair
 }

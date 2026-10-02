@@ -70,16 +70,16 @@ final class TagBar: NSView, NSTokenFieldDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Starts an edit. `what` names the thing being tagged. `project` is the project it sits in:
-    /// its tags are offered alongside the global ones, and a new tag may be given to it. With
-    /// `anyProject`, every tag is offered and a new tag may go to any project.
-    func begin(_ what: String, tags: [String], in library: Library, project: UUID?, anyProject: Bool = false,
+    /// Starts an edit. `what` names the thing being tagged. `projects` are the projects it sits in:
+    /// their tags are offered alongside the global ones, and a new tag may be given to one of
+    /// them. A project tag from anywhere else is not offered, and would not be accepted.
+    func begin(_ what: String, tags: [String], in library: Library, projects: Set<UUID>,
                commit: @escaping ([String], [String: UUID]) -> Void) {
         title.stringValue = what
         field.objectValue = tags
         self.library = library
-        offered = anyProject ? library.allTags : library.tags(offeredIn: project)
-        scopes = anyProject ? library.orderedProjects : library.orderedProjects.filter { $0.id == project }
+        offered = library.allTags.filter { library.mayWear($0, in: projects) }
+        scopes = library.orderedProjects.filter { projects.contains($0.id) }
         chosen = [:]
         self.commit = commit
         open = true

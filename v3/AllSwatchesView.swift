@@ -630,7 +630,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         let what = hexes.count == 1 ? "Tags for \(colourName(first))" : "Tags for \(plural(hexes.count, "Swatch", "Swatches"))"
         tagging = true
         updateHeader()
-        tagBar.begin(what, tags: current, in: library.library, project: nil, anyProject: true) { [weak self] tags, scoped in
+        tagBar.begin(what, tags: current, in: library.library, projects: library.library.projects(holdingAll: hexes)) { [weak self] tags, scoped in
             self?.library.setTags(ofSwatches: hexes, tags, scoped: scoped)
         }
     }

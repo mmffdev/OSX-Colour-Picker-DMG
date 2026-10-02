@@ -84,6 +84,9 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         if let l = l, let r = r, (r.favouritePlacedAt ?? .distantPast) > (l.favouritePlacedAt ?? .distantPast) { starred = (r.favouritePosition, r.favouritePlacedAt) }
         var listed = (position: base.listPosition, at: base.listPlacedAt)
         if let l = l, let r = r, (r.listPlacedAt ?? .distantPast) > (l.listPlacedAt ?? .distantPast) { listed = (r.listPosition, r.listPlacedAt) }
+        // A Typography palette's pairings: the newer list whole, as with tags.
+        var styles = (list: base.styles, at: base.stylesChangedAt)
+        if let l = l, let r = r, (r.stylesChangedAt ?? .distantPast) > (l.stylesChangedAt ?? .distantPast) { styles = (r.styles, r.stylesChangedAt) }
         var order: [String] = [], dates: [String: Date] = [:]
         var names: [String: (name: String?, at: Date?)] = [:]   // the newer of the two names for each colour
         for e in (l?.entries ?? []) + (r?.entries ?? []) {
@@ -101,7 +104,8 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    projectID: placed.project, position: placed.position, placedAt: placed.at,
                                    tags: tags.list, tagsChangedAt: tags.at,
                                    favouritePosition: starred.position, favouritePlacedAt: starred.at,
-                                   listPosition: listed.position, listPlacedAt: listed.at))
+                                   listPosition: listed.position, listPlacedAt: listed.at,
+                                   styles: styles.list, stylesChangedAt: styles.at))
     }
 
     // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.

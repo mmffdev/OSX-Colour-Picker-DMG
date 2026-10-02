@@ -388,12 +388,117 @@ final class StripView: NSView {
     }
 }
 
+// ---------- Saving a tool's colours ----------
+
+/// A push button with a small symbol, as the tools' pages use.
+func toolButton(_ title: String, _ icon: String, _ tip: String, target: AnyObject, action: Selector) -> NSButton {
+    let b = NSButton(title: title.isEmpty ? "" : " " + title, target: target, action: action)
+    b.image = symbol(icon, tip, size: 12)
+    b.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
+    b.bezelStyle = .rounded
+    b.toolTip = tip
+    b.setAccessibilityLabel(tip)
+    return b
+}
+
+/// The foot of a tool's page: a name, then Add To Palette and Add To Project. Neither leaves the page.
+final class SaveBar: NSView, NSTextFieldDelegate {
+    /// What a save keeps, and what it is called when no name has been typed.
+    var colours: () -> [String] = { [] }
+    var defaultName: () -> String = { "" }
+    var onNameChanged: (() -> Void)?
+
+    private let library: LibraryController
+    private let name = NSTextField()
+    private var toPalette: NSButton!, toProject: NSButton!
+    override var isFlipped: Bool { true }
+
+    init(library: LibraryController) {
+        self.library = library
+        super.init(frame: .zero)
+        name.placeholderString = "Palette Name"
+        name.delegate = self
+        name.lineBreakMode = .byTruncatingTail
+        name.cell?.usesSingleLineMode = true
+        name.setAccessibilityLabel("Palette name")
+        toPalette = toolButton("Add To Palette", "plus.rectangle.on.rectangle", "Save These Colours To A Palette", target: self, action: #selector(paletteTapped(_:)))
+        toProject = toolButton("Add To Project", "folder.badge.plus", "Save These Colours As A New Palette In A Project", target: self, action: #selector(projectTapped(_:)))
+        for v in [name, toPalette, toProject] as [NSView] { addSubview(v) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    var chosenName: String {
+        let typed = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? defaultName() : typed
+    }
+
+    func refresh() { name.placeholderString = defaultName() }
+
+    override func layout() {
+        super.layout()
+        var x = bounds.width
+        for button in [toProject, toPalette] as [NSButton] {
+            button.sizeToFit()
+            x -= button.frame.width
+            button.frame.origin = NSPoint(x: x, y: (bounds.height - button.frame.height) / 2)
+            x -= 6
+        }
+        name.frame = NSRect(x: 0, y: (bounds.height - 22) / 2, width: max(80, min(260, x - 8)), height: 22)
+    }
+
+    @objc private func paletteTapped(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "New Palette", action: #selector(keepNew(_:)), keyEquivalent: "").target = self
+        let palettes = library.paletteOrder
+        if !palettes.isEmpty { menu.addItem(.separator()) }
+        for s in palettes {
+            let item = menu.addItem(withTitle: s.name, action: #selector(keepIn(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = s.id
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func projectTapped(_ sender: NSButton) {
+        let menu = NSMenu()
+        let projects = library.library.orderedProjects
+        if projects.isEmpty {
+            menu.addItem(withTitle: "No Projects Yet", action: nil, keyEquivalent: "").isEnabled = false
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
+        }
+        for p in projects {
+            let item = menu.addItem(withTitle: p.name, action: #selector(keepNew(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = p.id
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func keepNew(_ sender: NSMenuItem) {
+        library.keep(colours(), named: chosenName, in: sender.representedObject as? UUID)
+    }
+
+    @objc private func keepIn(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? UUID { library.add(colours(), to: id) }
+    }
+
+    func controlTextDidChange(_ obj: Notification) { onNameChanged?() }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertNewline(_:)) || selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        window?.makeFirstResponder(superview)
+        return true
+    }
+}
+
 // ---------- The page ----------
 
-/// Lays its subviews out by hand, top down, so the wheel and strip can trade places as the window changes shape.
-private final class LabPageView: NSView {
+/// Lays its subviews out by hand, top down, so the parts can trade places as the window changes shape.
+final class ToolPageView: NSView {
     var onLayout: ((NSRect) -> Void)?
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
     override func layout() {
         super.layout()
         onLayout?(bounds)
@@ -401,7 +506,7 @@ private final class LabPageView: NSView {
     override func viewDidMoveToWindow() { needsLayout = true }
 }
 
-final class LabViewController: NSViewController, NSTextFieldDelegate {
+final class LabViewController: NSViewController {
     private let library: LibraryController
     private(set) var state: LabState
     private var history = LabHistory()
@@ -415,46 +520,34 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
     private var rules: [RuleButton] = []
     private let dim = NSImageView(), bright = NSImageView()
     private let slider = NSSlider(value: 1, minValue: 0.08, maxValue: 1, target: nil, action: nil)
-    private let even = NSImageView(), strong = NSImageView()
-    private let vivid = NSSlider(value: 1, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let why = NSTextField(wrappingLabelWithString: "")
     private let strip = StripView()
-    private let name = NSTextField()
-    private var toPalette: NSButton!, toProject: NSButton!
+    private let saveBar: SaveBar
 
     private static let key = "labState"
 
     init(library: LibraryController) {
         self.library = library
+        saveBar = SaveBar(library: library)
         let saved = preferences.data(forKey: LabViewController.key).flatMap { try? JSONDecoder().decode(LabState.self, from: $0) }
         state = saved.flatMap { $0.nodes.isEmpty || !$0.nodes.indices.contains($0.base) ? nil : $0 }
             ?? LabState(rule: .analogous, base: LabNode(hex: "#2456F5") ?? LabNode(h: 260, s: 0.8, v: 1))
         super.init(nibName: nil, bundle: nil)
         selected = state.base
+        publish()
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let page = LabPageView(frame: NSRect(x: 0, y: 0, width: 700, height: 520))
+        let page = ToolPageView(frame: NSRect(x: 0, y: 0, width: 700, height: 520))
         page.onLayout = { [weak self] in self?.arrange(in: $0) }
         view = page
 
         heading.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
-        func button(_ title: String, _ icon: String, _ tip: String, _ action: Selector) -> NSButton {
-            let b = NSButton(title: title.isEmpty ? "" : " " + title, target: self, action: action)
-            b.image = symbol(icon, tip, size: 12)
-            b.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
-            b.bezelStyle = .rounded
-            b.toolTip = tip
-            b.setAccessibilityLabel(tip)
-            return b
-        }
-        undo = button("", "arrow.uturn.backward", "Undo", #selector(undoTapped))
-        redo = button("", "arrow.uturn.forward", "Redo", #selector(redoTapped))
-        add = button("", "plus", "Add A Colour", #selector(addTapped))
-        random = button("Random", "shuffle", "Roll New Colours; Locked Ones Stay", #selector(randomTapped))
-        toPalette = button("Add To Palette", "plus.rectangle.on.rectangle", "Save These Colours To A Palette", #selector(paletteTapped(_:)))
-        toProject = button("Add To Project", "folder.badge.plus", "Save These Colours As A New Palette In A Project", #selector(projectTapped(_:)))
+        undo = toolButton("", "arrow.uturn.backward", "Undo", target: self, action: #selector(undoTapped))
+        redo = toolButton("", "arrow.uturn.forward", "Redo", target: self, action: #selector(redoTapped))
+        add = toolButton("", "plus", "Add A Colour", target: self, action: #selector(addTapped))
+        random = toolButton("Random", "shuffle", "Roll New Colours; Locked Ones Stay", target: self, action: #selector(randomTapped))
 
         rules = LabRule.allCases.map { RuleButton(rule: $0, target: self, action: #selector(ruleTapped(_:))) }
 
@@ -469,29 +562,14 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         slider.toolTip = "Brightness"
         slider.setAccessibilityLabel("Brightness")
 
-        even.image = symbol("equal.circle", "Even", size: 12)
-        strong.image = symbol("sparkles", "Vivid", size: 12)
-        even.contentTintColor = .secondaryLabelColor
-        strong.contentTintColor = .secondaryLabelColor
-        even.toolTip = "Even: Every Colour As Light As The Base"
-        strong.toolTip = "Vivid: Every Colour As Strong As The Wheel Shows It"
-        vivid.target = self
-        vivid.action = #selector(vividSlid)
-        vivid.isContinuous = true
-        vivid.controlSize = .small
-        vivid.toolTip = "Even To Vivid: Hold Every Colour To The Base\u{2019}s Lightness, Or Let Each Be As Strong As The Wheel Shows It"
-        vivid.setAccessibilityLabel("Even to vivid")
-
         why.font = NSFont.systemFont(ofSize: 11.5)
         why.textColor = .secondaryLabelColor
         why.maximumNumberOfLines = 2
         why.lineBreakMode = .byTruncatingTail
 
-        name.placeholderString = "Palette Name"
-        name.delegate = self
-        name.lineBreakMode = .byTruncatingTail
-        name.cell?.usesSingleLineMode = true
-        name.setAccessibilityLabel("Palette name")
+        saveBar.colours = { [weak self] in self?.uniqueHexes ?? [] }
+        saveBar.defaultName = { [weak self] in self?.defaultName ?? "" }
+        saveBar.onNameChanged = { [weak self] in self?.publish() }
 
         wheel.onGrab = { [weak self] i in
             guard let self = self else { return }
@@ -512,7 +590,7 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         strip.onLock = { [weak self] i in self?.change { $0.toggleLock(i) } }
         strip.onDelete = { [weak self] i in self?.change { $0.remove(i) } }
 
-        for v in [heading, undo, redo, add, random, wheel, dim, slider, bright, even, vivid, strong, why, strip, name, toPalette, toProject] + rules as [NSView] {
+        for v in [heading, undo, redo, add, random, wheel, dim, slider, bright, why, strip, saveBar] + rules as [NSView] {
             page.addSubview(v)
         }
         refresh()
@@ -537,14 +615,7 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         }
 
         let foot = b.height - pad - bar
-        x = b.width - pad
-        for button in [toProject, toPalette] as [NSButton] {
-            button.sizeToFit()
-            x -= button.frame.width
-            button.frame.origin = NSPoint(x: x, y: foot + (bar - button.frame.height) / 2)
-            x -= 6
-        }
-        name.frame = NSRect(x: pad, y: foot + 3, width: max(80, min(260, x - pad - 8)), height: 22)
+        saveBar.frame = NSRect(x: pad, y: foot, width: w, height: bar)
 
         // The caption runs the full width under the working area, so it never squeezes the wheel.
         let whyHeight: CGFloat = 30
@@ -552,7 +623,7 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
 
         let top = head + bar + gap, bottom = why.frame.minY - 10
         let ruleSide: CGFloat = 30, ruleRow = CGFloat(rules.count) * ruleSide + CGFloat(rules.count - 1)
-        let controls = 10 + ruleSide + 8 + 20 + 6 + 20
+        let controls = 10 + ruleSide + 8 + 20
         let stacked = b.width < 600 && b.height >= 600
 
         let column: CGFloat, side: CGFloat, left: CGFloat
@@ -578,10 +649,6 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         dim.frame = NSRect(x: sx, y: y + 2, width: 16, height: 16)
         bright.frame = NSRect(x: sx + track - 16, y: y + 2, width: 16, height: 16)
         slider.frame = NSRect(x: sx + 22, y: y, width: track - 44, height: 20)
-        y += 26
-        even.frame = NSRect(x: sx, y: y + 2, width: 16, height: 16)
-        strong.frame = NSRect(x: sx + track - 16, y: y + 2, width: 16, height: 16)
-        vivid.frame = NSRect(x: sx + 22, y: y, width: track - 44, height: 20)
         y += 20
 
         strip.frame = stacked
@@ -592,6 +659,7 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
     // MARK: Showing and changing
 
     private func refresh() {
+        publish()
         guard isViewLoaded else { return }
         if !state.nodes.indices.contains(selected) || state.rule != .custom { selected = state.base }
         let target = state.nodes[selected]
@@ -600,9 +668,6 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         strip.show(state)
         for r in rules { r.chosen = r.rule == state.rule }
         if abs(slider.doubleValue - target.v) > 0.001 { slider.doubleValue = target.v }
-        if abs(vivid.doubleValue - state.vivid) > 0.001 { vivid.doubleValue = state.vivid }
-        // With no rule there are no companions to move.
-        vivid.isEnabled = state.rule != .custom
         slider.toolTip = state.rule == .custom ? "Brightness Of The Ringed Colour" : "Brightness Of The Base Colour"
 
         let text = NSMutableAttributedString(string: state.rule.title + "  ", attributes: [
@@ -612,11 +677,16 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         why.attributedStringValue = text
         why.toolTip = state.rule.why
 
-        name.placeholderString = defaultName
+        saveBar.refresh()
         undo.isEnabled = history.canUndo
         redo.isEnabled = history.canRedo
         add.isEnabled = state.nodes.count < LabState.most
-        library.labPalette = ExportPalette(name: chosenName, colours: uniqueHexes.map { ExportColour(name: colourName($0), hex: $0) })
+    }
+
+    /// Keeps the library's copy of the strip current, for export, sharing and the other tools.
+    private func publish() {
+        library.labPalette = ExportPalette(name: saveBar.chosenName.isEmpty ? defaultName : saveBar.chosenName,
+                                           colours: uniqueHexes.map { ExportColour(name: colourName($0), hex: $0) })
     }
 
     private func save() {
@@ -652,10 +722,6 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         return state.hexes.filter { seen.insert($0).inserted }
     }
     private var defaultName: String { "\(colourName(state.nodes[state.base].hex)) \u{2014} \(state.rule.title)" }
-    private var chosenName: String {
-        let typed = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return typed.isEmpty ? defaultName : typed
-    }
 
     // MARK: Actions
 
@@ -682,57 +748,5 @@ final class LabViewController: NSViewController, NSTextFieldDelegate {
         state.setBrightness(slider.doubleValue, of: selected)
         refresh()
         if NSApp.currentEvent?.type == .leftMouseUp { endGesture() }
-    }
-
-    @objc private func vividSlid() {
-        if gestureStart == nil { gestureStart = state }
-        state.setVivid(vivid.doubleValue)
-        refresh()
-        if NSApp.currentEvent?.type == .leftMouseUp { endGesture() }
-    }
-
-    @objc private func paletteTapped(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.addItem(withTitle: "New Palette", action: #selector(keepNew(_:)), keyEquivalent: "").target = self
-        let palettes = library.paletteOrder
-        if !palettes.isEmpty { menu.addItem(.separator()) }
-        for s in palettes {
-            let item = menu.addItem(withTitle: s.name, action: #selector(keepIn(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = s.id
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
-    }
-
-    @objc private func projectTapped(_ sender: NSButton) {
-        let menu = NSMenu()
-        let projects = library.library.orderedProjects
-        if projects.isEmpty {
-            menu.addItem(withTitle: "No Projects Yet", action: nil, keyEquivalent: "").isEnabled = false
-            menu.addItem(.separator())
-            menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
-        }
-        for p in projects {
-            let item = menu.addItem(withTitle: p.name, action: #selector(keepNew(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = p.id
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
-    }
-
-    @objc private func keepNew(_ sender: NSMenuItem) {
-        library.keep(uniqueHexes, named: chosenName, in: sender.representedObject as? UUID)
-    }
-
-    @objc private func keepIn(_ sender: NSMenuItem) {
-        if let id = sender.representedObject as? UUID { library.add(uniqueHexes, to: id) }
-    }
-
-    func controlTextDidChange(_ obj: Notification) { refresh() }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        guard selector == #selector(NSResponder.insertNewline(_:)) || selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
-        view.window?.makeFirstResponder(wheel)
-        return true
     }
 }

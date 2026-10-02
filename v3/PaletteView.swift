@@ -600,7 +600,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// The tag icon: the action bar gives way to the tag bar, on this palette's own tags.
     @objc private func tagsTapped() {
         guard let id = paletteID, let s = library.library.swatch(id) else { return }
-        startTagging("Palette tags", tags: s.tagList) { [weak self] tags, scoped in self?.library.setTags(ofPalette: id, tags, scoped: scoped) }
+        startTagging("Palette tags", tags: s.tagList, projects: Set([s.projectID].compactMap { $0 })) { [weak self] tags, scoped in self?.library.setTags(ofPalette: id, tags, scoped: scoped) }
     }
 
     /// The same bar, on one swatch or several. They all end up with the tags left in the bar.
@@ -608,14 +608,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         guard let first = hexes.first else { return }
         let current = library.library.colours.first { $0.hex == first }?.tags ?? []
         let what = hexes.count == 1 ? "Tags for \(colourName(first))" : "Tags for \(plural(hexes.count, "Swatch", "Swatches"))"
-        startTagging(what, tags: current) { [weak self] tags, scoped in self?.library.setTags(ofSwatches: hexes, tags, scoped: scoped) }
+        startTagging(what, tags: current, projects: library.library.projects(holdingAll: hexes)) { [weak self] tags, scoped in self?.library.setTags(ofSwatches: hexes, tags, scoped: scoped) }
     }
 
-    private func startTagging(_ what: String, tags: [String], commit: @escaping ([String], [String: UUID]) -> Void) {
-        let project = paletteID.flatMap { library.library.swatch($0)?.projectID }
+    private func startTagging(_ what: String, tags: [String], projects: Set<UUID>, commit: @escaping ([String], [String: UUID]) -> Void) {
         tagging = true
         updateHeader()
-        tagBar.begin(what, tags: tags, in: library.library, project: project, commit: commit)
+        tagBar.begin(what, tags: tags, in: library.library, projects: projects, commit: commit)
     }
 
     @objc private func wcagTapped() { Prefs.showContrast = wcag.state == .on }

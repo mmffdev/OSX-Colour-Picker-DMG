@@ -13,6 +13,8 @@ private extension NSToolbarItem.Identifier {
     static let settings = NSToolbarItem.Identifier("settings")
     static let sync = NSToolbarItem.Identifier("sync")
     static let search = NSToolbarItem.Identifier("search")
+    /// The search field itself, which takes over the toolbar while a search is under way.
+    static let searchField = NSToolbarItem.Identifier("searchField")
     static let lab = NSToolbarItem.Identifier("lab")
 }
 
@@ -21,6 +23,8 @@ final class ContentViewController: NSViewController {
     let palette: PaletteViewController
     let all: AllSwatchesViewController
     let lab: LabViewController
+    let contrast: ContrastViewController
+    let typography: TypographyViewController
     private let library: LibraryController
     private let status = caption("")
     private let host = NSView()
@@ -33,10 +37,14 @@ final class ContentViewController: NSViewController {
         palette = PaletteViewController(library: library)
         all = AllSwatchesViewController(library: library)
         lab = LabViewController(library: library)
+        contrast = ContrastViewController(library: library)
+        typography = TypographyViewController(library: library)
         super.init(nibName: nil, bundle: nil)
         addChild(palette)
         addChild(all)
         addChild(lab)
+        addChild(contrast)
+        addChild(typography)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -155,6 +163,29 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private var builderItem: NSSplitViewItem!
     private(set) var selection: Selection = .all
     private weak var pickItem: NSToolbarItem?
+    /// The toolbar's items as they were before the search field took their place; nil when not searching.
+    private var searchRestore: [NSToolbarItem.Identifier]?
+    private lazy var searchBox: NSSearchField = {
+        let field = NSSearchField()
+        field.placeholderString = "Name, hex or palette"
+        field.target = self
+        field.action = #selector(searchChanged(_:))
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.delegate = self
+        field.translatesAutoresizingMaskIntoConstraints = false
+        return field
+    }()
+    /// The search field's width: the toolbar's room beside the sidebar, kept up to date as the window changes.
+    private lazy var searchWidth: NSLayoutConstraint = searchBox.widthAnchor.constraint(equalToConstant: 320)
+
+    private func fitSearchBox() {
+        guard let window = window else { return }
+        let side = split.splitViewItems.first.map { $0.isCollapsed ? 0 : $0.viewController.view.frame.width } ?? 0
+        // Clear of the sidebar and its toggle on one side, and of the window's edge on the other.
+        searchWidth.constant = max(220, window.frame.width - max(side, 150) - 48)
+        searchWidth.isActive = true
+    }
 
     init(library: LibraryController) {
         self.library = library
@@ -231,6 +262,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         library.onCover = { [weak self] form, fills in
             if let form = form { self?.content.cover(with: form, fills: fills) } else { self?.content.uncover() }
         }
+        library.onOpenContrast = { [weak self] palette, style in
+            self?.show(.contrast)
+            self?.content.contrast.edit(style, in: palette)
+        }
         library.onOpenLab = { [weak self] hex in
             self?.show(.lab)
             self?.content.lab.open(with: hex)
@@ -269,12 +304,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case .tag(let t):
             content.show(content.all)
             content.all.setTag(t)
+        case .palette(let id) where library.library.swatch(id)?.isTypography == true:
+            // A Typography palette has a page of its own: its pairings as real examples.
+            content.show(content.typography)
+            content.typography.show(id)
         case .palette(let id):
             content.show(content.palette)
             content.palette.show(id)
             preferences.set(id.uuidString, forKey: "lastPalette")
         case .lab:
             content.show(content.lab)
+        case .contrast:
+            content.show(content.contrast)
+            content.contrast.reload()   // the library may have changed since it was last shown
         }
         sidebar.select(s)
         retitle()
@@ -292,6 +334,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             window?.title = "Tagged \(t)" + where_
         case .lab:
             window?.title = "cLab" + where_
+        case .contrast:
+            window?.title = "Contrast" + where_
         }
     }
 
@@ -316,6 +360,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     @objc func previousPalette() { step(-1) }
     @objc func showAll() { show(.all) }
     @objc func showLab() { show(.lab) }
+    @objc func showContrast() { show(.contrast) }
 
     private func setBuilder(open: Bool) {
         // Not animated: an animated split leaves the grid sized for a width part-way through.
@@ -330,7 +375,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         content.palette.relayout()
     }
 
-    func windowDidResize(_ notification: Notification) { relayout() }
+    func windowDidResize(_ notification: Notification) {
+        relayout()
+        if searchRestore != nil { fitSearchBox() }
+    }
     func windowDidEndLiveResize(_ notification: Notification) { relayout() }
 
     @objc func buildPalette() {
@@ -353,8 +401,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     }
 
     func rehearseSearch(_ text: String) {
-        content.palette.setSearch(text)
-        content.all.setSearch(text)
+        focusSearch()
+        searchBox.stringValue = text
+        searchChanged(searchBox)
     }
 
     // MARK: Keeping up
@@ -389,14 +438,51 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     @objc func exportDesignPack() { library.exportDesignPack(for: selection) }
     @objc func addShownToColourPanel() { library.addToColourPanel(library.exportPalettes(for: selection)) }
 
+    // MARK: Search
+    //
+    // Search rests as a magnifying glass. Pressing it (or ⌘F) clears the toolbar's own buttons and
+    // grows a search field across it; Esc on an empty field, or leaving it empty, puts them back.
+
     @objc func focusSearch() {
-        guard let item = window?.toolbar?.items.first(where: { $0.itemIdentifier == .search }) as? NSSearchToolbarItem else { return }
-        item.beginSearchInteraction()
+        guard let toolbar = window?.toolbar else { return }
+        if searchRestore == nil {
+            let lead = (toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator }).map { $0 + 1 } ?? 0
+            searchRestore = toolbar.items.dropFirst(lead).map { $0.itemIdentifier }
+            toolbar.autosavesConfiguration = false   // this is a passing state, not the user's arrangement
+            while toolbar.items.count > lead { toolbar.removeItem(at: lead) }
+            fitSearchBox()
+            toolbar.insertItem(withItemIdentifier: .searchField, at: lead)
+        }
+        window?.makeFirstResponder(searchBox)
+    }
+
+    private func endSearch() {
+        guard let toolbar = window?.toolbar, let items = searchRestore else { return }
+        searchRestore = nil
+        searchBox.stringValue = ""
+        searchChanged(searchBox)
+        if let at = toolbar.items.firstIndex(where: { $0.itemIdentifier == .searchField }) {
+            toolbar.removeItem(at: at)
+            for (offset, id) in items.enumerated() { toolbar.insertItem(withItemIdentifier: id, at: at + offset) }
+        }
+        toolbar.autosavesConfiguration = true
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
         content.palette.setSearch(sender.stringValue)
         content.all.setSearch(sender.stringValue)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard control === searchBox, selector == #selector(NSResponder.cancelOperation(_:)), searchBox.stringValue.isEmpty else { return false }
+        window?.makeFirstResponder(nil)   // Esc on an empty field closes it; on a full one it clears it first
+        endSearch()
+        return true
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        // Left empty, the field has nothing to show and folds away; with text in it, it stays as the reminder of the filter.
+        if (obj.object as? NSSearchField) === searchBox, searchBox.stringValue.isEmpty { DispatchQueue.main.async { [weak self] in self?.endSearch() } }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -471,14 +557,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             i.delegate = self
             return i
         case .search:
-            let i = NSSearchToolbarItem(itemIdentifier: id)
+            return item("Search", "magnifyingglass", "Search by name, hex or palette (\u{2318}F)", self, #selector(focusSearch))
+        case .searchField:
+            let i = NSToolbarItem(itemIdentifier: id)
             i.label = "Search"
-            i.paletteLabel = "Search"
-            i.searchField.placeholderString = "Name, hex or palette"
-            i.searchField.target = self
-            i.searchField.action = #selector(searchChanged(_:))
-            i.searchField.sendsSearchStringImmediately = true
-            i.searchField.sendsWholeSearchString = false
+            i.view = searchBox
             return i
         default:
             return nil
