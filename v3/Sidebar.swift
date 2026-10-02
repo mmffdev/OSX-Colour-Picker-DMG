@@ -9,6 +9,8 @@ final class SidebarNode: NSObject {
         case projects
         case project(UUID)
         case all
+        /// cLab, under All Swatches.
+        case lab
         case tag(String)
         /// The "Edit Tags…" row at the foot of the tag list.
         case editTags
@@ -267,7 +269,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     init(library: LibraryController) {
         self.library = library
         super.init(nibName: nil, bundle: nil)
-        libraryGroup.children = [SidebarNode(.all)]
+        libraryGroup.children = [SidebarNode(.all), SidebarNode(.lab)]
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -336,8 +338,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
             projects.append(node)
         }
-        loose.children = lib.palettes(in: nil).map { SidebarNode(.palette($0.id)) }
-        tags.children = lib.allTags.filter { lib.project(ofTag: $0) == nil }.map { SidebarNode(.tag($0)) } + [SidebarNode(.editTags)]
+        // The Palettes list holds every palette. One that lives in a project shows here as well as
+        // under its project (the same palette, not a copy). The list keeps an order of its own.
+        loose.children = lib.listedPalettes.map { SidebarNode(.palette($0.id)) }
+        // Every tag, global or not, for quick access; a project's own also sit in its bucket above.
+        tags.children = lib.allTags.map { SidebarNode(.tag($0)) } + [SidebarNode(.editTags)]
         projectsGroup.children = projects
         roots = [libraryGroup, favourites, projectsGroup, loose, tags]
 
@@ -371,7 +376,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private func stands(_ node: SidebarNode, for selection: Selection) -> Bool {
         switch (node.kind, selection) {
-        case (.all, .all): return true
+        case (.all, .all), (.lab, .lab): return true
         case (.palette(let a), .palette(let b)): return a == b
         case (.tag(let a), .tag(let b)): return a.lowercased() == b.lowercased()
         default: return false
@@ -415,6 +420,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let cell = o.makeView(withIdentifier: PaletteCell.identifier, owner: self) as? PaletteCell ?? {
                 let c = PaletteCell(frame: .zero); c.identifier = PaletteCell.identifier; return c }()
             cell.configure(s, isTarget: lib.activeSwatchID == id)
+            // In the Palettes list, a palette held in a project says which.
+            if (o.parent(forItem: item) as? SidebarNode)?.kind == .loose, let project = s.projectID.flatMap({ lib.project($0)?.name }) {
+                cell.toolTip = "In project \(project)" + (cell.toolTip.map { "  \u{00B7}  \($0)" } ?? "")
+            }
             cell.onRename = { [weak self] name in self?.library.rename(id, to: name) }
             cell.onStar = { [weak self] in self?.library.toggleFavourite(id) }
             cell.onGear = { [weak self] button in
@@ -462,7 +471,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
-        case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Palettes outside any project"
+        case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Every palette. Those in a project are listed under their project too"
         case .projectTags:
             cell.textField?.stringValue = "Tags"
             cell.imageView?.image = symbol("tag", "Project tags", size: 11)
@@ -481,6 +490,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.contentTintColor = .controlAccentColor
             cell.toolTip = nil
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(lib.colours.count)"
+        case .lab:
+            cell.textField?.stringValue = "cLab"
+            cell.imageView?.image = symbol(labSymbolName, "cLab", size: 12)
+            cell.imageView?.contentTintColor = .controlAccentColor
+            cell.toolTip = "The colour lab: build palettes on a colour wheel"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .tag(let t):
             cell.textField?.stringValue = t
             cell.imageView?.image = symbol(lib.info(forTag: t)?.colour == nil ? "tag" : "tag.fill", "Tag", size: 11)
@@ -530,6 +545,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch node.kind {
         case .palette(let id): selection = .palette(id)
         case .all: selection = .all
+        case .lab: selection = .lab
         case .tag(let t): selection = .tag(t)
         case .editTags:
             // Not a place to be: open the editor and put the highlight back where it was.
@@ -569,10 +585,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let (palette, project) = dragged(info)
         let target = item as? SidebarNode
         if palette != nil {
-            // Palettes land in a project or in the loose list; dropping on a palette row means beside it.
-            if let t = target, t.projectID != nil || t.kind == .loose { return .move }
-            if let t = target, t.paletteID != nil, let parent = o.parent(forItem: t) as? SidebarNode,
-               parent.projectID != nil || parent.kind == .loose {
+            // Palettes land in a project, or are put in order within Favourites or the Palettes list;
+            // dropping on a palette row means beside it.
+            func takes(_ place: SidebarNode) -> Bool {
+                if place.projectID != nil || place.kind == .loose { return true }
+                // Favourites is only arranged by dragging; the star decides what is in it.
+                return place.kind == .favourites && place.children.contains { $0.paletteID == palette }
+            }
+            if let t = target, takes(t) { return .move }
+            if let t = target, t.paletteID != nil, let parent = o.parent(forItem: t) as? SidebarNode, takes(parent) {
                 o.setDropItem(parent, dropChildIndex: parent.children.firstIndex { $0 === t } ?? 0)
                 return .move
             }
@@ -593,9 +614,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ o: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
         let (palette, project) = dragged(info)
         let target = item as? SidebarNode
-        if let id = palette, let t = target {
-            let destination = t.projectID
-            guard destination != nil || t.kind == .loose else { return false }
+        if let id = palette, let t = target, t.kind == .favourites || t.kind == .loose {
+            // Each of these lists has its own order; arranging one leaves projects and the other alone.
+            var ids = t.children.compactMap { $0.paletteID }
+            guard let from = ids.firstIndex(of: id) else { return false }
+            var to = index < 0 ? ids.count : min(index, ids.count)
+            ids.remove(at: from)
+            if from < to { to -= 1 }
+            ids.insert(id, at: min(to, ids.count))
+            if t.kind == .favourites { library.placeFavourites(ids) } else { library.placeInList(ids) }
+            return true
+        }
+        if let id = palette, let t = target, let destination = t.projectID {
             // Palettes come first in a project; its tag bucket, when it has one, is always last.
             let palettes = t.children.filter { $0.paletteID != nil }.count
             var at = index < 0 ? palettes : min(index, palettes)

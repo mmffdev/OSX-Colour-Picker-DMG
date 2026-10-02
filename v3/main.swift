@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
-    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
+    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
     private func rehearse(_ main: MainWindowController) {
         let env = ProcessInfo.processInfo.environment
         guard env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_SHOW"] else { return }
@@ -88,6 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if arg.hasPrefix("bar") { main.rehearseTagBar(typing: String(arg.dropFirst(4))) } else { self.library.showTagEditor() }
             case "labels":
                 main.rehearseLabels()
+            case "lab":
+                if arg.isEmpty { main.showLab() } else { self.library.onOpenLab?(arg) }
             case "project":
                 if arg == "templates" { self.library.manageProjectTemplates() } else { self.library.newProject() }
             default: break
@@ -154,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu("View") { m in
             add(m, "All Swatches", #selector(MainWindowController.showAll), "0", main)
+            add(m, "cLab", #selector(MainWindowController.showLab), "l", main)
             add(m, "Next Palette", #selector(MainWindowController.nextPalette), "]", main)
             add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)
             m.addItem(.separator())

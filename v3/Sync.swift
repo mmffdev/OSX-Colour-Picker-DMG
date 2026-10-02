@@ -79,6 +79,11 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         if let p = placed.project, !out.projects.contains(where: { $0.id == p }) { placed.project = nil } // its project is gone
         var tags = (list: base.tags, at: base.tagsChangedAt)
         if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = (r.tags, r.tagsChangedAt) }
+        // Its place under Favourites and in the Palettes list: each is its own arrangement, newer wins.
+        var starred = (position: base.favouritePosition, at: base.favouritePlacedAt)
+        if let l = l, let r = r, (r.favouritePlacedAt ?? .distantPast) > (l.favouritePlacedAt ?? .distantPast) { starred = (r.favouritePosition, r.favouritePlacedAt) }
+        var listed = (position: base.listPosition, at: base.listPlacedAt)
+        if let l = l, let r = r, (r.listPlacedAt ?? .distantPast) > (l.listPlacedAt ?? .distantPast) { listed = (r.listPosition, r.listPlacedAt) }
         var order: [String] = [], dates: [String: Date] = [:]
         var names: [String: (name: String?, at: Date?)] = [:]   // the newer of the two names for each colour
         for e in (l?.entries ?? []) + (r?.entries ?? []) {
@@ -94,7 +99,9 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    favouriteChangedAt: favouriteChanged,
                                    isCustom: l?.isCustom ?? r?.isCustom,
                                    projectID: placed.project, position: placed.position, placedAt: placed.at,
-                                   tags: tags.list, tagsChangedAt: tags.at))
+                                   tags: tags.list, tagsChangedAt: tags.at,
+                                   favouritePosition: starred.position, favouritePlacedAt: starred.at,
+                                   listPosition: listed.position, listPlacedAt: listed.at))
     }
 
     // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.

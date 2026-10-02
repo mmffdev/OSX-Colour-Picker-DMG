@@ -13,12 +13,14 @@ private extension NSToolbarItem.Identifier {
     static let settings = NSToolbarItem.Identifier("settings")
     static let sync = NSToolbarItem.Identifier("sync")
     static let search = NSToolbarItem.Identifier("search")
+    static let lab = NSToolbarItem.Identifier("lab")
 }
 
 /// The middle pane: whichever page is showing, with the status bar beneath it.
 final class ContentViewController: NSViewController {
     let palette: PaletteViewController
     let all: AllSwatchesViewController
+    let lab: LabViewController
     private let library: LibraryController
     private let status = caption("")
     private let host = NSView()
@@ -30,9 +32,11 @@ final class ContentViewController: NSViewController {
         self.library = library
         palette = PaletteViewController(library: library)
         all = AllSwatchesViewController(library: library)
+        lab = LabViewController(library: library)
         super.init(nibName: nil, bundle: nil)
         addChild(palette)
         addChild(all)
+        addChild(lab)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -227,11 +231,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         library.onCover = { [weak self] form, fills in
             if let form = form { self?.content.cover(with: form, fills: fills) } else { self?.content.uncover() }
         }
+        library.onOpenLab = { [weak self] hex in
+            self?.show(.lab)
+            self?.content.lab.open(with: hex)
+        }
         library.onReveal = { [weak self] hex in
             guard let self = self else { return }
-            // A pick lands in the target palette; follow it there, unless the user is looking at everything.
-            if let id = self.library.library.activeSwatchID, self.selection != .all { self.show(.palette(id)) }
-            if case .palette = self.selection { self.content.palette.reveal(hex) } else { self.content.all.reveal(hex) }
+            // A pick lands in the target palette, but the page stays where it is, so sampling can
+            // carry on from whatever is on screen. The new swatch is shown only if it is on this page.
+            switch self.selection {
+            case .palette(let id): if id == self.library.library.activeSwatchID { self.content.palette.reveal(hex) }
+            default: self.content.all.reveal(hex)
+            }
         }
 
         let nc = NotificationCenter.default
@@ -262,6 +273,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             content.show(content.palette)
             content.palette.show(id)
             preferences.set(id.uuidString, forKey: "lastPalette")
+        case .lab:
+            content.show(content.lab)
         }
         sidebar.select(s)
         retitle()
@@ -277,6 +290,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             window?.title = (library.library.swatch(id)?.name ?? "Palette") + where_
         case .tag(let t):
             window?.title = "Tagged \(t)" + where_
+        case .lab:
+            window?.title = "cLab" + where_
         }
     }
 
@@ -300,6 +315,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     @objc func nextPalette() { step(1) }
     @objc func previousPalette() { step(-1) }
     @objc func showAll() { show(.all) }
+    @objc func showLab() { show(.lab) }
 
     private func setBuilder(open: Bool) {
         // Not animated: an animated split leaves the grid sized for a width part-way through.
@@ -402,11 +418,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .flexibleSpace, .share, .settings, .search]
+        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .flexibleSpace, .share, .settings, .search]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .build, .fromImage, .paste, .export, .share,
+        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share,
          .sync, .settings, .search, .flexibleSpace, .space]
     }
 
@@ -431,6 +447,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case .newPalette:
             return item("New Palette", "plus.rectangle.on.rectangle", "Start an empty palette and send picks to it (\u{2318}N)",
                         library, #selector(LibraryController.newPalette))
+        case .lab:
+            return item("cLab", labSymbolName, "Open cLab, the colour wheel (\u{2318}L)", self, #selector(showLab))
         case .build:
             return item("Build Palette", "rectangle.stack.badge.plus", "Choose swatches from the library to make a palette",
                         self, #selector(buildPalette))

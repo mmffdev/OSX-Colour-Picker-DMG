@@ -19,6 +19,8 @@ enum Selection: Equatable {
     case palette(UUID)
     /// All Swatches, showing only what carries the tag.
     case tag(String)
+    /// cLab: the colour wheel and its result strip.
+    case lab
 }
 
 final class LibraryController: NSObject {
@@ -33,6 +35,10 @@ final class LibraryController: NSObject {
     var onReveal: ((String) -> Void)?
     /// Lays a form over the page (nil takes it away), filling its width or in a centred column; set by the window.
     var onCover: ((NSViewController?, _ fills: Bool) -> Void)?
+    /// Opens cLab with this colour as the base; set by the window.
+    var onOpenLab: ((String) -> Void)?
+    /// What cLab's strip holds, kept up to date by cLab so it can be exported and shared like a palette.
+    var labPalette: ExportPalette?
 
     private(set) var picking = false
     private(set) var syncStatus = "Not synced yet."
@@ -50,7 +56,7 @@ final class LibraryController: NSObject {
 
     // MARK: Reading
 
-    var favourites: [Swatch] { paletteOrder.filter { $0.favourite } }
+    var favourites: [Swatch] { library.orderedFavourites }
     /// Every palette once, in sidebar order: project by project, then the loose ones.
     var paletteOrder: [Swatch] {
         library.orderedProjects.flatMap { library.palettes(in: $0.id) } + library.palettes(in: nil)
@@ -290,6 +296,8 @@ final class LibraryController: NSObject {
     }
 
     func placeProjects(_ ids: [UUID]) { apply { $0.placeProjects(ids) } }
+    func placeFavourites(_ ids: [UUID]) { apply { $0.placeFavourites(ids) } }
+    func placeInList(_ ids: [UUID]) { apply { $0.placeInList(ids) } }
 
     // MARK: Tags
 
@@ -490,6 +498,7 @@ final class LibraryController: NSObject {
         case .tag(let t):
             let hexes = library.catalogueHexes(by: .colour).filter { library.hexes(tagged: t).contains($0) }
             return [ExportPalette(name: "Tagged \(t)", colours: hexes.map { ExportColour(name: colourName($0), hex: $0) })]
+        case .lab: return labPalette.map { [$0] } ?? []
         }
     }
 
@@ -506,7 +515,7 @@ final class LibraryController: NSObject {
         case .palette(let id):
             guard let s = library.swatch(id) else { return }
             pack = library.designPack(named: s.name, palettes: [id], owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)
-        case .all, .tag:
+        case .all, .tag, .lab:
             pack = library.designPack(named: catalogue == Catalogues.mainName ? "Colour Library" : catalogue,
                                       owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)
         }

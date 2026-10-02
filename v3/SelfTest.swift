@@ -190,6 +190,10 @@ func runSelfTest() -> Never {
     runProjectTests(check: check)
     runColourSpaceTests(check: check)
     runTagTests(check: check)
+    runNameTests(check: check)
+    runSwatchNameTests(check: check)
+    runLabTests(check: check)
+    runOrderTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
     exit(failed == 0 ? 0 : 1)
@@ -883,4 +887,210 @@ func runTagTests(check: (Bool, String) -> Void) {
     var plain = Library()
     plain.addPick("#333333", at: t)
     check(!String(data: try! JSONEncoder.library.encode(plain), encoding: .utf8)!.contains("\"tags\" : ["), "a library with no tag records saves as it always did")
+}
+
+// ---------- cLab: the perceptual engine, the wheel and its rules ----------
+
+func runLabTests(check: (Bool, String) -> Void) {
+    print("perceptual colour engine")
+    let samples = ["#FFFFFF", "#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#4F8093", "#808080", "#10288C", "#F2E9D8"]
+    check(samples.allSatisfy { hexFrom(ColourValues($0)!.oklch) == $0 }, "a colour survives the trip into OKLCH and back unchanged")
+    let white = ColourValues("#FFFFFF")!.oklch, red = ColourValues("#FF0000")!.oklch
+    check(abs(white.l - 1) < 0.001 && white.c < 0.001, "white is lightness 1 with no chroma")
+    check(abs(red.l - 0.628) < 0.002 && abs(red.c - 0.2577) < 0.002 && abs(red.h - 29.23) < 0.1,
+          "sRGB red is the published OKLCH value: \(red)")
+    let tooStrong = OKLCH(l: 0.7, c: 0.39, h: 145)
+    let fitted = ColourValues(hexFrom(tooStrong))!.oklch
+    check(!displayable(tooStrong) && abs(fitted.h - 145) < 1.5 && abs(fitted.l - 0.7) < 0.01 && fitted.c < 0.39,
+          "a colour too strong for the screen keeps its hue and lightness and loses chroma: \(fitted)")
+    check(maxChroma(l: 0, h: 20) == 0 && maxChroma(l: 1, h: 20) == 0 && maxChroma(l: 0.6, h: 30) > 0.15,
+          "black and white have no room for chroma; a mid red has plenty")
+
+    print("wheel positions")
+    func near(_ a: String, _ b: String) -> Bool {
+        guard let x = ColourValues(a), let y = ColourValues(b) else { return false }
+        return abs(x.r - y.r) <= 1 && abs(x.g - y.g) <= 1 && abs(x.b - y.b) <= 1
+    }
+    let moved = samples.filter { !near(LabNode(hex: $0)!.hex, $0) }.map { "\($0) became \(LabNode(hex: $0)!.hex)" }
+    check(moved.isEmpty, "a colour placed on the wheel reads back as itself \(moved)")
+    let grey = LabNode(hex: "#808080")!, vivid = LabNode(hex: "#FF0000")!
+    check(grey.s < 0.01 && vivid.s > 0.99, "grey sits at the centre and a pure primary on the rim")
+    let p = LabNode(h: 90, s: 0.5, v: 0.6).point, back = LabNode.polar(x: p.x, y: p.y)
+    check(abs(p.x) < 1e-9 && abs(p.y - 0.5) < 1e-9 && abs(back.h - 90) < 1e-6 && abs(back.s - 0.5) < 1e-9,
+          "hue is the angle and strength the distance from the centre")
+    check(LabNode.polar(x: 3, y: 0).s == 1, "a drag beyond the rim stays on it")
+
+    print("harmony rules")
+    let base = LabNode(hex: "#10288C")!
+    func hues(_ r: LabRule) -> [Int] { r.arrangement(around: base)!.nodes.map { Int((($0.h - base.h + 360).truncatingRemainder(dividingBy: 360)).rounded()) % 360 } }
+    check(LabRule.allCases.filter { $0 != .custom }.allSatisfy { r in
+        let a = r.arrangement(around: base)!
+        return a.nodes.count == 5 && near(a.nodes[a.base].hex, "#10288C")
+    }, "every rule gives five colours and keeps the base as it was")
+    check(LabRule.custom.arrangement(around: base) == nil, "custom has no arrangement")
+    check(hues(.analogous) == [330, 345, 0, 15, 30], "analogous: neighbours 15 and 30 degrees either side")
+    check(hues(.complementary).prefix(2) == [0, 180], "complementary: the opposite hue")
+    check(hues(.splitComplementary).prefix(3) == [0, 150, 210], "split complementary: either side of the opposite")
+    check(hues(.triad).prefix(3) == [0, 120, 240], "triad: thirds of a turn")
+    check(hues(.square).prefix(4) == [0, 90, 180, 270], "square: quarter turns")
+    check(hues(.compound).prefix(4) == [0, 30, 165, 195], "compound: a neighbour and the pair round the opposite")
+    check(Set(hues(.shades)) == [0] && Set(hues(.monochromatic)) == [0], "shades and monochromatic stay on one hue")
+    let square = LabRule.square.arrangement(around: LabNode(h: 30, s: 0.7, v: 0.8), vivid: 0)!.nodes.prefix(4)
+    let lightness = square.compactMap { ColourValues($0.hex)?.oklch.l }
+    check(lightness.max()! - lightness.min()! < 0.02, "at even, turning the hue keeps a colour as light as it was: \(lightness)")
+    check(LabNode(h: 0, s: 1, v: 1).hex == "#FF0000" && LabNode(h: 120, s: 1, v: 1).hex == "#FFFF00" && LabNode(hex: "#0000FF")!.h > 270
+          && LabNode(hex: "#0000FF")!.h < 280 && LabNode(h: 200, s: 0, v: 1).hex == "#FFFFFF",
+          "the artists\u{2019} wheel: red, then yellow a third of the way round, blue past two thirds, white at the centre")
+    func opposite(_ hex: String) -> ColourGroup { colourGroup(LabNode(hex: hex)!.turn(180).hex) }
+    check(opposite("#FF0000") == .greens && opposite("#FFFF00") == .purples && [.oranges, .yellows].contains(opposite("#0000FF")),
+          "opposites are the painters\u{2019} pairs: red and green, yellow and violet, blue and orange")
+    check((0..<360).allSatisfy { abs(wheelAngle(ofHue: screenHue(atWheel: Double($0))) - Double($0)) < 1e-9 },
+          "wheel angle and screen hue convert back and forth exactly")
+    check(LabNode(h: 50, s: 0.8, v: 0).hex == "#000000", "brightness runs down to black")
+    func chroma(_ nodes: [LabNode]) -> Double { nodes.compactMap { ColourValues($0.hex)?.oklch.c }.reduce(0, +) }
+    let strongBlue = LabNode(hex: "#0000FF")!
+    let even = LabRule.splitComplementary.arrangement(around: strongBlue, vivid: 0)!.nodes
+    let bold = LabRule.splitComplementary.arrangement(around: strongBlue, vivid: 1)!.nodes
+    check(bold[1].s == 1 && bold[1].v == 1 && bold[0] == even[0],
+          "at full vivid a base on the rim gets companions on the rim, and the base is untouched")
+    check(chroma(Array(bold.prefix(3))) > chroma(Array(even.prefix(3))) * 1.3,
+          "vivid companions of a strong blue are far more colourful than equally dark ones: \(bold.prefix(3).map { $0.hex }) against \(even.prefix(3).map { $0.hex })")
+    let shades = LabRule.shades.arrangement(around: LabNode(h: 264, s: 0.9, v: 0.6))!.nodes
+    check(Set(shades.map { $0.hex }).count == 5 && Set(shades.map { $0.s }).count == 1 && shades.map({ $0.v }) == [0.6, 1.0, 0.82, 0.46, 0.28],
+          "shades are one colour at five brightnesses, the base among them")
+
+    print("the wheel in use")
+    var state = LabState(rule: .triad, base: base)
+    check(state.nodes.count == 5 && state.base == 0 && near(state.hexes[0], "#10288C"), "a new wheel is arranged by its rule")
+    state.move(0, h: base.h + 40, s: 0.5)
+    check(abs(state.nodes[1].h - LabNode(h: base.h + 160, s: 0, v: 0).h) < 1e-6 && abs(state.nodes[1].s - 0.5) < 1e-9,
+          "dragging the base carries the rest round with it")
+    let before = state.nodes[0].h
+    state.move(1, h: state.nodes[1].h + 10, s: state.nodes[1].s)
+    check(abs(state.nodes[0].h - LabNode(h: before + 10, s: 0, v: 0).h) < 1e-6, "dragging any other colour turns the whole arrangement")
+    state.toggleLock(2)
+    let held = state.nodes[2]
+    state.move(0, h: 200, s: 0.9)
+    check(state.nodes[2] == held, "a locked colour stays put while the others move")
+    var seed = 0.0
+    state.randomise { seed += 0.137; return seed.truncatingRemainder(dividingBy: 1) }
+    check(state.nodes[2] == held && state.rule == .triad, "a locked colour survives a random roll")
+    state.setRule(.custom)
+    let others = state.nodes
+    state.move(4, h: 10, s: 0.3)
+    check(state.nodes.prefix(4) == others.prefix(4) && abs(state.nodes[4].h - 10) < 1e-9, "under custom a colour moves alone")
+    state.remove(0)
+    check(state.nodes.count == 4 && state.base == 0, "removing the base hands the role to the first colour")
+    state.add()
+    check(state.nodes.count == 5 && state.rule == .custom, "a colour can be added back")
+    for _ in 0..<10 { state.add() }
+    check(state.nodes.count == LabState.most, "the strip stops at \(LabState.most) colours")
+    state.makeBase(3)
+    check(state.base == 3, "any colour can be made the base")
+    var dial = LabState(rule: .triad, base: base)
+    dial.setVivid(0)
+    let calm = dial.nodes[1].oklch.l
+    dial.setVivid(1)
+    check(abs(calm - base.oklch.l) < 1e-9 && dial.nodes[1].oklch.l != calm && dial.nodes[0] == base && dial.nodes[1].s == base.s && dial.nodes[1].v == base.v,
+          "the vivid control moves the companions between the base\u{2019}s lightness and their own place on the wheel, and leaves the base alone")
+    state.setRule(.square)
+    check(state.nodes.count == 5 && state.base == 0, "choosing a rule rebuilds five colours round the base")
+    let saved = try? JSONDecoder().decode(LabState.self, from: JSONEncoder().encode(state))
+    check(saved == state, "the wheel survives being saved and read back")
+
+    print("undo and redo")
+    var history = LabHistory()
+    let a = LabState(rule: .triad, base: base), b = LabState(rule: .square, base: base)
+    history.record(a, now: a)
+    check(!history.canUndo, "a change that changed nothing is not remembered")
+    history.record(a, now: b)
+    let undone = history.undo(from: b)
+    check(undone == a && history.canRedo && !history.canUndo, "undo goes back one step")
+    check(history.redo(from: a) == b && history.canUndo && !history.canRedo, "redo comes forward again")
+    history.record(b, now: a)
+    check(!history.canRedo, "a new change clears what could be redone")
+}
+
+func runNameTests(check: (Bool, String) -> Void) {
+    print("colour names")
+    check(colourName("#000000") == "Black" && colourName("#FFFFFF") == "White" && colourName("#FF0000") == "Red"
+          && colourName("#0000FF") == "Blue" && colourName("#FFFF00") == "Yellow",
+          "the plain colours are called what they are")
+    check(colourName("#152229") != "Black" && colourName("#390015") != "Black" && colourName("#152229") != colourName("#390015"),
+          "a dark blue-grey and a dark maroon are not both called Black: \(colourName("#152229")), \(colourName("#390015"))")
+    check(Set(["#434C6A", "#283855", "#334949"].map(colourName)).count == 3, "different dark slates get different names")
+    check(colourName("#2F4F4F") == "Dark Slate Grey" && colourName("#FA8072") == "Salmon", "a colour that is exactly a web colour keeps its web name")
+    check(allNamedColours.count > 1600 && allNamedColours.allSatisfy { normaliseHex($0.hex) == $0.hex && !$0.name.isEmpty && !$0.name.contains("Gray") },
+          "the name table is large, valid, and spelt the British way")
+}
+
+func runSwatchNameTests(check: (Bool, String) -> Void) {
+    print("a colour's own name in a palette")
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    var lib = Library()
+    lib.addPick("#F55805", at: t)
+    let brand = lib.createSwatch(named: "Brand", hexes: ["#F55805"], at: t)
+    let web = lib.createSwatch(named: "Web", hexes: ["#F55805"], at: t)
+    let standard = colourName("#F55805")
+    lib.setName("  Brand Orange ", of: "#F55805", in: brand, at: t.addingTimeInterval(1))
+    check(lib.name(of: "#F55805", in: brand) == "Brand Orange" && lib.name(of: "#F55805", in: web) == standard && lib.name(of: "#F55805", in: nil) == standard,
+          "a colour renamed in one palette keeps its standard name everywhere else")
+    check(lib.exportPalette(brand, by: .oldest)?.colours.first?.name == "Brand Orange" && lib.exportPalette(web, by: .oldest)?.colours.first?.name == standard,
+          "a palette exports its colours under the names it gives them")
+    var other = lib
+    other.setName("Sunset", of: "#F55805", in: brand, at: t.addingTimeInterval(5))
+    check(mergeLibraries(local: lib, remote: other).name(of: "#F55805", in: brand) == "Sunset"
+          && mergeLibraries(local: other, remote: lib).name(of: "#F55805", in: brand) == "Sunset", "the newer name wins a sync")
+    lib.setName("", of: "#F55805", in: brand, at: t.addingTimeInterval(10))
+    check(lib.customName(of: "#F55805", in: brand) == nil && lib.name(of: "#F55805", in: brand) == standard, "a blank name puts the standard name back")
+    check(mergeLibraries(local: lib, remote: other).customName(of: "#F55805", in: brand) == nil, "resetting a name is kept by a sync")
+    lib.setName(standard, of: "#F55805", in: web, at: t.addingTimeInterval(11))
+    check(lib.customName(of: "#F55805", in: web) == nil, "typing the standard name is not a rename")
+    var plain = Library()
+    plain.addPick("#111111", at: t)
+    plain.createSwatch(named: "P", hexes: ["#111111"], at: t)
+    let saved = String(data: try! JSONEncoder.library.encode(plain), encoding: .utf8)!
+    check(saved.components(separatedBy: "\"name\"").count == 2 && !saved.contains("nameChangedAt"),
+          "a palette whose colours were never renamed saves as it always did")
+}
+
+// ---------- One order per place: each project, Favourites and the Palettes list ----------
+
+func runOrderTests(check: (Bool, String) -> Void) {
+    print("an order for each place")
+    func at(_ n: Double) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + n) }
+    var lib = Library()
+    let a = lib.createSwatch(named: "A", hexes: ["#111111"], at: at(1))
+    let b = lib.createSwatch(named: "B", hexes: ["#222222"], at: at(2))
+    let c = lib.createSwatch(named: "C", hexes: ["#333333"], at: at(3))
+    let project = lib.createProject(named: "Client", at: at(4))
+    for id in [a, b, c] { lib.move(id, to: project, index: Int.max, at: at(5)); lib.setFavourite(id, true, at: at(6)) }
+    func names(_ list: [Swatch]) -> String { list.map { $0.name }.joined() }
+    check(names(lib.palettes(in: project)) == "ABC" && names(lib.orderedFavourites) == "ABC" && names(lib.listedPalettes) == "ABC",
+          "before anything is arranged, Favourites and the Palettes list follow the project")
+
+    lib.placeFavourites([c, a, b], at: at(10))
+    lib.placeInList([b, c, a], at: at(11))
+    check(names(lib.orderedFavourites) == "CAB" && names(lib.listedPalettes) == "BCA" && names(lib.palettes(in: project)) == "ABC",
+          "Favourites and the Palettes list are each arranged without touching the project")
+    lib.move(c, to: project, index: 0, at: at(12))
+    check(names(lib.palettes(in: project)) == "CAB" && names(lib.orderedFavourites) == "CAB" && names(lib.listedPalettes) == "BCA",
+          "reordering inside the project leaves Favourites and the Palettes list as they were")
+    lib.move(a, to: project, index: 0, at: at(13))
+    check(names(lib.palettes(in: project)) == "ACB" && names(lib.orderedFavourites) == "CAB", "and again: the project moves, Favourites does not")
+
+    let d = lib.createSwatch(named: "D", hexes: ["#444444"], at: at(14))
+    lib.setFavourite(d, true, at: at(15))
+    check(names(lib.listedPalettes).hasPrefix("D") && names(lib.orderedFavourites).hasPrefix("D"),
+          "a new palette goes to the top of a list that has been arranged")
+    let saved = try? JSONDecoder().decode(Library.self, from: JSONEncoder().encode(lib))
+    check(saved.map { names($0.orderedFavourites) } == names(lib.orderedFavourites) && saved.map { names($0.listedPalettes) } == names(lib.listedPalettes),
+          "both orders survive being saved and read back")
+
+    var other = lib
+    other.placeFavourites([b, a, c, d], at: at(20))
+    lib.placeInList([a, b, c, d], at: at(21))
+    let merged = mergeLibraries(local: lib, remote: other)
+    check(names(merged.orderedFavourites) == "BACD" && names(merged.listedPalettes) == "ABCD" && names(merged.palettes(in: project)) == "ACB",
+          "a sync keeps the newer arrangement of each place separately")
 }

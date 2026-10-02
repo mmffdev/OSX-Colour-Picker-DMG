@@ -55,6 +55,13 @@ struct Swatch: Codable, Equatable {
     var placedAt: Date?
     var tags: [String]?
     var tagsChangedAt: Date?
+    /// Order under Favourites, and order in the Palettes list. Each place a palette shows keeps an
+    /// order of its own, so arranging one never disturbs another. nil = not arranged there yet.
+    /// The dates let a sync keep the newer arrangement.
+    var favouritePosition: Int? = nil
+    var favouritePlacedAt: Date? = nil
+    var listPosition: Int? = nil
+    var listPlacedAt: Date? = nil
 
     var favourite: Bool { isFavourite ?? false }
     var custom: Bool { isCustom ?? false }
@@ -291,6 +298,38 @@ extension Library {
         swatches.filter { $0.projectID == projectID }.sorted { a, b in
             let (x, y) = (a.position ?? Int.max, b.position ?? Int.max)
             return x != y ? x < y : a.createdAt > b.createdAt
+        }
+    }
+
+    /// Every palette once: project by project, then the ones outside any project.
+    var projectOrder: [Swatch] { orderedProjects.flatMap { palettes(in: $0.id) } + palettes(in: nil) }
+
+    /// By a place's own order. Palettes not yet arranged there come first, as `projectOrder` has them.
+    private func arranged(_ list: [Swatch], by position: (Swatch) -> Int?) -> [Swatch] {
+        list.enumerated().sorted { a, b in
+            let (x, y) = (position(a.element) ?? Int.min, position(b.element) ?? Int.min)
+            return x != y ? x < y : a.offset < b.offset
+        }.map { $0.element }
+    }
+
+    /// The Palettes list: every palette, in the list's own order.
+    var listedPalettes: [Swatch] { arranged(projectOrder) { $0.listPosition } }
+    /// Favourites, in their own order.
+    var orderedFavourites: [Swatch] { arranged(projectOrder.filter { $0.favourite }) { $0.favouritePosition } }
+
+    /// Sets the order of the Palettes list. Order inside projects and under Favourites is untouched.
+    mutating func placeInList(_ ids: [UUID], at date: Date = Date()) {
+        for (n, id) in ids.enumerated() {
+            guard let i = swatches.firstIndex(where: { $0.id == id }) else { continue }
+            if swatches[i].listPosition != n { swatches[i].listPosition = n; swatches[i].listPlacedAt = date }
+        }
+    }
+
+    /// Sets the order under Favourites. Order inside projects and in the Palettes list is untouched.
+    mutating func placeFavourites(_ ids: [UUID], at date: Date = Date()) {
+        for (n, id) in ids.enumerated() {
+            guard let i = swatches.firstIndex(where: { $0.id == id }) else { continue }
+            if swatches[i].favouritePosition != n { swatches[i].favouritePosition = n; swatches[i].favouritePlacedAt = date }
         }
     }
 

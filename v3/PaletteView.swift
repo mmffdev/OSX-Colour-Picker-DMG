@@ -752,6 +752,7 @@ enum SwatchMenu {
             let make = NSMenu()
             for h in Harmony.allCases { add(make, h.title, #selector(Handler.make(_:)), h.rawValue) }
             menu.addItem(withTitle: "Make Palette", action: nil, keyEquivalent: "").submenu = make
+            add(menu, "Open In cLab", #selector(Handler.openInLab))
         }
 
         menu.addItem(.separator())
@@ -800,6 +801,9 @@ enum SwatchMenu {
                     HaloAction(id: h.rawValue, label: h.title, symbol: harmonySymbols[h] ?? "circle") { library.makePalette(h, from: hex) }
                 }
             },
+            HaloAction(id: "lab", label: "Open In cLab", symbol: labSymbolName, description: "Build on this colour on the wheel") {
+                library.onOpenLab?(hex)
+            },
             HaloAction(id: "tags", label: "Tags\u{2026}", symbol: "tag") {
                 editTags?([hex])
             },
@@ -839,6 +843,7 @@ enum SwatchMenu {
         @objc func make(_ s: NSMenuItem) {
             if let raw = s.representedObject as? String, let h = Harmony(rawValue: raw) { library.makePalette(h, from: hexes[0]) }
         }
+        @objc func openInLab() { library.onOpenLab?(hexes[0]) }
         @objc func removeChosen() { if let id = palette { library.remove(hexes, from: id) } }
         @objc func deleteChosen() { library.deleteFromLibrary(hexes) }
     }
