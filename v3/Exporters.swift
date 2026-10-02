@@ -292,7 +292,7 @@ extension Library {
     /// A palette ready to export, colours in the order given, each with its nearest name.
     func exportPalette(_ id: UUID, by order: SortOrder) -> ExportPalette? {
         guard let s = swatch(id) else { return nil }
-        return ExportPalette(name: s.name, colours: hexes(inSwatch: id, by: order).map { ExportColour(name: colourName($0), hex: $0) })
+        return ExportPalette(name: s.name, colours: hexes(inSwatch: id, by: order).map { ExportColour(name: name(of: $0, in: id), hex: $0) })
     }
 
     /// Every colour in the library as one palette.
@@ -452,7 +452,7 @@ extension Library {
                 let folder = g.folder.isEmpty ? base : "\(g.folder)/\(base)"
                 var usedFiles: [String] = []
                 let swatches = hexes(inSwatch: s.id, by: order).enumerated().map { i, hex -> PackSwatch in
-                    let n = colourName(hex)
+                    let n = self.name(of: hex, in: s.id)
                     let file = uniqueName(String(format: "%02d-%@-%@", i + 1, slug(n), String(hex.dropFirst()).lowercased()), among: usedFiles)
                     usedFiles.append(file)
                     return PackSwatch(name: n, hex: hex, tags: colours.first { $0.hex == hex }?.tags ?? [],

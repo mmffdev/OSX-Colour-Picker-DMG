@@ -30,6 +30,9 @@ struct Project: Codable, Equatable {
 struct SwatchEntry: Codable, Equatable {
     let hex: String
     var addedAt: Date
+    /// The user's own name for the colour in this palette; nil uses the standard name.
+    var name: String? = nil
+    var nameChangedAt: Date? = nil
 }
 
 /// A named collection of colours. Colours always live in the catalogue too.
@@ -386,6 +389,29 @@ extension Library {
         guard tags != (colours[i].tags ?? []) else { return }
         colours[i].tags = tags.isEmpty ? nil : tags
         colours[i].tagsChangedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.up))
+    }
+
+    // MARK: Swatch names
+
+    /// The user's own name for a colour in a palette, if they gave it one.
+    func customName(of hex: String, in palette: UUID?) -> String? {
+        palette.flatMap { swatch($0)?.entries.first { $0.hex == hex }?.name }
+    }
+
+    /// What the colour is called in a palette: the user's name for it there, or the standard one.
+    func name(of hex: String, in palette: UUID?) -> String {
+        customName(of: hex, in: palette) ?? colourName(hex)
+    }
+
+    /// Names the colour within one palette. Blank, or the standard name itself, goes back to the standard name.
+    mutating func setName(_ raw: String?, of hex: String, in palette: UUID, at date: Date = Date()) {
+        guard let s = swatches.firstIndex(where: { $0.id == palette }),
+              let e = swatches[s].entries.firstIndex(where: { $0.hex == hex }) else { return }
+        let typed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String? = typed.isEmpty || typed == colourName(hex) ? nil : typed
+        guard swatches[s].entries[e].name != name else { return }
+        swatches[s].entries[e].name = name
+        swatches[s].entries[e].nameChangedAt = date
     }
 
     /// Every tag: those in use on swatches or palettes, and those made in the tag editor. Sorted.

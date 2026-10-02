@@ -275,6 +275,8 @@ final class SwatchGridView: NSCollectionView {
     var onDelete: (() -> Void)?
     var onCopy: (() -> Void)?
     var onFavourite: (() -> Void)?
+    /// A double-click on a tile; return true to take it, so it does nothing else.
+    var onDoubleClick: ((IndexPath, NSEvent) -> Bool)?
     /// Where a shift-click measures its run from: the last tile clicked without Shift.
     private var anchor: IndexPath?
     /// When set, a click adds or removes the tile instead of selecting it.
@@ -288,6 +290,7 @@ final class SwatchGridView: NSCollectionView {
             return
         }
         let held = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        if event.clickCount == 2, let ip = hit, onDoubleClick?(ip, event) == true { return }
         // Shift-click takes every tile from the last one clicked to this one, in reading order.
         if held == .shift, let to = hit, let from = anchor ?? selectionIndexPaths.min(by: { $0.item < $1.item }),
            from.item < numberOfItems(inSection: 0) {

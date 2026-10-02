@@ -308,6 +308,12 @@ final class LibraryController: NSObject {
         }
     }
 
+    /// Gives a colour the user's own name within one palette; blank puts the standard name back.
+    func rename(swatch hex: String, in palette: UUID, to name: String?) {
+        apply { $0.setName(name, of: hex, in: palette) }
+        flash(library.customName(of: hex, in: palette).map { "Named \(hex) \u{201C}\($0)\u{201D}" } ?? "\(hex) is \(colourName(hex)) again")
+    }
+
     func setTag(_ name: String, colour: String?, project: UUID?) { apply { $0.setTag(name, colour: colour, project: project) } }
     func renameTag(_ old: String, to new: String) { apply { $0.renameTag(old, to: new) } }
     func deleteTag(_ name: String) { apply { $0.deleteTag(name) } }

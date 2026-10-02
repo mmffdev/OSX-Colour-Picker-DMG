@@ -95,7 +95,7 @@ final class SpectrumView: NSView {
     }
 }
 
-final class ColourCard: NSCollectionViewItem {
+final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("card")
     /// The narrowest a card gets; they widen to fill the row.
     static let width: CGFloat = 228
@@ -175,13 +175,48 @@ final class ColourCard: NSCollectionViewItem {
         view.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : ink.withAlphaComponent(0.16)).cgColor
     }
 
-    func configure(hex: String) {
+    /// The name was edited on the card; blank asks for the standard name back.
+    var onRename: ((String) -> Void)?
+    private var shownName = ""
+
+    /// Whether a click landed on the name, where a double-click starts a rename.
+    func isOverName(_ event: NSEvent) -> Bool {
+        name.bounds.insetBy(dx: -4, dy: -3).contains(name.convert(event.locationInWindow, from: nil))
+    }
+
+    /// Turns the name into a text box. Return keeps what is typed; Esc puts the name back.
+    func beginRenaming() {
+        name.stringValue = shownName
+        name.isEditable = true
+        name.delegate = self
+        view.window?.makeFirstResponder(name)
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard name.isEditable else { return }
+        name.isEditable = false
+        let typed = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed != shownName { onRename?(typed) } else { name.stringValue = shownName }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        name.abortEditing()
+        name.isEditable = false
+        name.stringValue = shownName
+        view.window?.makeFirstResponder(view.superview)
+        return true
+    }
+
+    /// `called` is the user's own name for the colour in this palette, when it has one.
+    func configure(hex: String, called: String? = nil) {
         self.hex = hex
+        shownName = called ?? colourName(hex)
         let ink = colorFromHex(readableText(on: hex)) ?? .white
         view.layer?.backgroundColor = colorFromHex(hex)?.cgColor
         outline()
 
-        name.stringValue = Prefs.showNames ? colourName(hex) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
+        name.stringValue = Prefs.showNames ? shownName : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         name.textColor = ink
         halo.ink = ink
         code.stringValue = Prefs.showNames ? ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex) : ""
@@ -373,6 +408,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         grid.onDelete = { [weak self] in self?.removeSelected() }
         grid.onCopy = { [weak self] in self?.copySelected() }
         grid.onFavourite = { [weak self] in self?.starTapped() }
+        // A double-click on a card's name renames the colour; anywhere else on the card it is two clicks.
+        grid.onDoubleClick = { [weak self] ip, event in
+            guard let card = self?.grid.item(at: ip) as? ColourCard, Prefs.showNames, card.isOverName(event) else { return false }
+            card.beginRenaming()
+            return true
+        }
         let menu = NSMenu()
         menu.delegate = self
         grid.menu = menu
@@ -438,6 +479,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
+                || (library.library.customName(of: $0, in: id)?.lowercased().contains(search) ?? false)
         }
 
         if view.window?.firstResponder !== nameField.currentEditor() || nameField.currentEditor() == nil {
@@ -502,7 +544,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         let card = cv.makeItem(withIdentifier: ColourCard.identifier, for: ip) as! ColourCard
         let hex = hexes[ip.item]
         card.library = library
-        card.configure(hex: hex)
+        card.configure(hex: hex, called: library.library.customName(of: hex, in: paletteID))
+        card.onRename = { [weak self] name in
+            if let id = self?.paletteID { self?.library.rename(swatch: hex, in: id, to: name) }
+        }
         card.onCopyRow = { [weak self] format in self?.library.copy(hex, as: format) }
         card.onHalo = { [weak self] trigger in self?.openHalo(for: hex, from: trigger) }
         return card
@@ -513,7 +558,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private func openHalo(for hex: String, from trigger: NSView) {
         if halo.isOpen, haloHex == hex { halo.chooseSelected(); return }
         haloHex = hex
-        halo.caption = Prefs.showNames ? colourName(hex) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
+        halo.caption = Prefs.showNames ? library.library.name(of: hex, in: paletteID) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags) { [weak self] in self?.halo.actions = $0 }
         halo.open(centredIn: grid.enclosingScrollView ?? view, trigger: trigger)
     }
@@ -761,6 +806,17 @@ enum SwatchMenu {
         ]
         if let id = palette {
             actions.append(HaloAction(id: "remove", label: "Remove from Palette", symbol: "minus.circle") { library.remove([hex], from: id) })
+        }
+        if let id = palette {
+            // The colour's name in this palette: typed in the middle of the halo, or put back to the standard one.
+            let own = library.library.customName(of: hex, in: id)
+            actions.insert(HaloAction(id: "rename", label: "Rename", symbol: "pencil", description: "Give this colour your own name in this palette",
+                                      edit: (library.library.name(of: hex, in: id), colourName(hex), "Return saves \u{00B7} Empty resets",
+                                             { library.rename(swatch: hex, in: id, to: $0) })), at: 1)
+            if own != nil {
+                actions.insert(HaloAction(id: "reset-name", label: "Reset Name", symbol: "arrow.counterclockwise",
+                                          description: "Back to \(colourName(hex))") { library.rename(swatch: hex, in: id, to: nil) }, at: 2)
+            }
         }
         actions.append(HaloAction(id: "delete", label: "Delete from Library", symbol: "trash") { library.deleteFromLibrary([hex]) })
         return actions

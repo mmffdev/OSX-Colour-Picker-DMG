@@ -17,7 +17,8 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
 
         let swatch = HaloMenu(label: "Swatch", caption: "#FF6600", hint: "Scroll or use the arrow keys", actions: [
             HaloAction(id: "copy", label: "Copy hex", symbol: "doc.on.doc", description: "Put #FF6600 on the clipboard", onSelect: say("Copied")),
-            HaloAction(id: "rename", label: "Rename", symbol: "pencil", onSelect: say("Rename")),
+            HaloAction(id: "rename", label: "Rename", symbol: "pencil",
+                       edit: ("Trinidad", "Trinidad", "Return saves \u{00B7} Empty resets", { [weak self] in self?.status.stringValue = "Renamed to \($0)" })),
             HaloAction(id: "star", label: "Favourite", symbol: "star", checked: true, onSelect: say("Favourite")),
             HaloAction(id: "export", label: "Export", symbol: "square.and.arrow.up", description: "Nothing to export yet", disabled: true, onSelect: say("Export")),
             HaloAction(id: "move", label: "Move to palette", symbol: "folder", onSelect: say("Move")),
@@ -102,6 +103,14 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
             content.cacheDisplay(in: content.bounds, to: image)
             try? image.representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("card.png"))
         }
+        shots.append(("rename", { [weak self] in
+            self?.halos[0].open(from: buttons[0])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                let dial = self?.window.childWindows?.first?.contentView
+                let items = dial?.accessibilityChildren() as? [NSAccessibilityElement]
+                _ = items?.first { $0.accessibilityLabel() == "Rename" }?.accessibilityPerformPress()
+            }
+        }))
         func next(_ at: Int) {
             guard at < shots.count else { NSApp.terminate(nil); return }
             shots[at].prepare()

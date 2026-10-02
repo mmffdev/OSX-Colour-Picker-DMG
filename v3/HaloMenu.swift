@@ -23,15 +23,18 @@ struct HaloAction {
     var confirmation: (label: String, keyboardHint: String)? = nil
     /// Leaves the dial open after `onSelect`, for an action that swaps in another ring.
     var keepsOpen = false
-    var onSelect: () -> Void
+    /// Set to make the action open a text box in the centre; Return hands back what was typed.
+    var edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil
+    var onSelect: () -> Void = {}
 }
 
 extension HaloAction {
     init(id: String, label: String, symbol name: String, description: String? = nil, disabled: Bool = false,
          checked: Bool? = nil, confirmation: (label: String, keyboardHint: String)? = nil, keepsOpen: Bool = false,
-         onSelect: @escaping () -> Void) {
+         edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil,
+         onSelect: @escaping () -> Void = {}) {
         self.init(id: id, label: label, icon: NSImage(systemSymbolName: name, accessibilityDescription: label) ?? NSImage(),
-                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, onSelect: onSelect)
+                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, edit: edit, onSelect: onSelect)
     }
 }
 
@@ -143,6 +146,10 @@ final class HaloMenu: NSResponder {
     private var turnStart: CFTimeInterval = 0
     fileprivate var hovered: String?
     fileprivate var confirmationID: String?
+    /// The action whose text box is open in the centre.
+    fileprivate var editingID: String?
+    /// A confirmation or a text box has the centre; the ring waits.
+    private var busy: Bool { confirmationID != nil || editingID != nil }
     fileprivate var confirmStart: CFTimeInterval = 0
     fileprivate var progress: CGFloat = 0
     fileprivate var keyboardFocus = false
@@ -286,6 +293,8 @@ final class HaloMenu: NSResponder {
         clearExit()
         removeWatchers()
         dial.endDrag()
+        dial.endEditing()
+        editingID = nil
         panel.ignoresMouseEvents = true
         if panel.isKeyWindow { panel.parent?.makeKey() }
         if reduceMotion {
@@ -317,7 +326,7 @@ final class HaloMenu: NSResponder {
 
     /// Closes shortly after the pointer leaves, unless it comes back or a confirmation is waiting.
     fileprivate func leave() {
-        guard isOpen, !sticky, exitTimer == nil, confirmationID == nil else { return }
+        guard isOpen, !sticky, exitTimer == nil, !busy else { return }
         let timer = Timer(timeInterval: 0.12, repeats: false) { [weak self] _ in
             self?.exitTimer = nil
             self?.close()
@@ -384,9 +393,13 @@ final class HaloMenu: NSResponder {
         guard let id = confirmationID else { return nil }
         return actions.first { $0.id == id && !$0.disabled && $0.confirmation != nil }
     }
+    fileprivate var editing: HaloAction? {
+        guard let id = editingID else { return nil }
+        return actions.first { $0.id == id && $0.edit != nil }
+    }
     /// The action the centre is describing.
     fileprivate var active: HaloAction? {
-        confirming ?? actions.first { $0.id == hovered } ?? (actions.isEmpty ? nil : actions[selected])
+        confirming ?? editing ?? actions.first { $0.id == hovered } ?? (actions.isEmpty ? nil : actions[selected])
     }
 
     /// How far the ring has turned right now, part-way between places while it is moving.
@@ -404,14 +417,24 @@ final class HaloMenu: NSResponder {
     }
 
     fileprivate func rotate(_ direction: Int) {
-        guard ready, confirmationID == nil,
+        guard ready, !busy,
               let step = HaloGeometry.step(from: selected, direction: direction, disabled: actions.map({ $0.disabled })) else { return }
         turnTo(index + step)
         announce()
     }
 
     fileprivate func choose(_ action: HaloAction?) {
-        guard ready, confirmationID == nil, let action = action, !action.disabled else { return }
+        guard ready, !busy, let action = action, !action.disabled else { return }
+        if action.edit != nil {
+            clearExit()
+            if let at = actions.firstIndex(where: { $0.id == action.id }) { turnTo(index + at - selected) }
+            editingID = action.id
+            closeFocused = false
+            panel.makeKey()
+            dial.beginEditing(action)
+            refresh()
+            return
+        }
         if action.confirmation != nil {
             clearExit()
             if let at = actions.firstIndex(where: { $0.id == action.id }) { turnTo(index + at - selected) }
@@ -467,7 +490,15 @@ final class HaloMenu: NSResponder {
         }
     }
 
+    /// Return in the centre's text box: hands back the text and closes.
+    fileprivate func commitEdit(_ text: String) {
+        guard let action = editing, let edit = action.edit else { return }
+        close()
+        edit.onCommit(text)
+    }
+
     fileprivate func key(_ event: NSEvent) -> Bool {
+        if editingID != nil { return false }
         let code = event.keyCode
         let left = code == 123, right = code == 124, down = code == 125, up = code == 126
         let press = code == 36 || code == 76 || code == 49, home = code == 115, end = code == 119
@@ -552,7 +583,7 @@ private final class HaloAccessibilityElement: NSAccessibilityElement {
     override func accessibilityPerformDecrement() -> Bool { slide?(-1); return slide != nil }
 }
 
-private final class HaloDialView: NSView {
+private final class HaloDialView: NSView, NSTextFieldDelegate {
     /// Room around the dial for its shadow.
     static let margin: CGFloat = 40
     weak var halo: HaloMenu?
@@ -613,7 +644,7 @@ private final class HaloDialView: NSView {
         let p = point(event), inside = isInside(p)
         if inside { menu.clearExit() } else { menu.leave() }
         (inside ? NSCursor.pointingHand : NSCursor.arrow).set()
-        let over = inside && menu.confirmationID == nil ? action(at: p).map { menu.actions[$0].id } : nil
+        let over = inside && menu.confirmationID == nil && menu.editingID == nil ? action(at: p).map { menu.actions[$0].id } : nil
         if over != menu.hovered {
             menu.hovered = over
             needsDisplay = true
@@ -660,6 +691,47 @@ private final class HaloDialView: NSView {
     }
 
     func endDrag() { grab = nil }
+
+    // MARK: The text box in the centre
+
+    private var editor: NSTextField?
+
+    /// Puts a text box in the middle of the dial for an action that edits a value.
+    func beginEditing(_ action: HaloAction) {
+        guard let menu = halo, let edit = action.edit else { return }
+        endEditing()
+        let width = diameter * 0.5
+        let field = NSTextField(frame: NSRect(x: centre.x - width / 2, y: centre.y - 13, width: width, height: 26))
+        field.stringValue = edit.value
+        field.placeholderString = edit.placeholder
+        field.alignment = .center
+        field.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        field.isBezeled = false
+        field.focusRingType = .none
+        field.drawsBackground = true
+        field.backgroundColor = menu.palette.band
+        field.textColor = menu.palette.bandInk
+        field.appearance = NSAppearance(named: .aqua)   // a pale box: dark text and a light selection, whatever the app's look
+        field.wantsLayer = true
+        field.layer?.cornerRadius = 5
+        field.delegate = self
+        field.setAccessibilityLabel(action.label)
+        addSubview(field)
+        editor = field
+        window?.makeFirstResponder(field)
+        (field.currentEditor() as? NSTextView)?.insertionPointColor = menu.palette.bandInk
+    }
+
+    func endEditing() {
+        editor?.removeFromSuperview()
+        editor = nil
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertNewline(_:)), let field = editor else { return false }
+        halo?.commitEdit(field.stringValue)
+        return true
+    }
 
     override func keyDown(with event: NSEvent) {
         if halo?.key(event) != true { super.keyDown(with: event) }
@@ -818,6 +890,13 @@ private final class HaloDialView: NSView {
         let gap: CGFloat = compact ? 4 : 6
         let title = text(active?.label ?? menu.label, size: compact ? 13 : 16, weight: .semibold, colour: ink, lines: 2)
 
+        if let edit = menu.editing?.edit {
+            // The text box itself is a real field laid over the dial; only its heading and hint are drawn.
+            stack([title], in: part(0.28, 0.27, 0.44, 0.16), gap: gap, fromTop: true, ctx)
+            stack([text(edit.hint, size: 11, colour: ink, opacity: 0.8, lines: 2)],
+                  in: CGRect(x: circle.minX + 0.22 * diameter, y: centre.y + 20, width: 0.56 * diameter, height: 30), gap: 0, fromTop: true, ctx)
+            return
+        }
         if let confirming = menu.confirming, let ask = confirming.confirmation {
             stack([title], in: part(0.28, 0.27, 0.44, 0.16), gap: gap, fromTop: true, ctx)
             drawSlider(menu, ctx)
