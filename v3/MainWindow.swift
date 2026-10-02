@@ -295,6 +295,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         if case .palette(let id) = s, library.library.swatch(id) == nil { s = .all }
         if s != .all, content.all.building { content.all.stopBuilding() }
         if !content.all.building, !builderItem.isCollapsed { builderItem.isCollapsed = true }
+        // Contrast offers cLab's wheel as a palette only when it is reached from cLab.
+        if s == .contrast, selection != .contrast { content.contrast.arrive(fromLab: selection == .lab) }
         selection = s
         library.current = s
         switch s {

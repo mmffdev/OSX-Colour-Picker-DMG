@@ -425,15 +425,21 @@ enum ContrastTarget: Double, CaseIterable {
 /// The shade of `hex` closest to it that reaches `target` against `other`: the same hue, lighter
 /// or darker by as little as it takes, judged by eye (OKLCH lightness). nil when no shade can.
 func nearestShade(of hex: String, against other: String, reaching target: Double) -> String? {
-    guard let from = ColourValues(hex), ColourValues(other) != nil else { return nil }
-    if contrastRatio(from.hex, other) >= target { return from.hex }
+    guard ColourValues(other) != nil else { return nil }
+    return nearestShade(of: hex) { contrastRatio($0, other) >= target }
+}
+
+/// The shade of `hex` closest to it that `passes`, whatever the test is.
+func nearestShade(of hex: String, where passes: (String) -> Bool) -> String? {
+    guard let from = ColourValues(hex) else { return nil }
+    if passes(from.hex) { return from.hex }
     let c = from.oklch
     for step in 1...500 {
         let d = Double(step) * 0.002
         // Both ways at each step; whichever passes first is the nearest.
         for l in [c.l - d, c.l + d] where l >= 0 && l <= 1 {
             let shade = hexFrom(OKLCH(l: l, c: c.c, h: c.h))
-            if contrastRatio(shade, other) >= target { return shade }
+            if passes(shade) { return shade }
         }
     }
     return nil
@@ -450,4 +456,51 @@ func strongestPair(in hexes: [String]) -> ContrastPair? {
         }
     }
     return best?.pair
+}
+
+// ---------- APCA: the contrast method drafted for WCAG 3 ----------
+//
+// The WCAG 2 ratio only compares how light two colours are, and is known to be hard on light text
+// over strong mid-tones (white on orange) and easy on dark text over dark backgrounds. APCA
+// (Accessible Perceptual Contrast Algorithm, version 0.0.98G-4g) models how text is actually read,
+// and treats dark-on-light and light-on-dark differently. It is not yet a standard.
+
+/// Lightness contrast, Lc: about 106 for black text on white, about -108 for white on black, 0
+/// for no difference. The sign only says which is lighter; the size is what is judged.
+func apcaContrast(text: String, background: String) -> Double {
+    func y(_ hex: String) -> Double? {
+        guard let v = ColourValues(hex) else { return nil }
+        let u = v.unit
+        let raw = 0.2126729 * pow(u.r, 2.4) + 0.7151522 * pow(u.g, 2.4) + 0.0721750 * pow(u.b, 2.4)
+        // Very dark colours are lifted a little, as a screen's black is never quite black.
+        return raw > 0.022 ? raw : raw + pow(0.022 - raw, 1.414)
+    }
+    guard let txt = y(text), let bg = y(background), abs(bg - txt) >= 0.0005 else { return 0 }
+    if bg > txt {
+        let c = (pow(bg, 0.56) - pow(txt, 0.57)) * 1.14
+        return c < 0.1 ? 0 : (c - 0.027) * 100
+    }
+    let c = (pow(bg, 0.65) - pow(txt, 0.62)) * 1.14
+    return c > -0.1 ? 0 : (c + 0.027) * 100
+}
+
+/// What APCA's guidance asks of a pair, by what the text is for.
+enum APCAUse: Double, CaseIterable {
+    case body = 75, large = 60, headline = 45
+
+    var title: String {
+        switch self {
+        case .body: return "Body Text"
+        case .large: return "Large Text"
+        case .headline: return "Headlines And Graphics"
+        }
+    }
+    /// The least Lc that will do.
+    var minimum: Double { rawValue }
+    /// The Lc to aim for.
+    var preferred: Double { rawValue + 15 }
+    var target: String { "\(title)  \u{00B7}  Lc \(Int(rawValue))" }
+
+    /// The most demanding use an Lc is enough for, or nil when it is enough for none.
+    static func best(for lc: Double) -> APCAUse? { allCases.first { abs(lc) >= $0.minimum } }
 }

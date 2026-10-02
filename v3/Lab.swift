@@ -515,7 +515,7 @@ final class LabViewController: NSViewController {
     private var selected = 0
 
     private let heading = NSTextField(labelWithString: "cLab")
-    private var undo: NSButton!, redo: NSButton!, add: NSButton!, random: NSButton!
+    private var undo: NSButton!, redo: NSButton!, add: NSButton!, random: NSButton!, check: NSButton!
     private let wheel = WheelView()
     private var rules: [RuleButton] = []
     private let dim = NSImageView(), bright = NSImageView()
@@ -548,6 +548,7 @@ final class LabViewController: NSViewController {
         redo = toolButton("", "arrow.uturn.forward", "Redo", target: self, action: #selector(redoTapped))
         add = toolButton("", "plus", "Add A Colour", target: self, action: #selector(addTapped))
         random = toolButton("Random", "shuffle", "Roll New Colours; Locked Ones Stay", target: self, action: #selector(randomTapped))
+        check = toolButton("Contrast", "circle.lefthalf.filled", "Check These Colours In Contrast", target: self, action: #selector(contrastTapped))
 
         rules = LabRule.allCases.map { RuleButton(rule: $0, target: self, action: #selector(ruleTapped(_:))) }
 
@@ -590,7 +591,7 @@ final class LabViewController: NSViewController {
         strip.onLock = { [weak self] i in self?.change { $0.toggleLock(i) } }
         strip.onDelete = { [weak self] i in self?.change { $0.remove(i) } }
 
-        for v in [heading, undo, redo, add, random, wheel, dim, slider, bright, why, strip, saveBar] + rules as [NSView] {
+        for v in [heading, undo, redo, add, random, check, wheel, dim, slider, bright, why, strip, saveBar] + rules as [NSView] {
             page.addSubview(v)
         }
         refresh()
@@ -607,11 +608,11 @@ final class LabViewController: NSViewController {
         heading.sizeToFit()
         heading.frame.origin = NSPoint(x: pad, y: head + (bar - heading.frame.height) / 2)
         var x = b.width - pad
-        for button in [random, add, redo, undo] as [NSButton] {
+        for button in [check, random, add, redo, undo] as [NSButton] {
             button.sizeToFit()
             x -= button.frame.width
             button.frame.origin = NSPoint(x: x, y: head + (bar - button.frame.height) / 2)
-            x -= button === add ? 14 : 4
+            x -= button === add || button === check ? 14 : 4
         }
 
         let foot = b.height - pad - bar
@@ -728,6 +729,7 @@ final class LabViewController: NSViewController {
     @objc private func ruleTapped(_ sender: RuleButton) { change { $0.setRule(sender.rule) } }
     @objc private func randomTapped() { change { $0.randomise { Double.random(in: 0..<1) } } }
     @objc private func addTapped() { change { $0.add() } }
+    @objc private func contrastTapped() { library.onShow?(.contrast, false) }
 
     @objc private func undoTapped() {
         guard let back = history.undo(from: state) else { return }

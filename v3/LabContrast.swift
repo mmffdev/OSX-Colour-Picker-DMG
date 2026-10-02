@@ -20,6 +20,12 @@ struct ContrastState: Codable, Equatable {
     /// The Typography palette pairings are being added to, and the pairing being edited, when there is one.
     var typography: UUID?
     var editing: UUID?
+    /// Scored by APCA rather than the WCAG 2 ratio, and the Lc a fix should then reach. Absent in older saves.
+    var apca: Bool?
+    var apcaGoal: Double?
+
+    var usesAPCA: Bool { apca ?? false }
+    var lcGoal: Double { apcaGoal ?? APCAUse.body.minimum }
 }
 
 private func passColour(_ ok: Bool) -> NSColor { ok ? .systemGreen : .systemRed }
@@ -44,41 +50,41 @@ private final class ChipButton: NSButton {
     }
 }
 
-/// Large Text, Small Text and Graphics against AA and AAA.
+/// What the pair is good enough for: three uses down the side, two levels across.
 private final class ContrastTable: NSView {
-    var ratio = 1.0 { didSet { needsDisplay = true } }
+    /// The two levels, and for each use whether each is met (nil = the level does not apply).
+    var headers = ("AA", "AAA") { didSet { needsDisplay = true } }
+    var rows: [(title: String, first: Bool?, second: Bool?)] = [] { didSet { needsDisplay = true } }
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let uses = ContrastUse.allCases
-        let head: CGFloat = 16, row = (bounds.height - head) / CGFloat(uses.count)
-        let aaX = bounds.width - 104, aaaX = bounds.width - 50
+        guard !rows.isEmpty else { return }
+        let head: CGFloat = 16, row = (bounds.height - head) / CGFloat(rows.count)
+        let firstX = bounds.width - 104, secondX = bounds.width - 50
         func put(_ text: String, _ x: CGFloat, _ y: CGFloat, _ colour: NSColor, weight: NSFont.Weight = .regular, size: CGFloat = 11.5) {
             (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight), .foregroundColor: colour])
         }
-        put("AA", aaX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
-        put("AAA", aaaX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
-        for (i, use) in uses.enumerated() {
+        put(headers.0, firstX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
+        put(headers.1, secondX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
+        for (i, r) in rows.enumerated() {
             let y = head + CGFloat(i) * row
             NSColor.separatorColor.setFill()
             NSRect(x: 0, y: y, width: bounds.width, height: 1).fill()
             let text = y + (row - 15) / 2
-            put(use.title, 0, text, .labelColor)
-            func verdict(_ need: Double?, _ x: CGFloat) {
-                guard let need = need else { put("N/A", x, text, .tertiaryLabelColor); return }
-                let ok = ratio >= need
+            put(r.title, 0, text, .labelColor)
+            func verdict(_ ok: Bool?, _ x: CGFloat) {
+                guard let ok = ok else { put("N/A", x, text, .tertiaryLabelColor); return }
                 put(ok ? "Pass" : "Fail", x, text, passColour(ok), weight: .medium)
             }
-            verdict(use.aa, aaX)
-            verdict(use.aaa, aaaX)
+            verdict(r.first, firstX)
+            verdict(r.second, secondX)
         }
     }
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityLabel() -> String? {
-        ContrastUse.allCases.map { use in
-            "\(use.title): AA \(ratio >= use.aa ? "pass" : "fail")" + (use.aaa.map { ", AAA \(ratio >= $0 ? "pass" : "fail")" } ?? "")
-        }.joined(separator: ". ")
+        func word(_ ok: Bool?) -> String { ok == nil ? "not applicable" : ok! ? "pass" : "fail" }
+        return rows.map { "\($0.title): \(headers.0) \(word($0.first)), \(headers.1) \(word($0.second))" }.joined(separator: ". ")
     }
 }
 
@@ -138,10 +144,13 @@ private final class TargetSpectrum: NSView {
     override func accessibilityLabel() -> String? { "Colours of the chosen palette" }
 }
 
-/// Every palette in the library as a strip of its colours, project by project. A press chooses one.
+/// Every palette in the library as a strip of its colours, in the sidebar's groups: Favourites,
+/// each project, then Palettes. A press on a palette chooses it; a press on a group's heading
+/// opens or closes the group.
 private final class PaletteShelf: NSView {
     enum Row {
-        case heading(String)
+        /// `key` names the group for remembering whether it is closed.
+        case heading(String, key: String)
         /// nil is cLab's wheel.
         case palette(id: UUID?, name: String, hexes: [String])
     }
@@ -149,44 +158,69 @@ private final class PaletteShelf: NSView {
     /// The chosen palette; `.some(nil)` is cLab's wheel.
     var chosen: UUID?? { didSet { needsDisplay = true } }
     var onChoose: ((UUID?) -> Void)?
+    /// A group opened or closed, so the list is a different height.
+    var onResize: (() -> Void)?
     override var isFlipped: Bool { true }
 
-    private static let headingHeight: CGFloat = 22, rowHeight: CGFloat = 26
+    private func closedKey(_ key: String) -> String { "contrastShelfClosed.\(key)" }
+    private func isClosed(_ key: String) -> Bool { preferences.bool(forKey: closedKey(key)) }
 
-    var height: CGFloat {
-        rows.reduce(0) { total, row in
-            if case .heading = row { return total + PaletteShelf.headingHeight }
-            return total + PaletteShelf.rowHeight
-        }
-    }
+    private static let headingHeight: CGFloat = 22, rowHeight: CGFloat = 26
+    /// Clear space under each group, held at the top of the next heading's row.
+    private static let groupGap: CGFloat = 20
+    /// Names and strips sit in from the edges, so the mark on the chosen row has room round them.
+    private static let inset: CGFloat = 8
+
+    var height: CGFloat { frames.last?.rect.maxY ?? 0 }
 
     private var frames: [(row: Row, rect: NSRect)] {
-        var y: CGFloat = 0
-        return rows.map { row in
+        var y: CGFloat = 0, hidden = false, out: [(Row, NSRect)] = []
+        for (i, row) in rows.enumerated() {
             var h = PaletteShelf.rowHeight
-            if case .heading = row { h = PaletteShelf.headingHeight }
-            defer { y += h }
-            return (row, NSRect(x: 0, y: y, width: bounds.width, height: h))
+            if case .heading(_, let key) = row {
+                h = PaletteShelf.headingHeight + (i == 0 ? 0 : PaletteShelf.groupGap)
+                hidden = isClosed(key)
+            } else if hidden {
+                continue   // inside a closed group
+            }
+            out.append((row, NSRect(x: 0, y: y, width: bounds.width, height: h)))
+            y += h
         }
+        return out
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let nameWidth = min(150, bounds.width * 0.42)
+        let inset = PaletteShelf.inset, nameWidth = min(150, bounds.width * 0.42)
         for (row, rect) in frames where rect.intersects(dirtyRect) {
             switch row {
-            case .heading(let title):
-                (title.uppercased() as NSString).draw(at: NSPoint(x: 0, y: rect.minY + 7), withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.tertiaryLabelColor])
+            case .heading(let title, let key):
+                // The title sits at the foot of its row; any gap from the group above is over it.
+                let top = rect.maxY - PaletteShelf.headingHeight
+                // An arrow at the left, as in the sidebar: right when closed, down when open.
+                let arrow = NSBezierPath(), mid = NSPoint(x: inset + 4, y: top + 13)
+                if isClosed(key) {
+                    arrow.move(to: NSPoint(x: mid.x - 2, y: mid.y - 4)); arrow.line(to: NSPoint(x: mid.x + 2, y: mid.y)); arrow.line(to: NSPoint(x: mid.x - 2, y: mid.y + 4))
+                } else {
+                    arrow.move(to: NSPoint(x: mid.x - 4, y: mid.y - 2)); arrow.line(to: NSPoint(x: mid.x, y: mid.y + 2)); arrow.line(to: NSPoint(x: mid.x + 4, y: mid.y - 2))
+                }
+                arrow.lineWidth = 1.5
+                arrow.lineCapStyle = .round
+                arrow.lineJoinStyle = .round
+                // Headings and arrows as the sidebar has them: bold, in the full text colour.
+                NSColor.labelColor.setStroke()
+                arrow.stroke()
+                (title as NSString).draw(at: NSPoint(x: inset + 14, y: top + 6), withAttributes: [
+                    .font: SidebarOutlineView.headingFont, .foregroundColor: NSColor.labelColor])
             case .palette(let id, let name, let hexes):
                 if let chosen = chosen, chosen == id {
                     NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
-                    NSBezierPath(roundedRect: rect.insetBy(dx: -4, dy: 1), xRadius: 5, yRadius: 5).fill()
+                    NSBezierPath(roundedRect: rect.insetBy(dx: 0, dy: 1), xRadius: 5, yRadius: 5).fill()
                 }
                 let style = NSMutableParagraphStyle()
                 style.lineBreakMode = .byTruncatingTail
-                (name as NSString).draw(in: NSRect(x: 0, y: rect.minY + 5, width: nameWidth - 8, height: 16), withAttributes: [
+                (name as NSString).draw(in: NSRect(x: inset, y: rect.minY + 5, width: nameWidth - 8 - inset, height: 16), withAttributes: [
                     .font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
-                let strip = NSRect(x: nameWidth, y: rect.minY + 6, width: bounds.width - nameWidth, height: rect.height - 12)
+                let strip = NSRect(x: nameWidth, y: rect.minY + 6, width: bounds.width - nameWidth - inset, height: rect.height - 12)
                 guard !hexes.isEmpty else {
                     NSColor.tertiaryLabelColor.setStroke()
                     NSBezierPath(roundedRect: strip.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).stroke()
@@ -208,8 +242,16 @@ private final class PaletteShelf: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        guard let hit = frames.first(where: { $0.rect.contains(p) }), case .palette(let id, _, _) = hit.row else { return }
-        onChoose?(id)
+        guard let hit = frames.first(where: { $0.rect.contains(p) }) else { return }
+        switch hit.row {
+        case .palette(let id, _, _): onChoose?(id)
+        case .heading(_, let key):
+            // The whole heading is the switch, arrow and name alike.
+            guard p.y >= hit.rect.maxY - PaletteShelf.headingHeight else { return }
+            preferences.set(!isClosed(key), forKey: closedKey(key))
+            needsDisplay = true
+            onResize?()
+        }
     }
 
     override func isAccessibilityElement() -> Bool { true }
@@ -340,6 +382,8 @@ private final class ContrastGrid: NSView {
     var hexes: [String] = [] { didSet { needsDisplay = true } }
     var pair = ContrastPair(ink: "#000000", paper: "#FFFFFF") { didSet { needsDisplay = true } }
     var onPick: ((ContrastPair) -> Void)?
+    /// Scored by APCA (Lc) rather than the WCAG 2 ratio.
+    var apca = false { didSet { needsDisplay = true } }
     override var isFlipped: Bool { true }
 
     private func cell(_ row: Int, _ column: Int) -> NSRect {
@@ -360,12 +404,15 @@ private final class ContrastGrid: NSView {
                 (colorFromHex(paper) ?? .gray).setFill()
                 box.fill()
                 guard r != c else { continue }   // a colour on itself is nothing to read
-                let ratio = contrastRatio(ink, paper)
                 // The number is always readable; the dot beside it is the text colour being judged.
                 let readable = colorFromHex(readableText(on: paper)) ?? .white
-                let text = NSAttributedString(string: String(format: "%.1f", (ratio * 10 + 1e-9).rounded(.down) / 10), attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: ratio >= 4.5 ? .semibold : .regular),
-                    .foregroundColor: readable.withAlphaComponent(ratio >= 3 ? 1 : 0.5)])
+                let ratio = contrastRatio(ink, paper), lc = abs(apcaContrast(text: ink, background: paper))
+                // Bold where body text passes, faint where nothing does.
+                let label = apca ? String(Int(lc.rounded(.down))) : String(format: "%.1f", (ratio * 10 + 1e-9).rounded(.down) / 10)
+                let strong = apca ? lc >= APCAUse.body.minimum : ratio >= 4.5, weak = apca ? lc < APCAUse.headline.minimum : ratio < 3
+                let text = NSAttributedString(string: label, attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: strong ? .semibold : .regular),
+                    .foregroundColor: readable.withAlphaComponent(weak ? 0.5 : 1)])
                 let dot: CGFloat = 7, width = dot + 4 + text.size().width
                 if width <= box.width - 2 {
                     let x = box.midX - width / 2
@@ -403,6 +450,8 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let library: LibraryController
     private(set) var state: ContrastState
     private var history = History<ContrastState>()
+    /// Whether cLab's wheel is listed as a palette: only when the page was reached from cLab.
+    private var offersWheel = false
     /// Which of the two colours the next colour picked goes to.
     private var arming = true   // true = text colour
 
@@ -418,6 +467,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let inkField = NSTextField(), paperField = NSTextField()
     private var swap: NSButton!
     private let badge = NSTextField(labelWithString: "")
+    private let method = NSSegmentedControl(labels: ["WCAG 2", "APCA"], trackingMode: .selectOne, target: nil, action: nil)
     private let table = ContrastTable()
     private let goal = NSPopUpButton()
     private var fixInk: NSButton!, fixPaper: NSButton!
@@ -426,6 +476,8 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let spectrum = TargetSpectrum()
     private var dropper: NSButton!
     private let shelf = PaletteShelf()
+    /// The palettes scroll on their own, under the controls, so the controls stay in view.
+    private let shelfScroll = NSScrollView()
 
     private let headingFont = NSPopUpButton(), bodyFont = NSPopUpButton()
     private let preview = ContrastPreview()
@@ -457,11 +509,12 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         why.font = NSFont.systemFont(ofSize: 11.5)
         why.maximumNumberOfLines = 2
         why.lineBreakMode = .byTruncatingTail
-        let lead = "Contrast  ", rest = "The ratio compares how light two colours are, from 1 (the same) to 21 (black on white). Body text needs 4.5; large text, icons and controls need 3."
-        let text = NSMutableAttributedString(string: lead, attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.labelColor])
-        text.append(NSAttributedString(string: rest, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
-        why.attributedStringValue = text
-        why.toolTip = rest
+        method.controlSize = .small
+        method.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        method.target = self
+        method.action = #selector(methodChosen)
+        method.toolTip = "How The Pair Is Scored: The WCAG 2 Ratio (The Standard), Or APCA (Drafted For WCAG 3)"
+        method.setAccessibilityLabel("Scoring method")
 
         saveBar.colours = { [weak self] in self?.pairHexes ?? [] }
         saveBar.defaultName = { [weak self] in self?.defaultName ?? "" }
@@ -491,10 +544,6 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
             popup.toolTip = tip
             popup.setAccessibilityLabel(tip)
         }
-        for t in ContrastTarget.allCases {
-            goal.addItem(withTitle: t.title)
-            goal.lastItem?.representedObject = t.rawValue
-        }
         small(goal, "The Ratio A Fix Should Reach", #selector(goalChosen))
         func smallButton(_ title: String, _ tip: String, _ action: Selector) -> NSButton {
             let b = NSButton(title: title, target: self, action: action)
@@ -512,6 +561,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         spectrum.onPick = { [weak self] in self?.take($0) }
         dropper = symbolButton("eyedropper", tooltip: "Pick From Screen", target: self, action: #selector(pickTapped))
         shelf.onChoose = { [weak self] id in self?.change { $0.palette = id } }
+        shelf.onResize = { [weak self] in self?.view.needsLayout = true }
 
         let families = NSFontManager.shared.availableFontFamilies
         for (popup, tip, action) in [(headingFont, "Font For The Heading", #selector(headingFontChosen)), (bodyFont, "Font For The Text", #selector(bodyFontChosen))] {
@@ -523,8 +573,13 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         preview.onText = { [weak self] heading, body in self?.change { $0.heading = heading; $0.body = body } }
         grid.onPick = { [weak self] pair in self?.change { $0.pair = pair } }
 
-        for v in [inkLabel, paperLabel, inkChip, paperChip, inkField, paperField, swap, badge, table, goal, fixInk, fixPaper,
-                  from, hint, spectrum, dropper, shelf] as [NSView] { column.addSubview(v) }
+        for v in [inkLabel, paperLabel, inkChip, paperChip, inkField, paperField, swap, badge, method, table, goal, fixInk, fixPaper,
+                  from, hint, spectrum, dropper, shelfScroll] as [NSView] { column.addSubview(v) }
+        shelfScroll.documentView = shelf
+        shelfScroll.hasVerticalScroller = true
+        shelfScroll.drawsBackground = false
+        shelfScroll.automaticallyAdjustsContentInsets = false
+        shelfScroll.scrollerStyle = .overlay
         scroll.documentView = column
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -555,26 +610,33 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         why.frame = NSRect(x: pad, y: foot - gap - 30, width: w, height: 30)
         let top = head + bar + gap, bottom = why.frame.minY - 10, height = bottom - top
 
-        let left = max(236, min(340, w * 0.42))
+        // The preview and grid take four fifths of what an even split would give them; the controls and palettes get the rest.
+        let even = max(236, min(340, w * 0.42))
+        // In a very large window neither side balloons: the parts keep a size that reads well and the rest is left clear.
+        let left = min(620, w - 18 - (w - even - 18) * 0.8)
         scroll.frame = NSRect(x: pad, y: top, width: left, height: height)
-        column.frame = NSRect(x: 0, y: 0, width: left, height: max(height, arrangeColumn(width: left)))
+        column.frame = NSRect(x: 0, y: 0, width: left, height: max(height, arrangeColumn(width: left, visible: height)))
 
-        let rx = pad + left + 18, rw = max(60, b.width - pad - rx)
+        let rx = pad + left + 18, rw = max(60, min(1000, b.width - pad - rx))
         let half = (rw - 6) / 2
         headingFont.frame = NSRect(x: rx, y: top, width: half, height: 22)
         bodyFont.frame = NSRect(x: rx + half + 6, y: top, width: half, height: 22)
         let showsGrid = !grid.hexes.isEmpty
         let room = height - 28
-        let previewHeight = showsGrid ? max(70, (room - 24) * 0.5) : room
+        let previewHeight = min(420, showsGrid ? max(70, (room - 24) * 0.5) : room)
         preview.frame = NSRect(x: rx, y: top + 28, width: rw, height: previewHeight)
         gridTitle.isHidden = !showsGrid
         grid.isHidden = !showsGrid
         gridTitle.frame = NSRect(x: rx, y: preview.frame.maxY + 8, width: rw, height: 14)
-        grid.frame = NSRect(x: rx, y: preview.frame.maxY + 26, width: rw, height: max(30, bottom - preview.frame.maxY - 26))
+        // A grid row is tall enough to read and click at 48 points; more is just colour.
+        let gridHeight = min(CGFloat(max(grid.hexes.count, 1)) * 48, bottom - preview.frame.maxY - 26)
+        grid.frame = NSRect(x: rx, y: preview.frame.maxY + 26, width: rw, height: max(30, gridHeight))
     }
 
-    /// Places the left column's parts and returns the height they need.
-    private func arrangeColumn(width: CGFloat) -> CGFloat {
+    /// Places the left column's parts and returns the height they need. The palettes take the room
+    /// left under the controls and scroll within it. Only when the window is too short for that do
+    /// they run on at full length, and the whole column scrolls instead.
+    private func arrangeColumn(width: CGFloat, visible: CGFloat) -> CGFloat {
         var y: CGFloat = 0
         let group = (width - 28) / 2
         inkLabel.frame = NSRect(x: 0, y: y, width: group, height: 14)
@@ -587,7 +649,9 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         paperField.frame = NSRect(x: group + 62, y: y + 1, width: group - 34, height: 22)
         y += 24 + 10
 
-        badge.frame = NSRect(x: 0, y: y, width: width, height: 30)
+        method.sizeToFit()
+        method.frame.origin = NSPoint(x: width - method.frame.width, y: y + 5)
+        badge.frame = NSRect(x: 0, y: y, width: width - method.frame.width - 8, height: 30)
         y += 30 + 8
         table.frame = NSRect(x: 0, y: y, width: width, height: 88)
         y += 88 + 10
@@ -604,8 +668,13 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         spectrum.frame = NSRect(x: 0, y: y, width: width - 28, height: 28)
         dropper.frame = NSRect(x: width - 22, y: y + 4, width: 20, height: 20)
         y += 28 + 14
-        shelf.frame = NSRect(x: 0, y: y, width: width, height: shelf.height)
-        return y + shelf.height + 4
+        let room = visible - y
+        let fits = room >= 96
+        shelfScroll.frame = NSRect(x: 0, y: y, width: width, height: fits ? room : shelf.height)
+        shelfScroll.hasVerticalScroller = fits
+        // The strips stop short of the edge, so the scroller has a lane of its own.
+        shelf.frame = NSRect(x: 0, y: 0, width: width - (fits ? 16 : 0), height: max(shelf.height, fits ? room : 0))
+        return fits ? visible : y + shelf.height + 4
     }
 
     // MARK: Showing
@@ -613,7 +682,15 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     /// The palette the two colours are picked from, as its colours.
     private var targetHexes: [String] {
         if let id = state.palette, library.library.swatch(id) != nil { return library.hexes(in: id) }
-        return library.labPalette?.colours.map { $0.hex } ?? []
+        return offersWheel ? library.labPalette?.colours.map { $0.hex } ?? [] : []
+    }
+
+    /// Called on arriving at the page. Coming from cLab, its wheel is offered as a palette and
+    /// chosen; coming from anywhere else it is not shown, and nothing is chosen until the user picks.
+    func arrive(fromLab: Bool) {
+        offersWheel = fromLab
+        if fromLab, state.palette != nil { state.palette = nil; save() }
+        if isViewLoaded { refresh() }
     }
     private var pairHexes: [String] { state.pair.ink == state.pair.paper ? [state.pair.ink] : [state.pair.ink, state.pair.paper] }
     private var defaultName: String { "\(colourName(state.pair.ink)) On \(colourName(state.pair.paper))" }
@@ -641,56 +718,92 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         if inkField.currentEditor() == nil { inkField.stringValue = pair.ink }
         if paperField.currentEditor() == nil { paperField.stringValue = pair.paper }
 
-        let grade = ["AAA": "AAA", "AA": "AA", "AA large": "AA Large", "fail": "Fail"][contrastGrade(ratio)] ?? ""
-        let text = NSMutableAttributedString(string: ContrastPair.text(ratio), attributes: [
+        // The score, what it is good for, and what a fix can aim at, by whichever method is chosen.
+        let apca = state.usesAPCA, lc = abs(apcaContrast(text: pair.ink, background: pair.paper))
+        let score: String, grade: String, colour: NSColor, met: Bool
+        if apca {
+            let best = APCAUse.best(for: lc)
+            score = "Lc \(Int(lc.rounded(.down)))"   // cut, not rounded, as with the ratio
+            grade = best?.title ?? "Fail"
+            colour = best == .body ? .systemGreen : best == nil ? .systemRed : .systemOrange
+            met = lc >= state.lcGoal
+            table.headers = ("Least", "Ideal")
+            table.rows = APCAUse.allCases.map { ($0.title, lc >= $0.minimum, lc >= $0.preferred) }
+        } else {
+            score = ContrastPair.text(ratio)
+            grade = ["AAA": "AAA", "AA": "AA", "AA large": "AA Large", "fail": "Fail"][contrastGrade(ratio)] ?? ""
+            colour = ratio >= 4.5 ? .systemGreen : ratio >= 3 ? .systemOrange : .systemRed
+            met = ratio >= state.goal
+            table.headers = ("AA", "AAA")
+            table.rows = ContrastUse.allCases.map { use in (use.title, ratio >= use.aa, use.aaa.map { ratio >= $0 }) }
+        }
+        let text = NSMutableAttributedString(string: score, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.labelColor])
-        text.append(NSAttributedString(string: "   " + grade, attributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: ratio >= 4.5 ? NSColor.systemGreen : ratio >= 3 ? NSColor.systemOrange : NSColor.systemRed]))
+        text.append(NSAttributedString(string: "   " + grade, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: colour]))
         badge.attributedStringValue = text
-        badge.setAccessibilityLabel("Contrast ratio \(ContrastPair.text(ratio)), \(grade)")
-        table.ratio = ratio
+        badge.setAccessibilityLabel(apca ? "APCA lightness contrast \(Int(lc.rounded(.down))), \(grade)" : "Contrast ratio \(ContrastPair.text(ratio)), \(grade)")
+        method.selectedSegment = apca ? 1 : 0
 
-        goal.selectItem(at: ContrastTarget.allCases.firstIndex { $0.rawValue == state.goal } ?? 1)
+        goal.removeAllItems()
+        let targets: [(title: String, value: Double)] = apca ? APCAUse.allCases.map { ($0.target, $0.minimum) } : ContrastTarget.allCases.map { ($0.title, $0.rawValue) }
+        for t in targets {
+            goal.addItem(withTitle: t.title)
+            goal.lastItem?.representedObject = t.value
+        }
+        goal.selectItem(at: targets.firstIndex { $0.value == (apca ? state.lcGoal : state.goal) } ?? 0)
         // Nothing to fix once the target is met.
-        fixInk.isEnabled = ratio < state.goal
-        fixPaper.isEnabled = ratio < state.goal
+        fixInk.isEnabled = !met
+        fixPaper.isEnabled = !met
 
-        // The palette menu and the shelf below it list the same things: cLab's wheel, each project's palettes, then the rest.
+        // The note under the page says what the number means and, for APCA, where it stands.
+        let lead = apca ? "APCA  " : "Contrast  "
+        let rest = apca
+            ? "Lc scores how readable the text is, from 0 to about 106, and knows light-on-dark from dark-on-light. APCA is drafted for WCAG 3 and is not yet a standard: audits, contracts and accessibility law still ask for the WCAG 2 ratio."
+            : "The ratio compares how light two colours are, from 1 (the same) to 21 (black on white). Body text needs 4.5; large text, icons and controls need 3."
+        let note = NSMutableAttributedString(string: lead, attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.labelColor])
+        note.append(NSAttributedString(string: rest, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        why.attributedStringValue = note
+        why.toolTip = rest
+        grid.apca = apca
+
+        // The palette menu and the shelf below it list the same things, in the sidebar's groups:
+        // cLab's wheel, Favourites, each project's palettes, then every palette.
         var rows: [PaletteShelf.Row] = []
         from.removeAllItems()
         // Items are made by hand: a pop-up button asked to add a title it already has replaces the first one.
-        func offer(_ id: UUID?, _ name: String, _ hexes: [String], indent: Int) {
+        func offer(_ id: UUID?, _ name: String, indent: Int) {
             let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
             item.representedObject = id
             item.indentationLevel = indent
             item.tag = 1
             from.menu?.addItem(item)
-            rows.append(.palette(id: id, name: name, hexes: hexes))
+            rows.append(.palette(id: id, name: name, hexes: id.map { library.hexes(in: $0) } ?? library.labPalette?.colours.map { $0.hex } ?? []))
         }
-        func head(_ title: String) {
+        func group(_ title: String, key: String, _ palettes: [Swatch]) {
+            let colours = palettes.filter { !$0.isTypography }   // colours are picked from palettes of colours
+            guard !colours.isEmpty else { return }
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
-            from.menu?.addItem(item)
-            rows.append(.heading(title))
-        }
-        if let wheel = library.labPalette { offer(nil, "cLab Wheel", wheel.colours.map { $0.hex }, indent: 0) }
-        for p in lib.orderedProjects {
-            let held = lib.palettes(in: p.id).filter { !$0.isTypography }   // colours are picked from palettes of colours
-            guard !held.isEmpty else { continue }
-            head(p.name)
-            for s in held { offer(s.id, s.name, library.hexes(in: s.id), indent: 1) }
-        }
-        let loose = lib.palettes(in: nil).filter { !$0.isTypography }
-        if !loose.isEmpty {
             if from.numberOfItems > 0 { from.menu?.addItem(.separator()) }
-            rows.append(.heading("Palettes"))
-            for s in loose { offer(s.id, s.name, library.hexes(in: s.id), indent: 0) }
+            from.menu?.addItem(item)
+            rows.append(.heading(title, key: key))
+            for s in colours { offer(s.id, s.name, indent: 1) }
         }
+        if offersWheel, library.labPalette != nil {
+            offer(nil, "cLab Wheel", indent: 0)
+        } else {
+            // Shown in the menu while no palette is chosen.
+            let none = NSMenuItem(title: "Choose A Palette", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            from.menu?.addItem(none)
+        }
+        group("Favourites", key: "favourites", library.favourites)
+        for p in lib.orderedProjects { group(p.name, key: "project.\(p.id.uuidString)", lib.palettes(in: p.id)) }
+        group("Palettes", key: "palettes", lib.listedPalettes)
         let chosen = from.itemArray.first { $0.tag == 1 && ($0.representedObject as? UUID) == state.palette }
-        from.select(chosen)
+        from.select(chosen ?? from.item(at: 0))
         shelf.rows = rows
-        shelf.chosen = .some(chosen == nil ? nil : state.palette)
+        shelf.chosen = chosen == nil ? nil : .some(state.palette)
 
         let target = targetHexes
         spectrum.hexes = target
@@ -754,7 +867,11 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @objc private func swapTapped() { change { $0.pair = $0.pair.swapped } }
-    @objc private func goalChosen() { change { $0.goal = (goal.selectedItem?.representedObject as? Double) ?? ContrastTarget.aa.rawValue } }
+    @objc private func goalChosen() {
+        guard let value = goal.selectedItem?.representedObject as? Double else { return }
+        change { if $0.usesAPCA { $0.apcaGoal = value } else { $0.goal = value } }
+    }
+    @objc private func methodChosen() { change { $0.apca = method.selectedSegment == 1 } }
     @objc private func paletteChosen(_ sender: NSPopUpButton) {
         let id = sender.selectedItem?.representedObject as? UUID
         change { $0.palette = id }
@@ -833,8 +950,15 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     private func fix(ink: Bool) {
         let (mine, other) = ink ? (state.pair.ink, state.pair.paper) : (state.pair.paper, state.pair.ink)
-        guard let shade = nearestShade(of: mine, against: other, reaching: state.goal) else {
-            library.flash("No Shade Of \(mine) Reaches \(ContrastPair.text(state.goal)) Against \(other). Try Fixing The \(ink ? "Background" : "Text Colour") Instead")
+        // APCA cares which colour is the text, so the test is put the right way round for the one being moved.
+        let apca = state.usesAPCA, lcGoal = state.lcGoal, ratioGoal = state.goal
+        let shade = nearestShade(of: mine) { candidate in
+            guard apca else { return contrastRatio(candidate, other) >= ratioGoal }
+            return abs(ink ? apcaContrast(text: candidate, background: other) : apcaContrast(text: other, background: candidate)) >= lcGoal
+        }
+        guard let shade = shade else {
+            let want = apca ? "Lc \(Int(lcGoal))" : ContrastPair.text(ratioGoal)
+            library.flash("No Shade Of \(mine) Reaches \(want) Against \(other). Try Fixing The \(ink ? "Background" : "Text Colour") Instead")
             return
         }
         change { if ink { $0.pair.ink = shade } else { $0.pair.paper = shade } }

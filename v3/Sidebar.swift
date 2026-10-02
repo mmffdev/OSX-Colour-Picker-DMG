@@ -185,7 +185,7 @@ final class ProjectHeaderCell: NSTableCellView {
     func configure(name: String, heading: Bool = false, tooltip: String) {
         title.stringValue = name
         title.font = heading ? SidebarOutlineView.headingFont : NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        title.textColor = heading ? .secondaryLabelColor : .labelColor
+        title.textColor = .labelColor
         folder.isHidden = heading
         add.toolTip = tooltip
         add.setAccessibilityLabel(tooltip)
@@ -201,7 +201,8 @@ final class SidebarOutlineView: NSOutlineView {
     // A project's tag bucket, and the tags inside it, sit one step further in, so the bucket's
     // disclosure arrow lines up under the stars of the palettes above it.
     private static let bucketInset: CGFloat = 16
-    static let headingFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    /// Bold and in the full text colour: grey headings were hard to read over a dark sidebar.
+    static let headingFont = NSFont.systemFont(ofSize: 11, weight: .bold)
 
     // A click anywhere on a row that opens and closes does so, not only one on its arrow. A drag
     // still drags, and the arrow and the plus button keep their own clicks.
@@ -506,7 +507,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let cell = o.makeView(withIdentifier: id, owner: self) as? NSTableCellView ?? plainCell(id, icon: !node.isGroup)
         if node.isGroup {
             cell.textField?.font = SidebarOutlineView.headingFont
-            cell.textField?.textColor = .secondaryLabelColor
+            cell.textField?.textColor = .labelColor
         }
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil

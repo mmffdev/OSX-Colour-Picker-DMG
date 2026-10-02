@@ -1106,6 +1106,17 @@ func runContrastTests(check: (Bool, String) -> Void) {
     check(onDark.map { ColourValues($0)!.luminance > ColourValues("#444444")!.luminance && contrastRatio($0, "#222222") >= 4.5 } == true,
           "on a dark background the fix goes lighter: \(onDark ?? "none")")
     check(nearestShade(of: "#808080", against: "#777777", reaching: 7) == nil, "no shade reaches 7 : 1 against a mid grey, and the fix says so")
+    func lc(_ text: String, _ bg: String) -> Double { apcaContrast(text: text, background: bg) }
+    check(abs(lc("#000000", "#FFFFFF") - 106.04) < 0.01 && abs(lc("#FFFFFF", "#000000") + 107.88) < 0.01
+          && abs(lc("#888888", "#FFFFFF") - 63.06) < 0.01 && abs(lc("#FFFFFF", "#888888") + 68.54) < 0.01,
+          "APCA matches its published reference values: \(lc("#000000", "#FFFFFF")), \(lc("#FFFFFF", "#000000")), \(lc("#888888", "#FFFFFF")), \(lc("#FFFFFF", "#888888"))")
+    check(lc("#777777", "#777777") == 0 && lc("#FFFFFF", "#FEFEFE") == 0, "no difference, or next to none, scores nothing")
+    check(contrastRatio("#FFFFFF", "#E8590C") < 4.5 && abs(lc("#FFFFFF", "#E8590C")) >= 60 && contrastRatio("#000000", "#E8590C") > contrastRatio("#FFFFFF", "#E8590C"),
+          "white on a strong orange: WCAG 2 fails it for body text and prefers black, APCA passes it as large text")
+    check(APCAUse.best(for: -80) == .body && APCAUse.best(for: 62) == .large && APCAUse.best(for: 45) == .headline && APCAUse.best(for: 30) == nil
+          && APCAUse.body.preferred == 90, "an Lc is graded by the most demanding use it is enough for, whichever way round the pair is")
+    let lifted = nearestShade(of: "#8FB2FF") { abs(lc($0, "#FFFFFF")) >= 75 }
+    check(lifted.map { abs(lc($0, "#FFFFFF")) >= 75 && abs(lc($0, "#FFFFFF")) < 78 } == true, "a fix can aim at an APCA score as well as a ratio: \(lifted ?? "none")")
     let strongest = strongestPair(in: ["#2456F5", "#F5BE24", "#0A216D", "#FFFFFF"])
     check(strongest == ContrastPair(ink: "#0A216D", paper: "#FFFFFF") && strongestPair(in: ["#FFFFFF"]) == nil,
           "the strongest pair in a palette is its two most different colours, the lighter as background")
