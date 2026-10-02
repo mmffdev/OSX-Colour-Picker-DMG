@@ -451,6 +451,20 @@ extension Library {
                 let base = uniqueName(slug(s.name), among: usedPalettes); usedPalettes.append(base)
                 let folder = g.folder.isEmpty ? base : "\(g.folder)/\(base)"
                 var usedFiles: [String] = []
+                // A Typography palette is exported pairing by pairing: each one's text colour and
+                // background, named for the pairing and its part, so the files that belong together sort together.
+                if let styles = s.styles {
+                    let swatches = styles.enumerated().flatMap { i, style -> [PackSwatch] in
+                        [("Text", "text", style.ink), ("Background", "bg", style.paper)].map { part, short, hex in
+                            let file = uniqueName(String(format: "%02d-%@-%@-%@-%@", i + 1, slug(style.name), short, slug(colourName(hex)),
+                                                         String(hex.dropFirst()).lowercased()), among: usedFiles)
+                            usedFiles.append(file)
+                            return PackSwatch(name: "\(style.name) \(part)", hex: hex, tags: colours.first { $0.hex == hex }?.tags ?? [],
+                                              file: "\(folder)/swatches/\(file).png")
+                        }
+                    }
+                    return PackPalette(name: s.name, tags: s.tagList, folder: folder, swatches: swatches)
+                }
                 let swatches = hexes(inSwatch: s.id, by: order).enumerated().map { i, hex -> PackSwatch in
                     let n = self.name(of: hex, in: s.id)
                     let file = uniqueName(String(format: "%02d-%@-%@", i + 1, slug(n), String(hex.dropFirst()).lowercased()), among: usedFiles)

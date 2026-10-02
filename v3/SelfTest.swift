@@ -1187,6 +1187,14 @@ func runTypographyTests(check: (Bool, String) -> Void) {
     let old = try? JSONDecoder().decode(Swatch.self, from: Data("{\"id\":\"\(UUID().uuidString)\",\"name\":\"Old\",\"createdAt\":0,\"entries\":[]}".utf8))
     check(old != nil && old?.isTypography == false, "a palette saved before Typography existed still reads, as a palette of colours")
 
+    let pack = lib.designPack(named: "Pack", palettes: [first], owner: "", licence: "", at: at(15)).palettes[0]
+    check(pack.swatches.map { $0.file } == ["typography-1/swatches/01-typography-set-2-text-\(slug(colourName("#2456F5")))-2456f5.png",
+                                            "typography-1/swatches/01-typography-set-2-bg-white-ffffff.png",
+                                            "typography-1/swatches/02-typography-set-3-text-black-000000.png",
+                                            "typography-1/swatches/02-typography-set-3-bg-yellow-ffff00.png"]
+          && pack.swatches.map { $0.name }.prefix(2) == ["Typography Set 2 Text", "Typography Set 2 Background"],
+          "a design pack names each file for its pairing and its part, so the two that belong together sit together: \(pack.swatches.map { $0.file })")
+
     var other = lib
     other.setStyle(style("#FF0000", "#FFFFFF", name: "From The Other Mac"), in: first, at: at(20))
     lib.renameSwatch(first, to: "Headlines", at: at(21))
