@@ -192,8 +192,10 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
             guard let hex = normaliseHex(texts.first ?? ""), let colour = ColourDefinition.of(hex: hex) else { return (nil, "A hex is six digits, such as #4F8093.") }
             return (colour, "")
         }
-        let numbers = texts.compactMap { Double($0) }
-        guard numbers.count == kind.labels.count else { return (nil, "Fill in every value with a number.") }
+        // The greyed 0 in an empty field means what it says: once anything is typed, an empty field is 0.
+        guard texts.contains(where: { !$0.isEmpty }) else { return (nil, "Type at least one value.") }
+        let numbers = texts.compactMap { $0.isEmpty ? 0 : Double($0) }
+        guard numbers.count == kind.labels.count else { return (nil, "Each value is a number.") }
         switch kind {
         case .p3:
             guard numbers.allSatisfy({ $0 >= 0 && $0 <= 255 }) else { return (nil, "Each value is 0 to 255.") }

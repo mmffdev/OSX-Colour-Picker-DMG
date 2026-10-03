@@ -1508,7 +1508,8 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(readP3.colour == vivid && readInks.colour?.source.values == [0, 0.9, 0.85, 0] && NewColourSheet.read(.lab, ["52", "\u{2212}60", "40"], press: "").colour == ColourDefinition.lab(52, -60, 40)
           && NewColourSheet.read(.hex, ["4f8093"], press: "").colour == plainRGB,
           "New Colour reads Display P3, a build, Lab and a hex as typed")
-    check(NewColourSheet.read(.p3, ["256", "0", "0"], press: "").colour == nil && NewColourSheet.read(.cmyk, ["0", "", "0", "0"], press: PressProfiles.generic).problem == "Fill in every value with a number."
+    check(NewColourSheet.read(.p3, ["256", "0", "0"], press: "").colour == nil && NewColourSheet.read(.cmyk, ["", "", "", ""], press: PressProfiles.generic).problem == "Type at least one value."
+          && NewColourSheet.read(.p3, ["255", "", ""], press: "").colour == vivid && NewColourSheet.read(.p3, ["255", "x", ""], press: "").problem == "Each value is a number."
           && NewColourSheet.read(.cmyk, ["0", "0", "0", "0"], press: "No Such Press").problem.contains("not on this Mac") && NewColourSheet.read(.hex, ["nope"], press: "").colour == nil,
           "and says what is wrong with a value out of range, a gap, a press that is not here, or a bad hex")
     var pickLib = Library()
