@@ -49,10 +49,6 @@ final class SwatchListView: NSView {
     var onAdd: ((NewColourStart?) -> Void)?
     private var addRows: [NSView] = []
     private var shownOffer = false
-    /// Each swatch's histogram: whether it is open, which values, and merged or a strip per channel.
-    /// Kept by colour, so it survives the page being laid out again.
-    private var histograms: [String: SwatchRow.HistogramState] = [:]
-    private var shownHistograms = false
 
     /// A row holding one blank swatch, the size of the swatch tiles above it.
     private func addRow(_ start: NewColourStart?) -> NSView {
@@ -102,13 +98,9 @@ final class SwatchListView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Shows the colours in order. The same colours as before are refreshed where they stand.
-    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = [], histograms all: Bool = false) {
-        // The bar's Histogram switch opens or closes every swatch's at once; a swatch's own button changes just its own.
-        if all != shownHistograms || palette != self.palette {
-            for hex in hexes { histograms[hex, default: SwatchRow.HistogramState()].open = all }
-            shownHistograms = all
-        }
-        defer { rows.forEach { $0.showHistogram(histograms[$0.hex] ?? SwatchRow.HistogramState(), among: hexes) } }
+    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = [], panels: RowPanels = RowPanels()) {
+        // What the bar above has switched on is shown on every swatch at once.
+        defer { rows.forEach { $0.show(panels, among: hexes) } }
         if palette == self.palette, rows.map({ $0.hex }) == hexes, groups == shownGroups, offersNew == shownOffer, !stack.arrangedSubviews.isEmpty || !offersNew {
             rows.forEach { $0.refresh(locked: locked) }
             return
@@ -122,7 +114,6 @@ final class SwatchListView: NSView {
         let made = Dictionary(uniqueKeysWithValues: hexes.map { hex -> (String, SwatchRow) in
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
-            row.onHistogram = { [weak self] state in self?.histograms[hex] = state }
             return (hex, row)
         })
         rows = hexes.compactMap { made[$0] }
@@ -161,32 +152,38 @@ final class SwatchListView: NSView {
     }
 }
 
-/// One colour: its tile, its name and values, then its notes as text, with Edit and History.
+/// What the bar above the swatches has switched on for every one of them.
+struct RowPanels: Equatable {
+    var channels = false
+    var history = false
+    var histogram = false
+    var type = HistogramType.rgb
+    var split = false
+
+    static var chosen: RowPanels {
+        RowPanels(channels: Prefs.paletteChannels, history: Prefs.paletteHistory, histogram: Prefs.histograms, type: Prefs.histogramType, split: Prefs.histogramSplit)
+    }
+}
+
+/// One colour: its tile, its name and values, then whatever the bar above has switched on (its
+/// histogram, its channels, its history) and its notes as text. The row has no buttons of its
+/// own: pressing the notes opens the colour's sheet.
 final class SwatchRow: NSView {
+    static let panelWidth: CGFloat = 460
     let hex: String
     private let palette: UUID
     private weak var library: LibraryController?
     var onOpen: ((Int) -> Void)?
 
-    struct HistogramState: Equatable {
-        var open = false
-        // A histogram opens the way the last one was left.
-        var type = Prefs.histogramType
-        var split = Prefs.histogramSplit
-    }
-    /// The swatch's histogram was opened, closed or changed.
-    var onHistogram: ((HistogramState) -> Void)?
-    private var histogramState = HistogramState()
-    private var population: [String] = []
     private let histogramPanel = HistogramPanel()
-    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show This Colour's Channels Against The Whole Palette's", target: self, action: #selector(histogramTapped))
+    private let channelsPanel = NSStackView()
+    private let historyPanel = NSStackView()
+    private var shown: RowPanels?
+    private var shownAmong: [String] = []
 
     private let tile = NSView()
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
-    private lazy var edit = toolButton("Edit Notes", "pencil", "Write Notes On This Colour", target: self, action: #selector(editTapped))
-    private lazy var channels = toolButton("Channels", "dial.medium", "See This Colour's Value And Fidelity In Each Channel Of The Palette's Profile", target: self, action: #selector(channelsTapped))
-    private lazy var history = toolButton("History", "clock.arrow.circlepath", "See What Happened To This Colour In This Palette", target: self, action: #selector(historyTapped))
     private let note = NSTextField(wrappingLabelWithString: "")
 
     init(hex: String, palette: UUID, library: LibraryController) {
@@ -214,36 +211,31 @@ final class SwatchRow: NSView {
         info.alignment = .leading
         info.spacing = 6
 
-        let bar = NSStackView(views: [edit, channels, history, histogram])
-        bar.orientation = .horizontal
-        bar.spacing = PageStyle.barSpacing
-
         note.font = NSFont.systemFont(ofSize: TextSize.body)
         note.maximumNumberOfLines = 5
         note.lineBreakMode = .byTruncatingTail
         note.cell?.truncatesLastVisibleLine = true
         note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        // The text is the way in too: a double-click on it opens the sheet.
-        let twice = NSClickGestureRecognizer(target: self, action: #selector(editTapped))
-        twice.numberOfClicksRequired = 2
-        note.addGestureRecognizer(twice)
+        // The text is the way in: a press on it opens the colour's sheet, on its notes.
+        note.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(editTapped)))
 
-        // Under the bar: the histogram when it is open, then the notes. The row grows to hold them
-        // and the swatches below move down; the tile keeps its size.
-        histogramPanel.isHidden = true
-        histogramPanel.onChange = { [weak self] in
-            guard let self = self else { return }
-            self.histogramState.type = self.histogramPanel.type
-            self.histogramState.split = self.histogramPanel.split
-            Prefs.histogramType = self.histogramPanel.type
-            Prefs.histogramSplit = self.histogramPanel.split
-            self.onHistogram?(self.histogramState)
+        for panel in [channelsPanel, historyPanel] {
+            panel.orientation = .vertical
+            panel.alignment = .leading
+            panel.spacing = 6
+            panel.isHidden = true
+            panel.translatesAutoresizingMaskIntoConstraints = false
+            panel.widthAnchor.constraint(equalToConstant: SwatchRow.panelWidth).isActive = true
         }
-        let body = NSStackView(views: [histogramPanel, note])
+        historyPanel.spacing = 3
+        histogramPanel.isHidden = true
+        // Beside the values: whatever is switched on, then the notes. The row grows to hold them
+        // and the swatches below move down; the tile keeps its size.
+        let body = NSStackView(views: [histogramPanel, channelsPanel, historyPanel, note])
         body.orientation = .vertical
         body.alignment = .leading
-        body.spacing = 10
-        for v in [tile, info, bar, body] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        body.spacing = 12
+        for v in [tile, info, body] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let s = SwatchListStyle.self
         let least = heightAnchor.constraint(equalToConstant: s.rowHeight)
         least.priority = .defaultLow
@@ -257,11 +249,9 @@ final class SwatchRow: NSView {
             info.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: s.gap),
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
-            bar.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
-            bar.topAnchor.constraint(equalTo: topAnchor),
-            body.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            body.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
             body.trailingAnchor.constraint(equalTo: trailingAnchor),
-            body.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap),
+            body.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             body.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             note.widthAnchor.constraint(equalTo: body.widthAnchor),
         ])
@@ -280,33 +270,77 @@ final class SwatchRow: NSView {
         values.views.forEach { $0.removeFromSuperview() }
         valueLines(for: hex, limit: 4).forEach { values.addArrangedSubview($0) }
         let text = library.library.note(of: hex, in: palette)
-        note.stringValue = text ?? "No Notes Yet."
+        note.stringValue = text ?? (locked ? "No Notes." : "No Notes Yet. Click To Write Some.")
         note.textColor = text == nil ? .tertiaryLabelColor : .labelColor
-        edit.title = locked ? "View Notes" : "Edit Notes"
-        edit.invalidateIntrinsicContentSize()
+        note.toolTip = locked ? "Click To Read This Colour's Notes, Channels And History" : "Click To Write Notes On This Colour, And See Its Channels And History"
+        shown = nil   // what the panels say may have changed with the library
         needsDisplay = true
     }
 
-    /// Opens or closes the histogram and sets its choices; `among` is the page's colours, shown faintly behind.
-    func showHistogram(_ state: HistogramState, among population: [String]) {
-        histogramState = state
-        self.population = population
-        histogramPanel.isHidden = !state.open
-        histogram.state = state.open ? .on : .off
-        histogram.needsDisplay = true
-        if state.open { histogramPanel.show(hex, among: population, type: state.type, split: state.split) }
+    /// Shows what the bar above has switched on. `among` is the page's colours, drawn faintly behind the histogram.
+    func show(_ panels: RowPanels, among population: [String]) {
+        guard panels != shown || population != shownAmong else { return }
+        shown = panels
+        shownAmong = population
+        histogramPanel.isHidden = !panels.histogram
+        if panels.histogram { histogramPanel.show(hex, among: population, type: panels.type, split: panels.split) }
+        channelsPanel.isHidden = !panels.channels
+        if panels.channels { fillChannels() }
+        historyPanel.isHidden = !panels.history
+        if panels.history { fillHistory() }
     }
 
-    @objc private func histogramTapped() {
-        histogramState.open.toggle()
-        showHistogram(histogramState, among: population)
-        onHistogram?(histogramState)
+    private func heading(_ text: String) -> NSTextField {
+        let l = caption(text.uppercased())
+        l.textColor = .tertiaryLabelColor
+        return l
+    }
+
+    /// Every channel of the palette's profile: the master beside what the channel gives, the value and the verdict.
+    private func fillChannels() {
+        channelsPanel.views.forEach { $0.removeFromSuperview() }
+        guard let library = library, let definition = library.library.definition(of: hex) else { return }
+        let profile = library.profile(forPalette: palette).profile
+        channelsPanel.addArrangedSubview(heading("Channels  \u{00B7}  \(profile.name)"))
+        if profile.channels.isEmpty { channelsPanel.addArrangedSubview(caption("This Profile Has No Channels. Add Some In Settings, Under Colour.")) }
+        for channel in profile.channels {
+            let row = SwatchSheet.proofRow(Rendering.of(definition, in: channel), master: definition.master)
+            channelsPanel.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: channelsPanel.widthAnchor).isActive = true
+        }
+    }
+
+    /// What happened to the colour in this palette, newest first; the sheet has the whole of a long history.
+    private func fillHistory() {
+        historyPanel.views.forEach { $0.removeFromSuperview() }
+        guard let library = library else { return }
+        historyPanel.addArrangedSubview(heading("History"))
+        let steps = library.history.steps(changing: hex, in: palette)
+        if steps.isEmpty {
+            historyPanel.addArrangedSubview(caption(library.historyEnabled ? "Nothing Has Happened To This Colour Here Since History Began." : "History Is Off For This Library."))
+        }
+        let limit = 6
+        for step in steps.reversed().prefix(limit) {
+            let what = caption(step.what, size: TextSize.body)
+            what.textColor = .secondaryLabelColor
+            what.lineBreakMode = .byTruncatingTail
+            what.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            what.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+            let when = caption(stepStamp(step.step.date))
+            when.setContentHuggingPriority(.required, for: .horizontal)
+            when.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let line = NSStackView(views: [what, when])
+            line.orientation = .horizontal
+            line.alignment = .firstBaseline
+            line.distribution = .fill
+            historyPanel.addArrangedSubview(line)
+            line.widthAnchor.constraint(equalTo: historyPanel.widthAnchor).isActive = true
+        }
+        if steps.count > limit { historyPanel.addArrangedSubview(caption("And \(steps.count - limit) Earlier. Click The Notes For All Of It.")) }
     }
 
     @objc private func copyTapped() { library?.copy(hex) }
     @objc private func editTapped() { onOpen?(0) }
-    @objc private func channelsTapped() { onOpen?(1) }
-    @objc private func historyTapped() { onOpen?(2) }
 }
 
 // ---------- The swatch's sheet ----------
@@ -527,14 +561,14 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
             proofs.addArrangedSubview(caption("This profile has no channels. Add some in Settings, under Colour.", size: TextSize.body))
         }
         for channel in using.profile.channels {
-            let row = proofRow(Rendering.of(definition, in: channel), master: definition.master)
+            let row = SwatchSheet.proofRow(Rendering.of(definition, in: channel), master: definition.master)
             proofs.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: proofs.widthAnchor).isActive = true
         }
     }
 
     /// One channel: the master beside what the channel gives, its name, the value, and the verdict.
-    private func proofRow(_ r: Rendering, master: XYZ) -> NSView {
+    static func proofRow(_ r: Rendering, master: XYZ) -> NSView {
         func chip(_ colour: NSColor?, _ tip: String) -> NSView {
             let v = NSView()
             v.wantsLayer = true

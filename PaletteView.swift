@@ -269,6 +269,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var slotCounts: [Int] = []
     /// Under the spectrum: how the page is grouped and what it shows.
     private let viewBar = PaletteViewBar()
+    /// Under that, while Histogram is on: the choices every swatch's histogram follows.
+    private let histogramBar = HistogramBar()
+    private let bars = NSStackView()
 
     private let nameField = NSTextField(labelWithString: "")
     private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
@@ -441,7 +444,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         header.trailing.setViews([gridButton, listButton], in: .leading)
         list.onOpen = { [weak self] hex, tab in self?.openSheet(for: hex, tab: tab) }
         header.trailing.isHidden = true
-        for v in [header, spectrum, viewBar, scroll, list, empty] as [NSView] {
+        histogramBar.onChange = { [weak self] in self?.reload() }
+        bars.setViews([viewBar, histogramBar], in: .top)
+        bars.orientation = .vertical
+        bars.alignment = .leading
+        bars.spacing = PageStyle.barGap
+        for bar in [viewBar, histogramBar] { bar.widthAnchor.constraint(equalTo: bars.widthAnchor).isActive = true }
+        for v in [header, spectrum, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -459,10 +468,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
             // Room to breathe: the same space above the bar as below it.
-            viewBar.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
-            viewBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            viewBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
-            scroll.topAnchor.constraint(equalTo: viewBar.bottomAnchor, constant: 30),
+            bars.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
+            bars.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            bars.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
+            scroll.topAnchor.constraint(equalTo: bars.bottomAnchor, constant: 30),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -513,6 +522,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         if !groups.isEmpty { hexes = groups.flatMap { $0.keys } }
         (slots, slotCounts) = PaletteSlot.page(hexes, groups: groups, offersNew: !(s.projectID.flatMap { library.library.project($0)?.isLocked } ?? false) && search.isEmpty)
         viewBar.refresh()
+        histogramBar.refresh()
+        histogramBar.isHidden = !(Prefs.histograms && Prefs.paletteListView)
 
         if view.window?.firstResponder !== nameField.currentEditor() || nameField.currentEditor() == nil {
             committedName = s.name
@@ -557,7 +568,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         list.isHidden = !asList
         wcag.isHidden = asList   // the card's own extras; a row shows its values always
         labels.isHidden = asList
-        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups, histograms: Prefs.histograms) }
+        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups, panels: RowPanels.chosen) }
 
         sizeCards()
         grid.reloadData()
@@ -618,7 +629,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private func setList(_ on: Bool) {
         guard Prefs.paletteListView != on else { return }
         Prefs.paletteListView = on
-        if !on { Prefs.histograms = false }   // the grid has nowhere to put them
+        if !on { Prefs.histograms = false; Prefs.paletteChannels = false; Prefs.paletteHistory = false }   // the grid has nowhere to put them
         reload()
     }
 

@@ -182,7 +182,10 @@ extension Library {
 final class PaletteViewBar: NSView {
     var onChange: (() -> Void)?
     private lazy var grouping = ToggleBar(labels: PaletteGrouping.allCases.map { $0.title }, target: self, action: #selector(groupingChanged))
-    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show Every Swatch's Histogram, In The Vertical View", target: self, action: #selector(histogramTapped))
+    // What every swatch shows beside its values, in the vertical view.
+    private lazy var channels = toolButton("Channels", "dial.medium", "Show Every Swatch's Value And Fidelity In Each Channel Of The Palette's Profile", target: self, action: #selector(panelTapped(_:)))
+    private lazy var history = toolButton("History", "clock.arrow.circlepath", "Show What Happened To Every Swatch In This Palette", target: self, action: #selector(panelTapped(_:)))
+    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show Every Swatch's Histogram", target: self, action: #selector(panelTapped(_:)))
     private lazy var filter = ToggleBar(labels: PaletteFilter.allCases.map { $0.title }, target: self, action: #selector(filterChanged))
 
     init() {
@@ -195,7 +198,8 @@ final class PaletteViewBar: NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let row = NSStackView(views: [groupLabel, grouping, histogram, spacer, showLabel, filter])
+        // Left: what every swatch shows. Right: how the page is grouped, then what it shows.
+        let row = NSStackView(views: [channels, history, histogram, spacer, groupLabel, grouping, showLabel, filter])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = PageStyle.barSpacing
@@ -217,14 +221,18 @@ final class PaletteViewBar: NSView {
     func refresh() {
         grouping.selectedSegment = PaletteGrouping.allCases.firstIndex(of: Prefs.paletteGrouping) ?? 0
         filter.selectedSegment = PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0
-        histogram.state = Prefs.histograms ? .on : .off
-        histogram.needsDisplay = true
+        for (button, on) in [(channels, Prefs.paletteChannels), (history, Prefs.paletteHistory), (histogram, Prefs.histograms)] {
+            button.state = on ? .on : .off
+            button.needsDisplay = true
+        }
     }
 
-    @objc private func histogramTapped() {
-        Prefs.histograms.toggle()
-        // Histograms sit beside each swatch's values, which only the vertical view has.
-        if Prefs.histograms { Prefs.paletteListView = true }
+    @objc private func panelTapped(_ sender: NSButton) {
+        if sender === channels { Prefs.paletteChannels.toggle() }
+        else if sender === history { Prefs.paletteHistory.toggle() }
+        else { Prefs.histograms.toggle() }
+        // These sit beside each swatch's values, which only the vertical view has.
+        if Prefs.paletteChannels || Prefs.paletteHistory || Prefs.histograms { Prefs.paletteListView = true }
         onChange?()
     }
 

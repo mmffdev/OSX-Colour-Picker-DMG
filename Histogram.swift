@@ -158,87 +158,95 @@ private extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }
 
-/// A swatch's histogram with its two choices: which values, and merged or a strip per channel.
+/// A swatch's histogram: the plot, and a line saying what it shows or which channels are outside the safe range.
+/// Which values it counts, and whether the channels are merged, is chosen once for every swatch on the bar above.
 final class HistogramPanel: NSView {
     static let width: CGFloat = 460
-    /// The choice changed; the row tells the list so it is kept.
-    var onChange: (() -> Void)?
     let plot = HistogramView()
-    private lazy var types = ToggleBar(labels: HistogramType.allCases.map { $0.title }, target: self, action: #selector(typeChanged))
-    private lazy var layouts = ToggleBar(labels: ["Merged", "Per Channel"], target: self, action: #selector(layoutChanged))
     private let about = caption("")
-    private var key = ""
-    private var population: [String] = []
 
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        for bar in [types, layouts] {
-            bar.controlSize = .small
-            bar.font = NSFont.systemFont(ofSize: TextSize.caption)
-        }
-        types.toolTip = "Which Values The Histogram Counts. CMYK Is The Build For The Palette's Press."
-        layouts.toolTip = "One Plot With Every Channel, Or A Strip For Each Channel"
-        about.textColor = .tertiaryLabelColor
         about.lineBreakMode = .byTruncatingTail
         about.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let controls = NSStackView(views: [types, layouts, about])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = PageStyle.barSpacing
-        for v in [controls, plot] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        for v in [plot, about] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: HistogramPanel.width),
-            controls.topAnchor.constraint(equalTo: topAnchor),
-            controls.leadingAnchor.constraint(equalTo: leadingAnchor),
-            controls.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            types.heightAnchor.constraint(equalToConstant: ButtonStyle.smallHeight),
-            layouts.heightAnchor.constraint(equalToConstant: ButtonStyle.smallHeight),
-            plot.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 6),
+            plot.topAnchor.constraint(equalTo: topAnchor),
             plot.leadingAnchor.constraint(equalTo: leadingAnchor),
             plot.trailingAnchor.constraint(equalTo: trailingAnchor),
-            plot.bottomAnchor.constraint(equalTo: bottomAnchor),
+            about.topAnchor.constraint(equalTo: plot.bottomAnchor, constant: 4),
+            about.leadingAnchor.constraint(equalTo: leadingAnchor),
+            about.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            about.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    var type: HistogramType { plot.type }
-    var split: Bool { plot.split }
-
     /// Shows a swatch against the colours of its page.
     func show(_ key: String, among population: [String], type: HistogramType, split: Bool) {
-        self.key = key
-        self.population = population
         plot.type = type
         plot.split = split
-        fill()
-    }
-
-    private func fill() {
-        types.selectedSegment = plot.type.rawValue
-        layouts.selectedSegment = plot.split ? 1 : 0
-        plot.own = plot.type.values(of: key)
-        plot.counts = Histogram.counts(of: population, as: plot.type)
-        let scale = plot.type == .rgb ? "0 To 255" : "0 To 100, For \(PrintCondition.current.press ?? PressProfiles.generic)"
-        let unsafe = plot.own.map { plot.type.warnings(for: $0) } ?? []
+        plot.own = type.values(of: key)
+        plot.counts = Histogram.counts(of: population, as: type)
+        let unsafe = plot.own.map { type.warnings(for: $0) } ?? []
         about.textColor = unsafe.isEmpty ? .tertiaryLabelColor : .systemOrange
-        about.stringValue = plot.own == nil ? "Not Worked Out: The Press Profile Is Not On This Mac"
-            : !unsafe.isEmpty ? unsafe.joined(separator: ", ")
-            : "\(scale)  \u{00B7}  Safe \(plot.type.safe.lowerBound) To \(plot.type.safe.upperBound)  \u{00B7}  Faint: The \(plural(population.count, "Colour", "Colours")) On This Page"
-        about.toolTip = plot.type == .rgb
-            ? "The Shaded Ends Are Outside The Safe Range: Under 16 Crushes To Black, Over 235 Blows Out To White"
-            : "The Shaded Ends Are Outside The Safe Range: Under 3% The Dot Does Not Hold, Over 95% It Fills In To Solid"
-        plot.toolTip = about.toolTip
+        let values = plot.own.map { zip(type.channels, $0).map { "\($0.prefix(1)) \($1)" }.joined(separator: "   ") } ?? ""
+        about.stringValue = plot.own == nil ? "Not Worked Out: The Press Profile Is Not On This Mac" : unsafe.isEmpty ? values : values + "   \u{00B7}   " + unsafe.joined(separator: ", ")
+        plot.toolTip = type == .rgb
+            ? "Bright: This Colour. Faint: Every Colour On The Page. The Shaded Ends Are Outside The Safe Range: Under 16 Crushes To Black, Over 235 Blows Out To White."
+            : "Bright: This Colour. Faint: Every Colour On The Page. The Shaded Ends Are Outside The Safe Range: Under 3% The Dot Does Not Hold, Over 95% It Fills In To Solid."
+    }
+}
+
+/// The second bar, shown while Histogram is on: the choices every swatch's histogram follows.
+final class HistogramBar: NSView {
+    var onChange: (() -> Void)?
+    private lazy var types = ToggleBar(labels: HistogramType.allCases.map { $0.title }, target: self, action: #selector(changed))
+    private lazy var layouts = ToggleBar(labels: ["Merged", "Per Channel"], target: self, action: #selector(changed))
+    private let about = caption("")
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        types.toolTip = "Which Values Every Histogram Counts. CMYK Is The Build For The Palette's Press."
+        layouts.toolTip = "One Plot With Every Channel, Or A Strip For Each Channel"
+        about.textColor = .secondaryLabelColor
+        about.lineBreakMode = .byTruncatingTail
+        about.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let label = caption("Histogram")
+        label.textColor = .secondaryLabelColor
+        let row = NSStackView(views: [label, types, layouts, about])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = PageStyle.barSpacing
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+            types.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
+            layouts.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
+        ])
+        refresh()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func refresh() {
+        let type = Prefs.histogramType
+        types.selectedSegment = type.rawValue
+        layouts.selectedSegment = Prefs.histogramSplit ? 1 : 0
+        let scale = type == .rgb ? "0 To 255" : "0 To 100, For \(PrintCondition.current.press ?? PressProfiles.generic)"
+        about.stringValue = "\(scale)  \u{00B7}  Safe \(type.safe.lowerBound) To \(type.safe.upperBound)  \u{00B7}  Bright: The Swatch. Faint: Every Colour On The Page."
     }
 
-    @objc private func typeChanged() {
-        plot.type = HistogramType(rawValue: types.selectedSegment) ?? .rgb
-        fill()
-        onChange?()
-    }
-    @objc private func layoutChanged() {
-        plot.split = layouts.selectedSegment == 1
-        fill()
+    @objc private func changed() {
+        Prefs.histogramType = HistogramType(rawValue: types.selectedSegment) ?? .rgb
+        Prefs.histogramSplit = layouts.selectedSegment == 1
+        refresh()
         onChange?()
     }
 }
@@ -252,6 +260,15 @@ extension Prefs {
     static var histogramSplit: Bool {
         get { preferences.bool(forKey: "histogramSplit") }
         set { preferences.set(newValue, forKey: "histogramSplit") }
+    }
+    /// Every swatch's channels, and every swatch's history, in a palette's vertical view.
+    static var paletteChannels: Bool {
+        get { preferences.bool(forKey: "paletteChannels") }
+        set { preferences.set(newValue, forKey: "paletteChannels") }
+    }
+    static var paletteHistory: Bool {
+        get { preferences.bool(forKey: "paletteHistory") }
+        set { preferences.set(newValue, forKey: "paletteHistory") }
     }
     static var histograms: Bool {
         get { preferences.bool(forKey: "paletteHistograms") }
