@@ -330,7 +330,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         menu.delegate = self
         outline.menu = menu
 
-        let scroll = NSScrollView()
+        let scroll = LetGoScrollView()
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false

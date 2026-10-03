@@ -460,7 +460,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let why = NSTextField(wrappingLabelWithString: "")
     private let saveBar: SaveBar
 
-    private let scroll = NSScrollView()
+    private let scroll = LetGoScrollView()
     private let column = ControlColumn()
     private let inkLabel = caption("Text Colour", size: 11), paperLabel = caption("Background", size: 11)
     private let inkChip = ChipButton(), paperChip = ChipButton()
@@ -477,7 +477,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private var dropper: NSButton!
     private let shelf = PaletteShelf()
     /// The palettes scroll on their own, under the controls, so the controls stay in view.
-    private let shelfScroll = NSScrollView()
+    private let shelfScroll = LetGoScrollView()
 
     private let headingFont = NSPopUpButton(), bodyFont = NSPopUpButton()
     private let preview = ContrastPreview()

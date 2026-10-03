@@ -123,6 +123,16 @@ func identityColour(_ id: UUID) -> NSColor {
     return NSColor(hue: hue, saturation: 0.62 - lift, brightness: 0.78 + lift, alpha: 1)
 }
 
+/// A scroll view that lets go of a flick once the pointer has left it. macOS keeps sending a
+/// flick's momentum to the view where it began, so the sidebar would go on scrolling while the
+/// mouse was already over the page; this drops those events instead.
+final class LetGoScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        if !event.momentumPhase.isEmpty, !bounds.contains(convert(event.locationInWindow, from: nil)) { return }
+        super.scrollWheel(with: event)
+    }
+}
+
 // ---------- Exports drawn with AppKit ----------
 
 extension ExportPalette {
