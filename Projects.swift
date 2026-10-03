@@ -190,17 +190,24 @@ private final class FormDocumentView: NSView {
 final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenuDelegate {
     enum Mode: Equatable {
         case newProject, project, template
+        /// Laid into a project's Overview page: no header of its own, and Save keeps it open.
+        case overview
     }
 
+    /// The project is locked: the form can be read and nothing in it changed.
+    var locked = false
+    private var embedded: Bool { mode == .overview }
+
     private let mode: Mode
-    private let startName: String
+    private var startName: String
     private var startValues: [String: String]
     private let onSave: (String, [String: String]) -> Void
     /// Set when the form covers the page instead of sitting in a sheet; called to take it away.
     var onClose: (() -> Void)?
 
     private let nameField = NSTextField()
-    private let templates = NSPopUpButton(frame: .zero, pullsDown: true)
+    /// "Fill from Template": in the form's own header, or handed to the Overview page for its action bar.
+    let templates = NSPopUpButton(frame: .zero, pullsDown: true)
     private let message = NSTextField(labelWithString: "")
     private var controls: [(field: ProjectField, control: NSControl)] = []
 
@@ -282,26 +289,43 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         message.textColor = .systemRed
         message.font = NSFont.systemFont(ofSize: 11)
         message.lineBreakMode = .byTruncatingTail
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
-        cancel.keyEquivalent = "\u{1b}"
-        let save = NSButton(title: mode == .newProject ? "Create Project" : "Save", target: self, action: #selector(saveTapped))
-        save.keyEquivalent = "\r"
+        let cancel: NSButton, save: NSButton
+        if embedded {
+            // On the page the buttons are the page's own kind, and the form stays up after a save.
+            cancel = toolButton("Revert", "arrow.uturn.backward", "Put Back What Was Last Saved", target: self, action: #selector(cancelTapped))
+            save = toolButton("Save", "checkmark", "Save The Project's Details (\u{2318}S)", target: self, action: #selector(saveTapped))
+            save.keyEquivalent = "s"
+            save.keyEquivalentModifierMask = .command
+            for c in [nameField, cancel, save] + controls.map({ $0.control }) as [NSControl] { c.isEnabled = !locked }
+            templates.isEnabled = !locked
+            if locked { say("The project is locked. Unlock it to change these details.", good: true) }
+        } else {
+            cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+            cancel.keyEquivalent = "\u{1b}"
+            save = NSButton(title: mode == .newProject ? "Create Project" : "Save", target: self, action: #selector(saveTapped))
+            save.keyEquivalent = "\r"
+        }
         let top = hairline(), bottom = hairline()
+        let inset: CGFloat = embedded ? PageStyle.side : 24
 
-        for v in [header, nameLabel, nameField, top, scroll, bottom, message, cancel, save] as [NSView] {
+        for v in (embedded ? [] : [header]) + [nameLabel, nameField, top, scroll, bottom, message, cancel, save] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
-        NSLayoutConstraint.activate([
+        NSLayoutConstraint.activate(embedded ? [
+            nameField.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+        ] : [
             root.widthAnchor.constraint(equalToConstant: 640),
             header.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             header.heightAnchor.constraint(equalToConstant: PageStyle.height),
-            nameLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
+            nameField.topAnchor.constraint(equalTo: header.bottomAnchor),
+        ])
+        NSLayoutConstraint.activate([
+            nameLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             nameLabel.widthAnchor.constraint(equalToConstant: 160),
             nameLabel.firstBaselineAnchor.constraint(equalTo: nameField.firstBaselineAnchor),
-            nameField.topAnchor.constraint(equalTo: header.bottomAnchor),
             nameField.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 10),
             nameField.widthAnchor.constraint(equalToConstant: 400),
             top.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 14),
@@ -314,18 +338,18 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
             bottom.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bottom.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             bottom.bottomAnchor.constraint(equalTo: save.topAnchor, constant: -14),
-            save.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
+            save.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
             save.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
             cancel.trailingAnchor.constraint(equalTo: save.leadingAnchor, constant: -10),
             cancel.centerYAnchor.constraint(equalTo: save.centerYAnchor),
-            message.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
+            message.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             message.trailingAnchor.constraint(lessThanOrEqualTo: cancel.leadingAnchor, constant: -12),
             message.centerYAnchor.constraint(equalTo: save.centerYAnchor),
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             grid.topAnchor.constraint(equalTo: document.topAnchor, constant: 16),
-            grid.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+            grid.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: inset),
             grid.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -18),
         ])
         view = root
@@ -334,7 +358,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        view.window?.makeFirstResponder(nameField)
+        if !embedded { view.window?.makeFirstResponder(nameField) }
     }
 
     private func fieldLabel(_ text: String) -> NSTextField {
@@ -455,11 +479,28 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let answers = ProjectField.tidy(values, templateOnly: isTemplate)
         if let problem = ProjectField.problem(name: name, values: answers, naming: isTemplate ? "template" : "project") { say(problem); return }
+        if embedded {
+            // The page stays; what was saved becomes what Revert goes back to.
+            startName = name
+            startValues = answers
+            onSave(name, answers)
+            say("Saved.", good: true)
+            return
+        }
         close()
         onSave(name, answers)
     }
 
-    @objc private func cancelTapped() { close() }
+    @objc private func cancelTapped() {
+        if embedded {
+            view.window?.makeFirstResponder(nil)
+            nameField.stringValue = startName
+            show(startValues)
+            say("Put back to what was last saved.", good: true)
+            return
+        }
+        close()
+    }
 
     private func close() {
         if let onClose = onClose { onClose(); return }

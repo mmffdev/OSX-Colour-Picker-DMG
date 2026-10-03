@@ -320,6 +320,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             guard let self = self else { return }
             ChoiceSheet(title: title, message: message, choices: choices).present(over: self.content.view)
         }
+        library.onPrompt = { [weak self] prompt in
+            guard let self = self else { return }
+            PromptSheet(prompt).present(over: self.content.view)
+        }
         library.onRevealProject = { [weak self] id in self?.sidebar.reveal(project: id) }
         library.onThemeChange = { [weak self] in self?.sidebar.reload() }
         library.onShow = { [weak self] s, rename in

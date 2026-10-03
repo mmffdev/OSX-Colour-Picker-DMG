@@ -456,33 +456,37 @@ final class LibraryController: NSObject {
     /// Opens the project form; saving it creates the project.
     @objc func newProject() { startProject(moving: nil) }
 
-    /// The same, putting `palette` into the project once it is made.
+    /// Asks for one line of text in the middle of the page; set by the window.
+    var onPrompt: ((ModalPrompt) -> Void)?
+
+    /// Asks for the project's name, makes it, and opens its Overview page, where its details are
+    /// filled in. `palette`, when given, goes into the project as a copy once it is made.
     func startProject(moving palette: UUID?) {
-        showProjectForm(mode: .newProject, name: "", values: [:]) { [weak self] name, values in
+        onPrompt?(ModalPrompt(title: "New Project", message: "Name the project. Its details are filled in on its Overview page, which opens next.",
+                              placeholder: "Client, product or piece of work", confirm: "Create Project", symbol: "folder.badge.plus",
+                              check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
-            self.apply("New Project") { lib in
-                let made = lib.createProject(named: name)
-                lib.setProjectDetails(made, values)
-                id = made
-            }
-            self.flash("Created project \(id.flatMap { self.library.project($0)?.name } ?? name)")
-            // Then the copy goes in by the usual door, which asks about notes when the palette has some.
-            guard let made = id, self.library.project(made) != nil else { return }
-            var first = palette
-            if first == nil, case .palette(let open)? = self.current, self.library.swatch(open)?.projectID == nil { first = open }
-            if let first = first { self.move(palette: first, to: made, index: 0) }
-        }
+            self.apply("New Project") { lib in id = lib.createProject(named: name) }
+            guard let made = id, let project = self.library.project(made) else { return }
+            self.flash("Created Project \(project.name)")
+            self.onShow?(.overview(made), false)
+            // The copy goes in by the usual door, which asks about notes when the palette has some.
+            if let palette = palette { self.move(palette: palette, to: made, index: 0) }
+        })
     }
 
-    /// Opens the project form on an existing project.
+    /// A project's details are on its Overview page.
     func editProject(_ id: UUID) {
-        guard let p = library.project(id) else { return }
-        showProjectForm(mode: .project, name: p.name, values: p.details ?? [:]) { [weak self] name, values in
-            self?.apply("Edit Project Details") { lib in
-                lib.renameProject(id, to: name)
-                lib.setProjectDetails(id, values)
-            }
+        guard library.project(id) != nil else { return }
+        onShow?(.overview(id), false)
+    }
+
+    /// Keeps the name and details typed into a project's Overview page.
+    func saveProject(_ id: UUID, name: String, details: [String: String]) {
+        apply("Edit Project Details") { lib in
+            lib.renameProject(id, to: name)
+            lib.setProjectDetails(id, details)
         }
     }
 
