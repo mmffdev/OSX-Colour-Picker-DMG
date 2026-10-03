@@ -12,18 +12,22 @@ private func labSymbol() -> String {
 let labSymbolName = labSymbol()
 
 extension LibraryController {
-    /// Saves colours as a new palette without leaving the page or redirecting picks.
+    /// Saves colours as a new palette without leaving the page or redirecting picks. The palette
+    /// always joins the Palettes collection; saved to a project, the project gets its own copy as
+    /// well, so the collection holds everything that was ever made.
     func keep(_ hexes: [String], named name: String, in project: UUID?) {
         var made: String?
+        var copied = false
         apply("Keep Colours As Palette") { lib in
             let target = lib.activeSwatchID
             let id = lib.createSwatch(named: name, hexes: hexes, custom: true)
             lib.activeSwatchID = target
-            if let p = project { lib.move(id, to: p, index: Int.max) }
+            if let p = project { copied = lib.copyPalette(id, to: p, withNotes: false) != nil }
             made = lib.swatch(id)?.name
         }
-        let place = project.flatMap { library.project($0)?.name }.map { " in \($0)" } ?? ""
-        flash("Saved \(plural(hexes.count, "colour")) as \(made ?? name)\(place)\(project == nil ? "" : "; it is under Palettes too")")
+        guard let saved = made else { return }   // refused: the project is locked
+        let place = project.flatMap { library.project($0)?.name }
+        flash("Saved \(plural(hexes.count, "Colour")) As \(saved)" + (copied ? " In \(place ?? "The Project") And In Palettes" : ""))
     }
 }
 

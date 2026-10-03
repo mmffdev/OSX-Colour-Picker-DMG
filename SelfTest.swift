@@ -1403,6 +1403,13 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let withoutStockNotes = shop.copyPalette(stock, to: beta, withNotes: false, at: t.addingTimeInterval(7))!
     check(shop.note(of: "#F55805", in: withStockNotes) == "Stock note." && !shop.hasNotes(withoutStockNotes) && shop.note(of: "#F55805", in: stock) == "Stock note.",
           "a loose palette has notes of its own, and a project's copy takes them or not as asked")
+    var lab = Library()
+    let delta = lab.createProject(named: "Delta", at: t)
+    let kept = lab.createSwatch(named: "From The Lab", hexes: ["#112233", "#445566"], custom: true, at: t)
+    let keptCopy = lab.copyPalette(kept, to: delta, withNotes: false, at: t)!
+    check(lab.palettes(in: nil).map { $0.id } == [kept] && lab.palettes(in: delta).map { $0.id } == [keptCopy]
+          && lab.swatch(keptCopy)?.name == "From The Lab" && lab.swatch(keptCopy)?.custom == true && lab.swatch(keptCopy)?.entries.count == 2,
+          "colours saved to a project from a tool are kept in the Palettes collection and copied into the project")
     let pair = shop.createTypography(named: "Type", at: t)
     shop.setStyle(TypeStyle(id: UUID(), name: "Body", ink: "#101010", paper: "#FFFFFF", heading: "H", body: "B", headingFont: nil, bodyFont: nil), in: pair)
     let pairCopy = shop.copyPalette(pair, to: alpha, withNotes: false, at: t.addingTimeInterval(7))!
