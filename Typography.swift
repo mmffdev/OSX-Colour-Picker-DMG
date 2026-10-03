@@ -266,7 +266,7 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
     private var built: [TypeStyle]?
 
     private let name = NSTextField()
-    private let detail = caption("", size: 11.5)
+    private lazy var header = PageHeader(title: name, actions: [add])
     private var add: NSButton!
     private let scroll = NSScrollView()
     private let column = CardColumn()
@@ -284,7 +284,6 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
         page.onLayout = { [weak self] in self?.arrange(in: $0) }
         view = page
 
-        name.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         name.isBordered = false
         name.drawsBackground = false
         name.focusRingType = .none
@@ -303,7 +302,7 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
-        for v in [name, detail, add, scroll, empty] as [NSView] { page.addSubview(v) }
+        for v in [header, scroll, empty] as [NSView] { page.addSubview(v) }
     }
 
     /// Shows a Typography palette, or refreshes the one showing after the library has changed.
@@ -317,7 +316,7 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
         if let project = s.projectID.flatMap({ library.library.project($0)?.name }) { parts.append("In \(project)") }
         let lost = Set(styles.flatMap { $0.fonts }.filter { !fontInstalled($0) })
         if !lost.isEmpty { parts.append(plural(lost.count, "Font") + " Missing") }
-        detail.stringValue = parts.joined(separator: "  \u{00B7}  ")
+        header.subtitle.stringValue = parts.joined(separator: "  \u{00B7}  ")
         empty.isHidden = !styles.isEmpty
 
         guard built != styles else { return }
@@ -341,14 +340,9 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func arrange(in b: NSRect) {
-        let pad: CGFloat = 20, bar: CGFloat = 28
-        let head = view.safeAreaInsets.top + 14
-        add.sizeToFit()
-        add.frame.origin = NSPoint(x: b.width - pad - add.frame.width, y: head + (bar - add.frame.height) / 2)
-        name.frame = NSRect(x: pad - 2, y: head, width: max(80, add.frame.minX - pad - 12), height: bar)
-        detail.frame = NSRect(x: pad, y: head + bar + 2, width: b.width - pad * 2, height: 16)
-
-        let top = head + bar + 28
+        let pad = PageStyle.side
+        header.frame = NSRect(x: 0, y: view.safeAreaInsets.top, width: b.width, height: PageStyle.height)
+        let top = header.frame.maxY
         scroll.frame = NSRect(x: pad, y: top, width: b.width - pad * 2, height: max(40, b.height - top - 8))
         // Clear of the scroller, when the Mac is set to show one all the time.
         let width = scroll.contentSize.width - 2, gap: CGFloat = 16

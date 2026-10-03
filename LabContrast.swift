@@ -455,7 +455,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     /// Which of the two colours the next colour picked goes to.
     private var arming = true   // true = text colour
 
-    private let heading = NSTextField(labelWithString: "Contrast")
+    private var header: PageHeader!
     private var undo: NSButton!, redo: NSButton!, toType: NSButton!
     private let why = NSTextField(wrappingLabelWithString: "")
     private let saveBar: SaveBar
@@ -502,7 +502,6 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         page.onLayout = { [weak self] in self?.arrange(in: $0) }
         view = page
 
-        heading.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         undo = toolButton("", "arrow.uturn.backward", "Undo", target: self, action: #selector(undoTapped))
         redo = toolButton("", "arrow.uturn.forward", "Redo", target: self, action: #selector(redoTapped))
         toType = toolButton("Add To Typography", "textformat", "Keep This Pairing, With Its Words And Fonts, In A Typography Palette", target: self, action: #selector(typographyTapped(_:)))
@@ -586,29 +585,21 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         scroll.scrollerStyle = .overlay
-        for v in [heading, undo, redo, toType, scroll, headingFont, bodyFont, preview, gridTitle, grid, saveBar] as [NSView] { page.addSubview(v) }
+        header = PageHeader(actions: [undo, redo, toType])
+        header.title.stringValue = "Contrast"
+        for v in [header, scroll, headingFont, bodyFont, preview, gridTitle, grid, saveBar] as [NSView] { page.addSubview(v) }
         refresh()
     }
 
     // MARK: Layout
 
     private func arrange(in b: NSRect) {
-        let pad: CGFloat = 20, bar: CGFloat = 28, gap: CGFloat = 14
+        let pad = PageStyle.side, bar: CGFloat = 28, gap: CGFloat = 14
         let w = b.width - pad * 2
-        let head = view.safeAreaInsets.top + PageLayout.titleCentre - bar / 2 // the page runs under the toolbar; its contents must not
-
-        heading.sizeToFit()
-        heading.frame.origin = NSPoint(x: pad, y: head + (bar - heading.frame.height) / 2)
-        var x = b.width - pad
-        for button in [toType, redo, undo] as [NSButton] {
-            button.sizeToFit()
-            x -= button.frame.width
-            button.frame.origin = NSPoint(x: x, y: head + (bar - button.frame.height) / 2)
-            x -= button === toType ? 14 : 4
-        }
+        header.frame = NSRect(x: 0, y: view.safeAreaInsets.top, width: b.width, height: PageStyle.height)
         let foot = b.height - pad - bar
         saveBar.frame = NSRect(x: pad, y: foot, width: w, height: bar)
-        let top = head + bar + gap, bottom = foot - gap, height = bottom - top
+        let top = header.frame.maxY, bottom = foot - gap, height = bottom - top
 
         // The preview and grid take four fifths of what an even split would give them; the controls and palettes get the rest.
         let even = max(236, min(340, w * 0.42))
@@ -795,7 +786,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
             for s in colours { offer(s.id, s.name, indent: 1) }
         }
         if offersWheel, library.labPalette != nil {
-            offer(nil, "cLab Wheel", indent: 0)
+            offer(nil, "Colour Lab Wheel", indent: 0)
         } else {
             // Shown in the menu while no palette is chosen.
             let none = NSMenuItem(title: "Choose A Palette", action: nil, keyEquivalent: "")

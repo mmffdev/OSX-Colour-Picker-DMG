@@ -514,7 +514,7 @@ final class LabViewController: NSViewController {
     private var gestureStart: LabState?
     private var selected = 0
 
-    private let heading = NSTextField(labelWithString: "cLab")
+    private var header: PageHeader!
     private var undo: NSButton!, redo: NSButton!, add: NSButton!, random: NSButton!, check: NSButton!
     private let wheel = WheelView()
     private var rules: [RuleButton] = []
@@ -543,7 +543,6 @@ final class LabViewController: NSViewController {
         page.onLayout = { [weak self] in self?.arrange(in: $0) }
         view = page
 
-        heading.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         undo = toolButton("", "arrow.uturn.backward", "Undo", target: self, action: #selector(undoTapped))
         redo = toolButton("", "arrow.uturn.forward", "Redo", target: self, action: #selector(redoTapped))
         add = toolButton("", "plus", "Add A Colour", target: self, action: #selector(addTapped))
@@ -591,7 +590,9 @@ final class LabViewController: NSViewController {
         strip.onLock = { [weak self] i in self?.change { $0.toggleLock(i) } }
         strip.onDelete = { [weak self] i in self?.change { $0.remove(i) } }
 
-        for v in [heading, undo, redo, add, random, check, wheel, dim, slider, bright, why, strip, saveBar] + rules as [NSView] {
+        header = PageHeader(actions: [undo, redo, add, random, check])
+        header.title.stringValue = "Colour Lab"
+        for v in [header, wheel, dim, slider, bright, why, strip, saveBar] + rules as [NSView] {
             page.addSubview(v)
         }
         refresh()
@@ -601,19 +602,9 @@ final class LabViewController: NSViewController {
 
     /// The wheel beside the strip; in a window that is narrow but tall, the strip drops below it.
     private func arrange(in b: NSRect) {
-        let pad: CGFloat = 20, bar: CGFloat = 28, gap: CGFloat = 14
+        let pad = PageStyle.side, bar: CGFloat = 28, gap: CGFloat = 14
         let w = b.width - pad * 2
-        let head = view.safeAreaInsets.top + PageLayout.titleCentre - bar / 2 // the page runs under the toolbar; its contents must not
-
-        heading.sizeToFit()
-        heading.frame.origin = NSPoint(x: pad, y: head + (bar - heading.frame.height) / 2)
-        var x = b.width - pad
-        for button in [check, random, add, redo, undo] as [NSButton] {
-            button.sizeToFit()
-            x -= button.frame.width
-            button.frame.origin = NSPoint(x: x, y: head + (bar - button.frame.height) / 2)
-            x -= button === add || button === check ? 14 : 4
-        }
+        header.frame = NSRect(x: 0, y: view.safeAreaInsets.top, width: b.width, height: PageStyle.height)
 
         let foot = b.height - pad - bar
         saveBar.frame = NSRect(x: pad, y: foot, width: w, height: bar)
@@ -622,7 +613,7 @@ final class LabViewController: NSViewController {
         let whyHeight: CGFloat = 36
         why.frame = NSRect(x: pad, y: foot - gap - whyHeight, width: w, height: whyHeight)
 
-        let top = head + bar + gap, bottom = why.frame.minY - 10
+        let top = header.frame.maxY, bottom = why.frame.minY - 10
         let ruleSide: CGFloat = 30, ruleRow = CGFloat(rules.count) * ruleSide + CGFloat(rules.count - 1)
         let controls = 10 + ruleSide + 8 + 20
         let stacked = b.width < 600 && b.height >= 600
@@ -667,6 +658,7 @@ final class LabViewController: NSViewController {
         wheel.state = state
         wheel.selected = selected
         strip.show(state)
+        header.subtitle.stringValue = "\(plural(state.nodes.count, "Colour"))  \u{00B7}  \(state.rule.title)"
         for r in rules { r.chosen = r.rule == state.rule }
         if abs(slider.doubleValue - target.v) > 0.001 { slider.doubleValue = target.v }
         slider.toolTip = state.rule == .custom ? "Brightness Of The Ringed Colour" : "Brightness Of The Base Colour"

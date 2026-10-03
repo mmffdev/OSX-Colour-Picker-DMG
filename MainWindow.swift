@@ -355,7 +355,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case .tag(let t):
             window?.title = "Tagged \(t)" + where_
         case .lab:
-            window?.title = "cLab" + where_
+            window?.title = "Colour Lab" + where_
         case .contrast:
             window?.title = "Contrast" + where_
         }
@@ -560,7 +560,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             return item("New Palette", "plus.rectangle.on.rectangle", "Start an empty palette and send picks to it (\u{2318}N)",
                         library, #selector(LibraryController.newPalette))
         case .lab:
-            return item("cLab", labSymbolName, "Open cLab, the colour wheel (\u{2318}L)", self, #selector(showLab))
+            return item("Colour Lab", labSymbolName, "Open Colour Lab, the colour wheel (\u{2318}L)", self, #selector(showLab))
         case .build:
             return item("Build Palette", "rectangle.stack.badge.plus", "Choose swatches from the library to make a palette",
                         self, #selector(buildPalette))

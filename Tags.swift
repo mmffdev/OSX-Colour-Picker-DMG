@@ -232,14 +232,13 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
     private let library: LibraryController
     var onClose: (() -> Void)?
     private var focus: String?
-    private let count = caption("")
+    private var header: PageHeader!
     private let rows = NSStackView()
     /// What each row's controls belong to, by the control's tag.
     private var names: [String] = []
     private var ownChange = false
     /// The tags ticked for acting on together.
     private var ticked = Set<String>()
-    private let heading = NSTextField(labelWithString: "Tags")
     private var browsing: [NSView] = []
     private var selecting: [NSView] = []
 
@@ -252,7 +251,6 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
 
     override func loadView() {
         let root = NSView()
-        heading.font = NSFont.systemFont(ofSize: 22, weight: .bold)
         let add = NSButton(title: "New Tag", target: self, action: #selector(newTapped))
         add.bezelStyle = .rounded
         add.controlSize = .small
@@ -274,6 +272,8 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
         clear.controlSize = .small
         browsing = [add, done]
         selecting = [remove, clear]
+        header = PageHeader(actions: browsing + selecting)
+        header.title.stringValue = "Tags"
 
         rows.orientation = .vertical
         rows.alignment = .leading
@@ -287,24 +287,16 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
         scroll.drawsBackground = false
         scroll.documentView = document
 
-        for v in [heading, count, add, done, remove, clear, scroll] as [NSView] {
+        for v in [header, scroll] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
         NSLayoutConstraint.activate([
-            heading.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 6),
-            heading.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            count.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 3),
-            count.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
-            done.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            done.centerYAnchor.constraint(equalTo: count.centerYAnchor),
-            add.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8),
-            add.centerYAnchor.constraint(equalTo: done.centerYAnchor),
-            clear.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            clear.centerYAnchor.constraint(equalTo: count.centerYAnchor),
-            remove.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
-            remove.centerYAnchor.constraint(equalTo: clear.centerYAnchor),
-            scroll.topAnchor.constraint(equalTo: count.bottomAnchor, constant: 14),
+            header.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: PageStyle.height),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -432,8 +424,8 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
     /// The title, the count line, and which pair of buttons is showing.
     private func showHeader() {
         let many = ticked.count > 1
-        heading.stringValue = many ? "\(ticked.count) Tags Selected" : "Tags"
-        count.stringValue = many ? "Remove them together, or untick to go back"
+        header.title.stringValue = many ? "\(ticked.count) Tags Selected" : "Tags"
+        header.subtitle.stringValue = many ? "Remove them together, or untick to go back"
             : names.isEmpty ? "No tags yet" : plural(names.count, "Tag")
         browsing.forEach { $0.isHidden = many }
         selecting.forEach { $0.isHidden = !many }

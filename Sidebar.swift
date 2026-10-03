@@ -5,15 +5,15 @@ import AppKit
 final class SidebarNode: NSObject {
     enum Kind: Equatable {
         case favourites, library, loose, tags
-        /// The "cTools" heading, over the tools that work on colours already chosen.
+        /// The "Tools" heading, over Colour Lab and Contrast.
         case tools
         /// The "Projects" heading; each project sits under it with its palettes inside.
         case projects
         case project(UUID)
         case all
-        /// cLab, under All Swatches.
+        /// Colour Lab, under Tools.
         case lab
-        /// Contrast, under cTools.
+        /// Contrast, under Tools.
         case contrast
         case tag(String)
         /// The "Edit Tags…" row at the foot of the tag list.
@@ -24,6 +24,8 @@ final class SidebarNode: NSObject {
         case typography
         /// The "Typography" bucket inside a project, above its tags, holding its Typography palettes.
         case projectTypography(UUID)
+        /// The "Palettes" bucket inside a project, first of its buckets, holding its palettes of colours.
+        case projectPalettes(UUID)
         case palette(UUID)
     }
 
@@ -43,12 +45,15 @@ final class SidebarNode: NSObject {
     var isExpandable: Bool {
         if case .projectTags = kind { return true }
         if case .projectTypography = kind { return true }
+        if case .projectPalettes = kind { return true }
         return isGroup || projectID != nil
     }
 
     var paletteID: UUID? { if case .palette(let id) = kind { return id }; return nil }
     var projectID: UUID? { if case .project(let id) = kind { return id }; return nil }
     var tag: String? { if case .tag(let t) = kind { return t }; return nil }
+    /// The project a Palettes bucket belongs to.
+    var bucketProjectID: UUID? { if case .projectPalettes(let id) = kind { return id }; return nil }
 }
 
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
@@ -224,7 +229,7 @@ final class SidebarOutlineView: NSOutlineView {
         // A project's Tags and Typography buckets are inset alike, and so is what they hold.
         func bucket(_ kind: SidebarNode.Kind?) -> Bool {
             switch kind {
-            case .projectTags?, .projectTypography?: return true
+            case .projectTags?, .projectTypography?, .projectPalettes?: return true
             default: return false
             }
         }
@@ -275,6 +280,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let libraryGroup = SidebarNode(.library)
     private let toolsGroup = SidebarNode(.tools)
     private let typography = SidebarNode(.typography)
+    private var paletteBuckets: [UUID: SidebarNode] = [:]
     private var typeBuckets: [UUID: SidebarNode] = [:]
     private let projectsGroup = SidebarNode(.projects)
     private var tagBuckets: [UUID: SidebarNode] = [:]
@@ -288,8 +294,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     init(library: LibraryController) {
         self.library = library
         super.init(nibName: nil, bundle: nil)
-        libraryGroup.children = [SidebarNode(.all), SidebarNode(.lab)]
-        toolsGroup.children = [SidebarNode(.contrast)]
+        libraryGroup.children = [SidebarNode(.all)]
+        toolsGroup.children = [SidebarNode(.lab), SidebarNode(.contrast)]
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -341,7 +347,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     override func viewDidLayout() {
         super.viewDidLayout()
         guard let scroll = view as? NSScrollView else { return }
-        let extra = PageLayout.titleCentre - 14 // the first row is 28 points tall
+        let extra = PageStyle.titleCentre - 14 // the first row is 28 points tall
         let top = view.safeAreaInsets.top + extra
         if scroll.automaticallyAdjustsContentInsets || scroll.contentInsets.top != top {
             scroll.automaticallyAdjustsContentInsets = false
@@ -360,7 +366,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let node = projectNodes[p.id] ?? SidebarNode(.project(p.id))
             projectNodes[p.id] = node
             let held = lib.palettes(in: p.id)
-            node.children = held.filter { !$0.isTypography }.map { SidebarNode(.palette($0.id)) }
+            // Its palettes of colours sit in a bucket of their own, like its Typography palettes and tags.
+            node.children = []
+            let colours = held.filter { !$0.isTypography }
+            if !colours.isEmpty {
+                let bucket = paletteBuckets[p.id] ?? SidebarNode(.projectPalettes(p.id))
+                paletteBuckets[p.id] = bucket
+                bucket.children = colours.map { SidebarNode(.palette($0.id)) }
+                node.children.append(bucket)
+                buckets.append(bucket)
+            }
             // Its Typography palettes sit in a bucket of their own, above its tags.
             let type = held.filter { $0.isTypography }
             if !type.isEmpty {
@@ -450,6 +465,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let node = item as? SidebarNode, !node.isGroup else { return false }
         if case .projectTags = node.kind { return false }
         if case .projectTypography = node.kind { return false }
+        if case .projectPalettes = node.kind { return false }
         return true
     }
     // Each main heading after the first carries the gap that separates it from the section above.
@@ -527,6 +543,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
         case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Every palette. Those in a project are listed under their project too"
+        case .projectPalettes:
+            cell.textField?.stringValue = "Palettes"
+            cell.imageView?.image = symbol("swatchpalette", "Project palettes", size: 11)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.toolTip = "Palettes that belong to this project"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
         case .projectTypography:
             cell.textField?.stringValue = "Typography"
             cell.imageView?.image = symbol("textformat", "Project typography", size: 11)
@@ -551,7 +573,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.contentTintColor = .controlAccentColor
             cell.toolTip = nil
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(lib.colours.count)"
-        case .tools: cell.textField?.stringValue = "cTools"
+        case .tools: cell.textField?.stringValue = "Tools"
         case .contrast:
             cell.textField?.stringValue = "Contrast"
             cell.imageView?.image = symbol("circle.lefthalf.filled", "Contrast", size: 12)
@@ -559,8 +581,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.toolTip = "Check a text colour against a background, and fix it"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .lab:
-            cell.textField?.stringValue = "cLab"
-            cell.imageView?.image = symbol(labSymbolName, "cLab", size: 12)
+            cell.textField?.stringValue = "Colour Lab"
+            cell.imageView?.image = symbol(labSymbolName, "Colour Lab", size: 12)
             cell.imageView?.contentTintColor = .controlAccentColor
             cell.toolTip = "The colour lab: build palettes on a colour wheel"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
@@ -658,6 +680,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             // dropping on a palette row means beside it.
             func takes(_ place: SidebarNode) -> Bool {
                 if place.projectID != nil { return true }
+                if case .projectPalettes = place.kind { return true }
                 // These lists are only arranged by dragging: what is in each is decided elsewhere.
                 return [.favourites, .loose, .typography].contains(place.kind) && place.children.contains { $0.paletteID == palette }
             }
@@ -694,8 +717,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             if t.kind == .favourites { library.placeFavourites(ids) } else { library.placeInList(ids) }
             return true
         }
-        if let id = palette, let t = target, let destination = t.projectID {
-            // Palettes come first in a project; its tag bucket, when it has one, is always last.
+        if let id = palette, let t = target, let destination = t.projectID ?? t.bucketProjectID {
+            // Within the project's Palettes bucket the order is the drop's; on the project itself, the end.
             let palettes = t.children.filter { $0.paletteID != nil }.count
             var at = index < 0 ? palettes : min(index, palettes)
             // Moving down within the same list: the row's own slot is about to close up.

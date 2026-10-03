@@ -263,12 +263,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var search = ""
 
     private let nameField = NSTextField(labelWithString: "")
-    private let subtitle = caption("")
+    private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
     private var star: NSButton!
     private var target: NSButton!
     private var tagButton: NSButton!
     private let tagBar = TagBar()
-    private let barGap = NSView()
     private var tagging = false
     /// What the swatch menus and the halo call to tag swatches: the page's own tag bar.
     private lazy var onEditTags: ([String]) -> Void = { [weak self] hexes in self?.editTags(of: hexes) }
@@ -315,8 +314,6 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     override func loadView() {
         view = NSView()
 
-        nameField.font = NSFont.systemFont(ofSize: 22, weight: .bold)
-        nameField.lineBreakMode = .byTruncatingTail
         nameField.isEditable = true
         nameField.isBordered = false
         nameField.drawsBackground = false
@@ -376,25 +373,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         }
         tagBar.isHidden = true
 
-        // The name has the top row to itself; under it, the count on the left and the actions on the right.
-        let gap = barGap
-        gap.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        // The shared header: the name has the top row to itself; under it, the count on the left and the actions on the right.
         browsing.setViews([tagButton, star, target, copyAll, wcag, labels, sort], in: .leading)
         browsing.spacing = 12
-        let bar = NSStackView(views: [subtitle, gap, browsing, selecting, tagBar])
-        bar.orientation = .horizontal
-        bar.spacing = 12
-        bar.alignment = .centerY
-
-        let header = NSStackView(views: [nameField, bar])
-        header.orientation = .vertical
-        header.alignment = .leading
-        header.spacing = 2
-        header.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
-        NSLayoutConstraint.activate([
-            nameField.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -20),
-            bar.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -20),
-        ])
 
         sizeCards()
         grid.collectionViewLayout = layout
@@ -431,16 +412,16 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
-        // 66 points unless its contents need more; never left to stretch into the page below.
-        let headerHeight = header.heightAnchor.constraint(equalToConstant: 66)
+        // The header's set height, unless its bar needs a second row; never left to stretch into the page below.
+        let headerHeight = header.heightAnchor.constraint(equalToConstant: PageStyle.height)
         headerHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 66),   // taller while the tag bar shows its second row
+            header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
             headerHeight,
-            spectrum.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            spectrum.topAnchor.constraint(equalTo: header.bottomAnchor),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
@@ -670,18 +651,18 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private func updateHeader() {
         let many = selected().count > 1
         tagBar.isHidden = !tagging
-        subtitle.isHidden = tagging
-        barGap.isHidden = tagging
+        header.subtitle.isHidden = tagging
+        header.gap.isHidden = tagging
         browsing.isHidden = many || tagging
         selecting.isHidden = !many || tagging
         let editingName = nameField.currentEditor() != nil
         nameField.isEditable = !many
         if many {
             nameField.stringValue = "\(selected().count) Swatches Selected"
-            subtitle.stringValue = "Shift-click or \u{2318}-click to change the selection"
+            header.subtitle.stringValue = "Shift-click or \u{2318}-click to change the selection"
         } else {
             if !editingName { nameField.stringValue = committedName }
-            subtitle.stringValue = restSubtitle
+            header.subtitle.stringValue = restSubtitle
         }
     }
 

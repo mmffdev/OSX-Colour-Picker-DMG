@@ -163,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu("View") { m in
             add(m, "All Swatches", #selector(MainWindowController.showAll), "0", main)
-            add(m, "cLab", #selector(MainWindowController.showLab), "l", main)
+            add(m, "Colour Lab", #selector(MainWindowController.showLab), "l", main)
             add(m, "Contrast", #selector(MainWindowController.showContrast), "l", main, [.command, .shift])
             add(m, "Next Palette", #selector(MainWindowController.nextPalette), "]", main)
             add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)

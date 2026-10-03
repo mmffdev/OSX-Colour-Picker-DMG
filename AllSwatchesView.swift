@@ -214,7 +214,6 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     /// The chosen swatches changed, so rail 3 should redraw.
     var onDraftChanged: (() -> Void)?
     private let tagBar = TagBar()
-    private let barGap = NSView()
     private var tagging = false
     /// What the swatch menu calls to tag swatches: the page's own tag bar.
     private lazy var onEditTags: ([String]) -> Void = { [weak self] hexes in self?.editTags(of: hexes) }
@@ -236,8 +235,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     private var labelsPopover = NSPopover()
     private var labelChecks: [NSButton] = []
     private let addTo = NSPopUpButton(frame: .zero, pullsDown: true)
-    private let titleLabel = NSTextField(labelWithString: "All Swatches")
-    private let subtitle = caption("")
+    private lazy var header = PageHeader(actions: [browsing, selecting, tagBar])
     /// The bar's right-hand side: filters while browsing, actions while several swatches are selected.
     private let browsing = NSStackView()
     private let selecting = NSStackView()
@@ -295,10 +293,8 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         buildButton.imagePosition = .imageLeading
         buildButton.toolTip = "Choose swatches from the library and save them as a new palette"
 
-        // Same shape as a palette page: the title on its own row, then the count on the left and the
+        // The shared header: the title on its own row, then the count on the left and the
         // controls on the right. With several swatches selected, the controls give way to actions.
-        titleLabel.font = NSFont.systemFont(ofSize: 22, weight: .bold)
-        titleLabel.lineBreakMode = .byTruncatingTail
         func small(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
             let b = NSButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
@@ -321,28 +317,13 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
             bar.spacing = 8
         }
         selecting.isHidden = true
-        let gap = barGap
-        gap.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tagBar.isHidden = true
         tagBar.onClose = { [weak self] in
             self?.tagging = false
             self?.updateHeader()
             self?.view.window?.makeFirstResponder(self?.grid)
         }
-        let bar = NSStackView(views: [subtitle, gap, browsing, selecting, tagBar])
-        bar.orientation = .horizontal
-        bar.spacing = 12
-        bar.alignment = .centerY
-        let filter = NSStackView(views: [titleLabel, bar])
-        filter.orientation = .vertical
-        filter.alignment = .leading
-        filter.spacing = 2
-        filter.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
-        NSLayoutConstraint.activate([
-            titleLabel.trailingAnchor.constraint(equalTo: filter.trailingAnchor, constant: -20),
-            bar.trailingAnchor.constraint(equalTo: filter.trailingAnchor, constant: -20),
-        ])
+        header.title.stringValue = "All Swatches"
 
         // The builder's own bar: name, count, save.
         nameField.placeholderString = "Palette name"
@@ -390,29 +371,29 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         empty.textColor = .tertiaryLabelColor
         empty.font = NSFont.systemFont(ofSize: 13)
 
-        for v in [builderBar, filter, scroll, empty] as [NSView] {
+        for v in [builderBar, header, scroll, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
         builderHeight = builderBar.heightAnchor.constraint(equalToConstant: 0)
-        // 66 points unless its contents need more; never left to stretch into the page below.
-        let filterHeight = filter.heightAnchor.constraint(equalToConstant: 66)
-        filterHeight.priority = .defaultHigh
-        // The title sits on the same line as every other page's, unless the builder bar needs the room.
-        let titleLine = titleLabel.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: PageLayout.titleCentre)
-        titleLine.priority = .defaultHigh
+        // The header's set height, unless its bar needs a second row; never left to stretch into the page below.
+        let headerHeight = header.heightAnchor.constraint(equalToConstant: PageStyle.height)
+        headerHeight.priority = .defaultHigh
+        // The header sits where it does on every page, unless the builder bar needs the room above it.
+        let headerTop = header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+        headerTop.priority = .defaultHigh
         NSLayoutConstraint.activate([
             builderBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             builderBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             builderBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             builderHeight,
-            filter.topAnchor.constraint(greaterThanOrEqualTo: builderBar.bottomAnchor, constant: 6),
-            titleLine,
-            filter.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            filter.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            filter.heightAnchor.constraint(greaterThanOrEqualToConstant: 66),   // taller while the tag bar shows its second row
-            filterHeight,
-            scroll.topAnchor.constraint(equalTo: filter.bottomAnchor),
+            header.topAnchor.constraint(greaterThanOrEqualTo: builderBar.bottomAnchor),
+            headerTop,
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
+            headerHeight,
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -605,21 +586,21 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         let chosen = building ? [] : selected()
         let many = chosen.count > 1
         tagBar.isHidden = !tagging
-        subtitle.isHidden = tagging
-        barGap.isHidden = tagging
+        header.subtitle.isHidden = tagging
+        header.gap.isHidden = tagging
         browsing.isHidden = many || tagging
         selecting.isHidden = !many || tagging
         if many {
-            titleLabel.stringValue = "\(chosen.count) Swatches Selected"
-            subtitle.stringValue = "Shift-click or \u{2318}-click to change the selection"
+            header.title.stringValue = "\(chosen.count) Swatches Selected"
+            header.subtitle.stringValue = "Shift-click or \u{2318}-click to change the selection"
             return
         }
-        titleLabel.stringValue = "All Swatches"
+        header.title.stringValue = "All Swatches"
         let total = library.library.colours.count, showing = Set(tiles.map { $0.hex }).count
         var parts = [plural(total, "Swatch", "Swatches")]
         if showing != total { parts.append("\(showing) Shown") }
         if let t = tag { parts.append("Tagged \(t)") }
-        subtitle.stringValue = parts.joined(separator: "  \u{00B7}  ")
+        header.subtitle.stringValue = parts.joined(separator: "  \u{00B7}  ")
     }
 
     @objc private func copySelected() { library.copy(selected()) }
