@@ -222,19 +222,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         let side = NSSplitViewItem(viewController: sidebar)
         sideItem = side
         side.minimumThickness = 236 // room for a palette name, its count and star
-        side.maximumThickness = 340
         side.canCollapse = true
         let main = NSSplitViewItem(viewController: content)
         main.minimumThickness = 420
         builderItem = NSSplitViewItem(viewController: builder)
         builderItem.minimumThickness = 230
-        builderItem.maximumThickness = 340
         builderItem.canCollapse = true
         builderItem.isCollapsed = true
         builderItem.holdingPriority = .defaultLow + 1
         historyItem = NSSplitViewItem(viewController: historyRail)
         historyItem.minimumThickness = 230
-        historyItem.maximumThickness = 340
         historyItem.canCollapse = true
         historyItem.holdingPriority = .defaultLow + 1
         split.addSplitViewItem(side)
@@ -259,22 +256,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         ])
         win.contentViewController = root
         win.setContentSize(NSSize(width: 1080, height: 700))
+        // The window takes its saved place first, so the panes' saved widths are laid into a window of the right size.
+        restoreFrame()
         split.splitView.autosaveName = "MMFFDevColour3Split"
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
         historyItem.isCollapsed = !Prefs.historyRailShown
         win.center()
         // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
         shouldCascadeWindows = false
-        win.setFrameAutosaveName("MMFFDevColour3MainWindow")
+        restoreFrame()
         Theme.apply(to: win)
         DispatchQueue.main.async { Theme.apply(to: win) }   // once more after every page has its views
-        if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_TRACE"] != nil {
-            let screens = NSScreen.screens.map { NSStringFromRect($0.frame) }.joined(separator: " | ")
-            NSLog("trace screens: %@", screens)
-            NSLog("trace after autosave: %@", NSStringFromRect(win.frame))
-            for t in [1.0, 3.0] { DispatchQueue.main.asyncAfter(deadline: .now() + t) { NSLog("trace at %.0fs: %@  on %@", t, NSStringFromRect(win.frame), win.screen.map { NSStringFromRect($0.frame) } ?? "no screen") } }
-            NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: win, queue: nil) { _ in NSLog("trace moved to: %@", NSStringFromRect(win.frame)) }
-        }
 
         let toolbar = NSToolbar(identifier: "MMFFDevColour3Toolbar")
         toolbar.delegate = self
@@ -449,7 +441,41 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         content.palette.relayout()
     }
 
+    // The window's place is kept by the app itself. macOS's own frame autosave drops the window on
+    // the main screen when the saved screen's usable area has changed since, as it does with three screens.
+    private var frameSettled = false
+
+    /// Puts the window where it was last left, if any of that place is still on a screen.
+    private func restoreFrame() {
+        guard let win = window, let text = preferences.string(forKey: "mainWindowFrame") else { return }
+        let frame = NSRectFromString(text)
+        guard frame.width >= win.minSize.width, frame.height >= win.minSize.height else { return }
+        let onScreen = NSScreen.screens.contains { $0.frame.intersection(frame).width >= 200 && $0.frame.intersection(frame).height >= 100 }
+        guard onScreen else { return }
+        if win.frame != frame { win.setFrame(frame, display: true) }
+    }
+
+    private func saveFrame() {
+        guard frameSettled, let win = window, !win.styleMask.contains(.fullScreen), !win.isMiniaturized else { return }
+        preferences.set(NSStringFromRect(win.frame), forKey: "mainWindowFrame")
+    }
+
+    /// Showing can move a window; the saved place is put back once it is up, and only then is a move worth keeping.
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        guard !frameSettled else { return }
+        restoreFrame()
+        DispatchQueue.main.async {
+            self.restoreFrame()
+            self.frameSettled = true
+        }
+    }
+
+    func windowDidMove(_ notification: Notification) { saveFrame() }
+    func windowWillClose(_ notification: Notification) { saveFrame() }
+
     func windowDidResize(_ notification: Notification) {
+        saveFrame()
         relayout()
         if searchRestore != nil { fitSearchBox() }
     }

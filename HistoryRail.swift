@@ -9,7 +9,7 @@ import AppKit
 final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let library: LibraryController
     private let table = HistoryTable()
-    private lazy var header = PageHeader(actions: [scope, play, remove])
+    private lazy var header = PageHeader(actions: [play, remove])
     private lazy var scope = NSSegmentedControl(labels: ["Project", "Global"], trackingMode: .selectOne, target: self, action: #selector(scopeChanged))
     /// The project whose steps are listed; nil lists everything. Follows the page, until the user picks.
     private var project: UUID?
@@ -18,6 +18,8 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
     private var rows: [Int] = []
     private lazy var play = toolButton("Play Back", "play.fill", "Walk through the steps from the first to the current one", target: self, action: #selector(playTapped))
     private lazy var remove = toolButton("", "trash", "Delete the selected step", target: self, action: #selector(deleteTapped))
+    /// How many steps are listed, and where: its own line under the bar, so a narrow rail never cuts it.
+    private let count = caption("", size: TextSize.body)
     private var playing: Timer?
     private var following = false
 
@@ -30,12 +32,14 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
     override func loadView() {
         view = NSView()
         header.title.stringValue = "History"
+        header.subtitle.isHidden = true
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("step"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
-        table.style = .plain
+        table.style = .fullWidth   // no padding of the table's own: the cell sets the page inset itself
         table.rowHeight = 40
+        table.intercellSpacing = .zero   // a cell starts on the rail's own edge, so its inset is the page inset
         table.dataSource = self
         table.delegate = self
         table.allowsEmptySelection = true
@@ -44,19 +48,27 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        for v in [header, scroll] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(v) }
+        for v in [header, count, scroll] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(v) }
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             header.heightAnchor.constraint(equalToConstant: PageStyle.height),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            count.topAnchor.constraint(equalTo: header.bar.bottomAnchor, constant: PageStyle.barGap),
+            count.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: PageStyle.side),
+            count.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -PageStyle.side),
+            scroll.topAnchor.constraint(equalTo: count.bottomAnchor, constant: PageStyle.barGap),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        scope.controlSize = .small
-        scope.font = NSFont.systemFont(ofSize: TextSize.caption)
+        // The toggle leads the bar, on the title's left edge, and stands as tall as the buttons beside it.
+        header.bar.insertArrangedSubview(scope, at: 0)
+        scope.controlSize = .regular
+        scope.font = NSFont.systemFont(ofSize: TextSize.body)
+        scope.setContentHuggingPriority(.required, for: .horizontal)
+        scope.heightAnchor.constraint(equalTo: play.heightAnchor).isActive = true
+        scope.centerYAnchor.constraint(equalTo: play.centerYAnchor).isActive = true
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .historyDidChange, object: library)
         NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .selectionDidChange, object: library)
         pageChanged()
@@ -91,7 +103,7 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         }
         following = false
         let name = project.flatMap { library.library.project($0)?.name }
-        header.subtitle.stringValue = rows.isEmpty ? (name.map { "No steps in \($0) yet" } ?? "No steps yet")
+        count.stringValue = rows.isEmpty ? (name.map { "No steps in \($0) yet" } ?? "No steps yet")
             : plural(rows.count, "Step") + (name.map { " in \($0)" } ?? "")
         play.isEnabled = rows.count > 1
         remove.isEnabled = table.selectedRow >= 0
@@ -147,39 +159,77 @@ private final class StepCell: NSTableCellView {
     private let title = NSTextField(labelWithString: "")
     private let detail = caption("")
     private let chips = NSStackView()
+    private let line = NSStackView()
+    private var leading: NSLayoutConstraint!
+    private var trailing: NSLayoutConstraint!
+    /// When the step happened: on the title line, hard right, never cut short.
+    private let when = caption("")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         icon.contentTintColor = .secondaryLabelColor
         icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.imageAlignment = .alignLeft   // the symbol's left edge on the title's left edge
+        when.alignment = .right
+        when.setContentHuggingPriority(.required, for: .horizontal)
+        when.setContentCompressionResistancePriority(.required, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         title.font = NSFont.systemFont(ofSize: TextSize.body)
         title.lineBreakMode = .byTruncatingTail
         detail.lineBreakMode = .byTruncatingTail
         chips.orientation = .horizontal
         chips.spacing = 3
         chips.setContentHuggingPriority(.required, for: .horizontal)
-        let line = NSStackView(views: [chips, detail])
+        line.setViews([chips, detail], in: .leading)
         line.orientation = .horizontal
         line.alignment = .centerY
         line.spacing = 6
-        let column = NSStackView(views: [title, line])
+        let top = NSStackView(views: [title, when])
+        top.orientation = .horizontal
+        top.alignment = .firstBaseline
+        top.spacing = 8
+        top.distribution = .fill
+        let column = NSStackView(views: [top, line])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 1
+        top.trailingAnchor.constraint(equalTo: column.trailingAnchor).isActive = true
+        line.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor).isActive = true
         let row = NSStackView(views: [icon, column])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
+        row.distribution = .fill
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
+        // Just short of required: a cell is briefly narrower than its two insets while the table sizes it.
+        leading = row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side)
+        trailing = row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side)
+        trailing.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            leading,
+            trailing,
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 18),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The table sets a cell in from its own edge by a few points. The insets are measured against
+    /// the row, so the symbol's ink lands on the title's left edge and the time on the bar's right edge.
+    override func layout() {
+        if let rowView = superview {
+            let left = PageStyle.side + StepCell.inkInset - frame.minX
+            let right = -(PageStyle.side - (rowView.bounds.maxX - frame.maxX))
+            if leading.constant != left { leading.constant = left }
+            if trailing.constant != right { trailing.constant = right }
+        }
+        super.layout()
+    }
+    /// A label's text starts two points inside its frame and a symbol's ink one point inside its image.
+    private static let inkInset: CGFloat = 1
 
     private static let clock: DateFormatter = {
         let f = DateFormatter()
@@ -187,6 +237,19 @@ private final class StepCell: NSTableCellView {
         f.timeStyle = .short
         return f
     }()
+
+    /// Earlier days carry the day too: "Yesterday, 03:57", "1 Oct 2026, 03:57".
+    private static let dayAndClock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = true
+        return f
+    }()
+
+    static func stamp(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date) ? clock.string(from: date) : dayAndClock.string(from: date)
+    }
 
     func show(_ step: HistoryStep, change: StepChange, project: String?, isPast: Bool) {
         icon.image = symbol(stepSymbol(for: step.title), step.title, size: 13)
@@ -197,7 +260,8 @@ private final class StepCell: NSTableCellView {
         // The colours that came or went, by name: "Scarlet added", "Blaze Orange, Orange removed".
         if !change.added.isEmpty { parts.append(change.added.prefix(2).map(colourName).joined(separator: ", ") + (change.added.count > 2 ? " +\(change.added.count - 2)" : "") + " added") }
         if !change.removed.isEmpty { parts.append(change.removed.prefix(2).map(colourName).joined(separator: ", ") + (change.removed.count > 2 ? " +\(change.removed.count - 2)" : "") + " removed") }
-        parts.append(StepCell.clock.string(from: step.date))
+        when.stringValue = StepCell.stamp(step.date)
+        when.textColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
         if let p = project { parts.append(p) }
         detail.stringValue = parts.joined(separator: "  \u{00B7}  ")
         chips.views.forEach { $0.removeFromSuperview() }
@@ -214,6 +278,7 @@ private final class StepCell: NSTableCellView {
             chips.addArrangedSubview(chip)
         }
         chips.isHidden = chips.views.isEmpty
+        line.isHidden = chips.views.isEmpty && detail.stringValue.isEmpty   // a lone title sits in the row's middle
     }
 }
 
