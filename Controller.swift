@@ -586,6 +586,11 @@ final class LibraryController: NSObject {
         flash(library.customName(of: hex, in: palette).map { "Named \(hex) \u{201C}\($0)\u{201D}" } ?? "\(hex) is \(colourName(hex)) again")
     }
 
+    /// Writes why a colour is in a palette; blank removes the description.
+    func describe(swatch hex: String, in palette: UUID, as note: String?) {
+        apply("Describe Colour") { $0.setNote(note, of: hex, in: palette) }
+    }
+
     func setTag(_ name: String, colour: String?, project: UUID?) { apply("Edit Tag") { $0.setTag(name, colour: colour, project: project) } }
     func renameTag(_ old: String, to new: String) { apply("Rename Tag") { $0.renameTag(old, to: new) } }
     func deleteTag(_ name: String) { apply("Delete Tag") { $0.deleteTag(name) } }

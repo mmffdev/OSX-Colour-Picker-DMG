@@ -1298,6 +1298,41 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(mergeLibraries(local: lib, remote: other).customName(of: "#F55805", in: brand) == nil, "resetting a name is kept by a sync")
     lib.setName(standard, of: "#F55805", in: web, at: t.addingTimeInterval(11))
     check(lib.customName(of: "#F55805", in: web) == nil, "typing the standard name is not a rename")
+
+    print("a colour's description in a palette")
+    var noted = Library()
+    noted.addPick("#F55805", at: t)
+    let client = noted.createProject(named: "Client", at: t)
+    let np = noted.createSwatch(named: "Brand", hexes: ["#F55805"], at: t)
+    noted.move(np, to: client, index: 0, at: t)
+    let nweb = noted.createSwatch(named: "Web", hexes: ["#F55805"], at: t)
+    var steps = StepHistory()
+    steps.record("Opened", library: noted, before: nil, limit: 0, at: t)
+    noted.setNote("  The call to action. Warm, never red. ", of: "#F55805", in: np, at: t.addingTimeInterval(1))
+    steps.record("Describe Colour", library: noted, before: steps.steps.last!.library, limit: 0, at: t.addingTimeInterval(1))
+    check(noted.note(of: "#F55805", in: np) == "The call to action. Warm, never red." && noted.note(of: "#F55805", in: nweb) == nil,
+          "a colour described in one palette has no description in another")
+    let notedFile = ProjectFile(project: noted.project(client)!, in: noted)
+    check((try? ProjectFile.read(notedFile.data()))?.palettes.first?.entries.first?.note == "The call to action. Warm, never red.",
+          "the description travels in the project file")
+    var elsewhere = noted
+    elsewhere.setNote("Buttons only.", of: "#F55805", in: np, at: t.addingTimeInterval(5))
+    check(mergeLibraries(local: noted, remote: elsewhere).note(of: "#F55805", in: np) == "Buttons only."
+          && mergeLibraries(local: elsewhere, remote: noted).note(of: "#F55805", in: np) == "Buttons only.", "the newer description wins a sync")
+    noted.setName("Brand Orange", of: "#F55805", in: np, at: t.addingTimeInterval(6))
+    steps.record("Rename Colour", library: noted, before: steps.steps.last!.library, limit: 0, at: t.addingTimeInterval(6))
+    noted.setNote("", of: "#F55805", in: np, at: t.addingTimeInterval(10))
+    steps.record("Describe Colour", library: noted, before: steps.steps.last!.library, limit: 0, at: t.addingTimeInterval(10))
+    check(noted.note(of: "#F55805", in: np) == nil && mergeLibraries(local: noted, remote: elsewhere).note(of: "#F55805", in: np) == nil,
+          "a blank description removes it, and a sync keeps it removed")
+    noted.remove(["#F55805"], fromSwatch: np, at: t.addingTimeInterval(11))
+    steps.record("Remove Colours", library: noted, before: steps.steps.last!.library, limit: 0, at: t.addingTimeInterval(11))
+    let told = steps.steps(changing: "#F55805", in: np)
+    check(told.map { $0.what } == ["Description Written", "Renamed \u{201C}Brand Orange\u{201D}", "Description Removed", "Removed"]
+          && told.last?.entry == nil && told[1].entry?.name == "Brand Orange",
+          "a colour's own history lists what happened to it in a palette, in order, with how it stood after each step")
+    check(steps.steps(changing: "#F55805", in: nweb).isEmpty, "and says nothing for a palette where nothing happened to it")
+
     var plain = Library()
     plain.addPick("#111111", at: t)
     plain.createSwatch(named: "P", hexes: ["#111111"], at: t)

@@ -63,6 +63,42 @@ struct StepHistory: Codable, Equatable {
     }
 }
 
+/// One thing that happened to one colour in one palette: the step, and what it did, in words.
+struct SwatchStep: Equatable {
+    /// The step's place in the whole history.
+    let index: Int
+    let step: HistoryStep
+    let what: String
+    /// The colour's name and description in the palette after the step; nil once it has gone.
+    let entry: SwatchEntry?
+}
+
+extension StepHistory {
+    /// Everything that happened to a colour in a palette, oldest first: added, renamed, described,
+    /// tagged, removed. Read off the libraries either side of each step.
+    func steps(changing hex: String, in palette: UUID) -> [SwatchStep] {
+        var out: [SwatchStep] = []
+        for i in steps.indices.dropFirst() {
+            let before = steps[i - 1].library, after = steps[i].library
+            let was = before.swatch(palette)?.entries.first { $0.hex == hex }
+            let now = after.swatch(palette)?.entries.first { $0.hex == hex }
+            var what: [String] = []
+            switch (was, now) {
+            case (nil, nil): continue
+            case (nil, _?): what.append("Added")
+            case (_?, nil): what.append("Removed")
+            case let (w?, n?):
+                if w.name != n.name { what.append(n.name.map { "Renamed \u{201C}\($0)\u{201D}" } ?? "Standard Name Restored") }
+                if w.note != n.note { what.append(n.note == nil ? "Description Removed" : w.note == nil ? "Description Written" : "Description Edited") }
+                let tagsWas = before.colours.first { $0.hex == hex }?.tags ?? [], tagsNow = after.colours.first { $0.hex == hex }?.tags ?? []
+                if tagsWas != tagsNow { what.append(tagsNow.isEmpty ? "Tags Removed" : "Tagged " + tagsNow.joined(separator: ", ")) }
+            }
+            if !what.isEmpty { out.append(SwatchStep(index: i, step: steps[i], what: what.joined(separator: "  \u{00B7}  "), entry: now)) }
+        }
+        return out
+    }
+}
+
 /// What a step did to the colours, read off the libraries before and after it.
 struct StepChange: Equatable {
     var added: [String] = []
@@ -94,6 +130,25 @@ extension StepHistory {
     }
 }
 
+private let stepClock: DateFormatter = {
+    let f = DateFormatter()
+    f.dateStyle = .none
+    f.timeStyle = .short
+    return f
+}()
+private let stepDayAndClock: DateFormatter = {
+    let f = DateFormatter()
+    f.dateStyle = .medium
+    f.timeStyle = .short
+    f.doesRelativeDateFormatting = true
+    return f
+}()
+
+/// When a step happened, as shown beside it: the time today, the day as well before that.
+func stepStamp(_ date: Date) -> String {
+    Calendar.current.isDateInToday(date) ? stepClock.string(from: date) : stepDayAndClock.string(from: date)
+}
+
 /// The symbol for a step, by what its title says it did.
 func stepSymbol(for title: String) -> String {
     let t = title.lowercased()
@@ -105,6 +160,7 @@ func stepSymbol(for title: String) -> String {
     if t.hasPrefix("remove") || t.hasPrefix("delete colour") { return "minus.circle" }
     if t.hasPrefix("delete") { return "trash" }
     if t.hasPrefix("rename") { return "pencil" }
+    if t.hasPrefix("describe") { return "text.alignleft" }
     if t.contains("star") { return "star" }
     if t.contains("tag") { return "tag" }
     if t.contains("pairing") || t.contains("typography") || t.contains("font") { return "textformat" }

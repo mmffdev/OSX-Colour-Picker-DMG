@@ -40,6 +40,10 @@ final class PageHeader: NSView {
     /// The padlock before the title, shown for anything in a project: open, or shut when the project is locked.
     private let lockMark = NSImageView()
     private var titleRow: NSStackView!
+    /// The title panel's far right: a page's view switches, sized to sit with the title.
+    let trailing = NSStackView()
+    /// The point size of a symbol in the title panel, to stand beside the title's capitals.
+    static let titleSymbol: CGFloat = 17
     var lock: Bool? = nil {
         didSet {
             lockMark.isHidden = lock == nil
@@ -67,7 +71,14 @@ final class PageHeader: NSView {
         bar.alignment = .centerY
         lockMark.isHidden = true
         lockMark.setContentHuggingPriority(.required, for: .horizontal)
-        let titleRow = NSStackView(views: [lockMark, title])
+        trailing.orientation = .horizontal
+        trailing.spacing = 10
+        trailing.setContentHuggingPriority(.required, for: .horizontal)
+        trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
+        title.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let titleRow = NSStackView(views: [lockMark, title, trailing])
+        titleRow.distribution = .fill
         self.titleRow = titleRow
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY

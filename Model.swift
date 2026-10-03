@@ -40,6 +40,9 @@ struct SwatchEntry: Codable, Equatable {
     /// The user's own name for the colour in this palette; nil uses the standard name.
     var name: String? = nil
     var nameChangedAt: Date? = nil
+    /// Why the colour is here: the designer's words on it in this palette. Kept in the project file with the rest.
+    var note: String? = nil
+    var noteChangedAt: Date? = nil
 }
 
 /// One pairing in a Typography palette: a text colour on a background, with the words and fonts
@@ -600,6 +603,22 @@ extension Library {
         guard swatches[s].entries[e].name != name else { return }
         swatches[s].entries[e].name = name
         swatches[s].entries[e].nameChangedAt = date
+    }
+
+    /// The description of a colour in a palette, if one has been written.
+    func note(of hex: String, in palette: UUID?) -> String? {
+        palette.flatMap { swatch($0)?.entries.first { $0.hex == hex }?.note }
+    }
+
+    /// Writes the description of a colour within one palette. Blank removes it.
+    mutating func setNote(_ raw: String?, of hex: String, in palette: UUID, at date: Date = Date()) {
+        guard let s = swatches.firstIndex(where: { $0.id == palette }),
+              let e = swatches[s].entries.firstIndex(where: { $0.hex == hex }) else { return }
+        let typed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let note: String? = typed.isEmpty ? nil : typed
+        guard swatches[s].entries[e].note != note else { return }
+        swatches[s].entries[e].note = note
+        swatches[s].entries[e].noteChangedAt = date
     }
 
     /// Every tag: those in use on swatches or palettes, and those made in the tag editor. Sorted.

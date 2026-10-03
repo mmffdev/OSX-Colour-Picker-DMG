@@ -231,26 +231,6 @@ private final class StepCell: NSTableCellView {
     /// A label's text starts two points inside its frame and a symbol's ink one point inside its image.
     private static let inkInset: CGFloat = 1
 
-    private static let clock: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .none
-        f.timeStyle = .short
-        return f
-    }()
-
-    /// Earlier days carry the day too: "Yesterday, 03:57", "1 Oct 2026, 03:57".
-    private static let dayAndClock: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        f.doesRelativeDateFormatting = true
-        return f
-    }()
-
-    static func stamp(_ date: Date) -> String {
-        Calendar.current.isDateInToday(date) ? clock.string(from: date) : dayAndClock.string(from: date)
-    }
-
     func show(_ step: HistoryStep, change: StepChange, project: String?, isPast: Bool) {
         icon.image = symbol(stepSymbol(for: step.title), step.title, size: 13)
         icon.contentTintColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
@@ -260,7 +240,7 @@ private final class StepCell: NSTableCellView {
         // The colours that came or went, by name: "Scarlet added", "Blaze Orange, Orange removed".
         if !change.added.isEmpty { parts.append(change.added.prefix(2).map(colourName).joined(separator: ", ") + (change.added.count > 2 ? " +\(change.added.count - 2)" : "") + " added") }
         if !change.removed.isEmpty { parts.append(change.removed.prefix(2).map(colourName).joined(separator: ", ") + (change.removed.count > 2 ? " +\(change.removed.count - 2)" : "") + " removed") }
-        when.stringValue = StepCell.stamp(step.date)
+        when.stringValue = stepStamp(step.date)
         when.textColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
         if let p = project { parts.append(p) }
         detail.stringValue = parts.joined(separator: "  \u{00B7}  ")

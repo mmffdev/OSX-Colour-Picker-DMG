@@ -89,15 +89,17 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         if let l = l, let r = r, (r.stylesChangedAt ?? .distantPast) > (l.stylesChangedAt ?? .distantPast) { styles = (r.styles, r.stylesChangedAt) }
         var order: [String] = [], dates: [String: Date] = [:]
         var names: [String: (name: String?, at: Date?)] = [:]   // the newer of the two names for each colour
+        var notes: [String: (note: String?, at: Date?)] = [:]   // and the newer of the two descriptions
         for e in (l?.entries ?? []) + (r?.entries ?? []) {
             let cutoff = max(deletedAt(.entry, Library.entryKey(id, e.hex)), deletedAt(.colour, e.hex))
             guard e.addedAt > cutoff else { continue }
             if let seen = dates[e.hex] { dates[e.hex] = min(seen, e.addedAt) }
             else { dates[e.hex] = e.addedAt; order.append(e.hex) }
             if names[e.hex] == nil || (e.nameChangedAt ?? .distantPast) > (names[e.hex]?.at ?? .distantPast) { names[e.hex] = (e.name, e.nameChangedAt) }
+            if notes[e.hex] == nil || (e.noteChangedAt ?? .distantPast) > (notes[e.hex]?.at ?? .distantPast) { notes[e.hex] = (e.note, e.noteChangedAt) }
         }
         out.swatches.append(Swatch(id: id, name: name, createdAt: base.createdAt,
-                                   entries: order.map { SwatchEntry(hex: $0, addedAt: dates[$0]!, name: names[$0]?.name, nameChangedAt: names[$0]?.at) },
+                                   entries: order.map { SwatchEntry(hex: $0, addedAt: dates[$0]!, name: names[$0]?.name, nameChangedAt: names[$0]?.at, note: notes[$0]?.note, noteChangedAt: notes[$0]?.at) },
                                    nameChangedAt: changed, isFavourite: favourite,
                                    favouriteChangedAt: favouriteChanged,
                                    isCustom: l?.isCustom ?? r?.isCustom,

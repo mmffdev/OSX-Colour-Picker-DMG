@@ -284,6 +284,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private let spectrum = SpectrumView()
     private let grid = SwatchGridView()
     private let scroll = PagingScrollView()
+    /// The vertical view: one colour to a row with its description and history. Project palettes only.
+    private lazy var list = SwatchListView(library: library)
+    private lazy var gridButton = symbolButton("square.grid.2x2", tooltip: "Grid View", target: self, action: #selector(showGrid))
+    private lazy var listButton = symbolButton("rectangle.grid.1x2", tooltip: "Vertical View, With Descriptions And History", target: self, action: #selector(showList))
     private let empty = NSTextField(wrappingLabelWithString: "")
     private var committedName = ""
     private let spacing: CGFloat = 16, side: CGFloat = 20
@@ -408,7 +412,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         empty.textColor = .tertiaryLabelColor
         empty.font = NSFont.systemFont(ofSize: 13)
 
-        for v in [header, spectrum, scroll, empty] as [NSView] {
+        header.trailing.setViews([gridButton, listButton], in: .leading)
+        header.trailing.isHidden = true
+        for v in [header, spectrum, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -429,6 +435,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            list.topAnchor.constraint(equalTo: scroll.topAnchor),
+            list.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            list.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
             empty.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             empty.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             empty.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
@@ -446,6 +456,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             grid.deselectAll(nil)
             scroll.contentView.scroll(to: .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
+            list.scrollToTop()
         }
     }
 
@@ -493,6 +504,19 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         spectrum.hexes = hexes
 
+        // A project palette offers two views, switched from the title panel's right: cards, or one colour to a row.
+        let asList = project != nil && Prefs.paletteIsList(id)
+        header.trailing.isHidden = project == nil
+        for (button, name, on) in [(gridButton, "square.grid.2x2", !asList), (listButton, "rectangle.grid.1x2", asList)] {
+            button.image = symbol(name, button.toolTip ?? "", size: PageHeader.titleSymbol, weight: .semibold)
+            button.contentTintColor = on ? .labelColor : .tertiaryLabelColor
+        }
+        scroll.isHidden = asList
+        list.isHidden = !asList
+        wcag.isHidden = asList   // the card's own extras; a row shows its values always
+        labels.isHidden = asList
+        if asList { list.show(hexes, in: id, locked: header.lock ?? false) }
+
         sizeCards()
         grid.reloadData()
         updateHeader()
@@ -501,6 +525,14 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         empty.stringValue = !search.isEmpty ? "No swatches in this palette match \u{201C}\(search)\u{201D}."
             : "No swatches yet.\n" + (Shortcuts.display(for: "togglePicking").map { "Press \($0) to pick" } ?? "Pick")
                 + " colours into this palette, or drop an image on the window."
+    }
+
+    @objc private func showGrid() { setList(false) }
+    @objc private func showList() { setList(true) }
+    private func setList(_ on: Bool) {
+        guard let id = paletteID, Prefs.paletteIsList(id) != on else { return }
+        Prefs.setPaletteIsList(on, for: id)
+        reload()
     }
 
     /// Lays the cards out afresh for the current width.

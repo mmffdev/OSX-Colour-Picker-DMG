@@ -223,6 +223,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         sideItem = side
         side.minimumThickness = 236 // room for a palette name, its count and star
         side.canCollapse = true
+        side.holdingPriority = .defaultLow + 2   // the page takes up a change in the window's width, not the sidebar
         let main = NSSplitViewItem(viewController: content)
         main.minimumThickness = 420
         builderItem = NSSplitViewItem(viewController: builder)
@@ -275,12 +276,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         toolbar.displayMode = .iconAndLabel
         win.toolbar = toolbar
 
+        // Read before the library loads: loading shows the first page, which would be saved over this.
+        let lastPage = preferences.string(forKey: "lastPage")
         wire()
         library.reload()
         // Opens where it was closed: the page last shown, or the palette last looked at.
         let saved = preferences.string(forKey: "lastPalette").flatMap(UUID.init(uuidString:))
         let palette = saved.flatMap { library.library.swatch($0) != nil ? Selection.palette($0) : nil }
-        switch preferences.string(forKey: "lastPage") {
+        switch lastPage {
         case "lab": show(.lab)
         case "contrast": show(.contrast)
         case "all": show(.all)
