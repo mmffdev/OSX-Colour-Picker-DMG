@@ -107,7 +107,8 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    tags: tags.list, tagsChangedAt: tags.at,
                                    favouritePosition: starred.position, favouritePlacedAt: starred.at,
                                    listPosition: listed.position, listPlacedAt: listed.at,
-                                   styles: styles.list, stylesChangedAt: styles.at))
+                                   styles: styles.list, stylesChangedAt: styles.at,
+                                   copiedFrom: l?.copiedFrom ?? r?.copiedFrom))
     }
 
     // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.

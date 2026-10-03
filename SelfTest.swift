@@ -1333,6 +1333,40 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           "a colour's own history lists what happened to it in a palette, in order, with how it stood after each step")
     check(steps.steps(changing: "#F55805", in: nweb).isEmpty, "and says nothing for a palette where nothing happened to it")
 
+
+    print("a project takes a copy of a palette")
+    var shop = Library()
+    shop.addPick("#F55805", at: t); shop.addPick("#101010", at: t)
+    let stock = shop.createSwatch(named: "Brand", hexes: ["#F55805", "#101010"], at: t)
+    shop.setName("Brand Orange", of: "#F55805", in: stock, at: t)
+    let alpha = shop.createProject(named: "Alpha", at: t), beta = shop.createProject(named: "Beta", at: t)
+    let inAlpha = shop.copyPalette(stock, to: alpha, withNotes: true, at: t.addingTimeInterval(1))!
+    check(shop.swatch(stock)?.projectID == nil && shop.swatch(inAlpha)?.projectID == alpha && shop.palettes(in: nil).map { $0.id } == [stock]
+          && shop.palettes(in: alpha).map { $0.id } == [inAlpha],
+          "taking a palette into a project leaves the original in the Palettes list and puts a copy in the project")
+    check(shop.swatch(inAlpha)?.name == "Brand" && shop.swatch(inAlpha)?.entries.map { $0.hex } == ["#F55805", "#101010"]
+          && shop.customName(of: "#F55805", in: inAlpha) == "Brand Orange" && shop.swatch(inAlpha)?.copiedFrom == stock,
+          "the copy keeps the name, the colours in order and each colour's own name, and records where it came from")
+    shop.setNote("The call to action.", of: "#F55805", in: inAlpha, at: t.addingTimeInterval(2))
+    check(shop.hasNotes(inAlpha) && !shop.hasNotes(stock) && shop.note(of: "#F55805", in: stock) == nil,
+          "notes written in the project stay off the original")
+    let clean = shop.copyPalette(inAlpha, to: beta, withNotes: false, at: t.addingTimeInterval(3))!
+    let noted2 = shop.copyPalette(inAlpha, to: beta, withNotes: true, at: t.addingTimeInterval(4))!
+    check(!shop.hasNotes(clean) && shop.note(of: "#F55805", in: noted2) == "The call to action." && shop.note(of: "#F55805", in: inAlpha) == "The call to action.",
+          "a copy to another project takes the notes only when asked, and the first project's notes are untouched")
+    shop.setNote("Changed in Beta.", of: "#F55805", in: noted2, at: t.addingTimeInterval(5))
+    shop.remove(["#101010"], fromSwatch: inAlpha, at: t.addingTimeInterval(5))
+    check(shop.note(of: "#F55805", in: inAlpha) == "The call to action." && shop.swatch(stock)?.entries.count == 2 && shop.swatch(noted2)?.entries.count == 2,
+          "the copies are separate from then on: a change in one reaches neither the original nor another copy")
+    let back = shop.copyPalette(inAlpha, to: nil, withNotes: false, at: t.addingTimeInterval(6))!
+    check(shop.swatch(back)?.projectID == nil && !shop.hasNotes(back) && shop.palettes(in: nil).count == 2, "a project's palette copied back to Palettes arrives without its notes")
+    check(mergeLibraries(local: shop, remote: shop).swatch(inAlpha)?.copiedFrom == stock, "where a copy came from survives a sync")
+    let pair = shop.createTypography(named: "Type", at: t)
+    shop.setStyle(TypeStyle(id: UUID(), name: "Body", ink: "#101010", paper: "#FFFFFF", heading: "H", body: "B", headingFont: nil, bodyFont: nil), in: pair)
+    let pairCopy = shop.copyPalette(pair, to: alpha, withNotes: false, at: t.addingTimeInterval(7))!
+    check(shop.swatch(pairCopy)?.styles?.map { $0.name } == ["Body"] && shop.swatch(pairCopy)?.styles?.first?.id != shop.swatch(pair)?.styles?.first?.id,
+          "a Typography palette is copied with its pairings, each a pairing of its own")
+
     var plain = Library()
     plain.addPick("#111111", at: t)
     plain.createSwatch(named: "P", hexes: ["#111111"], at: t)

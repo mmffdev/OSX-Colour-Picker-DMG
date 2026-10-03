@@ -462,9 +462,9 @@ final class LibraryController: NSObject {
             self.apply("New Project") { lib in
                 let made = lib.createProject(named: name)
                 lib.setProjectDetails(made, values)
-                // The palette asked for moves in; failing that the open one, so the project is not born empty.
-                if let palette = palette { lib.move(palette, to: made, index: 0) }
-                else if case .palette(let open)? = self.current, lib.swatch(open)?.projectID == nil { lib.move(open, to: made, index: 0) }
+                // A copy of the palette asked for goes in; failing that, of the open one, so the project is not born empty.
+                if let palette = palette { lib.copyPalette(palette, to: made, index: 0, withNotes: false) }
+                else if case .palette(let open)? = self.current, lib.swatch(open)?.projectID == nil { lib.copyPalette(open, to: made, index: 0, withNotes: false) }
                 id = made
             }
             self.flash("Created project \(id.flatMap { self.library.project($0)?.name } ?? name)")
@@ -538,10 +538,36 @@ final class LibraryController: NSObject {
         }
     }
 
+    /// Asks a question in the middle of the page; set by the window. Title, message, answers (the last is the way out).
+    var onAsk: ((String, String, [ModalChoice]) -> Void)?
+
+    /// Puts a palette at a place in a list. Within its own list that is a move. Into a project,
+    /// between projects, or back to the Palettes list, it goes as a copy: a project owns its
+    /// palettes outright, so its notes, lock and history are its own and the original is untouched.
     func move(palette id: UUID, to project: UUID?, index: Int) {
-        apply("Move Palette") { $0.move(id, to: project, index: index) }
-        let name = library.swatch(id)?.name ?? "palette"
-        flash(project.flatMap { library.project($0)?.name }.map { "Moved \(name) to \($0)" } ?? "Moved \(name) out of its project")
+        guard let s = library.swatch(id) else { return }
+        if s.projectID == project {
+            apply("Move Palette") { $0.move(id, to: project, index: index) }
+            return
+        }
+        let place: (Bool) -> Void = { [weak self] notes in
+            guard let self = self else { return }
+            var copy: UUID?
+            self.apply("Copy Palette") { copy = $0.copyPalette(id, to: project, index: index, withNotes: notes) }
+            guard let made = copy, self.library.swatch(made) != nil else { return }   // refused: the project is locked
+            let home = project.flatMap { self.library.project($0)?.name }
+            self.flash(home.map { "Copied \(s.name) Into \($0)" + (notes ? ", With Its Notes" : "") } ?? "Copied \(s.name) To Palettes")
+            self.onShow?(.palette(made), false)
+        }
+        // Notes are one project's words on its colours. They are offered only to another project, and only when there are some.
+        guard s.projectID != nil, project != nil, library.hasNotes(id), let ask = onAsk else { place(false); return }
+        let from = s.projectID.flatMap { library.project($0)?.name } ?? "its project"
+        let to = project.flatMap { library.project($0)?.name } ?? "the project"
+        ask("Copy The Notes Across?",
+            "\(s.name) has notes written for \(from). The copy going into \(to) can take them with it or start clean. The notes in \(from) stay as they are either way.",
+            [ModalChoice(title: "Copy With Notes", symbol: "doc.on.doc.fill") { place(true) },
+             ModalChoice(title: "Copy Without Notes", symbol: "doc.on.doc") { place(false) },
+             ModalChoice(title: "Cancel", symbol: "xmark") {}])
     }
 
     func placeProjects(_ ids: [UUID]) { apply("Arrange Projects") { $0.placeProjects(ids) } }
@@ -672,33 +698,7 @@ final class LibraryController: NSObject {
     }
 
     /// A copy of the palette in another project (or loose), independent from then on. The original stays.
-    func copy(palette id: UUID, to project: UUID?) {
-        guard let s = library.swatch(id) else { return }
-        let home = project.flatMap { library.project($0)?.name }
-        let name = home.map { "\(s.name) (\($0))" } ?? "\(s.name) copy"
-        var copy: UUID?
-        apply("Copy To Project") { lib in
-            if let styles = s.styles {
-                let new = lib.createTypography(named: name, in: project)
-                for style in styles {
-                    lib.setStyle(TypeStyle(id: UUID(), name: style.name, ink: style.ink, paper: style.paper, heading: style.heading,
-                                           body: style.body, headingFont: style.headingFont, bodyFont: style.bodyFont), in: new)
-                }
-                copy = new
-            } else {
-                let new = lib.createSwatch()
-                _ = lib.renameSwatch(new, to: name)
-                _ = lib.add(lib.hexes(inSwatch: id, by: .oldest), toSwatch: new)
-                for hex in lib.hexes(inSwatch: id, by: .oldest) {
-                    if let own = lib.swatch(id)?.entries.first(where: { $0.hex == hex })?.name { lib.setName(own, of: hex, in: new) }
-                }
-                if let tags = s.tags { lib.setTags(ofPalette: new, tags) }
-                lib.move(new, to: project, index: Int.max)
-                copy = new
-            }
-        }
-        if let copy = copy { onShow?(.palette(copy), false) }
-    }
+    func copy(palette id: UUID, to project: UUID?) { move(palette: id, to: project, index: Int.max) }
 
     func delete(palette id: UUID) {
         guard let s = library.swatch(id) else { return }

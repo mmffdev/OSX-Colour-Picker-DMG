@@ -93,6 +93,8 @@ struct Swatch: Codable, Equatable {
     /// A sync keeps the newer list whole.
     var styles: [TypeStyle]? = nil
     var stylesChangedAt: Date? = nil
+    /// The palette this one was copied from, when it was taken into a project or out of one.
+    var copiedFrom: UUID? = nil
 
     var isTypography: Bool { styles != nil }
 
@@ -513,6 +515,36 @@ extension Library {
         swatches[s].projectID = project
         place(order, at: date)
         if from != project { place(palettes(in: from).map { $0.id }, at: date) }
+    }
+
+    /// True when any colour in the palette has notes written on it.
+    func hasNotes(_ id: UUID) -> Bool { swatch(id)?.entries.contains { $0.note != nil } ?? false }
+
+    /// A copy of a palette put at `index` in `project` (nil = the loose Palettes list). The original
+    /// stays where it is, untouched; the two are separate from then on. The copy keeps the name,
+    /// the colours and their order, each colour's own name, the palette's tags and its pairings.
+    /// Notes go with it only when asked for: they are one project's words on its colours.
+    @discardableResult
+    mutating func copyPalette(_ id: UUID, to project: UUID?, index: Int = Int.max, withNotes: Bool, at date: Date = Date()) -> UUID? {
+        guard let source = swatch(id) else { return nil }
+        if let p = project, self.project(p) == nil { return nil }
+        var copy = Swatch(id: UUID(), name: source.name, createdAt: date, entries: source.entries.map { entry in
+            var e = entry
+            if !withNotes { e.note = nil; e.noteChangedAt = nil }
+            return e
+        })
+        copy.isCustom = source.isCustom
+        if let styles = source.styles {
+            copy.styles = styles.map { TypeStyle(id: UUID(), name: $0.name, ink: $0.ink, paper: $0.paper, heading: $0.heading,
+                                                 body: $0.body, headingFont: $0.headingFont, bodyFont: $0.bodyFont) }
+            copy.stylesChangedAt = date
+        }
+        copy.copiedFrom = id
+        swatches.append(copy)
+        move(copy.id, to: project, index: index, at: date)
+        // Through the usual door, so a tag that belongs to another project is not carried into this one.
+        if let tags = source.tags { setTags(ofPalette: copy.id, tags, at: date) }
+        return copy.id
     }
 
     /// Gives an ordered set of palettes positions 0, 1, 2 …

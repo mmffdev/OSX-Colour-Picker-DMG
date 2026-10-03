@@ -494,9 +494,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
             projects.append(node)
         }
-        // The Palettes list holds every palette. One that lives in a project shows here as well as
-        // under its project (the same palette, not a copy). The list keeps an order of its own.
-        loose.children = lib.listedPalettes.filter { !$0.isTypography }.map { SidebarNode(.palette($0.id)) }
+        // The Palettes list is the stock: palettes outside any project. A project's palettes are its
+        // own copies and are listed under it only. The list keeps an order of its own.
+        loose.children = lib.listedPalettes.filter { !$0.isTypography && $0.projectID == nil }.map { SidebarNode(.palette($0.id)) }
         // Typography palettes have a list of their own, kept in order the same way.
         typography.children = lib.listedPalettes.filter { $0.isTypography }.map { SidebarNode(.palette($0.id)) }
         // Every tag, global or not, for quick access; a project's own also sit in its bucket above.
@@ -661,7 +661,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
-        case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Every palette. Those in a project are listed under their project too"
+        case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Your stock of palettes. A project takes a copy, so these never change with a project"
         case .projectPalettes:
             cell.textField?.stringValue = "Palettes"
             cell.imageView?.image = symbol("swatchpalette", "Project palettes", size: 11)
@@ -801,16 +801,24 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if palette != nil {
             // Palettes land in a project, or are put in order within Favourites or the Palettes list;
             // dropping on a palette row means beside it.
+            let home = palette.flatMap { library.library.swatch($0)?.projectID }
+            // Into another list a palette goes as a copy, and the pointer says so.
+            func drop(on place: SidebarNode) -> NSDragOperation {
+                if [.favourites, .typography].contains(place.kind) { return .move }   // only ever put in order
+                let there: UUID? = place.kind == .loose ? nil : (place.projectID ?? place.bucketProjectID)
+                return there == home ? .move : .copy
+            }
             func takes(_ place: SidebarNode) -> Bool {
                 if place.projectID != nil { return true }
                 if case .projectPalettes = place.kind { return true }
+                if place.kind == .loose, home != nil { return true }   // a project's palette, copied back to stock
                 // These lists are only arranged by dragging: what is in each is decided elsewhere.
                 return [.favourites, .loose, .typography].contains(place.kind) && place.children.contains { $0.paletteID == palette }
             }
-            if let t = target, takes(t) { return .move }
+            if let t = target, takes(t) { return drop(on: t) }
             if let t = target, t.paletteID != nil, let parent = o.parent(forItem: t) as? SidebarNode, takes(parent) {
                 o.setDropItem(parent, dropChildIndex: parent.children.firstIndex { $0 === t } ?? 0)
-                return .move
+                return drop(on: parent)
             }
             return []
         }
@@ -832,7 +840,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = palette, let t = target, [.favourites, .loose, .typography].contains(t.kind) {
             // Each of these lists has its own order; arranging one leaves projects and the other alone.
             var ids = t.children.compactMap { $0.paletteID }
-            guard let from = ids.firstIndex(of: id) else { return false }
+            guard let from = ids.firstIndex(of: id) else {
+                // Not one of this list's own: a project's palette dropped on Palettes is copied to stock.
+                guard t.kind == .loose else { return false }
+                library.move(palette: id, to: nil, index: Int.max)
+                return true
+            }
             var to = index < 0 ? ids.count : min(index, ids.count)
             ids.remove(at: from)
             if from < to { to -= 1 }
@@ -881,30 +894,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 add(library.library.activeSwatchID == id ? "Stop Sending Picks Here" : "Send Picks Here", #selector(targetClicked(_:)), id)
             }
             add("Duplicate", #selector(duplicateClicked(_:)), id)
-            let move = NSMenu()
-            for p in library.library.orderedProjects where p.id != s.projectID {
-                let i = move.addItem(withTitle: p.name, action: #selector(moveClicked(_:)), keyEquivalent: "")
-                i.target = self; i.representedObject = [id, p.id]
-            }
-            if s.projectID != nil {
-                if !move.items.isEmpty { move.addItem(.separator()) }
-                let i = move.addItem(withTitle: "Out of its project", action: #selector(moveClicked(_:)), keyEquivalent: "")
-                i.target = self; i.representedObject = [id]
-            }
-            if !move.items.isEmpty { move.addItem(.separator()) }
-            let fresh = move.addItem(withTitle: "New Project\u{2026}", action: #selector(moveToNewClicked(_:)), keyEquivalent: "")
-            fresh.target = self; fresh.representedObject = id
-            menu.addItem(withTitle: "Move to Project", action: nil, keyEquivalent: "").submenu = move
-            // A copy is independent from then on: the way to start another project from this one.
+            // A project owns its palettes, so a palette goes to another home as a copy; the original stays.
             let copy = NSMenu()
             for p in library.library.orderedProjects where p.id != s.projectID {
                 let i = copy.addItem(withTitle: p.name, action: #selector(copyToProjectClicked(_:)), keyEquivalent: "")
                 i.target = self; i.representedObject = [id, p.id]
             }
             if !copy.items.isEmpty { copy.addItem(.separator()) }
-            let loose = copy.addItem(withTitle: "Palettes, Outside Any Project", action: #selector(copyToProjectClicked(_:)), keyEquivalent: "")
-            loose.target = self; loose.representedObject = [id]
-            menu.addItem(withTitle: "Copy to Project", action: nil, keyEquivalent: "").submenu = copy
+            let fresh = copy.addItem(withTitle: "New Project\u{2026}", action: #selector(moveToNewClicked(_:)), keyEquivalent: "")
+            fresh.target = self; fresh.representedObject = id
+            if s.projectID != nil {
+                let loose = copy.addItem(withTitle: "Palettes, Outside Any Project", action: #selector(copyToProjectClicked(_:)), keyEquivalent: "")
+                loose.target = self; loose.representedObject = [id]
+            }
+            menu.addItem(withTitle: "Copy To Project", action: nil, keyEquivalent: "").submenu = copy
             menu.addItem(.separator())
             add("Copy All", #selector(copyClicked(_:)), id)
             add("Export\u{2026}", #selector(exportClicked(_:)), id)

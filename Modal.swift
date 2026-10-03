@@ -1,0 +1,111 @@
+import AppKit
+
+// ---------- A question, asked in the middle of the page ----------
+//
+// A small panel in the dead centre of the page, above everything in the window, with the rest
+// dimmed: a heading, a sentence or two, and the answers as buttons. Escape, or a click outside,
+// is the last answer (the one that changes nothing).
+
+struct ModalChoice {
+    let title: String
+    let symbol: String
+    let run: () -> Void
+}
+
+final class ChoiceSheet: NSView {
+    private let panel = NSView()
+    private let choices: [ModalChoice]
+
+    /// `choices` are laid out left to right; the last is the way out and is what Escape picks.
+    init(title: String, message: String, choices: [ModalChoice]) {
+        self.choices = choices
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        panel.wantsLayer = true
+        panel.layer?.cornerRadius = 14
+        panel.layer?.cornerCurve = .continuous
+        panel.layer?.borderWidth = 1
+        panel.shadow = { let s = NSShadow(); s.shadowBlurRadius = 30; s.shadowOffset = NSSize(width: 0, height: -8); s.shadowColor = NSColor.black.withAlphaComponent(0.45); return s }()
+
+        let heading = NSTextField(wrappingLabelWithString: title)
+        heading.font = PageStyle.titleFont
+        let body = NSTextField(wrappingLabelWithString: message)
+        body.font = NSFont.systemFont(ofSize: TextSize.body)
+        body.textColor = .secondaryLabelColor
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        var buttons: [NSView] = [spacer]
+        for (i, choice) in choices.enumerated() {
+            let b = toolButton(choice.title, choice.symbol, choice.title, target: self, action: #selector(chosen(_:)))
+            b.tag = i
+            buttons.append(b)
+        }
+        let bar = NSStackView(views: buttons)
+        bar.orientation = .horizontal
+        bar.spacing = PageStyle.barSpacing
+
+        addSubview(panel)
+        for v in [panel, heading, body, bar] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        for v in [heading, body, bar] as [NSView] { panel.addSubview(v) }
+        let pad = SwatchListStyle.sheetPad
+        NSLayoutConstraint.activate([
+            panel.widthAnchor.constraint(equalToConstant: 520),
+            heading.topAnchor.constraint(equalTo: panel.topAnchor, constant: pad),
+            heading.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: pad),
+            heading.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -pad),
+            body.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
+            body.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: heading.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 20),
+            bar.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: heading.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -pad),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Lays the sheet over the whole window with its panel in the centre of `page`.
+    func present(over page: NSView) {
+        guard let root = page.window?.contentView else { return }
+        root.addSubview(self, positioned: .above, relativeTo: nil)
+        let across = panel.centerXAnchor.constraint(equalTo: page.centerXAnchor)
+        across.priority = .defaultHigh   // the page's centre, unless that would leave the window
+        NSLayoutConstraint.activate([
+            topAnchor.constraint(equalTo: root.topAnchor),
+            bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            across,
+            panel.centerYAnchor.constraint(equalTo: page.centerYAnchor),
+            panel.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 8),
+            panel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -8),
+        ])
+        window?.makeFirstResponder(self)
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        super.updateLayer()
+        panel.layer?.backgroundColor = Theme.grey(0.05).cgColor
+        panel.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor
+    }
+
+    private func pick(_ index: Int) {
+        removeFromSuperview()
+        if choices.indices.contains(index) { choices[index].run() }
+    }
+
+    @objc private func chosen(_ sender: NSButton) { pick(sender.tag) }
+    override func cancelOperation(_ sender: Any?) { pick(choices.count - 1) }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { pick(choices.count - 1) } else { super.keyDown(with: event) }
+    }
+    override func mouseDown(with event: NSEvent) {
+        if !panel.frame.contains(convert(event.locationInWindow, from: nil)) { pick(choices.count - 1) }
+    }
+    override func scrollWheel(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+}
