@@ -67,6 +67,7 @@ final class SwatchListView: NSView {
             rows.forEach { $0.refresh(locked: locked) }
             return
         }
+        rows.forEach { $0.commit() }   // anything half typed is kept before the rows go
         self.palette = palette
         rows.forEach { $0.removeFromSuperview() }
         rows = hexes.map { hex in
@@ -238,6 +239,7 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         }
         if note.currentEditor() == nil { note.stringValue = library.library.note(of: hex, in: palette) ?? "" }
         note.isEditable = !locked
+        note.placeholderString = locked ? "Project Locked. Unlock It To Write Notes." : "Notes\u{2026}"
         note.toolTip = locked ? "The project is locked: unlock it to write here" : nil
         fillSteps()
         showTab()
@@ -290,10 +292,24 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
 
     @objc private func copyTapped() { library?.copy(hex) }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, note.currentEditor() != nil { commit() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    /// A click on the row away from the note ends the typing, which saves it.
+    override func mouseDown(with event: NSEvent) {
+        if note.currentEditor() != nil { window?.makeFirstResponder(nil) } else { super.mouseDown(with: event) }
+    }
+
     // MARK: Description
 
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let library = library else { return }
+    func controlTextDidEndEditing(_ obj: Notification) { commit() }
+
+    /// Saves what has been typed, if it differs from what is kept. Called when editing ends and
+    /// whenever the row is about to go, so a note is never lost by clicking away or changing page.
+    func commit() {
+        guard let library = library, note.isEditable else { return }
         let typed = note.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard typed != (library.library.note(of: hex, in: palette) ?? "") else { return }
         library.describe(swatch: hex, in: palette, as: typed)
