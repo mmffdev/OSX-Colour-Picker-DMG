@@ -41,7 +41,7 @@ extension LibraryController {
 
     func addTypography(to project: UUID?) {
         var id: UUID?
-        apply { id = $0.createTypography(in: project) }
+        apply("New Typography Palette") { id = $0.createTypography(in: project) }
         if let id = id { onShow?(.palette(id), false) }
     }
 
@@ -49,7 +49,7 @@ extension LibraryController {
     @discardableResult
     func keep(_ style: TypeStyle, in id: UUID?) -> UUID? {
         var palette = id, existed = false, name = style.name
-        apply { lib in
+        apply("Add Pairing") { lib in
             if palette == nil || lib.swatch(palette!)?.isTypography != true { palette = lib.createTypography() }
             guard let p = palette else { return }
             existed = lib.swatch(p)?.styles?.contains { $0.id == style.id } ?? false
@@ -63,9 +63,9 @@ extension LibraryController {
         return palette
     }
 
-    func removeStyle(_ style: UUID, from id: UUID) { apply { $0.removeStyle(style, from: id) } }
+    func removeStyle(_ style: UUID, from id: UUID) { apply("Remove Pairing") { $0.removeStyle(style, from: id) } }
     func replaceFont(_ old: String, with new: String?, in id: UUID) {
-        apply { $0.replaceFont(old, with: new, in: id) }
+        apply("Replace Font") { $0.replaceFont(old, with: new, in: id) }
         flash("Replaced \(old) With \(new ?? "The System Font")")
     }
 }
@@ -327,7 +327,7 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
             card.onRename = { [weak self] typed in
                 var renamed = style
                 renamed.name = typed
-                self?.library.apply { $0.setStyle(renamed, in: new) }
+                self?.library.apply("Rename Pairing") { $0.setStyle(renamed, in: new) }
             }
             card.onEdit = { [weak self] in self?.library.onOpenContrast?(new, style.id) }
             card.onDelete = { [weak self] in self?.library.removeStyle(style.id, from: new) }

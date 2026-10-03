@@ -61,23 +61,24 @@ enum ProjectFiles {
         set { preferences.set(newValue?.path, forKey: "projectsFolder") }
     }
 
-    static func folder(for project: Project, library: URL) -> URL {
+    /// `master` is the chosen Projects folder; nil means the default beside the library.
+    static func folder(for project: Project, library: URL, master: URL?) -> URL {
         if let own = project.folder { return URL(fileURLWithPath: own) }
-        return folder ?? library.deletingLastPathComponent().appendingPathComponent("Projects")
+        return master ?? library.deletingLastPathComponent().appendingPathComponent("Projects")
     }
 
-    static func url(for project: Project, library: URL) -> URL {
-        folder(for: project, library: library).appendingPathComponent(ProjectFile.fileName(for: project))
+    static func url(for project: Project, library: URL, master: URL?) -> URL {
+        folder(for: project, library: library, master: master).appendingPathComponent(ProjectFile.fileName(for: project))
     }
 
     /// Writes every project's package, and only when its contents have changed since the last write.
     /// Returns the packages written. `written` carries what was last written, by project id.
-    static func write(_ lib: Library, library: URL, written: inout [UUID: Data]) throws -> [URL] {
+    static func write(_ lib: Library, library: URL, master: URL?, written: inout [UUID: Data]) throws -> [URL] {
         var out: [URL] = []
         for p in lib.orderedProjects {
             let data = try ProjectFile(project: p, in: lib).data()
             if written[p.id] == data { continue }
-            let package = url(for: p, library: library)
+            let package = url(for: p, library: library, master: master)
             try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
             try data.write(to: package.appendingPathComponent(ProjectFile.inner), options: .atomic)
             written[p.id] = data

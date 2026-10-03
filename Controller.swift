@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 extension Notification.Name {
     /// Colours or palettes changed.
     static let libraryDidChange = Notification.Name("libraryDidChange")
+    static let historyDidChange = Notification.Name("historyDidChange")
     /// Catalogue, sync status or picking state changed.
     static let appStateDidChange = Notification.Name("appStateDidChange")
     /// A short confirmation for the status bar. userInfo["text"].
@@ -85,6 +86,7 @@ final class LibraryController: NSObject {
     func reload() {
         do { library = try store.load() } catch { show(error) }
         loadedStamp = store.modificationDate
+        loadHistory()
         changed()
         if let aside = store.quarantinedFile, aside != reportedQuarantine {
             reportedQuarantine = aside
@@ -103,15 +105,68 @@ final class LibraryController: NSObject {
         sync()
     }
 
-    func apply(_ body: (inout Library) -> Void) {
+    /// Every change goes through here, and becomes a step in the history under `title`.
+    func apply(_ title: String = "Change", _ body: (inout Library) -> Void) {
+        let before = library
         do {
             library = try store.mutate(body)
             loadedStamp = store.modificationDate
         } catch {
             show(error)
         }
+        if library != before { recordStep(title, before: before) }
         changed()
         sync()
+    }
+
+    // MARK: History
+
+    private(set) var history = StepHistory()
+    private var historyTimer: Timer?
+
+    var historyEnabled: Bool { Prefs.historyEnabled(for: catalogue) }
+
+    private func recordStep(_ title: String, before: Library?) {
+        guard historyEnabled else { return }
+        history.record(title, library: library, before: before, limit: Prefs.historySteps)
+        historyChanged()
+    }
+
+    private func historyChanged() {
+        NotificationCenter.default.post(name: .historyDidChange, object: self)
+        historyTimer?.invalidate()
+        historyTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.saveHistory() }
+    }
+
+    private func saveHistory() {
+        guard historyEnabled else { return }
+        do { try HistoryStore.save(history, beside: store.url) } catch { flash("Could not save the history: \(error.localizedDescription)") }
+    }
+
+    func loadHistory() {
+        history = historyEnabled ? HistoryStore.load(beside: store.url) : StepHistory()
+        if history.isEmpty, historyEnabled { history.record("Opened", library: library, before: nil, limit: Prefs.historySteps) }
+        NotificationCenter.default.post(name: .historyDidChange, object: self)
+    }
+
+    /// Takes the library back (or forward) to a step. Not a step itself.
+    func goToStep(_ index: Int) {
+        guard let lib = history.go(to: index) else { return }
+        do { try store.save(lib); library = lib; loadedStamp = store.modificationDate } catch { show(error); return }
+        historyChanged()
+        changed()
+        sync()
+    }
+
+    func deleteStep(_ index: Int) {
+        history.delete(at: index)
+        historyChanged()
+    }
+
+    func clearHistory() {
+        history = StepHistory()
+        history.record("Opened", library: library, before: nil, limit: Prefs.historySteps)
+        historyChanged()
     }
 
     private func changed() {
@@ -131,18 +186,18 @@ final class LibraryController: NSObject {
     }
 
     func writeProjectFiles() {
-        do { _ = try ProjectFiles.write(library, library: store.url, written: &projectFilesWritten) }
+        do { _ = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder, written: &projectFilesWritten) }
         catch { flash("Could not write a project file: \(error.localizedDescription)") }
     }
 
     /// The project's file, written now.
-    func projectFileURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.url(for: $0, library: store.url) } }
+    func projectFileURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.url(for: $0, library: store.url, master: ProjectFiles.folder) } }
 
     /// Gives the project a folder of its own, or nil to put it back in the master folder, and moves its file.
     func setProjectFolder(_ id: UUID, _ folder: URL?) {
         guard let p = library.project(id) else { return }
-        let old = ProjectFiles.url(for: p, library: store.url)
-        apply { $0.setProjectFolder(id, folder?.path) }
+        let old = ProjectFiles.url(for: p, library: store.url, master: ProjectFiles.folder)
+        apply("Keep Project In") { $0.setProjectFolder(id, folder?.path) }
         projectFilesWritten[id] = nil
         writeProjectFiles()
         if let new = projectFileURL(id), new != old { try? FileManager.default.removeItem(at: old) }
@@ -175,7 +230,7 @@ final class LibraryController: NSObject {
         panel.canCreateDirectories = true
         panel.prompt = "Keep Project Here"
         panel.message = "Choose a folder for \u{201C}\(p.name)\u{201D} and its file"
-        panel.directoryURL = ProjectFiles.folder(for: p, library: store.url)
+        panel.directoryURL = ProjectFiles.folder(for: p, library: store.url, master: ProjectFiles.folder)
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard r == .OK, let url = panel.url else { return }
             self?.setProjectFolder(id, url)
@@ -256,7 +311,7 @@ final class LibraryController: NSObject {
             }
             playShutter()
             copyToClipboard(Prefs.copyText(hex))
-            self.apply { $0.addPick(hex) }
+            self.apply("Pick Colour") { $0.addPick(hex) }
             self.onReveal?(hex)
             let into = self.library.activeSwatch.map { " \u{2192} \($0.name)" } ?? ""
             self.flash("Picked \(colourName(hex))  \(hex)\(into)")
@@ -279,7 +334,7 @@ final class LibraryController: NSObject {
 
     func addPalette(to project: UUID?) {
         var id: UUID?
-        apply { lib in
+        apply("New Palette") { lib in
             id = lib.createSwatch()
             if let id = id, let p = project { lib.move(id, to: p, index: Int.max) }
         }
@@ -296,7 +351,7 @@ final class LibraryController: NSObject {
         showProjectForm(mode: .newProject, name: "", values: [:]) { [weak self] name, values in
             guard let self = self else { return }
             var id: UUID?
-            self.apply { lib in
+            self.apply("New Project") { lib in
                 let made = lib.createProject(named: name)
                 lib.setProjectDetails(made, values)
                 // The palette asked for moves in; failing that the open one, so the project is not born empty.
@@ -312,7 +367,7 @@ final class LibraryController: NSObject {
     func editProject(_ id: UUID) {
         guard let p = library.project(id) else { return }
         showProjectForm(mode: .project, name: p.name, values: p.details ?? [:]) { [weak self] name, values in
-            self?.apply { lib in
+            self?.apply("Edit Project Details") { lib in
                 lib.renameProject(id, to: name)
                 lib.setProjectDetails(id, values)
             }
@@ -351,13 +406,13 @@ final class LibraryController: NSObject {
         guard a.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        apply { $0.renameProject(id, to: name) }
+        apply("Rename Project") { $0.renameProject(id, to: name) }
     }
 
     func delete(project id: UUID) {
         guard let p = library.project(id) else { return }
         let count = library.palettes(in: id).count
-        guard count > 0 else { apply { $0.deleteProject(id) }; return }
+        guard count > 0 else { apply("Delete Project") { $0.deleteProject(id) }; return }
         let a = NSAlert()
         a.alertStyle = .warning
         a.messageText = "Delete the project \u{201C}\(p.name)\u{201D}?"
@@ -365,25 +420,25 @@ final class LibraryController: NSObject {
         a.addButton(withTitle: "Delete Project")
         a.addButton(withTitle: "Cancel")
         present(a) { [weak self] r in
-            if r == .alertFirstButtonReturn { self?.apply { $0.deleteProject(id) } }
+            if r == .alertFirstButtonReturn { self?.apply("Delete Project") { $0.deleteProject(id) } }
         }
     }
 
     func move(palette id: UUID, to project: UUID?, index: Int) {
-        apply { $0.move(id, to: project, index: index) }
+        apply("Move Palette") { $0.move(id, to: project, index: index) }
         let name = library.swatch(id)?.name ?? "palette"
         flash(project.flatMap { library.project($0)?.name }.map { "Moved \(name) to \($0)" } ?? "Moved \(name) out of its project")
     }
 
-    func placeProjects(_ ids: [UUID]) { apply { $0.placeProjects(ids) } }
-    func placeFavourites(_ ids: [UUID]) { apply { $0.placeFavourites(ids) } }
-    func placeInList(_ ids: [UUID]) { apply { $0.placeInList(ids) } }
+    func placeProjects(_ ids: [UUID]) { apply("Arrange Projects") { $0.placeProjects(ids) } }
+    func placeFavourites(_ ids: [UUID]) { apply("Arrange Favourites") { $0.placeFavourites(ids) } }
+    func placeInList(_ ids: [UUID]) { apply("Arrange Palettes") { $0.placeInList(ids) } }
 
     // MARK: Tags
 
     /// `scoped` are the new tags that were given to a project as they were typed.
     func setTags(ofPalette id: UUID, _ tags: [String], scoped: [String: UUID] = [:]) {
-        apply { lib in
+        apply("Tag Palette") { lib in
             // Scopes first, so that a new project tag is held to its project like any other.
             for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
             lib.setTags(ofPalette: id, tags)
@@ -401,7 +456,7 @@ final class LibraryController: NSObject {
     }
 
     func setTags(ofSwatches hexes: [String], _ tags: [String], scoped: [String: UUID] = [:]) {
-        apply { lib in
+        apply("Tag Swatches") { lib in
             for tag in tags { if let project = scoped[tag.lowercased()] { lib.setTag(tag, colour: nil, project: project) } }
             for h in hexes { lib.setTags(ofColour: h, tags) }
         }
@@ -413,20 +468,20 @@ final class LibraryController: NSObject {
 
     /// Gives a colour the user's own name within one palette; blank puts the standard name back.
     func rename(swatch hex: String, in palette: UUID, to name: String?) {
-        apply { $0.setName(name, of: hex, in: palette) }
+        apply("Rename Colour") { $0.setName(name, of: hex, in: palette) }
         flash(library.customName(of: hex, in: palette).map { "Named \(hex) \u{201C}\($0)\u{201D}" } ?? "\(hex) is \(colourName(hex)) again")
     }
 
-    func setTag(_ name: String, colour: String?, project: UUID?) { apply { $0.setTag(name, colour: colour, project: project) } }
-    func renameTag(_ old: String, to new: String) { apply { $0.renameTag(old, to: new) } }
-    func deleteTag(_ name: String) { apply { $0.deleteTag(name) } }
-    func deleteTags(_ names: [String]) { apply { lib in for name in names { lib.deleteTag(name) } } }
+    func setTag(_ name: String, colour: String?, project: UUID?) { apply("Edit Tag") { $0.setTag(name, colour: colour, project: project) } }
+    func renameTag(_ old: String, to new: String) { apply("Rename Tag") { $0.renameTag(old, to: new) } }
+    func deleteTag(_ name: String) { apply("Delete Tag") { $0.deleteTag(name) } }
+    func deleteTags(_ names: [String]) { apply("Delete Tags") { lib in for name in names { lib.deleteTag(name) } } }
 
     /// Makes an unused tag with a name of its own and returns that name.
     @discardableResult
     func newTag() -> String {
         let name = uniqueName("New Tag", among: library.allTags)
-        apply { $0.setTag(name, colour: nil, project: nil) }
+        apply("New Tag") { $0.setTag(name, colour: nil, project: nil) }
         return name
     }
 
@@ -444,7 +499,7 @@ final class LibraryController: NSObject {
     @discardableResult
     func createPalette(named name: String, hexes: [String], custom: Bool = false, rename: Bool = false) -> UUID? {
         var id: UUID?
-        apply { lib in
+        apply("Create Palette") { lib in
             let target = lib.activeSwatchID
             id = lib.createSwatch(named: name, hexes: hexes, custom: custom)
             if custom { lib.activeSwatchID = target } // building a palette doesn't redirect picks
@@ -455,12 +510,12 @@ final class LibraryController: NSObject {
 
     func rename(_ id: UUID, to name: String) {
         // Deferred: this is called while a name field is still ending its edit.
-        DispatchQueue.main.async { [weak self] in self?.apply { $0.renameSwatch(id, to: name) } }
+        DispatchQueue.main.async { [weak self] in self?.apply("Rename Palette") { $0.renameSwatch(id, to: name) } }
     }
 
     func toggleFavourite(_ id: UUID) {
         guard let s = library.swatch(id) else { return }
-        apply { $0.setFavourite(id, !s.favourite) }
+        apply(s.favourite ? "Unstar Palette" : "Star Palette") { $0.setFavourite(id, !s.favourite) }
         flash(s.favourite ? "Removed \(s.name) from Favourites" : "Added \(s.name) to Favourites")
     }
 
@@ -469,12 +524,12 @@ final class LibraryController: NSObject {
         let palettes = library.palettes(in: id)
         guard let p = library.project(id), !palettes.isEmpty else { return }
         let on = !palettes.allSatisfy { $0.favourite }
-        apply { lib in for s in palettes { lib.setFavourite(s.id, on) } }
+        apply(on ? "Star Palettes" : "Unstar Palettes") { lib in for s in palettes { lib.setFavourite(s.id, on) } }
         flash(on ? "Added the palettes in \(p.name) to Favourites" : "Removed the palettes in \(p.name) from Favourites")
     }
 
     func setTarget(_ id: UUID?) {
-        apply { $0.activeSwatchID = id }
+        apply("Send Picks To Palette") { $0.activeSwatchID = id }
         flash(library.activeSwatch.map { "Picks now go to \($0.name)" } ?? "Picks now go to the library only")
     }
 
@@ -483,7 +538,7 @@ final class LibraryController: NSObject {
         if let styles = s.styles {
             // A Typography palette is copied with its pairings, each under a new id.
             var copy: UUID?
-            apply { lib in
+            apply("Duplicate Palette") { lib in
                 let new = lib.createTypography(named: "\(s.name) copy", in: s.projectID)
                 for style in styles {
                     lib.setStyle(TypeStyle(id: UUID(), name: style.name, ink: style.ink, paper: style.paper, heading: style.heading,
@@ -499,7 +554,7 @@ final class LibraryController: NSObject {
 
     func delete(palette id: UUID) {
         guard let s = library.swatch(id) else { return }
-        guard !s.entries.isEmpty else { apply { $0.deleteSwatch(id) }; return }
+        guard !s.entries.isEmpty else { apply("Delete Palette") { $0.deleteSwatch(id) }; return }
         let a = NSAlert()
         a.alertStyle = .warning
         a.messageText = "Delete \u{201C}\(s.name)\u{201D}?"
@@ -507,27 +562,27 @@ final class LibraryController: NSObject {
         a.addButton(withTitle: "Delete")
         a.addButton(withTitle: "Cancel")
         present(a) { [weak self] r in
-            if r == .alertFirstButtonReturn { self?.apply { $0.deleteSwatch(id) } }
+            if r == .alertFirstButtonReturn { self?.apply("Delete Palette") { $0.deleteSwatch(id) } }
         }
     }
 
     func add(_ hexes: [String], to id: UUID) {
         var added = 0
-        apply { added = $0.add(hexes, toSwatch: id) }
+        apply("Add Colours") { added = $0.add(hexes, toSwatch: id) }
         let name = library.swatch(id)?.name ?? "palette"
         flash(added == 0 ? "Already in \(name)" : "Added \(plural(added, "swatch", "swatches")) to \(name)")
     }
 
     func remove(_ hexes: [String], from id: UUID) {
         guard !hexes.isEmpty else { return }
-        apply { $0.remove(Set(hexes), fromSwatch: id) }
+        apply("Remove Colours") { $0.remove(Set(hexes), fromSwatch: id) }
     }
 
     func deleteFromLibrary(_ list: [String]) {
         let hexes = Set(list)
         guard !hexes.isEmpty else { return }
         let used = library.swatchCount(containingAnyOf: hexes)
-        guard used > 0 else { apply { $0.deleteColours(hexes) }; return }
+        guard used > 0 else { apply("Delete Colours") { $0.deleteColours(hexes) }; return }
         let a = NSAlert()
         a.alertStyle = .warning
         a.messageText = "Delete \(plural(hexes.count, "swatch", "swatches")) from the library?"
@@ -535,7 +590,7 @@ final class LibraryController: NSObject {
         a.addButton(withTitle: "Delete")
         a.addButton(withTitle: "Cancel")
         present(a) { [weak self] r in
-            if r == .alertFirstButtonReturn { self?.apply { $0.deleteColours(hexes) } }
+            if r == .alertFirstButtonReturn { self?.apply("Delete Colours") { $0.deleteColours(hexes) } }
         }
     }
 
@@ -589,7 +644,7 @@ final class LibraryController: NSObject {
             return
         }
         var gained = LibraryChange()
-        apply { lib in
+        apply("Import Earlier Library") { lib in
             let merged = mergeLibraries(local: lib, remote: previous)
             gained = change(from: lib, to: merged)
             lib = merged
@@ -1053,8 +1108,10 @@ final class LibraryController: NSObject {
     }
 
     private func reloadAfterSync() {
+        let before = library
         do { library = try store.load() } catch { show(error) }
         loadedStamp = store.modificationDate
+        if library != before { recordStep("Sync", before: before) }
         changed()
     }
 

@@ -49,6 +49,22 @@ enum Prefs {
         set { d.set(newValue, forKey: "lowercaseHex"); changed() }
     }
 
+    // MARK: History
+
+    /// History is kept per library (catalogue): on unless turned off for that one.
+    static func historyEnabled(for catalogue: String) -> Bool { bool("history.\(catalogue)", true) }
+    static func setHistoryEnabled(_ on: Bool, for catalogue: String) { d.set(on, forKey: "history.\(catalogue)") }
+    /// Steps kept; 0 is unlimited.
+    static var historySteps: Int {
+        get { int("historySteps", 50) }
+        set { d.set(newValue, forKey: "historySteps") }
+    }
+    /// Steps that touch one project are also written into that project's file.
+    static var projectHistory: Bool {
+        get { bool("projectHistory", true) }
+        set { d.set(newValue, forKey: "projectHistory") }
+    }
+
     /// The first-open setup has been shown and dismissed.
     static var setupDone: Bool {
         get { bool("setupDone", false) }

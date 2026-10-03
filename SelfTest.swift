@@ -808,15 +808,47 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let projRoot = root.appendingPathComponent("projects")
     let libURL = projRoot.appendingPathComponent("Main/library.json")
     var written: [UUID: Data] = [:]
-    let firstWrite = try! ProjectFiles.write(projLib, library: libURL, written: &written)
-    let again = try! ProjectFiles.write(projLib, library: libURL, written: &written)
+    let firstWrite = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
+    let again = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
     check(firstWrite.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client A.mmffproject").path] && again.isEmpty
           && (try? ProjectFiles.read(firstWrite[0]).data()) == fileData,
           "a project package lands in a Projects folder beside the library, reads back whole, and is rewritten only when it changes")
     projLib.setProjectFolder(client, projRoot.appendingPathComponent("Elsewhere").path)
-    let moved = try! ProjectFiles.write(projLib, library: libURL, written: &written)
+    let moved = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
     check(moved.map { $0.lastPathComponent } == ["Client A.mmffproject"] && moved[0].deletingLastPathComponent().lastPathComponent == "Elsewhere",
           "a project given a folder of its own is written there")
+
+    print("history")
+    var hist = StepHistory()
+    var hLib = Library()
+    let th = Date(timeIntervalSince1970: 1_760_000_000)
+    hist.record("Opened", library: hLib, before: nil, limit: 0, at: th)
+    let hp = hLib.createProject(named: "Client", at: th)
+    hist.record("New Project", library: hLib, before: hist.steps.last!.library, limit: 0, at: th)
+    let hs = hLib.createSwatch(at: th); hLib.add(["#FF0000"], toSwatch: hs, at: th); hLib.move(hs, to: hp, index: 0, at: th)
+    hist.record("Add Colours", library: hLib, before: hist.steps.last!.library, limit: 0, at: th)
+    let hs2 = hLib.createSwatch(at: th.addingTimeInterval(1)); hLib.add(["#00FF00"], toSwatch: hs2, at: th)
+    hist.record("New Palette", library: hLib, before: hist.steps.last!.library, limit: 0, at: th)
+    check(hist.steps.map { $0.title } == ["Opened", "New Project", "Add Colours", "New Palette"] && hist.current == 3,
+          "every change is a step, newest last, and the library matches the last one")
+    check(hist.steps.map { $0.project } == [nil, hp, hp, nil], "a step that touched one project is marked with it; a loose palette is not")
+    check(hist.steps(in: hp).count == 2 && hist.steps(changing: hs).map { $0.title } == ["Add Colours"],
+          "a project's steps and a palette's own changes can be picked out")
+    let backTo = hist.go(to: 1)
+    check(backTo?.swatches.isEmpty == true && hist.current == 1 && hist.steps.count == 4, "going back to a step gives that library and keeps the later steps")
+    hist.record("Rename Project", library: hLib, before: backTo, limit: 0, at: th)
+    check(hist.steps.map { $0.title } == ["Opened", "New Project", "Rename Project"] && hist.current == 2,
+          "a new step taken from an earlier one cuts off the steps after it")
+    hist.delete(at: 0)
+    check(hist.steps.map { $0.title } == ["New Project", "Rename Project"] && hist.current == 1, "a step can be deleted and the current one follows")
+    for i in 0..<5 { hist.record("Step \(i)", library: hLib, before: hLib, limit: 3, at: th) }
+    check(hist.steps.count == 3 && hist.steps.last?.title == "Step 4" && hist.current == 2, "a limit keeps only the newest steps")
+    let hRoot = root.appendingPathComponent("history/library.json")
+    try! fm.createDirectory(at: hRoot.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try! HistoryStore.save(hist, beside: hRoot)
+    check(HistoryStore.load(beside: hRoot) == hist && HistoryStore.url(beside: hRoot).lastPathComponent == "library.history.json",
+          "history is kept in a sidecar file beside the library and reads back whole")
+    check(HistoryStore.load(beside: root.appendingPathComponent("nowhere/library.json")).isEmpty, "no sidecar, no history")
 
     print("favourites and custom palettes")
     var lib = Library()

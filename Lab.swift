@@ -15,7 +15,7 @@ extension LibraryController {
     /// Saves colours as a new palette without leaving the page or redirecting picks.
     func keep(_ hexes: [String], named name: String, in project: UUID?) {
         var made: String?
-        apply { lib in
+        apply("Keep Colours As Palette") { lib in
             let target = lib.activeSwatchID
             let id = lib.createSwatch(named: name, hexes: hexes, custom: true)
             lib.activeSwatchID = target
