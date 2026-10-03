@@ -235,14 +235,6 @@ final class SidebarBackdrop: NSView {
     override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
 }
 
-/// The band at the top of the sidebar, level with the page's title panel, striped when the page's is.
-final class SidebarBand: NSView {
-    var striped = false { didSet { if striped != oldValue { needsDisplay = true } } }
-    override func draw(_ dirtyRect: NSRect) {
-        if striped { Theme.drawStripes(in: bounds) }
-    }
-}
-
 /// A row that draws its selection in the theme's colours and turns its text to match, when the
 /// theme says; otherwise the system draws it.
 final class ThemedRowView: NSTableRowView {
@@ -420,31 +412,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         self.scroll = scroll
-        // The sidebar sits under the same header band as the page, with no tint of its own.
+        // Under the full-width toolbar, with a flat background of its own; the first row sits on the pages' title line.
         let root = SidebarBackdrop()
-        root.addSubview(band)
         root.addSubview(scroll)
-        band.translatesAutoresizingMaskIntoConstraints = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            band.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            band.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            band.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            band.heightAnchor.constraint(equalToConstant: PageStyle.titlePanelHeight),
-            scroll.topAnchor.constraint(equalTo: band.bottomAnchor, constant: PageStyle.barGap),
+            scroll.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: PageStyle.titleCentre - 14),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
-        NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .selectionDidChange, object: library)
     }
 
     private var scroll: NSScrollView!
-    private let band = SidebarBand()
-
-    /// The band is striped while the page showing belongs to a project, as the page's own title panel is.
-    @objc private func pageChanged() { band.striped = library.currentProject != nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -452,10 +433,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     /// The list starts below the toolbar, set down so that the first row's middle is on the pages' title line.
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        pageChanged()
-    }
+
 
     // MARK: Contents
 

@@ -8,6 +8,7 @@ private extension NSToolbarItem.Identifier {
     static let fromImage = NSToolbarItem.Identifier("fromImage")
     static let build = NSToolbarItem.Identifier("build")
     static let history = NSToolbarItem.Identifier("history")
+    static let sidebarToggle = NSToolbarItem.Identifier("sidebarToggle")
     static let paste = NSToolbarItem.Identifier("paste")
     static let export = NSToolbarItem.Identifier("export")
     static let share = NSToolbarItem.Identifier("share")
@@ -172,6 +173,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private let builder: BuilderViewController
     private var builderItem: NSSplitViewItem!
     private var historyItem: NSSplitViewItem!
+    private var sideItem: NSSplitViewItem!
     private lazy var historyRail = HistoryRailController(library: library)
     private(set) var selection: Selection = .all
     private weak var pickItem: NSToolbarItem?
@@ -216,7 +218,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         library.window = win
         catalogueMenu.delegate = self
 
-        let side = NSSplitViewItem(sidebarWithViewController: sidebar)
+        // A plain pane, not a system sidebar: the toolbar runs the full width above it, and it has no chrome of its own.
+        let side = NSSplitViewItem(viewController: sidebar)
+        sideItem = side
         side.minimumThickness = 236 // room for a palette name, its count and star
         side.maximumThickness = 340
         side.canCollapse = true
@@ -509,6 +513,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     // MARK: Menu and toolbar actions
 
+    @objc func toggleSidebarPane() { sideItem.animator().isCollapsed.toggle() }
+
     @objc func toggleHistory() {
         historyItem.animator().isCollapsed.toggle()
         Prefs.historyRailShown = !historyItem.isCollapsed
@@ -530,7 +536,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     @objc func focusSearch() {
         guard let toolbar = window?.toolbar else { return }
         if searchRestore == nil {
-            let lead = (toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator }).map { $0 + 1 } ?? 0
+            let lead = (toolbar.items.firstIndex { $0.itemIdentifier == .sidebarToggle }).map { $0 + 1 } ?? 0
             searchRestore = toolbar.items.dropFirst(lead).map { $0.itemIdentifier }
             toolbar.autosavesConfiguration = false   // this is a passing state, not the user's arrangement
             while toolbar.items.count > lead { toolbar.removeItem(at: lead) }
@@ -588,11 +594,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .flexibleSpace, .history, .share, .settings, .search]
+        [.sidebarToggle, .pick, .newPalette, .lab, .flexibleSpace, .history, .share, .settings, .search]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share, .history,
+        [.sidebarToggle, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share, .history,
          .sync, .settings, .search, .flexibleSpace, .space]
     }
 
@@ -610,6 +616,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             return i
         }
         switch id {
+        case .sidebarToggle:
+            return item("Sidebar", "sidebar.leading", "Show or hide the sidebar (\u{2303}\u{2318}S)", self, #selector(toggleSidebarPane))
         case .pick:
             let i = item("Pick", "eyedropper", "Pick colours from the screen (\u{2318}P)", library, #selector(LibraryController.togglePicking))
             if flag { pickItem = i }

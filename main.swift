@@ -168,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Next Palette", #selector(MainWindowController.nextPalette), "]", main)
             add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)
             m.addItem(.separator())
-            add(m, "Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", nil, [.command, .control])
+            add(m, "Show Sidebar", #selector(MainWindowController.toggleSidebarPane), "s", main, [.command, .control])
             add(m, "Show History", #selector(MainWindowController.toggleHistory), "y", main, [.command, .shift])
             m.addItem(.separator())
             add(m, "Lighter Background", #selector(MainWindowController.lighterBackground), "]", main)
