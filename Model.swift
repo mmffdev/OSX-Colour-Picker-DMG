@@ -32,6 +32,9 @@ struct Project: Codable, Equatable {
     /// Locked: nothing in the project may change until it is unlocked. Kept in the project file too.
     var locked: Bool? = nil
     var isLocked: Bool { locked ?? false }
+    /// The colour profile the project's palettes work to, unless one has its own; nil is the house default.
+    var profile: UUID? = nil
+    var profileChangedAt: Date? = nil
 }
 
 struct SwatchEntry: Codable, Equatable {
@@ -95,6 +98,9 @@ struct Swatch: Codable, Equatable {
     var stylesChangedAt: Date? = nil
     /// The palette this one was copied from, when it was taken into a project or out of one.
     var copiedFrom: UUID? = nil
+    /// The colour profile this palette works to; nil uses its project's, or the house default.
+    var profile: UUID? = nil
+    var profileChangedAt: Date? = nil
 
     var isTypography: Bool { styles != nil }
 
@@ -135,8 +141,10 @@ struct Library: Codable, Equatable {
     var deleted: [Tombstone] = []
     var projects: [Project] = []
     var tagInfo: [TagInfo] = []
+    /// The colour profiles this library's palettes and projects use: its own copies, so it stays whole when it travels.
+    var colourProfiles: [ColourProfile] = []
 
-    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted, projects, tagInfo = "tags" }
+    enum CodingKeys: String, CodingKey { case version, colours, swatches, activeSwatchID, deleted, projects, tagInfo = "tags", colourProfiles }
 
     // The "tags" key is left out while there is nothing to say, so older libraries stay as they were.
     func encode(to encoder: Encoder) throws {
@@ -148,6 +156,7 @@ struct Library: Codable, Equatable {
         try c.encode(deleted, forKey: .deleted)
         try c.encode(projects, forKey: .projects)
         if !tagInfo.isEmpty { try c.encode(tagInfo, forKey: .tagInfo) }
+        if !colourProfiles.isEmpty { try c.encode(colourProfiles, forKey: .colourProfiles) }
     }
 }
 
@@ -163,6 +172,7 @@ extension Library {
         deleted = try c.decodeIfPresent([Tombstone].self, forKey: .deleted) ?? []
         projects = try c.decodeIfPresent([Project].self, forKey: .projects) ?? []
         tagInfo = try c.decodeIfPresent([TagInfo].self, forKey: .tagInfo) ?? []
+        colourProfiles = try c.decodeIfPresent([ColourProfile].self, forKey: .colourProfiles) ?? []
     }
 
     static func entryKey(_ swatch: UUID, _ hex: String) -> String { "\(swatch.uuidString)/\(hex)" }
@@ -544,6 +554,8 @@ extension Library {
         move(copy.id, to: project, index: index, at: date)
         // Through the usual door, so a tag that belongs to another project is not carried into this one.
         if let tags = source.tags { setTags(ofPalette: copy.id, tags, at: date) }
+        // The copy works to the same profile as the original, unless its new home says otherwise later.
+        if let own = source.profile, let i = swatches.firstIndex(where: { $0.id == copy.id }) { swatches[i].profile = own; swatches[i].profileChangedAt = date }
         return copy.id
     }
 

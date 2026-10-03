@@ -1371,6 +1371,100 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && ProjectField.tidy(["ownerDepartment": " Design ", "ownerMobile": "07", "nonsense": "x"]) == ["ownerDepartment": "Design", "ownerMobile": "07"],
           "the Studio section holds the organisation's fields in order, and the new ones are kept like the rest")
 
+    print("the colour engine: masters, renderings and proofs")
+    func near(_ a: Double, _ b: Double, _ slack: Double = 0.0005) -> Bool { abs(a - b) <= slack }
+    func close(_ p: XYZ, _ x: Double, _ y: Double, _ z: Double, _ slack: Double = 0.0005) -> Bool { near(p.x, x, slack) && near(p.y, y, slack) && near(p.z, z, slack) }
+    let redMaster = RGBSpace.srgb.master(of: [1, 0, 0]), whiteMaster = RGBSpace.srgb.master(of: [1, 1, 1])
+    check(close(redMaster, 0.4360747, 0.2225045, 0.0139322) && close(whiteMaster, XYZ.d50.x, XYZ.d50.y, XYZ.d50.z),
+          "sRGB red and white give the published D50 masters")
+    check(close(RGBSpace.displayP3.master(of: [1, 0, 0]), 0.5151, 0.2412, -0.0011) && RGBSpace.allCases.allSatisfy { close($0.master(of: [1, 1, 1]), XYZ.d50.x, XYZ.d50.y, XYZ.d50.z, 0.001) },
+          "Display P3 red matches the system engine's figure, and every space's white is the one D50 white")
+    check(RGBSpace.allCases.allSatisfy { space in
+        let given = [0.92, 0.2, 0.14], back = space.values(of: space.master(of: given))
+        return zip(given, back).allSatisfy { near($0, $1, 1e-9) }
+    }, "a colour goes to its master and back in every space without loss")
+    let someLab = LabD50(l: 52.1, a: 68.3, b: 47.9)
+    check(near(whiteMaster.lab.l, 100, 0.01) && near(whiteMaster.lab.a, 0, 0.01) && near(whiteMaster.lab.b, 0, 0.01)
+          && near(someLab.xyz.lab.l, 52.1, 1e-9) && near(someLab.xyz.lab.a, 68.3, 1e-9) && near(someLab.xyz.lab.b, 47.9, 1e-9),
+          "white is L 100 with no colour, and Lab converts to the master and back exactly")
+    // Published CIEDE2000 check pairs (Sharma, Wu and Dalal).
+    check(near(deltaE2000(LabD50(l: 50, a: 2.6772, b: -79.7751), LabD50(l: 50, a: 0, b: -82.7485)), 2.0425, 0.0001)
+          && near(deltaE2000(LabD50(l: 50, a: 3.1571, b: -77.2803), LabD50(l: 50, a: 0, b: -82.7485)), 2.8615, 0.0001)
+          && near(deltaE2000(LabD50(l: 50, a: 2.8361, b: -74.0200), LabD50(l: 50, a: 0, b: -82.7485)), 3.4412, 0.0001)
+          && deltaE2000(someLab, someLab) == 0,
+          "the colour difference matches the published CIEDE2000 figures, and a colour differs from itself by nothing")
+    let steel = ColourDefinition.of(hex: "#4F8093")!
+    let steelOnScreen = Rendering.of(steel, in: ProfileChannel(space: "srgb"))
+    check(steel.source.space == "srgb" && steel.kind == .surface && steel.sourceText == "sRGB  #4F8093"
+          && steelOnScreen.value == "#4F8093" && steelOnScreen.inRange && (steelOnScreen.difference ?? 9) < 0.001,
+          "a colour known by its hex has the hex as its source, and renders to sRGB as itself")
+    let vividRed = ColourDefinition(source: ColourSource(space: "displayP3", values: [1, 0, 0]), master: RGBSpace.displayP3.master(of: [1, 0, 0]), kind: .surface)
+    let inSRGB = Rendering.of(vividRed, in: ProfileChannel(space: "srgb")), inP3 = Rendering.of(vividRed, in: ProfileChannel(space: "displayP3"))
+    let in2020 = Rendering.of(vividRed, in: ProfileChannel(space: "rec2020"))
+    check(!inSRGB.inRange && inSRGB.value == "#FF0000" && (inSRGB.difference ?? 0) > Rendering.visible && inP3.inRange && (inP3.difference ?? 9) < 0.001 && in2020.inRange,
+          "a Display P3 red is outside sRGB, which shows its nearest red and says how far off it is; P3 and Rec. 2020 hold it")
+    let twiceWhite = XYZ(x: XYZ.d50.x * 2, y: 2, z: XYZ.d50.z * 2)
+    let bright = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .light), in: ProfileChannel(space: "acescg"))
+    let brightOnPaper = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .surface), in: ProfileChannel(space: "srgb"))
+    check(bright.inRange && (bright.difference ?? 9) < 0.001 && (bright.value ?? "").hasPrefix("2.0") && !brightOnPaper.inRange && brightOnPaper.value == "#FFFFFF",
+          "a light twice as bright as white is held whole in a rendering space, and is out of range for a screen")
+    let generic = ProfileChannel(space: ProfileChannel.print, press: PressProfiles.generic, intent: .relative)
+    let greenInk = Rendering.of(ColourDefinition.of(hex: "#00FF00")!, in: generic), greyInk = Rendering.of(ColourDefinition.of(hex: "#808080")!, in: generic)
+    check(PressProfiles.all.contains { $0.name == PressProfiles.generic } && greenInk.value != nil && !greenInk.inRange
+          && (greenInk.difference ?? 0) > (greyInk.difference ?? 9) && greenInk.detail.contains("Total Ink") && greenInk.detail.contains("Relative Colorimetric"),
+          "a vivid screen green is out of range in print and shifts more than a mid grey; a print value names its intent and total ink")
+    let nowhere = Rendering.of(steel, in: ProfileChannel(space: ProfileChannel.print, press: "No Such Press"))
+    check(nowhere.value == nil && !nowhere.inRange && nowhere.detail.contains("not on this Mac"), "a press profile that is not on this Mac gives no value and says why")
+    if let paper = PrintBuild.master(ofInks: [0, 0, 0, 0], press: PressProfiles.generic), let solid = PrintBuild.master(ofInks: [0, 0, 0, 1], press: PressProfiles.generic) {
+        check(close(paper, XYZ.d50.x, XYZ.d50.y, XYZ.d50.z, 0.02) && solid.y < 0.1 && (PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .relative)?.totalInk ?? 99) < 1,
+              "no ink is paper white, solid black is dark, and white needs no ink")
+    } else { check(false, "a build typed in by hand has a master through its press profile") }
+
+    print("colour profiles: palette, project, house")
+    var studio = Library()
+    studio.addPick("#4F8093", at: t)
+    let client2 = studio.createProject(named: "Client", at: t)
+    let webPalette = studio.createSwatch(named: "Web", hexes: ["#4F8093"], at: t), printPalette = studio.createSwatch(named: "Print", hexes: ["#4F8093"], at: t)
+    let stockPalette = studio.createSwatch(named: "Stock", hexes: ["#4F8093"], at: t)
+    studio.move(webPalette, to: client2, index: 0, at: t); studio.move(printPalette, to: client2, index: 1, at: t)
+    let house = ColourProfiles.starters, screenProfile = house[0], printProfile = house[1], videoProfile = house[2]
+    check(house.map { $0.name } == ["Screen And Web", "Print", "Video", "Rendering And Effects", "Every Channel"] && printProfile.print?.press == PressProfiles.generic
+          && house[4].channels.count == RGBSpace.allCases.count + 1 && Set(house.map { $0.id }).count == 5,
+          "five profiles to begin with, each with an id of its own; Print carries a press, Every Channel carries them all")
+    check(studio.profile(forPalette: webPalette, house: house, houseDefault: nil).profile == screenProfile
+          && studio.profile(forPalette: webPalette, house: house, houseDefault: videoProfile.id) == (videoProfile, .house),
+          "with nothing chosen a palette uses the house default, or the first profile when there is none")
+    studio.setProfile(printProfile, ofProject: client2, at: t.addingTimeInterval(1))
+    check(studio.profile(forPalette: webPalette, house: house, houseDefault: videoProfile.id) == (printProfile, .project)
+          && studio.profile(forPalette: stockPalette, house: house, houseDefault: videoProfile.id) == (videoProfile, .house) && studio.profileRecord(printProfile.id) == printProfile,
+          "a project's profile is used by its palettes and not by a loose one, and the library keeps its own copy")
+    studio.setProfile(screenProfile, ofPalette: webPalette, at: t.addingTimeInterval(2))
+    check(studio.profile(forPalette: webPalette, house: house, houseDefault: nil) == (screenProfile, .palette)
+          && studio.profile(forPalette: printPalette, house: house, houseDefault: nil) == (printProfile, .project),
+          "a palette's own profile wins over its project's, so one project can hold a web palette and a print palette")
+    check(studio.profile(forPalette: webPalette, house: [], houseDefault: nil).profile == screenProfile, "a library's own copy is enough: the profile is found with no house profiles at all")
+    var otherStudio = studio
+    otherStudio.setProfile(videoProfile, ofPalette: webPalette, at: t.addingTimeInterval(5))
+    let agreed = mergeLibraries(local: studio, remote: otherStudio), agreedBack = mergeLibraries(local: otherStudio, remote: studio)
+    check(agreed.swatch(webPalette)?.profile == videoProfile.id && agreedBack.swatch(webPalette)?.profile == videoProfile.id && agreed.project(client2)?.profile == printProfile.id
+          && Set(agreed.colourProfiles.map { $0.id }) == Set([screenProfile.id, printProfile.id, videoProfile.id]),
+          "the newer choice of profile wins a sync, and the merged library holds every profile either side used")
+    studio.setProfile(nil, ofPalette: webPalette, at: t.addingTimeInterval(6))
+    check(studio.profile(forPalette: webPalette, house: house, houseDefault: nil).origin == .project, "a palette can give up its own profile and go back to its project's")
+    let studioFile = ProjectFile(project: studio.project(client2)!, in: studio)
+    check((try? ProjectFile.read(studioFile.data()))?.profiles?.map { $0.id } == [printProfile.id], "the project's file carries the profiles it works to")
+    let saved2 = try! JSONEncoder.library.encode(studio)
+    check((try? JSONDecoder.library.decode(Library.self, from: saved2)) == studio && !String(data: try! JSONEncoder.library.encode(Library()), encoding: .utf8)!.contains("colourProfiles"),
+          "a library reads back with its profiles, and one with none says nothing about them")
+    let copyOfWeb: UUID = { var l = otherStudio; return l.copyPalette(webPalette, to: nil, withNotes: false, at: t.addingTimeInterval(9)).flatMap { l.swatch($0)?.profile } ?? UUID() }()
+    check(copyOfWeb == videoProfile.id, "a copy of a palette keeps the profile the original worked to")
+    let profileFolder = FileManager.default.temporaryDirectory.appendingPathComponent("mmffdev-colour3-profiles-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: profileFolder) }
+    var mine = house; mine[0].name = "Web Only"; mine[0].channels = [ProfileChannel(space: "srgb")]; mine[0].changedAt = t
+    try? ColourProfiles.save(mine, to: profileFolder.appendingPathComponent("colour-profiles.json"))
+    check(ColourProfiles.load(from: profileFolder.appendingPathComponent("colour-profiles.json")) == mine && ColourProfiles.load(from: profileFolder.appendingPathComponent("none.json")) == house,
+          "the house's profiles read back as written, and a Mac with none saved starts with the five")
+
     print("a project takes a copy of a palette")
     var shop = Library()
     shop.addPick("#F55805", at: t); shop.addPick("#101010", at: t)

@@ -23,6 +23,8 @@ struct ProjectFile: Codable, Equatable {
     var tags: [TagInfo]
     /// The steps that touched this project, oldest first, when project history is on.
     var history: [ProjectStep] = []
+    /// The colour profiles the project and its palettes work to, so the channels travel with it.
+    var profiles: [ColourProfile]? = nil
 
     init(project: Project, in lib: Library, history steps: [HistoryStep] = []) {
         self.project = project
@@ -32,6 +34,9 @@ struct ProjectFile: Codable, Equatable {
         colours = lib.colours.filter { hexes.contains($0.hex) }
         let worn = Set(palettes.flatMap { $0.tagList } + colours.flatMap { $0.tags ?? [] })
         tags = lib.tagInfo.filter { $0.removed != true && ($0.projectID == project.id || worn.contains($0.name)) }
+        let used = Set(([project.profile] + palettes.map { $0.profile }).compactMap { $0 })
+        let carried = lib.colourProfiles.filter { used.contains($0.id) }
+        profiles = carried.isEmpty ? nil : carried
     }
 
     /// "Client A.mmffproject": the package folder.

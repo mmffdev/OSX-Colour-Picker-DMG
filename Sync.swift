@@ -36,6 +36,7 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
             if (r.nameChangedAt ?? r.createdAt) > (l.nameChangedAt ?? l.createdAt) { p.name = r.name; p.nameChangedAt = r.nameChangedAt }
             if (r.positionChangedAt ?? .distantPast) > (l.positionChangedAt ?? .distantPast) { p.position = r.position; p.positionChangedAt = r.positionChangedAt }
             if (r.detailsChangedAt ?? .distantPast) > (l.detailsChangedAt ?? .distantPast) { p.details = r.details; p.detailsChangedAt = r.detailsChangedAt }
+            if (r.profileChangedAt ?? .distantPast) > (l.profileChangedAt ?? .distantPast) { p.profile = r.profile; p.profileChangedAt = r.profileChangedAt }
         }
         out.projects.append(p)
     }
@@ -109,6 +110,10 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    listPosition: listed.position, listPlacedAt: listed.at,
                                    styles: styles.list, stylesChangedAt: styles.at,
                                    copiedFrom: l?.copiedFrom ?? r?.copiedFrom))
+        // The colour profile: the newer choice.
+        let pick = (l?.profileChangedAt ?? .distantPast) >= (r?.profileChangedAt ?? .distantPast) ? l ?? r : r ?? l
+        out.swatches[out.swatches.count - 1].profile = pick?.profile
+        out.swatches[out.swatches.count - 1].profileChangedAt = pick?.profileChangedAt
     }
 
     // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.
@@ -124,6 +129,15 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         var tags = (l ?? r)?.tags, at = (l ?? r)?.tagsChangedAt
         if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = r.tags; at = r.tagsChangedAt }
         return Colour(hex: hex, pickedAt: dates[hex]!, tags: tags, tagsChangedAt: at)
+    }
+
+    // Colour profiles: one copy of each, the newer kept.
+    for profile in local.colourProfiles + remote.colourProfiles {
+        if let i = out.colourProfiles.firstIndex(where: { $0.id == profile.id }) {
+            if profile.changedAt > out.colourProfiles[i].changedAt { out.colourProfiles[i] = profile }
+        } else {
+            out.colourProfiles.append(profile)
+        }
     }
 
     if let active = local.activeSwatchID, out.swatch(active) != nil { out.activeSwatchID = active }
