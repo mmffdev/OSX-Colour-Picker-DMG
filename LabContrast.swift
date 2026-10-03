@@ -165,9 +165,9 @@ private final class PaletteShelf: NSView {
     private func closedKey(_ key: String) -> String { "contrastShelfClosed.\(key)" }
     private func isClosed(_ key: String) -> Bool { preferences.bool(forKey: closedKey(key)) }
 
-    private static let headingHeight: CGFloat = 22, rowHeight: CGFloat = 26
+    private static let headingHeight: CGFloat = 24, rowHeight: CGFloat = 30
     /// Clear space under each group, held at the top of the next heading's row.
-    private static let groupGap: CGFloat = 20
+    private static let groupGap: CGFloat = 28
     /// Names and strips sit in from the edges, so the mark on the chosen row has room round them.
     private static let inset: CGFloat = 8
 
@@ -659,7 +659,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         y += 26
         fixInk.frame = NSRect(x: 0, y: y, width: (width - 6) / 2, height: 22)
         fixPaper.frame = NSRect(x: (width + 6) / 2, y: y, width: (width - 6) / 2, height: 22)
-        y += 22 + 16
+        y += 22 + 28
 
         from.frame = NSRect(x: 0, y: y, width: width, height: 22)
         y += 26
@@ -667,7 +667,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         y += 18
         spectrum.frame = NSRect(x: 0, y: y, width: width - 28, height: 28)
         dropper.frame = NSRect(x: width - 22, y: y + 4, width: 20, height: 20)
-        y += 28 + 14
+        y += 28 + 30
         let room = visible - y
         let fits = room >= 96
         shelfScroll.frame = NSRect(x: 0, y: y, width: width, height: fits ? room : shelf.height)
