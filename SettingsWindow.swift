@@ -604,6 +604,8 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
     private lazy var printCheck = check("Print, through a press profile", #selector(changed))
     private lazy var press = popup(PressProfiles.all.map { $0.name }, #selector(changed))
     private lazy var intent = popup(RenderingIntent.allCases.map { $0.name }, #selector(changed))
+    private lazy var blackPoint = check("Black Point Compensation", #selector(changed))
+    private lazy var legal = check("Video Values In Legal Range (64 To 940)", #selector(changed))
     private lazy var houseDefault = check("Use for palettes and projects with no profile of their own", #selector(defaultChanged))
     private lazy var remove = button("Delete", #selector(deleteTapped))
 
@@ -621,12 +623,14 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
         for (space, box) in spaceChecks {
             out.append([space.channel == lastChannel ? blank : label(space.channel + ":"), box])
             lastChannel = space.channel
+            if space == RGBSpace.allCases.last(where: { $0.isVideo }) { out.append([blank, legal]) }
         }
         out += [
             [label("Print:"), printCheck],
             [label("Press profile:"), press],
             [label("Rendering intent:"), intent],
-            [blank, note("A profile is the set of channels a piece of work is delivered to. A project picks one on its Overview page and a palette can pick its own. Each swatch then shows, under Channels, the value to use in every channel and how far it sits from the master colour. Press profiles are the ICC files on this Mac. Relative colorimetric keeps a colour that is in range exactly as it is, which is what a brand colour needs.")],
+            [blank, blackPoint],
+            [blank, note("A profile is the set of channels a piece of work is delivered to. A project picks one on its Overview page and a palette can pick its own. Each swatch then shows, under Channels, the value to use in every channel and how far it sits from the master colour. Press profiles are the ICC files on this Mac. Relative colorimetric keeps a colour that is in range exactly as it is, which is what a brand colour needs. Absolute colorimetric shows the colour on the press's own paper. Black point compensation keeps dark colours apart on a press whose black is not fully dark, at the cost of lifting them slightly. Legal range writes Rec. 709 and Rec. 2020 values as broadcast expects, 64 for black and 940 for white. The CMYK row on every card is the build for this press.")],
         ]
         return out
     }
@@ -654,6 +658,11 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
         intent.selectItem(at: RenderingIntent.allCases.firstIndex(of: p.print?.intent ?? .relative) ?? 0)
         press.isEnabled = p.print != nil
         intent.isEnabled = p.print != nil
+        blackPoint.state = p.print?.blackPoint == true ? .on : .off
+        blackPoint.isEnabled = p.print != nil && p.print?.intent != .perceptual
+        let video = p.channels.filter { $0.rgb?.isVideo == true }
+        legal.state = video.contains { $0.legal == true } ? .on : .off
+        legal.isEnabled = !video.isEmpty
         houseDefault.state = (ColourProfiles.houseDefault ?? profiles.first?.id) == p.id ? .on : .off
         remove.isEnabled = profiles.count > 1
     }
@@ -672,10 +681,13 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
 
     @objc private func changed() {
         guard let i = current else { return }
-        var channels = spaceChecks.filter { $0.box.state == .on }.map { ProfileChannel(space: $0.space.rawValue) }
+        var channels = spaceChecks.filter { $0.box.state == .on }.map {
+            ProfileChannel(space: $0.space.rawValue, legal: $0.space.isVideo && legal.state == .on ? true : nil)
+        }
         if printCheck.state == .on {
             channels.append(ProfileChannel(space: ProfileChannel.print, press: press.titleOfSelectedItem ?? PressProfiles.generic,
-                                           intent: RenderingIntent.allCases[max(intent.indexOfSelectedItem, 0)]))
+                                           intent: RenderingIntent.allCases[max(intent.indexOfSelectedItem, 0)],
+                                           blackPoint: blackPoint.state == .on ? true : nil))
         }
         profiles[i].channels = channels
         profiles[i].changedAt = Date()

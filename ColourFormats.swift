@@ -2,8 +2,9 @@ import Foundation
 
 // ---------- Colour values, formats, names, contrast, harmonies ----------
 //
-// Stored colours are sRGB; every other system is worked out from that. CMYK here is the naive device conversion — fine as a
-// starting value, not a substitute for a print profile.
+// A colour's key stands for an sRGB value here, or for the sRGB colour it shows as. CMYK is the
+// build for a real press (see PrintCondition); the wide spaces and Lab of a colour with a key of
+// its own come from its master, not from sRGB.
 
 struct ColourValues {
     /// "#RRGGBB", uppercase.
@@ -11,7 +12,8 @@ struct ColourValues {
     let r: Int, g: Int, b: Int
 
     init?(_ raw: String) {
-        guard let n = normaliseHex(raw), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
+        // A key that is not a hex is read as the sRGB colour it shows as.
+        guard let n = normaliseHex(raw) ?? ColourKeys.displayHex(raw), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
         hex = n
         r = Int((v >> 16) & 0xFF); g = Int((v >> 8) & 0xFF); b = Int(v & 0xFF)
     }
@@ -46,14 +48,6 @@ struct ColourValues {
 
     var hsl: (h: Int, s: Int, l: Int) { let v = hslUnit; return (whole(v.h) % 360, whole(v.s * 100), whole(v.l * 100)) }
     var hsv: (h: Int, s: Int, v: Int) { let v = hsvUnit; return (whole(v.h) % 360, whole(v.s * 100), whole(v.v * 100)) }
-
-    var cmyk: (c: Int, m: Int, y: Int, k: Int) {
-        let (r, g, b) = unit
-        let k = 1 - max(r, g, b)
-        guard k < 1 else { return (0, 0, 0, 100) }
-        return (whole((1 - r - k) / (1 - k) * 100), whole((1 - g - k) / (1 - k) * 100),
-                whole((1 - b - k) / (1 - k) * 100), whole(k * 100))
-    }
 
     /// Linear-light values, as 3D and compositing tools expect for a base colour.
     var linear: (r: Double, g: Double, b: Double) {
@@ -161,7 +155,7 @@ enum ColourFormat: String, CaseIterable {
         case .hsl: return "HSL  \u{2014}  197, 30%, 44%"
         case .cssHSL: return "CSS hsl()  \u{2014}  hsl(197 30% 44%)"
         case .hsv: return "HSV / HSB  \u{2014}  197, 46%, 58%"
-        case .cmyk: return "CMYK  \u{2014}  46, 13, 0, 42"
+        case .cmyk: return "CMYK, for the profile's press  \u{2014}  " + text("#4F8093")
         case .float: return "Float RGB 0\u{2013}1  \u{2014}  0.310, 0.502, 0.576"
         case .linear: return "Linear RGB 0\u{2013}1 (3D, shaders)  \u{2014}  0.078, 0.216, 0.292"
         case .swiftUI: return "SwiftUI Color"
@@ -206,7 +200,7 @@ enum ColourFormat: String, CaseIterable {
         case .hsl: return "\(v.hsl.h), \(v.hsl.s)%, \(v.hsl.l)%"
         case .cssHSL: return "hsl(\(v.hsl.h) \(v.hsl.s)% \(v.hsl.l)%)"
         case .hsv: return "\(v.hsv.h), \(v.hsv.s)%, \(v.hsv.v)%"
-        case .cmyk: return "\(v.cmyk.c), \(v.cmyk.m), \(v.cmyk.y), \(v.cmyk.k)"
+        case .cmyk: return fields(raw).joined(separator: ", ")
         case .float: return "\(f(u.r)), \(f(u.g)), \(f(u.b))"
         case .linear: return "\(f(v.linear.r)), \(f(v.linear.g)), \(f(v.linear.b))"
         case .swiftUI: return "Color(red: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)))"
@@ -219,12 +213,23 @@ enum ColourFormat: String, CaseIterable {
     /// The separate numbers shown across a card row.
     func fields(_ raw: String, lowercase: Bool = false) -> [String] {
         guard let v = ColourValues(raw) else { return [raw] }
+        // A colour with a key of its own: its wide values and Lab come from its master, so nothing sRGB cannot hold is lost.
+        if let wide = ColourKeys.definition(of: raw) {
+            func bytes(_ space: RGBSpace) -> [String] { space.values(of: wide.master).map { "\(Int((min(max($0, 0), 1) * 255).rounded()))" } }
+            switch self {
+            case .p3: return bytes(.displayP3)
+            case .adobeRGB: return bytes(.adobeRGB)
+            case .rec2020: return bytes(.rec2020)
+            case .lab: let lab = wide.master.lab; return [lab.l, lab.a, lab.b].map { String(format: "%.1f", $0 == 0 ? 0 : $0) }
+            default: break
+            }
+        }
         switch self {
         case .hex, .hexBare: return [ColourFormat.hexBare.text(raw, lowercase: lowercase)]
         case .rgb, .cssRGB: return ["\(v.r)", "\(v.g)", "\(v.b)"]
         case .hsl, .cssHSL: return ["\(v.hsl.h)", "\(v.hsl.s)", "\(v.hsl.l)"]
         case .hsv: return ["\(v.hsv.h)", "\(v.hsv.s)", "\(v.hsv.v)"]
-        case .cmyk: return ["\(v.cmyk.c)", "\(v.cmyk.m)", "\(v.cmyk.y)", "\(v.cmyk.k)"]
+        case .cmyk: return PrintCondition.inks(of: raw)?.map { "\($0)" } ?? ["\u{2014}"]
         case .p3: return ["\(v.p3.r)", "\(v.p3.g)", "\(v.p3.b)"]
         case .adobeRGB: return ["\(v.adobeRGB.r)", "\(v.adobeRGB.g)", "\(v.adobeRGB.b)"]
         case .rec2020: return ["\(v.rec2020.r)", "\(v.rec2020.g)", "\(v.rec2020.b)"]

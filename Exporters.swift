@@ -545,12 +545,12 @@ extension Library {
     /// A palette ready to export, colours in the order given, each with its nearest name.
     func exportPalette(_ id: UUID, by order: SortOrder) -> ExportPalette? {
         guard let s = swatch(id) else { return nil }
-        return ExportPalette(name: s.name, colours: hexes(inSwatch: id, by: order).map { ExportColour(name: name(of: $0, in: id), hex: $0) })
+        return ExportPalette(name: s.name, colours: hexes(inSwatch: id, by: order).map { ExportColour(name: name(of: $0, in: id), hex: displayHex($0)) })
     }
 
     /// Every colour in the library as one palette.
     func exportEverything(named name: String, by order: SortOrder) -> ExportPalette {
-        ExportPalette(name: name, colours: catalogueHexes(by: order).map { ExportColour(name: colourName($0), hex: $0) })
+        ExportPalette(name: name, colours: catalogueHexes(by: order).map { ExportColour(name: colourName($0), hex: displayHex($0)) })
     }
 }
 
@@ -561,6 +561,9 @@ extension Library {
 
 struct PackSwatch {
     let name: String, hex: String, tags: [String]
+    /// The build for the palette's press, as four percentages; nil when the press profile is not on this Mac.
+    var cmyk: [Int]? = nil
+    var cmykText: String { cmyk.map { $0.map { "\($0)" }.joined(separator: ", ") } ?? "\u{2014}" }
     /// Path of the PNG within the pack.
     let file: String
 }
@@ -570,6 +573,8 @@ struct PackPalette {
     /// Folder within the pack.
     let folder: String
     let swatches: [PackSwatch]
+    /// The print condition the CMYK values are for: "Generic CMYK, Relative Colorimetric".
+    var press: String = PrintCondition.name(PrintCondition.fallback)
     var css: String { "\(folder)/\(slug(name)).css" }
     var sheet: String { "\(folder)/\(slug(name)).png" }
     var export: ExportPalette { ExportPalette(name: name, colours: swatches.map { ExportColour(name: $0.name, hex: $0.hex) }) }
@@ -625,10 +630,10 @@ struct DesignPack {
             if projects.count > 1 || pr.name != "Palettes" { l += ["## \(pr.name)", ""] }
             for p in pr.palettes {
                 l.append("### \(p.name)" + (p.tags.isEmpty ? "" : "  \u{2014}  " + p.tags.map { "#" + $0 }.joined(separator: " ")))
-                l += ["", "Tokens: `\(p.css)` \u{00B7} Sheet: `\(p.sheet)`", "",
+                l += ["", "Tokens: `\(p.css)` \u{00B7} Sheet: `\(p.sheet)`", "", "CMYK is the build for \(p.press).", "",
                       "| # | Swatch | Hex | RGB | HSL | CMYK | Tags |", "|---|---|---|---|---|---|---|"]
                 for (i, s) in p.swatches.enumerated() {
-                    l.append("| \(i + 1) | \(s.name) | \(s.hex) | \(ColourFormat.rgb.text(s.hex)) | \(ColourFormat.hsl.text(s.hex)) | \(ColourFormat.cmyk.text(s.hex)) | \(s.tags.joined(separator: ", ")) |")
+                    l.append("| \(i + 1) | \(s.name) | \(s.hex) | \(ColourFormat.rgb.text(s.hex)) | \(ColourFormat.hsl.text(s.hex)) | \(s.cmykText) | \(s.tags.joined(separator: ", ")) |")
                 }
                 l.append("")
             }
@@ -646,13 +651,13 @@ struct DesignPack {
         for (pi, pr) in projects.enumerated() {
             l.append("    { \"name\": \(q(pr.name)), \"palettes\": [")
             for (i, p) in pr.palettes.enumerated() {
-                l.append("      { \"name\": \(q(p.name)), \"tags\": \(list(p.tags)), \"css\": \(q(p.css)), \"sheet\": \(q(p.sheet)), \"swatches\": [")
+                l.append("      { \"name\": \(q(p.name)), \"tags\": \(list(p.tags)), \"press\": \(q(p.press)), \"css\": \(q(p.css)), \"sheet\": \(q(p.sheet)), \"swatches\": [")
                 for (j, s) in p.swatches.enumerated() {
                     guard let v = ColourValues(s.hex) else { continue }
                     let u = v.unit, lin = v.linear
                     l.append("        { \"name\": \(q(s.name)), \"hex\": \(q(s.hex.lowercased())), \"rgb\": [\(v.r), \(v.g), \(v.b)], "
                              + "\"hsl\": \(nums(ColourFormat.hsl.text(s.hex))), \"hsv\": \(nums(ColourFormat.hsv.text(s.hex))), "
-                             + "\"cmyk\": \(nums(ColourFormat.cmyk.text(s.hex))), "
+                             + "\"cmyk\": \(s.cmyk.map { nums($0.map { "\($0)" }.joined(separator: ", ")) } ?? "null"), "
                              + String(format: "\"float\": [%.4f, %.4f, %.4f], \"linear\": [%.4f, %.4f, %.4f], ", u.r, u.g, u.b, lin.r, lin.g, lin.b)
                              + "\"tags\": \(list(s.tags)), \"file\": \(q(s.file)) }" + (j == p.swatches.count - 1 ? "" : ","))
                 }
@@ -675,15 +680,16 @@ struct DesignPack {
     passed to contractors working on those products. It may not be sold or published as a colour \
     collection in its own right.
 
-    Colour names are approximate and provided for convenience. CMYK values are unprofiled conversions \
-    and should be checked against a print profile before use in print.
+    Colour names are approximate and provided for convenience. CMYK values are builds for the print \
+    condition named beside each palette and should be proofed on that press before a run.
     """
 }
 
 extension Library {
     /// Builds the pack for one palette, one project, or everything, laying out folders and file names.
     func designPack(named name: String, palettes chosen: [UUID]? = nil, projects only: [UUID]? = nil,
-                    owner: String, licence: String, order: SortOrder = .oldest, at date: Date = Date()) -> DesignPack {
+                    owner: String, licence: String, order: SortOrder = .oldest, at date: Date = Date(),
+                    house: [ColourProfile] = ColourProfiles.load(), houseDefault: UUID? = ColourProfiles.houseDefault) -> DesignPack {
         let nested = chosen == nil && only == nil
         var groups: [(name: String, folder: String, palettes: [Swatch])] = []
         var usedFolders: [String] = []
@@ -704,28 +710,30 @@ extension Library {
                 let base = uniqueName(slug(s.name), among: usedPalettes); usedPalettes.append(base)
                 let folder = g.folder.isEmpty ? base : "\(g.folder)/\(base)"
                 var usedFiles: [String] = []
+                // Each palette's CMYK is the build for its own profile's press.
+                let condition = profile(forPalette: s.id, house: house, houseDefault: houseDefault).profile.printCondition
                 // A Typography palette is exported pairing by pairing: each one's text colour and
                 // background, named for the pairing and its part, so the files that belong together sort together.
                 if let styles = s.styles {
                     let swatches = styles.enumerated().flatMap { i, style -> [PackSwatch] in
                         [("Text", "text", style.ink), ("Background", "bg", style.paper)].map { part, short, hex in
                             let file = uniqueName(String(format: "%02d-%@-%@-%@-%@", i + 1, slug(style.name), short, slug(colourName(hex)),
-                                                         String(hex.dropFirst()).lowercased()), among: usedFiles)
+                                                         String(displayHex(hex).dropFirst()).lowercased()), among: usedFiles)
                             usedFiles.append(file)
-                            return PackSwatch(name: "\(style.name) \(part)", hex: hex, tags: colours.first { $0.hex == hex }?.tags ?? [],
-                                              file: "\(folder)/swatches/\(file).png")
+                            return PackSwatch(name: "\(style.name) \(part)", hex: displayHex(hex), tags: colours.first { $0.hex == hex }?.tags ?? [],
+                                              cmyk: PrintCondition.inks(of: hex, in: condition), file: "\(folder)/swatches/\(file).png")
                         }
                     }
-                    return PackPalette(name: s.name, tags: s.tagList, folder: folder, swatches: swatches)
+                    return PackPalette(name: s.name, tags: s.tagList, folder: folder, swatches: swatches, press: PrintCondition.name(condition))
                 }
                 let swatches = hexes(inSwatch: s.id, by: order).enumerated().map { i, hex -> PackSwatch in
                     let n = self.name(of: hex, in: s.id)
-                    let file = uniqueName(String(format: "%02d-%@-%@", i + 1, slug(n), String(hex.dropFirst()).lowercased()), among: usedFiles)
+                    let file = uniqueName(String(format: "%02d-%@-%@", i + 1, slug(n), String(displayHex(hex).dropFirst()).lowercased()), among: usedFiles)
                     usedFiles.append(file)
-                    return PackSwatch(name: n, hex: hex, tags: colours.first { $0.hex == hex }?.tags ?? [],
-                                      file: "\(folder)/swatches/\(file).png")
+                    return PackSwatch(name: n, hex: displayHex(hex), tags: colours.first { $0.hex == hex }?.tags ?? [],
+                                      cmyk: PrintCondition.inks(of: hex, in: condition), file: "\(folder)/swatches/\(file).png")
                 }
-                return PackPalette(name: s.name, tags: s.tagList, folder: folder, swatches: swatches)
+                return PackPalette(name: s.name, tags: s.tagList, folder: folder, swatches: swatches, press: PrintCondition.name(condition))
             })
         }
         return DesignPack(name: name, projects: projects, licenceOwner: owner, licenceText: licence, exportedAt: date)

@@ -128,7 +128,8 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         let l = local.colours.first { $0.hex == hex }, r = remote.colours.first { $0.hex == hex }
         var tags = (l ?? r)?.tags, at = (l ?? r)?.tagsChangedAt
         if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = r.tags; at = r.tagsChangedAt }
-        return Colour(hex: hex, pickedAt: dates[hex]!, tags: tags, tagsChangedAt: at)
+        return Colour(hex: hex, pickedAt: dates[hex]!, tags: tags, tagsChangedAt: at,
+                      source: (l ?? r)?.source, master: (l ?? r)?.master, kind: (l ?? r)?.kind)
     }
 
     // Colour profiles: one copy of each, the newer kept.

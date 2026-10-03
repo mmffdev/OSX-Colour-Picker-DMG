@@ -754,7 +754,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
 
     func rehearse(name: String, hexes: [String]) {
         nameField.stringValue = name
-        for h in hexes { if let n = normaliseHex(h), !draft.contains(n) { draft.toggle(n) } }
+        for h in hexes { if let n = colourKey(h), !draft.contains(n) { draft.toggle(n) } }
     }
 
     private func draftChanged() {

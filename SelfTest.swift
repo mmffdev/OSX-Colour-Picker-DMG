@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import CoreGraphics
 
 // Run with: MMFFDevColour3 --self-test
@@ -553,12 +553,18 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(ColourFormat.hsv.text(fiji) == "197, 46%, 58%", "HSV: \(ColourFormat.hsv.text(fiji))")
     check(ColourFormat.hsl.text(fiji) == "197, 30%, 44%" && ColourFormat.cssHSL.text(fiji) == "hsl(197 30% 44%)",
           "HSL: \(ColourFormat.hsl.text(fiji))")
-    check(ColourFormat.cmyk.text(fiji) == "46, 13, 0, 42", "CMYK: \(ColourFormat.cmyk.text(fiji))")
+    PrintCondition.current = PrintCondition.fallback
+    let fijiInks = PrintBuild.of(RGBSpace.srgb.master(of: [79.0 / 255, 128.0 / 255, 147.0 / 255]), press: PressProfiles.generic, intent: .relative)?.inks.map { "\(Int(($0 * 100).rounded()))" } ?? []
+    check(fijiInks.count == 4 && ColourFormat.cmyk.fields(fiji) == fijiInks && ColourFormat.cmyk.text(fiji) == fijiInks.joined(separator: ", ") && ColourFormat.cmyk.text(fiji) != "46, 13, 0, 42",
+          "CMYK is the build for the press in force, not the old sum: \(ColourFormat.cmyk.text(fiji))")
     check(ColourFormat.float.text(fiji) == "0.310, 0.502, 0.576", "float RGB: \(ColourFormat.float.text(fiji))")
     check(ColourFormat.linear.text("#808080") == "0.216, 0.216, 0.216", "linear RGB: \(ColourFormat.linear.text("#808080"))")
     check(ColourFormat.swiftUI.text("#FF0000") == "Color(red: 1.000, green: 0.000, blue: 0.000)", "SwiftUI")
-    check(ColourFormat.cmyk.text("#000000") == "0, 0, 0, 100" && ColourFormat.hsl.text("#FFFFFF") == "0, 0%, 100%",
-          "black and white don't divide by zero")
+    check(ColourFormat.cmyk.text("#FFFFFF") == "0, 0, 0, 0" && ColourFormat.cmyk.fields("#000000").count == 4 && ColourFormat.hsl.text("#FFFFFF") == "0, 0%, 100%",
+          "white takes no ink, black gives a build, and neither divides by zero")
+    PrintCondition.current = ProfileChannel(space: ProfileChannel.print, press: "No Such Press", intent: .relative)
+    check(ColourFormat.cmyk.fields(fiji) == ["\u{2014}"] && PrintCondition.name() == "No Such Press, Relative Colorimetric", "a press that is not on this Mac gives a dash, never a made-up build")
+    PrintCondition.current = PrintCondition.fallback
     check(ColourFormat.rgb.fields(fiji) == ["79", "128", "147"] && ColourFormat.cmyk.fields(fiji).count == 4,
           "card rows split into columns")
     check(ColourFormat.allCases.allSatisfy { !$0.text("#123456").isEmpty && !$0.title.isEmpty }, "every format produces text")
@@ -1453,6 +1459,60 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(RenderingIntent.allCases.map { $0.name } == ["Relative Colorimetric", "Absolute Colorimetric", "Perceptual"]
           && Rendering.of(steel, in: ProfileChannel(space: ProfileChannel.print, press: PressProfiles.generic, intent: .relative, blackPoint: true)).detail.contains("Black Point Compensation"),
           "three rendering intents are on offer, and a print value says when black point compensation is on")
+
+    print("colour identity: a colour is more than its hex")
+    var wideLib = Library()
+    let vivid = ColourDefinition.displayP3([1, 0, 0]), plainRGB = ColourDefinition.of(hex: "#4F8093")!
+    let vividKey = wideLib.addColour(vivid, at: t) ?? "", plainKey = wideLib.addColour(plainRGB, at: t) ?? ""
+    check(ColourKeys.isKey(vividKey) && plainKey == "#4F8093" && wideLib.addColour(vivid, at: t) == vividKey && wideLib.colours.count == 2 && !vivid.fitsSRGB && plainRGB.fitsSRGB,
+          "a colour sRGB cannot hold gets a key of its own, a plain sRGB colour keeps its hex, and the same colour twice is one colour")
+    check(wideLib.definition(of: vividKey) == vivid && displayHex(vividKey) == "#FF0000" && colourKey(vividKey) == vividKey && colourKey("c:nothing") == nil && colourKey("4f8093") == "#4F8093"
+          && ColourKeys.label(vividKey) == "P3 " + RGBSpace.displayP3.text([1, 0, 0]) && ColourKeys.label("#4F8093") == "#4F8093",
+          "the key gives back the whole definition, shows as its nearest sRGB, and is labelled by its source: \(ColourKeys.label(vividKey))")
+    check(ColourFormat.p3.fields(vividKey) == ["255", "0", "0"] && ColourFormat.p3.fields("#FF0000") != ["255", "0", "0"] && ColourFormat.rgb.fields(vividKey) == ["255", "0", "0"]
+          && ColourValues(vividKey)?.hex == "#FF0000" && colorFromHex(vividKey)?.colorSpace == .displayP3,
+          "its Display P3 values are its own, not those of the sRGB red it shows as, and it is drawn in Display P3")
+    let widePalette = wideLib.createSwatch(named: "Wide", hexes: [vividKey, plainKey], at: t)
+    check(wideLib.hexes(inSwatch: widePalette, by: .oldest) == [vividKey, plainKey], "a palette holds a colour with a key of its own beside plain ones")
+    let wideCopy = wideLib.copyPalette(widePalette, to: nil, withNotes: false, at: t.addingTimeInterval(1))
+    check(wideCopy.map { wideLib.hexes(inSwatch: $0, by: .oldest) } == [vividKey, plainKey], "and a copy of the palette holds the same colour")
+    let wideCoder = JSONEncoder(), wideDecoder = JSONDecoder()
+    wideCoder.dateEncodingStrategy = .millisecondsSince1970; wideDecoder.dateDecodingStrategy = .millisecondsSince1970
+    let wideBack = (try? wideCoder.encode(wideLib)).flatMap { try? wideDecoder.decode(Library.self, from: $0) }
+    check(wideBack?.definition(of: vividKey) == vivid && wideBack?.colours.first { $0.hex == plainKey }?.source == nil && wideBack?.hexes(inSwatch: widePalette, by: .oldest) == [vividKey, plainKey],
+          "saved and read back, the colour keeps its source and master; a plain colour's record is as it always was")
+    var otherMac = Library()
+    otherMac.addPick("#111111", at: t)
+    let wideMerged = mergeLibraries(local: otherMac, remote: wideLib)
+    check(wideMerged.definition(of: vividKey) == vivid && wideMerged.hexes(inSwatch: widePalette, by: .oldest) == [vividKey, plainKey] && mergeLibraries(local: wideLib, remote: otherMac).definition(of: vividKey) == vivid,
+          "a sync carries the colour whole, whichever side has it")
+    let widePack = wideLib.designPack(named: "Wide", palettes: [widePalette], owner: "", licence: "", at: t, house: ColourProfiles.starters, houseDefault: nil).projects[0].palettes[0]
+    check(widePack.swatches.map { $0.hex } == ["#FF0000", "#4F8093"] && widePack.swatches.allSatisfy { $0.cmyk?.count == 4 } && widePack.press == "Generic CMYK, Relative Colorimetric"
+          && widePack.export.colours.first?.hex == "#FF0000",
+          "an export that only knows sRGB gets the colour as sRGB shows it, with a build for the palette's press, named")
+    if let typed = ColourDefinition.cmyk([0, 0.9, 0.85, 0], press: PressProfiles.generic), let typedKey = wideLib.addColour(typed, at: t) {
+        check(ColourKeys.isKey(typedKey) && ColourFormat.cmyk.text(typedKey) == "0, 90, 85, 0" && ColourKeys.label(typedKey) == "C 0  M 90  Y 85  K 0" && typed.source.press == PressProfiles.generic,
+              "a build typed for a press is a colour in its own right, and its CMYK for that press is the build as typed")
+    } else { check(false, "a typed build becomes a colour") }
+    let typedLab = ColourDefinition.lab(52, 60, 40)
+    check(near(typedLab.master.lab.l, 52, 0.001) && near(typedLab.master.lab.a, 60, 0.001) && ColourDefinition.cmyk([0, 0, 0, 0], press: "No Such Press") == nil
+          && wideLib.addColour(typedLab, at: t).map { ColourFormat.lab.fields($0) } == ["52.0", "60.0", "40.0"],
+          "a colour given as Lab keeps those very values; a build for a press that is not here is refused")
+    check(ColourDefinition.picked(NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1))?.source.space == RGBSpace.displayP3.rawValue
+          && ColourDefinition.picked(NSColor(srgbRed: 79.0 / 255, green: 128.0 / 255, blue: 147.0 / 255, alpha: 1))?.sourceText == plainRGB.sourceText,
+          "a pick from a wide screen is kept in Display P3 when sRGB cannot hold it, and as a plain hex when it can")
+    let readP3 = NewColourSheet.read(.p3, ["255", "0", "0", ""], press: PressProfiles.generic), readInks = NewColourSheet.read(.cmyk, ["0", "90%", "85", "0"], press: PressProfiles.generic)
+    check(readP3.colour == vivid && readInks.colour?.source.values == [0, 0.9, 0.85, 0] && NewColourSheet.read(.lab, ["52", "\u{2212}60", "40"], press: "").colour == ColourDefinition.lab(52, -60, 40)
+          && NewColourSheet.read(.hex, ["4f8093"], press: "").colour == plainRGB,
+          "New Colour reads Display P3, a build, Lab and a hex as typed")
+    check(NewColourSheet.read(.p3, ["256", "0", "0"], press: "").colour == nil && NewColourSheet.read(.cmyk, ["0", "", "0", "0"], press: PressProfiles.generic).problem == "Fill in every value with a number."
+          && NewColourSheet.read(.cmyk, ["0", "0", "0", "0"], press: "No Such Press").problem.contains("not on this Mac") && NewColourSheet.read(.hex, ["nope"], press: "").colour == nil,
+          "and says what is wrong with a value out of range, a gap, a press that is not here, or a bad hex")
+    var pickLib = Library()
+    let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
+    pickLib.activeSwatchID = pickPalette
+    let pickedKey = pickLib.addPick(vivid, at: t)
+    check(pickedKey.map { pickLib.hexes(inSwatch: pickPalette, by: .oldest) == [$0] } == true, "a wide pick goes into the active palette like any other")
 
     print("colour profiles: palette, project, house")
     var studio = Library()

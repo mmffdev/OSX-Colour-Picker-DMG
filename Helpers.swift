@@ -26,6 +26,11 @@ func hexOf(_ color: NSColor) -> String? {
 }
 
 func colorFromHex(_ hex: String) -> NSColor? {
+    // A colour with a key of its own is drawn from its master in Display P3, so a wide screen shows it as wide as it can.
+    if let wide = ColourKeys.definition(of: hex) {
+        let v = RGBSpace.displayP3.values(of: wide.master).map { CGFloat(min(max($0, 0), 1)) }
+        return NSColor(displayP3Red: v[0], green: v[1], blue: v[2], alpha: 1)
+    }
     guard let (r, g, b) = rgbComponents(hex) else { return nil }
     return NSColor(srgbRed: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1)
 }

@@ -44,7 +44,7 @@ final class FormatRow: NSView {
         label.stringValue = format.label
         label.textColor = ink.withAlphaComponent(0.62)
         icon.contentTintColor = ink.withAlphaComponent(0.7)
-        toolTip = "Copy \(format.label)  \(format.text(hex, lowercase: Prefs.lowercaseHex))"
+        toolTip = "Copy \(format.label)  \(format.text(hex, lowercase: Prefs.lowercaseHex))" + (format == .cmyk ? "\nThe build for \(PrintCondition.name())" : "")
         setAccessibilityLabel(toolTip)
 
         values.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -219,7 +219,8 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         name.stringValue = Prefs.showNames ? shownName : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         name.textColor = ink
         halo.ink = ink
-        code.stringValue = Prefs.showNames ? ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex) : ""
+        // A colour that is not a plain sRGB value says what it is: its P3 values, its build, its Lab.
+        code.stringValue = !Prefs.showNames ? "" : ColourKeys.isKey(hex) ? ColourKeys.label(hex) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         code.textColor = ink.withAlphaComponent(0.75)
         let tags = library?.library.colours.first { $0.hex == hex }?.tags ?? []
         view.toolTip = "Click to copy \(Prefs.copyText(hex))" + (tags.isEmpty ? "" : "\nTags: " + tags.joined(separator: ", "))
@@ -365,6 +366,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         star = symbolButton("star", tooltip: "Add to Favourites", target: self, action: #selector(starTapped))
         target = symbolButton("eyedropper", tooltip: "Send picks here", target: self, action: #selector(targetTapped))
         let copyAll = symbolButton("doc.on.doc", tooltip: "Copy every swatch in this palette", target: self, action: #selector(copyAllTapped))
+        let newColour = symbolButton("plus", tooltip: "New Colour: Type It As Display P3, CMYK, Lab Or Hex (\u{21E7}\u{2318}K)", target: library, action: #selector(LibraryController.newColour))
 
         sort.addItems(withTitles: ["Order Added", "Newest First", "Colour Order"])
         sort.controlSize = .small
@@ -384,7 +386,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         profile.target = self
         profile.action = #selector(profileChanged)
-        browsing.setViews([tagButton, star, target, copyAll, wcag, labels, profile, sort], in: .leading)
+        browsing.setViews([newColour, tagButton, star, target, copyAll, wcag, labels, profile, sort], in: .leading)
         browsing.spacing = 12
 
         sizeCards()

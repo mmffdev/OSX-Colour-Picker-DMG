@@ -13,14 +13,16 @@ func runPickMode() -> Never {
 
     sampler.show { color in
         defer { semaphore.signal() }
-        guard let color = color, let hex = hexOf(color) else { return }
+        guard let color = color, let seen = ColourDefinition.picked(color) else { return }
         playShutter()
-        copyToClipboard(Prefs.copyText(hex))
+        var key: String?
         do {
-            try LibraryStore.standard.mutate { $0.addPick(hex) }
+            try LibraryStore.standard.mutate { key = $0.addPick(seen) }
         } catch {
             FileHandle.standardError.write("\(error.localizedDescription)\n".data(using: .utf8)!)
         }
+        guard let hex = key else { return }
+        copyToClipboard(Prefs.copyText(hex))
         picked = hex
     }
 
@@ -57,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
+        library.watchPrintCondition()
         let main = MainWindowController(library: library)
         self.main = main
         let bar = menus(for: main)
@@ -131,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu("File") { m in
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
+            add(m, "New Colour\u{2026}", #selector(LibraryController.newColour), "k", library, [.command, .shift])
             m.addItem(.separator())
             add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)
             add(m, "New Typography Palette", #selector(LibraryController.newTypography), "", library)

@@ -415,16 +415,19 @@ final class LibraryController: NSObject {
         NSColorSampler().show { [weak self] color in
             guard let self = self, self.picking else { return }
             // Esc gives no colour; a click on our own window means "I'm done".
-            guard let color = color, let hex = hexOf(color), !self.clickLandedOnThisWindow() else {
+            guard let color = color, let picked = ColourDefinition.picked(color), !self.clickLandedOnThisWindow() else {
                 self.stopPicking()
                 return
             }
             playShutter()
+            // A colour sRGB can show is kept as its hex, as ever; one it cannot is kept whole, under a key of its own.
+            var key: String?
+            self.apply("Pick Colour") { key = $0.addPick(picked) }
+            guard let hex = key else { return }
             copyToClipboard(Prefs.copyText(hex))
-            self.apply("Pick Colour") { $0.addPick(hex) }
             self.onReveal?(hex)
             let into = self.library.activeSwatch.map { " \u{2192} \($0.name)" } ?? ""
-            self.flash("Picked \(colourName(hex))  \(hex)\(into)")
+            self.flash("Picked \(colourName(hex))  \(ColourKeys.label(hex))\(into)" + (picked.fitsSRGB ? "" : "  \u{00B7}  Beyond sRGB, Kept Whole"))
             if Prefs.keepPicking { DispatchQueue.main.async { self.sampleNext() } }
             else { self.stopPicking() }
         }
@@ -503,6 +506,22 @@ final class LibraryController: NSObject {
     }
 
     // MARK: Colour profiles
+
+    /// Keeps the print condition CMYK values are worked out for in step with the page showing, the library and Settings.
+    func watchPrintCondition() {
+        for name in [Notification.Name.selectionDidChange, .libraryDidChange, .prefsDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refreshPrintCondition() }
+        }
+        refreshPrintCondition()
+    }
+
+    private func refreshPrintCondition() {
+        var palette: UUID?
+        if case .palette(let id)? = current { palette = id }
+        let chosen: ColourProfile
+        if palette == nil, let project = currentProject { chosen = profile(forProject: project).profile } else { chosen = profile(forPalette: palette).profile }
+        PrintCondition.current = chosen.printCondition
+    }
 
     /// The house's profiles, from Settings.
     var houseProfiles: [ColourProfile] { ColourProfiles.load() }
@@ -673,7 +692,7 @@ final class LibraryController: NSObject {
     /// Gives a colour the user's own name within one palette; blank puts the standard name back.
     func rename(swatch hex: String, in palette: UUID, to name: String?) {
         apply("Rename Colour") { $0.setName(name, of: hex, in: palette) }
-        flash(library.customName(of: hex, in: palette).map { "Named \(hex) \u{201C}\($0)\u{201D}" } ?? "\(hex) is \(colourName(hex)) again")
+        flash(library.customName(of: hex, in: palette).map { "Named \(ColourKeys.label(hex)) \u{201C}\($0)\u{201D}" } ?? "\(ColourKeys.label(hex)) is \(colourName(hex)) again")
     }
 
     /// Writes why a colour is in a palette; blank removes the description.
@@ -785,6 +804,28 @@ final class LibraryController: NSObject {
         flash(added == 0 ? "Already in \(name)" : "Added \(plural(added, "swatch", "swatches")) to \(name)")
     }
 
+    /// Set by the window: shows the New Colour sheet for a palette, or for All Swatches when there is none.
+    var onNewColour: ((UUID?) -> Void)?
+
+    /// A colour typed in as P3, CMYK, Lab or hex: into the palette showing, or All Swatches.
+    @objc func newColour() {
+        var palette: UUID?
+        if case .palette(let id)? = current, library.swatch(id)?.styles == nil { palette = id }
+        onNewColour?(palette)
+    }
+
+    func add(colour definition: ColourDefinition, to palette: UUID?) {
+        var key: String?
+        apply("New Colour") { lib in
+            key = lib.addColour(definition)
+            if let key = key, let palette = palette { lib.add([key], toSwatch: palette) }
+        }
+        guard let added = key, library.colours.contains(where: { $0.hex == added }) else { return }
+        if palette == nil { onReveal?(added) }
+        let into = palette.flatMap { library.swatch($0)?.name }.map { " to \($0)" } ?? ""
+        flash("Added \(colourName(added))  \(ColourKeys.label(added))\(into)")
+    }
+
     func remove(_ hexes: [String], from id: UUID) {
         guard !hexes.isEmpty else { return }
         apply("Remove Colours") { $0.remove(Set(hexes), fromSwatch: id) }
@@ -810,7 +851,7 @@ final class LibraryController: NSObject {
         let colours = harmony.colours(from: hex)
         guard !colours.isEmpty else { return }
         createPalette(named: "\(colourName(hex)) \u{2014} \(harmony.title)", hexes: colours, custom: true)
-        flash("Made \(harmony.title) from \(hex)")
+        flash("Made \(harmony.title) from \(ColourKeys.label(hex))")
     }
 
     // MARK: Bringing colours in
@@ -873,7 +914,7 @@ final class LibraryController: NSObject {
         case .all: return [library.exportEverything(named: catalogue == Catalogues.mainName ? "All Swatches" : catalogue, by: .colour)]
         case .tag(let t):
             let hexes = library.catalogueHexes(by: .colour).filter { library.hexes(tagged: t).contains($0) }
-            return [ExportPalette(name: "Tagged \(t)", colours: hexes.map { ExportColour(name: colourName($0), hex: $0) })]
+            return [ExportPalette(name: "Tagged \(t)", colours: hexes.map { ExportColour(name: colourName($0), hex: displayHex($0)) })]
         case .lab: return labPalette.map { [$0] } ?? []
         case .contrast: return contrastPalette.map { [$0] } ?? []
         // From a project's Overview, the export is the project: each of its palettes of colours.

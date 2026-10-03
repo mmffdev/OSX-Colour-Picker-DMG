@@ -320,6 +320,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             guard let self = self else { return }
             ChoiceSheet(title: title, message: message, choices: choices).present(over: self.content.view)
         }
+        library.onNewColour = { [weak self] palette in
+            guard let self = self else { return }
+            let chosen = (palette.map { self.library.profile(forPalette: $0).profile } ?? self.library.profile(forPalette: nil).profile).printCondition.press ?? PressProfiles.generic
+            NewColourSheet(palette: palette.flatMap { self.library.library.swatch($0)?.name }, press: chosen) { [weak self] colour in
+                self?.library.add(colour: colour, to: palette)
+            }.present(over: self.content.view)
+        }
         library.onPrompt = { [weak self] prompt in
             guard let self = self else { return }
             PromptSheet(prompt).present(over: self.content.view)

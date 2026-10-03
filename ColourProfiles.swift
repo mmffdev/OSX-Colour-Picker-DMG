@@ -122,5 +122,7 @@ extension Library {
     }
 
     /// A colour's full definition. One known only by its hex has the hex as its sRGB source.
-    func definition(of hex: String) -> ColourDefinition? { ColourDefinition.of(hex: hex) }
+    func definition(of hex: String) -> ColourDefinition? {
+        colours.first { $0.hex == hex }?.definition ?? ColourKeys.definition(of: hex) ?? ColourDefinition.of(hex: hex)
+    }
 }

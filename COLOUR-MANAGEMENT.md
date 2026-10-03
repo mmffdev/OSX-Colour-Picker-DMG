@@ -155,10 +155,10 @@ A **colour profile** is a named set of channels: screen, video and rendering spa
 
 | Stage | Delivers | State on 2026-10-03 |
 |---|---|---|
-| 1 | The master colour record; existing colours carried over; files and sync on the new record; self-tests | **Half built.** The engine and the record exist and every colour has a master. The colour's identity is still its hex (see below) |
-| 2 | The picker keeps wide gamut; importing ASE, ACO, GPL and CLR keeps the values those files carry | Not built. Waits on the identity change |
+| 1 | The master colour record; existing colours carried over; files and sync on the new record; self-tests | **Built.** Every colour has a master, and a colour that is not a plain sRGB value has a key of its own and carries its source, master and kind through files, sync, history and export |
+| 2 | The picker keeps wide gamut; importing ASE, ACO, GPL and CLR keeps the values those files carry | **Part built:** the picker keeps Display P3, and New Colour takes P3, CMYK for a press, Lab or hex. Imports still read hex only |
 | 3 | Channels and proofs on every swatch; rendering intents; the Gamut tool | **Built:** profiles, and the Channels view in every swatch's sheet. The Gamut tool is still paused |
-| 4 | Print conditions, ink reporting, pinned values, approval status | **Part built:** press profile and intent per profile, total ink shown. No ink limit warning, no pinned values, no approval |
+| 4 | Print conditions, ink reporting, pinned values, approval status | **Part built:** press profile, three intents and black point compensation per profile, total ink shown, the card's CMYK row built for the press. No ink limit warning, no pinned values, no approval |
 | 5 | Delivery per channel: print swatches, LUT, OCIO, spec sheet, each at its own bit depth | Not built |
 
 ### What is built (2026-10-03)
@@ -170,14 +170,21 @@ A **colour profile** is a named set of channels: screen, video and rendering spa
 - **Settings, Colour:** make, name, duplicate and delete profiles; tick their channels; choose the press profile and intent; choose the house default.
 - Light colours above white are held whole in ACEScg; the engine is ready for them, though nothing in the app can make one yet.
 
+### The five gaps, filled (2026-10-03)
+
+- **A colour is more than its hex** (`ColourIdentity.swift`). A plain sRGB colour keeps `#RRGGBB` as its key, so no existing library changed. Any other colour gets a key of its own (`c:` and an id) and its record carries `source`, `master` and `kind`. Older code that hands a key to something expecting a hex gets the sRGB colour it shows as; cards draw it in Display P3. The picker keeps a pick sRGB cannot hold as Display P3. **New Colour** (File menu, Shift-Command-K, or the plus on a palette's bar) takes Display P3, a CMYK build for a press, Lab or a hex, and keeps it exactly as typed.
+- **Black point compensation** is worked out by the app: the master is scaled so black lands on the press's darkest black and white takes no ink. A tick per profile, off to begin with.
+- **Absolute colorimetric** is worked out by the app from the paper white read out of the press profile's own data. It is the second of three intents in every profile.
+- **Video values in legal range** (64 to 940): a tick per profile, covering Rec. 709 and Rec. 2020. Every video value names its range.
+- **The CMYK row on cards is the build for a real press:** the print condition of the profile the palette uses, or the system's Generic CMYK when the profile has no print channel. Its tooltip names the condition. The design pack names the condition beside each palette. A press profile that is not on the Mac gives a dash, never a made-up build.
+
 ### What is not built, and why it matters
 
-- **The colour's identity is still its hex.** This is the second half of stage 1 and the largest single change: about 280 references in 22 files. Until it is done, a colour outside sRGB cannot be stored, so wide-gamut picking, typed CMYK or Lab colours, and imports that keep their values all wait on it. Every colour in the app today is therefore inside sRGB, and the screen and video channels all read "In Range". Print is the channel that already tells you something new.
-- **Black point compensation is off.** Asked for through the system's engine it put ink on pure white, which is wrong. It needs a route that can be trusted.
-- **Absolute colorimetric is not offered.** The system's engine will not run it from a master. It needs the paper white read from the profile itself.
-- **Video code values are full range.** Broadcast legal range (64 to 940) is not offered yet.
-- **The naive CMYK row on cards is still there.** Section 7.3 says it goes; it has not gone yet.
+- **Imports read hex only.** ASE, ACO, GPL and CLR files can carry CMYK, Lab and wide values; the importers still reduce them to sRGB. The identity work makes keeping them possible; it has not been done.
+- **Exports of a colour beyond sRGB give its nearest sRGB value.** CSS, tokens, swatch files and PNGs know only sRGB today. Delivery per channel is stage 5.
+- **Harmonies, shades and contrast work from the sRGB colour a keyed colour shows as.** A shade of a P3 colour is an sRGB shade.
 - **Press profiles are not shipped with the app.** The app uses what is on the Mac: the system's Generic CMYK, and Adobe's set when Adobe apps are installed (FOGRA39, GRACoL, SWOP and others).
+- **No ink limit warning, pinned values or approval status** (stage 4), and nothing yet makes a light colour above white.
 
 **Paused work.** A Gamut tool was started on 2026-10-03 before this design existed: the CIE 1931 chromaticity diagram, gamut triangles for sRGB, Display P3, Adobe RGB and Rec. 2020, a palette plotted on it, and a print-shift check using ΔE 2000. It is kept in a git stash named "Gamut tool, paused 2026-10-03", with two self-tests failing. It returns at stage 3, rebuilt on the master colour.
 

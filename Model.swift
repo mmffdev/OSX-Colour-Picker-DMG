@@ -3,14 +3,51 @@ import Foundation
 // ---------- Data model ----------
 
 struct Colour: Codable, Equatable {
+    /// The colour's key: "#RRGGBB" for a plain sRGB colour, or an id of its own ("c:…") for any
+    /// other. See ColourIdentity.swift. Called `hex` for the sake of every library written so far.
     let hex: String
     var pickedAt: Date
     /// Free-form labels. The date lets a sync keep the newer set.
     var tags: [String]?
     var tagsChangedAt: Date?
+    /// For a colour that is not a plain sRGB value: what was given, its device-independent master,
+    /// and whether it is a surface or a light. A plain sRGB colour needs none: its hex is its source.
+    var source: ColourSource?
+    var master: XYZ?
+    var kind: ColourKind?
 
-    init(hex: String, pickedAt: Date, tags: [String]? = nil, tagsChangedAt: Date? = nil) {
+    enum CodingKeys: String, CodingKey { case hex, pickedAt, tags, tagsChangedAt, source, master, kind }
+
+    init(hex: String, pickedAt: Date, tags: [String]? = nil, tagsChangedAt: Date? = nil,
+         source: ColourSource? = nil, master: XYZ? = nil, kind: ColourKind? = nil) {
         self.hex = hex; self.pickedAt = pickedAt; self.tags = tags; self.tagsChangedAt = tagsChangedAt
+        self.source = source; self.master = master; self.kind = kind
+        register()
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hex = try c.decode(String.self, forKey: .hex)
+        pickedAt = try c.decode(Date.self, forKey: .pickedAt)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags)
+        tagsChangedAt = try c.decodeIfPresent(Date.self, forKey: .tagsChangedAt)
+        source = try c.decodeIfPresent(ColourSource.self, forKey: .source)
+        master = try c.decodeIfPresent(XYZ.self, forKey: .master)
+        kind = try c.decodeIfPresent(ColourKind.self, forKey: .kind)
+        register()
+    }
+
+    /// The colour's full definition: what it carries, or its hex taken as an sRGB source.
+    var definition: ColourDefinition? {
+        if let source = source, let master = master { return ColourDefinition(source: source, master: master, kind: kind ?? .surface) }
+        return ColourDefinition.of(hex: hex)
+    }
+
+    /// Lets the rest of the app find what a key of the other kind means, wherever the record came from.
+    private func register() {
+        if ColourKeys.isKey(hex), let source = source, let master = master {
+            ColourKeys.register(hex, ColourDefinition(source: source, master: master, kind: kind ?? .surface))
+        }
     }
 }
 
@@ -207,7 +244,8 @@ func normaliseHex(_ raw: String) -> String? {
 }
 
 func rgbComponents(_ hex: String) -> (r: Double, g: Double, b: Double)? {
-    guard let n = normaliseHex(hex), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
+    // A key that is not a hex is read as the sRGB colour it shows as.
+    guard let n = normaliseHex(hex) ?? ColourKeys.displayHex(hex), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
     return (Double((v >> 16) & 0xFF) / 255, Double((v >> 8) & 0xFF) / 255, Double(v & 0xFF) / 255)
 }
 
@@ -397,7 +435,7 @@ extension Library {
     /// Adds a pairing, or replaces the one with the same id. Its two colours join the palette and the library.
     mutating func setStyle(_ style: TypeStyle, in id: UUID, at date: Date = Date()) {
         guard let i = swatches.firstIndex(where: { $0.id == id }), var styles = swatches[i].styles,
-              let ink = normaliseHex(style.ink), let paper = normaliseHex(style.paper) else { return }
+              let ink = colourKey(style.ink), let paper = colourKey(style.paper) else { return }
         var clean = style
         clean.ink = ink; clean.paper = paper
         let name = style.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -775,7 +813,13 @@ extension Library {
     /// Adds to the catalogue if new, without touching the date of an existing colour.
     @discardableResult
     mutating func addToCatalogue(_ raw: String, at date: Date = Date()) -> String? {
-        guard let hex = normaliseHex(raw) else { return nil }
+        guard let hex = normaliseHex(raw) else {
+            // A colour with a key of its own: already here, or known from another library and taken in whole.
+            if colours.contains(where: { $0.hex == raw }) { return raw }
+            guard let known = ColourKeys.definition(of: raw) else { return nil }
+            colours.append(Colour(hex: raw, pickedAt: after([deletedAt(.colour, raw)], date), source: known.source, master: known.master, kind: known.kind))
+            return raw
+        }
         if !colours.contains(where: { $0.hex == hex }) {
             colours.append(Colour(hex: hex, pickedAt: after([deletedAt(.colour, hex)], date)))
         }
