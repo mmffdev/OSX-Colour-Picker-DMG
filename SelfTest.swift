@@ -787,6 +787,35 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(AdobeAccess.state == .nothingToDo || !AdobeAccess.folders.isEmpty, "Adobe access has nothing to set up where no Adobe app is installed")
     check(Permission.all.map { $0.title } == ["Adobe apps"], "the first-open setup lists each permission once")
 
+    print("project files")
+    var projLib = Library()
+    let tp = Date(timeIntervalSince1970: 1_760_000_000)
+    let client = projLib.createProject(named: "Client A", at: tp)
+    let brandSwatch = projLib.createSwatch(at: tp.addingTimeInterval(0.123))
+    projLib.renameSwatch(brandSwatch, to: "Brand")
+    projLib.add(["#FF0000", "#0033FF"], toSwatch: brandSwatch, at: tp)
+    projLib.move(brandSwatch, to: client, index: 0)
+    let looseSwatch = projLib.createSwatch(at: tp.addingTimeInterval(1))
+    projLib.add(["#00FF00"], toSwatch: looseSwatch, at: tp)
+    let file = ProjectFile(project: projLib.project(client)!, in: projLib)
+    check(file.palettes.map { $0.name } == ["Brand"] && file.colours.map { $0.hex }.sorted() == ["#0033FF", "#FF0000"],
+          "a project file holds the project's palettes and the colours they use, and nothing from outside it")
+    let fileData = try! file.data()
+    check((try? ProjectFile.read(fileData)) == file && ProjectFile.fileName(for: file.project) == "Client A.mmffproject",
+          "a project file reads back as written and is named for the project")
+    let projRoot = root.appendingPathComponent("projects")
+    let libURL = projRoot.appendingPathComponent("Main/library.json")
+    var written: [UUID: Data] = [:]
+    let firstWrite = try! ProjectFiles.write(projLib, library: libURL, written: &written)
+    let again = try! ProjectFiles.write(projLib, library: libURL, written: &written)
+    check(firstWrite.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client A.mmffproject").path] && again.isEmpty
+          && (try? ProjectFiles.read(firstWrite[0])) == file,
+          "a project package lands in a Projects folder beside the library, reads back whole, and is rewritten only when it changes")
+    projLib.setProjectFolder(client, projRoot.appendingPathComponent("Elsewhere").path)
+    let moved = try! ProjectFiles.write(projLib, library: libURL, written: &written)
+    check(moved.map { $0.lastPathComponent } == ["Client A.mmffproject"] && moved[0].deletingLastPathComponent().lastPathComponent == "Elsewhere",
+          "a project given a folder of its own is written there")
+
     print("favourites and custom palettes")
     var lib = Library()
     let t = Date(timeIntervalSince1970: 1_760_000_000)

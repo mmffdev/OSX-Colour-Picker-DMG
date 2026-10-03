@@ -336,6 +336,7 @@ final class SyncPanel: SettingsPanel {
     private lazy var turnOff = button("Turn Off Sync", #selector(turnOffSync))
     private lazy var showFolder = button("Show in Finder", #selector(showSyncFolder))
     private lazy var syncNow = button("Sync Now", #selector(syncNowTapped))
+    private let projectsFolder = NSTextField(labelWithString: "")
     private let keepChoices = [10, 25, 50, 100, 0]
 
     override func rows() -> [[NSView]] {
@@ -354,6 +355,10 @@ final class SyncPanel: SettingsPanel {
             [label("Keep:"), keep],
             [blank, row([button("Show Backups", #selector(showBackups))])],
             [blank, note("Both copies are saved before every merge, in the sync folder and on this Mac.")],
+            [heading("Project files"), blank],
+            [label("Projects folder:"), projectsFolder],
+            [blank, row([button("Choose\u{2026}", #selector(chooseProjects))])],
+            [blank, note("Every project is also kept as a file of its own here, always current, so it can be handed over whole. Right-click a project to keep it somewhere else instead.")],
         ]
     }
 
@@ -361,6 +366,9 @@ final class SyncPanel: SettingsPanel {
         guard isViewLoaded else { return }
         let chosen = SyncSettings.folder
         folder.stringValue = chosen.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Sync is off"
+        projectsFolder.lineBreakMode = .byTruncatingMiddle
+        projectsFolder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        projectsFolder.stringValue = ((ProjectFiles.folder ?? library.store.url.deletingLastPathComponent().appendingPathComponent("Projects")).path as NSString).abbreviatingWithTildeInPath
         folder.toolTip = chosen?.path
         folder.textColor = chosen == nil ? .secondaryLabelColor : .labelColor
         [turnOff, showFolder, syncNow, when].forEach { ($0 as NSControl).isEnabled = chosen != nil }
@@ -373,6 +381,8 @@ final class SyncPanel: SettingsPanel {
         SyncSettings.askBeforeMerging = when.indexOfSelectedItem == 0
         SyncSettings.backupsToKeep = keepChoices[max(0, keep.indexOfSelectedItem)]
     }
+
+    @objc private func chooseProjects() { library.chooseProjectsFolder() }
 
     @objc private func chooseFolder() {
         guard let w = view.window else { return }

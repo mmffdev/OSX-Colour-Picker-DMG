@@ -796,6 +796,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             add("New Palette in Project", #selector(newInProjectClicked(_:)), id)
             add("Project Details\u{2026}", #selector(projectDetailsClicked(_:)), id)
             add("Rename Project\u{2026}", #selector(renameProjectClicked(_:)), id)
+            add("Show Project File", #selector(projectFileClicked(_:)), id)
+            add("Keep Project In\u{2026}", #selector(moveProjectClicked(_:)), id)
             add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
             menu.addItem(.separator())
             add("Delete Project", #selector(deleteProjectClicked(_:)), id)
@@ -830,6 +832,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func newInProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.addPalette(to: id) } }
     @objc private func projectDetailsClicked(_ s: NSMenuItem) { if let id = id(s) { library.editProject(id) } }
     @objc private func renameProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.renameProject(id) } }
+    @objc private func projectFileClicked(_ s: NSMenuItem) { if let id = id(s) { library.showProjectFile(id) } }
+    @objc private func moveProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.moveProject(id) } }
     @objc private func projectPackClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportDesignPack(project: id) } }
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
 }

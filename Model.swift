@@ -25,6 +25,8 @@ struct Project: Codable, Equatable {
     /// The project form's answers, by ProjectField; nil until some are given.
     var details: [String: String]? = nil
     var detailsChangedAt: Date? = nil
+    /// A folder of the project's own for its file; nil is the master Projects folder.
+    var folder: String? = nil
 }
 
 struct SwatchEntry: Codable, Equatable {
@@ -456,6 +458,11 @@ extension Library {
     }
 
     /// Removes the project only; its palettes drop into the loose list.
+    mutating func setProjectFolder(_ id: UUID, _ path: String?) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].folder = path
+    }
+
     mutating func deleteProject(_ id: UUID, at date: Date = Date()) {
         guard projects.contains(where: { $0.id == id }) else { return }
         bury(.project, id.uuidString, at: date)

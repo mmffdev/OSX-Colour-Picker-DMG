@@ -114,7 +114,80 @@ final class LibraryController: NSObject {
         sync()
     }
 
-    private func changed() { NotificationCenter.default.post(name: .libraryDidChange, object: self) }
+    private func changed() {
+        NotificationCenter.default.post(name: .libraryDidChange, object: self)
+        writeProjectFilesSoon()
+    }
+
+    // MARK: Project files
+
+    private var projectFilesWritten: [UUID: Data] = [:]
+    private var projectFilesTimer: Timer?
+
+    /// Each project's own file follows the library, a moment after it changes.
+    private func writeProjectFilesSoon() {
+        projectFilesTimer?.invalidate()
+        projectFilesTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.writeProjectFiles() }
+    }
+
+    func writeProjectFiles() {
+        do { _ = try ProjectFiles.write(library, library: store.url, written: &projectFilesWritten) }
+        catch { flash("Could not write a project file: \(error.localizedDescription)") }
+    }
+
+    /// The project's file, written now.
+    func projectFileURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.url(for: $0, library: store.url) } }
+
+    /// Gives the project a folder of its own, or nil to put it back in the master folder, and moves its file.
+    func setProjectFolder(_ id: UUID, _ folder: URL?) {
+        guard let p = library.project(id) else { return }
+        let old = ProjectFiles.url(for: p, library: store.url)
+        apply { $0.setProjectFolder(id, folder?.path) }
+        projectFilesWritten[id] = nil
+        writeProjectFiles()
+        if let new = projectFileURL(id), new != old { try? FileManager.default.removeItem(at: old) }
+    }
+
+    @objc func chooseProjectsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Keep Projects Here"
+        panel.message = "Choose the folder where project files are kept"
+        if let current = ProjectFiles.folder { panel.directoryURL = current }
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, let url = panel.url else { return }
+            ProjectFiles.folder = url
+            self.projectFilesWritten = [:]
+            self.writeProjectFiles()
+            self.stateChanged()
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// Lets the user pick a folder of the project's own.
+    func moveProject(_ id: UUID) {
+        guard let p = library.project(id) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Keep Project Here"
+        panel.message = "Choose a folder for \u{201C}\(p.name)\u{201D} and its file"
+        panel.directoryURL = ProjectFiles.folder(for: p, library: store.url)
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard r == .OK, let url = panel.url else { return }
+            self?.setProjectFolder(id, url)
+            self?.flash("\u{201C}\(p.name)\u{201D} is kept in \(url.lastPathComponent)")
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    func showProjectFile(_ id: UUID) {
+        writeProjectFiles()
+        if let url = projectFileURL(id) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
     private func stateChanged() { NotificationCenter.default.post(name: .appStateDidChange, object: self) }
 
     func flash(_ text: String) {
