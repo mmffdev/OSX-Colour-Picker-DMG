@@ -9,7 +9,7 @@ import AppKit
 final class PaneGrip: NSView {
     /// Which edge of its pane the notch sits on: the sidebar's is its right, a rail's is its left.
     enum Edge { case trailing, leading }
-    /// As tall as the title panel, so beside a striped title it runs the stripes' full height.
+    /// As tall as the title panel.
     static var size: NSSize { NSSize(width: 16, height: PageStyle.titlePanelHeight) }
 
     private let edge: Edge
@@ -33,13 +33,13 @@ final class PaneGrip: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Puts the notch on the pane's inner edge, at the top, level with the title panel.
+    /// Puts the notch on the pane's inner edge, at the bottom, resting on the footer.
     func attach(to pane: NSView) {
         pane.addSubview(self, positioned: .above, relativeTo: nil)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: PaneGrip.size.width),
             heightAnchor.constraint(equalToConstant: PaneGrip.size.height),
-            topAnchor.constraint(equalTo: pane.safeAreaLayoutGuide.topAnchor),
+            bottomAnchor.constraint(equalTo: pane.bottomAnchor),
             edge == .trailing ? trailingAnchor.constraint(equalTo: pane.trailingAnchor) : leadingAnchor.constraint(equalTo: pane.leadingAnchor),
         ])
     }
@@ -54,12 +54,17 @@ final class PaneGrip: NSView {
         path.line(to: NSPoint(x: deep, y: b.maxY - curve))
         path.curve(to: NSPoint(x: flat, y: b.maxY), controlPoint1: NSPoint(x: deep, y: b.maxY - curve / 2), controlPoint2: NSPoint(x: flat, y: b.maxY - curve / 2))
         path.close()
-        (held ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.grey(0.14)).setFill()
+        // The whole notch changes: the button's resting grey, its hover colour under the pointer, its active colour while held.
+        (held ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.buttonRest).setFill()
         path.fill()
-        // One short line down the middle, to say it can be held.
+        // Three dots down the middle, to say it can be held.
         let ink = held ? Theme.buttonActiveText : hovering ? Theme.buttonHoverText : Theme.text
-        ink.withAlphaComponent(held || hovering ? 0.8 : 0.35).setFill()
-        NSBezierPath(roundedRect: NSRect(x: b.midX - 1 + (edge == .trailing ? 2 : -2), y: b.midY - 8, width: 2, height: 16), xRadius: 1, yRadius: 1).fill()
+        ink.withAlphaComponent(held || hovering ? 0.9 : 0.4).setFill()
+        let dot: CGFloat = 3, gap: CGFloat = 4
+        let x = b.midX - dot / 2 + (edge == .trailing ? 2 : -2)
+        for i in -1...1 {
+            NSBezierPath(ovalIn: NSRect(x: x, y: b.midY - dot / 2 + CGFloat(i) * (dot + gap), width: dot, height: dot)).fill()
+        }
     }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
