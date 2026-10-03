@@ -9,8 +9,8 @@ Since 2026-10-02 this repo's work lives in the workspace the local Vector connec
 | | |
 |---|---|
 | Runway | PR-23 — MMFFDev - Colour Picker |
-| Objectives | OB-80 Colour Lab (cLab) · OB-81 Colour Tools · OB-82 Export And Handover · First Run And Permissions · Launch And Sales |
-| Themes | TH-260 Colour Lab Tools · TH-261 Colour Lab Foundations · TH-262 Colour Lab Future Ideas · TH-263 Contrast And Typography · TH-264 Export Templates (also holds the app-format and Adobe work) · Setup And Permissions · Selling And Licensing · Updates And Health · Launch Page And Help |
+| Objectives | OB-80 Colour Lab (cLab) · OB-81 Colour Tools · OB-82 Export And Handover · First Run And Permissions · Launch And Sales · History And Project Files · Colour Management And Proofing |
+| Themes | TH-260 Colour Lab Tools · TH-261 Colour Lab Foundations · TH-262 Colour Lab Future Ideas · TH-263 Contrast And Typography · TH-264 Export Templates (also holds the app-format and Adobe work) · Setup And Permissions · Selling And Licensing · Updates And Health · Launch Page And Help · Project Files · History Rail · History Storage And Settings · Project Overview And Swatch Notes · The Master Colour · Channels And Proofs · Print Conditions And Approved Values · Video, Three-Dimensional Work And Delivery |
 | Node | `c9b6ca76-522d-44dc-9402-ec797f49ec97` |
 
 A new area of the app gets a new objective under PR-23, never a new runway.
