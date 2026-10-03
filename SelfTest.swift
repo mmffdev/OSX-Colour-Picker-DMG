@@ -849,6 +849,12 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(HistoryStore.load(beside: hRoot) == hist && HistoryStore.url(beside: hRoot).lastPathComponent == "library.history.json",
           "history is kept in a sidecar file beside the library and reads back whole")
     check(HistoryStore.load(beside: root.appendingPathComponent("nowhere/library.json")).isEmpty, "no sidecar, no history")
+    var hist2 = StepHistory()
+    hist2.record("Opened", library: Library(), before: nil, limit: 0, at: th)
+    hist2.record("New Project", library: hLib, before: Library(), limit: 0, at: th)
+    let withSteps = ProjectFile(project: hLib.project(hp)!, in: hLib, history: hist2.steps(in: hp))
+    check(withSteps.history.map { $0.title } == ["New Project"] && (try? ProjectFile.read(withSteps.data()))?.history == withSteps.history,
+          "a project file lists the steps that touched the project, and reads them back")
 
     print("favourites and custom palettes")
     var lib = Library()

@@ -169,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Previous Palette", #selector(MainWindowController.previousPalette), "[", main)
             m.addItem(.separator())
             add(m, "Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", nil, [.command, .control])
+            add(m, "Show History", #selector(MainWindowController.toggleHistory), "y", main, [.command, .shift])
             add(m, "Customise Toolbar\u{2026}", #selector(NSWindow.runToolbarCustomizationPalette(_:)))
         }
         menu("Window") { m in

@@ -471,6 +471,58 @@ final class ShortcutsPanel: SettingsPanel {
     }
 }
 
+// MARK: History
+
+final class HistoryPanel: SettingsPanel {
+    private lazy var enabled = check("Keep a history for this library", #selector(enabledChanged))
+    private let whereKept = NSTextField(labelWithString: "")
+    private lazy var projectHistory = check("Write each project's steps into its project file", #selector(changed))
+    private let stepChoices = [0, 25, 50, 100, 200, 500]
+    private lazy var steps = popup(stepChoices.map { $0 == 0 ? "Unlimited" : "\($0)" }, #selector(changed))
+
+    override func rows() -> [[NSView]] {
+        whereKept.lineBreakMode = .byTruncatingMiddle
+        whereKept.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return [
+            [heading("History"), blank],
+            [blank, enabled],
+            [blank, note("Every change becomes a step in the History rail (View \u{25B8} Show History). Click a step to go back to it. Each library keeps a history of its own.")],
+            [heading("Global history"), blank],
+            [label("Kept in:"), whereKept],
+            [blank, row([button("Show in Finder", #selector(showFile)), button("Clear History", #selector(clear))])],
+            [blank, note("A file of its own beside the library file, so the library stays lean and the history can be cleared without touching your work. Steps hold only names, colours, order and tags, never images.")],
+            [heading("Project history"), blank],
+            [blank, projectHistory],
+            [blank, note("A step that changes one project is also listed in that project's file, so whoever receives the project sees how it came about.")],
+            [heading("Steps to save"), blank],
+            [label("Keep:"), steps],
+            [blank, note("Once the limit is reached the oldest step is dropped. Unlimited keeps everything.")],
+        ]
+    }
+
+    override func refresh() {
+        let on = library.historyEnabled
+        enabled.state = on ? .on : .off
+        whereKept.stringValue = (library.historyFileURL().path as NSString).abbreviatingWithTildeInPath
+        projectHistory.state = Prefs.projectHistory ? .on : .off
+        steps.selectItem(at: stepChoices.firstIndex(of: Prefs.historySteps) ?? 2)
+        for c in [whereKept, projectHistory, steps] as [NSControl] { c.isEnabled = on }
+    }
+
+    @objc private func enabledChanged() {
+        library.setHistoryEnabled(enabled.state == .on)
+        refresh()
+    }
+
+    @objc private func changed() {
+        Prefs.projectHistory = projectHistory.state == .on
+        Prefs.historySteps = stepChoices[max(0, steps.indexOfSelectedItem)]
+    }
+
+    @objc private func showFile() { NSWorkspace.shared.activateFileViewerSelecting([library.historyFileURL()]) }
+    @objc private func clear() { library.clearHistory() }
+}
+
 // MARK: Window
 
 final class SettingsWindowController: NSWindowController {
@@ -491,6 +543,7 @@ final class SettingsWindowController: NSWindowController {
             ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
+            HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
             PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield"),
         ]
         tabs.tabStyle = .toolbar

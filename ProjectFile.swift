@@ -21,11 +21,12 @@ struct ProjectFile: Codable, Equatable {
     var colours: [Colour]
     /// Tags the project owns, and any global tag its palettes or colours wear.
     var tags: [TagInfo]
-    /// Steps taken in this project; filled once history exists.
-    var history: [String] = []
+    /// The steps that touched this project, oldest first, when project history is on.
+    var history: [ProjectStep] = []
 
-    init(project: Project, in lib: Library) {
+    init(project: Project, in lib: Library, history steps: [HistoryStep] = []) {
         self.project = project
+        history = steps.map { ProjectStep(id: $0.id, date: $0.date, title: $0.title) }
         palettes = lib.palettes(in: project.id)
         let hexes = Set(palettes.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
         colours = lib.colours.filter { hexes.contains($0.hex) }
@@ -53,6 +54,13 @@ struct ProjectFile: Codable, Equatable {
     }
 }
 
+/// One step as a project file records it: what and when, not the whole library.
+struct ProjectStep: Codable, Equatable {
+    let id: UUID
+    let date: Date
+    let title: String
+}
+
 /// Where project files go: one master folder, and a folder of its own for any project that wants one.
 enum ProjectFiles {
     /// The master folder; nil until chosen, when it defaults to "Projects" beside the library file.
@@ -73,10 +81,10 @@ enum ProjectFiles {
 
     /// Writes every project's package, and only when its contents have changed since the last write.
     /// Returns the packages written. `written` carries what was last written, by project id.
-    static func write(_ lib: Library, library: URL, master: URL?, written: inout [UUID: Data]) throws -> [URL] {
+    static func write(_ lib: Library, library: URL, master: URL?, history: StepHistory? = nil, written: inout [UUID: Data]) throws -> [URL] {
         var out: [URL] = []
         for p in lib.orderedProjects {
-            let data = try ProjectFile(project: p, in: lib).data()
+            let data = try ProjectFile(project: p, in: lib, history: history?.steps(in: p.id) ?? []).data()
             if written[p.id] == data { continue }
             let package = url(for: p, library: library, master: master)
             try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)

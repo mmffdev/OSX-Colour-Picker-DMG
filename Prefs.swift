@@ -54,6 +54,10 @@ enum Prefs {
     /// History is kept per library (catalogue): on unless turned off for that one.
     static func historyEnabled(for catalogue: String) -> Bool { bool("history.\(catalogue)", true) }
     static func setHistoryEnabled(_ on: Bool, for catalogue: String) { d.set(on, forKey: "history.\(catalogue)") }
+    static var historyRailShown: Bool {
+        get { bool("historyRail", false) }
+        set { d.set(newValue, forKey: "historyRail") }
+    }
     /// Steps kept; 0 is unlimited.
     static var historySteps: Int {
         get { int("historySteps", 50) }

@@ -134,6 +134,7 @@ final class LibraryController: NSObject {
 
     private func historyChanged() {
         NotificationCenter.default.post(name: .historyDidChange, object: self)
+        writeProjectFilesSoon()
         historyTimer?.invalidate()
         historyTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.saveHistory() }
     }
@@ -163,6 +164,14 @@ final class LibraryController: NSObject {
         historyChanged()
     }
 
+    func historyFileURL() -> URL { HistoryStore.url(beside: store.url) }
+
+    func setHistoryEnabled(_ on: Bool) {
+        Prefs.setHistoryEnabled(on, for: catalogue)
+        if on { loadHistory() } else { history = StepHistory(); NotificationCenter.default.post(name: .historyDidChange, object: self) }
+        stateChanged()
+    }
+
     func clearHistory() {
         history = StepHistory()
         history.record("Opened", library: library, before: nil, limit: Prefs.historySteps)
@@ -186,7 +195,10 @@ final class LibraryController: NSObject {
     }
 
     func writeProjectFiles() {
-        do { _ = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder, written: &projectFilesWritten) }
+        do {
+            _ = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder,
+                                       history: Prefs.projectHistory && historyEnabled ? history : nil, written: &projectFilesWritten)
+        }
         catch { flash("Could not write a project file: \(error.localizedDescription)") }
     }
 

@@ -7,6 +7,7 @@ private extension NSToolbarItem.Identifier {
     static let newPalette = NSToolbarItem.Identifier("newPalette")
     static let fromImage = NSToolbarItem.Identifier("fromImage")
     static let build = NSToolbarItem.Identifier("build")
+    static let history = NSToolbarItem.Identifier("history")
     static let paste = NSToolbarItem.Identifier("paste")
     static let export = NSToolbarItem.Identifier("export")
     static let share = NSToolbarItem.Identifier("share")
@@ -162,6 +163,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private let content: ContentViewController
     private let builder: BuilderViewController
     private var builderItem: NSSplitViewItem!
+    private var historyItem: NSSplitViewItem!
+    private lazy var historyRail = HistoryRailController(library: library)
     private(set) var selection: Selection = .all
     private weak var pickItem: NSToolbarItem?
     /// The toolbar's items as they were before the search field took their place; nil when not searching.
@@ -217,13 +220,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         builderItem.canCollapse = true
         builderItem.isCollapsed = true
         builderItem.holdingPriority = .defaultLow + 1
+        historyItem = NSSplitViewItem(viewController: historyRail)
+        historyItem.minimumThickness = 230
+        historyItem.maximumThickness = 340
+        historyItem.canCollapse = true
+        historyItem.holdingPriority = .defaultLow + 1
         split.addSplitViewItem(side)
         split.addSplitViewItem(main)
         split.addSplitViewItem(builderItem)
+        split.addSplitViewItem(historyItem)
         win.contentViewController = split
         win.setContentSize(NSSize(width: 1080, height: 700))
         split.splitView.autosaveName = "MMFFDevColour3Split"
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
+        historyItem.isCollapsed = !Prefs.historyRailShown
         win.center()
         // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
         shouldCascadeWindows = false
@@ -464,6 +474,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     // MARK: Menu and toolbar actions
 
+    @objc func toggleHistory() {
+        historyItem.animator().isCollapsed.toggle()
+        Prefs.historyRailShown = !historyItem.isCollapsed
+    }
+
     @objc func exportShown() { library.export(library.exportPalettes(for: selection)) }
     @objc func exportDesignPack() { library.exportDesignPack(for: selection) }
     @objc func addShownToAdobe(_ sender: NSMenuItem) {
@@ -538,11 +553,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .flexibleSpace, .share, .settings, .search]
+        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .flexibleSpace, .history, .share, .settings, .search]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share,
+        [.toggleSidebar, .sidebarTrackingSeparator, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share, .history,
          .sync, .settings, .search, .flexibleSpace, .space]
     }
 
@@ -569,6 +584,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
                         library, #selector(LibraryController.newPalette))
         case .lab:
             return item("Colour Lab", labSymbolName, "Open Colour Lab, the colour wheel (\u{2318}L)", self, #selector(showLab))
+        case .history:
+            return item("History", "clock.arrow.circlepath", "Show or hide the History rail (\u{2318}\u{21E7}Y)", self, #selector(toggleHistory))
         case .build:
             return item("Build Palette", "rectangle.stack.badge.plus", "Choose swatches from the library to make a palette",
                         self, #selector(buildPalette))
