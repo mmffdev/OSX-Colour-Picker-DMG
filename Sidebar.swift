@@ -180,15 +180,17 @@ final class ProjectHeaderCell: NSTableCellView {
         lock.image = symbol("lock.open", "", size: 11)
         lock.contentTintColor = .tertiaryLabelColor
         lock.imagePosition = .imageOnly
-        let stack = NSStackView(views: [folder, title, warning, lock, add])
+        // The padlock sits on its own at the far right, clear of the plus and padded from the edge.
+        let stack = NSStackView(views: [folder, title, warning, add, lock])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
+        stack.setCustomSpacing(12, after: add)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             // The plus sits on the title's own middle line, whatever height the button would take.
             add.centerYAnchor.constraint(equalTo: title.centerYAnchor),
