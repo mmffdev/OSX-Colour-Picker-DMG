@@ -57,9 +57,12 @@ final class LibraryController: NSObject {
     private var loadedStamp: Date?
     private var reportedQuarantine: URL?
 
-    override init() {
-        catalogue = Catalogues.currentName
-        store = Catalogues.standard.store(for: catalogue)
+    override convenience init() { self.init(catalogue: Catalogues.currentName) }
+
+    /// A controller on one catalogue; the app uses the current one, scripts may name another.
+    init(catalogue name: String) {
+        catalogue = name
+        store = Catalogues.standard.store(for: name)
         super.init()
     }
 

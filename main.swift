@@ -186,8 +186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 if CommandLine.arguments.contains("--self-test") {
     runSelfTest()
 } else if CommandLine.arguments.contains("--write-project-files") {
-    // Writes every project's package now, for scripts and for filling in files for projects made before they existed.
-    let controller = LibraryController()
+    // Writes every project's file now, for scripts and for filling in projects made before the files existed.
+    // "--catalogue <name>" picks a catalogue other than the current one.
+    let args = CommandLine.arguments
+    let named = args.firstIndex(of: "--catalogue").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+    let controller = LibraryController(catalogue: named ?? Catalogues.currentName)
     controller.reload()
     controller.writeProjectFiles()
     for p in controller.library.orderedProjects { print(controller.projectFileURL(p.id)?.path ?? p.name) }
