@@ -9,6 +9,8 @@ extension Notification.Name {
     /// Colours or palettes changed.
     static let libraryDidChange = Notification.Name("libraryDidChange")
     static let historyDidChange = Notification.Name("historyDidChange")
+    /// The page showing changed (Selection in `current`).
+    static let selectionDidChange = Notification.Name("selectionDidChange")
     /// Project files were written, or one was found missing.
     static let projectFilesDidChange = Notification.Name("projectFilesDidChange")
     /// Catalogue, sync status or picking state changed.
@@ -493,7 +495,13 @@ final class LibraryController: NSObject {
     }
 
     /// What the window is showing; set by the window so project creation can use it.
-    var current: Selection?
+    var current: Selection? { didSet { if current != oldValue { NotificationCenter.default.post(name: .selectionDidChange, object: self) } } }
+
+    /// The project the page showing belongs to, if any.
+    var currentProject: UUID? {
+        if case .palette(let id)? = current { return library.swatch(id)?.projectID }
+        return nil
+    }
 
     func renameProject(_ id: UUID) {
         guard let p = library.project(id) else { return }

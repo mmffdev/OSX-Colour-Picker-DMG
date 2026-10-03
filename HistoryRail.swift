@@ -9,7 +9,13 @@ import AppKit
 final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let library: LibraryController
     private let table = HistoryTable()
-    private lazy var header = PageHeader(actions: [play, remove])
+    private lazy var header = PageHeader(actions: [scope, play, remove])
+    private lazy var scope = NSSegmentedControl(labels: ["Project", "Global"], trackingMode: .selectOne, target: self, action: #selector(scopeChanged))
+    /// The project whose steps are listed; nil lists everything. Follows the page, until the user picks.
+    private var project: UUID?
+    private var pickedByUser = false
+    /// Rows of the table as indices into the history's steps.
+    private var rows: [Int] = []
     private lazy var play = toolButton("Play Back", "play.fill", "Walk through the steps from the first to the current one", target: self, action: #selector(playTapped))
     private lazy var remove = toolButton("", "trash", "Delete the selected step", target: self, action: #selector(deleteTapped))
     private var playing: Timer?
@@ -49,65 +55,88 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        scope.controlSize = .small
+        scope.font = NSFont.systemFont(ofSize: TextSize.caption)
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .historyDidChange, object: library)
+        NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .selectionDidChange, object: library)
+        pageChanged()
+    }
+
+    /// Inside a project the rail offers Project or Global and starts on Project; outside, it is global only.
+    @objc private func pageChanged() {
+        let now = library.currentProject
+        scope.isHidden = now == nil
+        if now != project { pickedByUser = false }
+        if !pickedByUser { project = now }
+        scope.selectedSegment = project == nil ? 1 : 0
+        reload()
+    }
+
+    @objc private func scopeChanged() {
+        pickedByUser = true
+        project = scope.selectedSegment == 0 ? library.currentProject : nil
         reload()
     }
 
     @objc func reload() {
         let history = library.history
+        rows = history.steps.indices.filter { project == nil || history.steps[$0].project == project }
         table.reloadData()
         following = true
-        if history.current >= 0 {
-            table.selectRowIndexes([history.current], byExtendingSelection: false)
-            table.scrollRowToVisible(history.current)
+        if let row = rows.firstIndex(of: history.current) {
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            table.scrollRowToVisible(row)
         } else {
             table.deselectAll(nil)
         }
         following = false
-        let count = history.steps.count
-        header.subtitle.stringValue = count == 0 ? "No steps yet" : plural(count, "Step")
-        play.isEnabled = history.current > 0
+        let name = project.flatMap { library.library.project($0)?.name }
+        header.subtitle.stringValue = rows.isEmpty ? (name.map { "No steps in \($0) yet" } ?? "No steps yet")
+            : plural(rows.count, "Step") + (name.map { " in \($0)" } ?? "")
+        play.isEnabled = rows.count > 1
         remove.isEnabled = table.selectedRow >= 0
     }
 
     // MARK: Table
 
-    func numberOfRows(in tableView: NSTableView) -> Int { library.history.steps.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = NSUserInterfaceItemIdentifier("step")
         let cell = tableView.makeView(withIdentifier: id, owner: self) as? StepCell ?? { let c = StepCell(); c.identifier = id; return c }()
-        let step = library.history.steps[row]
-        cell.show(step, change: library.history.change(at: row), project: step.project.flatMap { library.library.project($0)?.name },
-                  isPast: row > library.history.current)
+        let index = rows[row]
+        let step = library.history.steps[index]
+        cell.show(step, change: library.history.change(at: index), project: project == nil ? step.project.flatMap { library.library.project($0)?.name } : nil,
+                  isPast: index > library.history.current)
         return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         remove.isEnabled = table.selectedRow >= 0
-        guard !following, table.selectedRow >= 0, table.selectedRow != library.history.current else { return }
-        library.goToStep(table.selectedRow)
+        guard !following, table.selectedRow >= 0, rows.indices.contains(table.selectedRow), rows[table.selectedRow] != library.history.current else { return }
+        library.goToStep(rows[table.selectedRow])
     }
 
     // MARK: Actions
 
+    /// Walks the listed steps from the first to the last at or before the current one.
     @objc private func playTapped() {
         playing?.invalidate()
-        let end = library.history.current
-        guard end > 0 else { return }
+        let path = rows.filter { $0 <= max(library.history.current, 0) }
+        guard path.count > 1 else { return }
         var at = 0
-        library.goToStep(0)
+        library.goToStep(path[0])
         playing = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] t in
             at += 1
-            guard let self = self, at <= end, at < self.library.history.steps.count else { t.invalidate(); return }
-            self.library.goToStep(at)
+            guard let self = self, at < path.count, path[at] < self.library.history.steps.count else { t.invalidate(); return }
+            self.library.goToStep(path[at])
         }
     }
 
     @objc private func deleteTapped() {
         let row = table.selectedRow
-        guard row >= 0 else { return }
-        library.deleteStep(row)
+        guard row >= 0, rows.indices.contains(row) else { return }
+        library.deleteStep(rows[row])
     }
 }
 
