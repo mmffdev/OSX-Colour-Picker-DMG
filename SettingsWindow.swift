@@ -471,6 +471,46 @@ final class ShortcutsPanel: SettingsPanel {
     }
 }
 
+// MARK: Theme
+
+final class ThemePanel: SettingsPanel {
+    private let selectionBackground = NSColorWell()
+    private let selectionText = NSColorWell()
+
+    override func rows() -> [[NSView]] {
+        for well in [selectionBackground, selectionText] {
+            well.target = self
+            well.action = #selector(changed)
+            well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            well.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        }
+        return [
+            [heading("Sidebar"), blank],
+            [label("Selected row:"), row([selectionBackground, caption("Background", size: TextSize.caption), selectionText, caption("Text", size: TextSize.caption)])],
+            [blank, row([button("Use The System Colours", #selector(reset))])],
+            [blank, note("The colours behind and on the sidebar row that is selected. The system's own are the accent colour with white text.")],
+        ]
+    }
+
+    override func refresh() {
+        selectionBackground.color = Prefs.sidebarSelectionBackground.flatMap(colorFromHex) ?? .controlAccentColor
+        selectionText.color = Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? .white
+    }
+
+    @objc private func changed() {
+        Prefs.sidebarSelectionBackground = hexOf(selectionBackground.color)
+        Prefs.sidebarSelectionText = hexOf(selectionText.color)
+        library.reloadSidebarTheme()
+    }
+
+    @objc private func reset() {
+        Prefs.sidebarSelectionBackground = nil
+        Prefs.sidebarSelectionText = nil
+        refresh()
+        library.reloadSidebarTheme()
+    }
+}
+
 // MARK: History
 
 final class HistoryPanel: SettingsPanel {
@@ -544,6 +584,7 @@ final class SettingsWindowController: NSWindowController {
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
             HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
+            ThemePanel(library: library, title: "Theme", icon: "paintpalette"),
             PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield"),
         ]
         tabs.tabStyle = .toolbar

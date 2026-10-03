@@ -284,6 +284,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         builder.onCancel = { [weak self] in self?.content.all.stopBuilding() }
 
         library.onRevealProject = { [weak self] id in self?.sidebar.reveal(project: id) }
+        library.onThemeChange = { [weak self] in self?.sidebar.reload() }
         library.onShow = { [weak self] s, rename in
             guard let self = self else { return }
             self.show(s)

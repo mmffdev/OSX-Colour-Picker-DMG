@@ -223,6 +223,44 @@ final class ProjectHeaderCell: NSTableCellView {
     @objc private func lockTapped() { onLock?() }
 }
 
+/// A row that draws its selection in the theme's colours and turns its text to match, when the
+/// theme says; otherwise the system draws it.
+final class ThemedRowView: NSTableRowView {
+    private var tinted: [NSTextField: NSColor] = [:]
+
+    override var isEmphasized: Bool {
+        get { Prefs.sidebarSelectionBackground == nil && super.isEmphasized }
+        set { super.isEmphasized = newValue }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard let hex = Prefs.sidebarSelectionBackground, let colour = colorFromHex(hex) else { super.drawSelection(in: dirtyRect); return }
+        colour.setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 0), xRadius: 6, yRadius: 6).fill()
+    }
+
+    override var isSelected: Bool {
+        didSet { recolour() }
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        recolour()
+    }
+
+    /// Every label in the row takes the theme's text colour while selected, and its own colour back after.
+    func recolour() {
+        guard let hex = Prefs.sidebarSelectionText, let colour = colorFromHex(hex) else { return }
+        func labels(in v: NSView) -> [NSTextField] { v.subviews.flatMap { ($0 as? NSTextField).map { [$0] } ?? labels(in: $0) } }
+        if isSelected {
+            for l in labels(in: self) where tinted[l] == nil { tinted[l] = l.textColor ?? .labelColor; l.textColor = colour }
+        } else {
+            for (l, own) in tinted { l.textColor = own }
+            tinted = [:]
+        }
+    }
+}
+
 final class SidebarOutlineView: NSOutlineView {
     var onDeleteKey: (() -> Void)?
     /// Shift-F on a row.
@@ -501,6 +539,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     // Headings are ordinary rows dressed as headings, not AppKit group rows: a group row puts its
     // disclosure arrow on the right and only on hover, and every arrow here is on the left.
     func outlineView(_ o: NSOutlineView, isGroupItem item: Any) -> Bool { false }
+    func outlineView(_ o: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("themedRow")
+        return o.makeView(withIdentifier: id, owner: self) as? ThemedRowView ?? { let r = ThemedRowView(); r.identifier = id; return r }()
+    }
     func outlineView(_ o: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         guard let node = item as? SidebarNode, !node.isGroup else { return false }
         if case .projectTags = node.kind { return false }

@@ -38,6 +38,10 @@ final class LibraryController: NSObject {
 
     /// Asks the window to show something. `rename` puts the palette's name into edit mode.
     var onShow: ((Selection, _ rename: Bool) -> Void)?
+    /// Redraws the sidebar after the theme changed; set by the window.
+    var onThemeChange: (() -> Void)?
+    func reloadSidebarTheme() { onThemeChange?() }
+
     /// Scrolls the sidebar to a project and opens it; set by the window.
     var onRevealProject: ((UUID) -> Void)?
     /// Asks the visible page to scroll to and select a swatch.

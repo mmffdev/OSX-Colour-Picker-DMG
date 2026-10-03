@@ -49,6 +49,18 @@ enum Prefs {
         set { d.set(newValue, forKey: "lowercaseHex"); changed() }
     }
 
+    // MARK: Theme
+
+    /// The sidebar's selected row: background and text as "#RRGGBB"; nil is the system's own.
+    static var sidebarSelectionBackground: String? {
+        get { d.string(forKey: "theme.sidebar.selectionBackground") }
+        set { d.set(newValue, forKey: "theme.sidebar.selectionBackground"); changed() }
+    }
+    static var sidebarSelectionText: String? {
+        get { d.string(forKey: "theme.sidebar.selectionText") }
+        set { d.set(newValue, forKey: "theme.sidebar.selectionText"); changed() }
+    }
+
     // MARK: History
 
     /// History is kept per library (catalogue): on unless turned off for that one.
