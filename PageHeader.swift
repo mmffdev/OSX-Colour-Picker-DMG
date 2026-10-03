@@ -14,11 +14,12 @@ enum PageStyle {
     static let titleFont = NSFont.systemFont(ofSize: TextSize.title, weight: .bold)
     /// The action bar: its row height, the gap under the title, and the gap between its items.
     static let barHeight: CGFloat = 28
-    static let barGap: CGFloat = 2
+    /// The clear space between the title panel and the bar.
+    static let barGap: CGFloat = 8
     static let barSpacing: CGFloat = 8
     /// From the top safe area to where the page's own content starts.
-    static let height: CGFloat = 80
-    /// Clear space round the title inside its own panel, when the panel is drawn (the project stripes).
+    static let height: CGFloat = 88
+    /// The title panel runs from the top edge, the full width, down to this far below the title.
     static let titlePad: CGFloat = 8
 }
 
@@ -75,7 +76,7 @@ final class PageHeader: NSView {
             titleRow.centerYAnchor.constraint(equalTo: topAnchor, constant: PageStyle.titleCentre),
             titleRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
             titleRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),
-            bar.topAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: PageStyle.barGap),
+            bar.topAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: PageStyle.titlePad + PageStyle.barGap),
             bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
             bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),
             bar.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.barHeight),
@@ -103,18 +104,20 @@ final class PageHeader: NSView {
         pills.isHidden = false
     }
 
-    /// Stripes 20 points wide with 20-point gaps at 45 degrees, in a shade a twentieth lighter than
-    /// the background in dark mode and a twentieth darker in light, on a rounded panel that hugs the
-    /// title with `titlePad` of clear space round it.
+    /// Stripes 20 points wide with 20-point gaps at 45 degrees, three percent lighter than
+    /// the background in dark mode and three percent darker in light, on the title panel: the full
+    /// width, touching the top, down to `titlePad` below the title, with the bar clear beneath it.
     override func draw(_ dirtyRect: NSRect) {
         guard striped, let titleRow = titleRow else { return }
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let base = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB) ?? .gray
-        let shade = base.blended(withFraction: 0.05, of: dark ? .white : .black) ?? base
-        let band = titleRow.frame.insetBy(dx: -PageStyle.titlePad, dy: -PageStyle.titlePad)
+        let shade = base.blended(withFraction: 0.03, of: dark ? .white : .black) ?? base
+        // The view is not flipped: the top edge is bounds.maxY, and the panel reaches down past the title.
+        let floor = titleRow.frame.minY - PageStyle.titlePad
+        let band = NSRect(x: 0, y: floor, width: bounds.width, height: bounds.maxY - floor)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
-        NSBezierPath(roundedRect: band, xRadius: 6, yRadius: 6).addClip()
+        ctx.clip(to: band)
         shade.setFill()
         let stripe: CGFloat = 20, step: CGFloat = 40
         // Each stripe is a parallelogram leaning at 45 degrees, wide enough to cross the band whole.
