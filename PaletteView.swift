@@ -262,6 +262,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private(set) var paletteID: UUID?
     private var hexes: [String] = []
     private var search = ""
+    /// The titled groups the page is split into; empty when it is one run.
+    private var groups: [PaletteGroup] = []
+    /// The grid's items in order: the colours, and the blank swatches that add one.
+    private var slots: [PaletteSlot] = []
+    private var slotCounts: [Int] = []
+    /// Under the spectrum: how the page is grouped and what it shows.
+    private let viewBar = PaletteViewBar()
 
     private let nameField = NSTextField(labelWithString: "")
     private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
@@ -310,6 +317,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         layout.spacing = spacing
         layout.margins = NSEdgeInsets(top: 8, left: side, bottom: 24, right: side)
         layout.height = { _ in ColourCard.height }
+        layout.headerHeight = GroupHeaderView.height
+        // The blank swatch that adds a colour sits at the end of the last group.
+        layout.groupCounts = slotCounts
         layout.invalidateLayout()
     }
 
@@ -398,7 +408,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         grid.backgroundColors = [.clear]
         grid.register(ColourCard.self, forItemWithIdentifier: ColourCard.identifier)
         grid.register(AddCard.self, forItemWithIdentifier: AddCard.identifier)
-        list.onAdd = { [weak self] in self?.library.newColour() }
+        grid.register(GroupHeaderView.self, forSupplementaryViewOfKind: GridLayout.headerKind, withIdentifier: GroupHeaderView.identifier)
+        viewBar.onChange = { [weak self] in
+            self?.reload()
+            self?.grid.deselectAll(nil)
+            self?.updateHeader()
+        }
+        list.onAdd = { [weak self] start in self?.library.startColour(start) }
         grid.onClick = { [weak self] ip in self?.clicked(ip) }
         grid.onDelete = { [weak self] in self?.removeSelected() }
         grid.onCopy = { [weak self] in self?.copySelected() }
@@ -425,7 +441,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         header.trailing.setViews([gridButton, listButton], in: .leading)
         list.onOpen = { [weak self] hex, tab in self?.openSheet(for: hex, tab: tab) }
         header.trailing.isHidden = true
-        for v in [header, spectrum, scroll, list, empty] as [NSView] {
+        for v in [header, spectrum, viewBar, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -442,7 +458,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
-            scroll.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 8),
+            viewBar.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: PageStyle.barGap),
+            viewBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            viewBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
+            scroll.topAnchor.constraint(equalTo: viewBar.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -485,6 +504,14 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
                 || (library.library.customName(of: $0, in: id)?.lowercased().contains(search) ?? false)
         }
+        // The bar under the spectrum narrows the page, then splits it into titled groups. Grouped,
+        // the colours run group by group, so the spectrum, the selection and the page all agree.
+        let proofing = library.profile(forPalette: id).profile
+        hexes = library.library.shown(hexes, filter: Prefs.paletteFilter, profile: proofing)
+        groups = library.library.groups(of: hexes, by: Prefs.paletteGrouping, profile: proofing)
+        if !groups.isEmpty { hexes = groups.flatMap { $0.keys } }
+        (slots, slotCounts) = PaletteSlot.page(hexes, groups: groups, offersNew: !(s.projectID.flatMap { library.library.project($0)?.isLocked } ?? false) && search.isEmpty)
+        viewBar.refresh()
 
         if view.window?.firstResponder !== nameField.currentEditor() || nameField.currentEditor() == nil {
             committedName = s.name
@@ -496,7 +523,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         wcag.state = Prefs.showContrast ? .on : .off
         let isTarget = library.library.activeSwatchID == id
         var parts = [plural(s.entries.count, "Swatch", "Swatches")]
-        if !search.isEmpty { parts.append("\(hexes.count) Shown") }
+        if hexes.count != all.count { parts.append("\(hexes.count) Shown") }
         if s.custom { parts.append("Custom palette") }
         if isTarget { parts.append("Picks go here") }
         restSubtitle = parts.joined(separator: "  \u{00B7}  ")
@@ -529,7 +556,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         list.isHidden = !asList
         wcag.isHidden = asList   // the card's own extras; a row shows its values always
         labels.isHidden = asList
-        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew) }
+        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups) }
 
         sizeCards()
         grid.reloadData()
@@ -537,6 +564,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         empty.isHidden = !hexes.isEmpty || offersNew   // the blank swatch says what to do next
         empty.stringValue = !search.isEmpty ? "No swatches in this palette match \u{201C}\(search)\u{201D}."
+            : !all.isEmpty ? "No Swatches Here Are \u{201C}\(Prefs.paletteFilter.title)\u{201D}."
             : "No swatches yet.\n" + (Shortcuts.display(for: "togglePicking").map { "Press \($0) to pick" } ?? "Pick")
                 + " colours into this palette, or drop an image on the window."
     }
@@ -600,7 +628,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     }
 
     func reveal(_ hex: String) {
-        guard let i = hexes.firstIndex(of: hex) else { return }
+        guard let i = slots.firstIndex(of: .colour(hex)) else { return }
         grid.layoutSubtreeIfNeeded()
         grid.deselectAll(nil)
         grid.selectItems(at: [IndexPath(item: i, section: 0)], scrollPosition: .centeredVertically)
@@ -617,16 +645,23 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// The blank swatch that adds a colour follows the last one, unless the project is locked or a search is narrowing the page.
     private var offersNew: Bool { !(header.lock ?? false) && search.isEmpty }
 
-    func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { hexes.count + (offersNew ? 1 : 0) }
+    func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { slots.count }
+
+    func collectionView(_ cv: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at ip: IndexPath) -> NSView {
+        let view = cv.makeSupplementaryView(ofKind: kind, withIdentifier: GroupHeaderView.identifier, for: ip)
+        if let title = view as? GroupHeaderView, groups.indices.contains(ip.item) { title.label.stringValue = GroupHeaderView.text(groups[ip.item]) }
+        return view
+    }
 
     func collectionView(_ cv: NSCollectionView, itemForRepresentedObjectAt ip: IndexPath) -> NSCollectionViewItem {
-        if ip.item >= hexes.count {
+        guard slots.indices.contains(ip.item), case .colour(let hex) = slots[ip.item] else {
             let add = cv.makeItem(withIdentifier: AddCard.identifier, for: ip) as! AddCard
-            add.tile.onPress = { [weak self] in self?.library.newColour() }
+            var start: NewColourStart?
+            if slots.indices.contains(ip.item), case .add(let asked) = slots[ip.item] { start = asked }
+            add.tile.onPress = { [weak self] in self?.library.startColour(start) }
             return add
         }
         let card = cv.makeItem(withIdentifier: ColourCard.identifier, for: ip) as! ColourCard
-        let hex = hexes[ip.item]
         card.library = library
         card.configure(hex: hex, called: library.library.customName(of: hex, in: paletteID))
         card.onRename = { [weak self] name in
@@ -648,12 +683,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     }
 
     private func clicked(_ ip: IndexPath) {
-        guard ip.item < hexes.count else { return }
-        library.copy(hexes[ip.item])
+        guard slots.indices.contains(ip.item), let hex = slots[ip.item].key else { return }
+        library.copy(hex)
     }
 
     private func selected() -> [String] {
-        grid.selectionIndexPaths.sorted { $0.item < $1.item }.compactMap { $0.item < hexes.count ? hexes[$0.item] : nil }
+        grid.selectionIndexPaths.sorted { $0.item < $1.item }.compactMap { slots.indices.contains($0.item) ? slots[$0.item].key : nil }
     }
 
     private func copySelected() { library.copy(selected()) }

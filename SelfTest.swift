@@ -1512,6 +1512,37 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && NewColourSheet.read(.p3, ["255", "", ""], press: "").colour == vivid && NewColourSheet.read(.p3, ["255", "x", ""], press: "").problem == "Each value is a number."
           && NewColourSheet.read(.cmyk, ["0", "0", "0", "0"], press: "No Such Press").problem.contains("not on this Mac") && NewColourSheet.read(.hex, ["nope"], press: "").colour == nil,
           "and says what is wrong with a value out of range, a gap, a press that is not here, or a bad hex")
+    print("palette groups and filters")
+    var mixed = Library()
+    let mixedKeys = ["#FF0000", "#808080", "#0000FF", "#F2F2FF"].compactMap { mixed.addColour(ColourDefinition.of(hex: $0)!, at: t) }
+        + [mixed.addColour(vivid, at: t), ColourDefinition.cmyk([0.56, 0, 0, 0], press: PressProfiles.generic).flatMap { mixed.addColour($0, at: t) }, mixed.addColour(ColourDefinition.lab(52, 60, 40), at: t)].compactMap { $0 }
+    let screenOnly = ColourProfiles.starters[0], withPrint = ColourProfiles.starters[1]
+    let bySource = mixed.groups(of: mixedKeys, by: .source, profile: screenOnly)
+    check(mixedKeys.count == 7 && bySource.map { $0.title } == ["Hex (sRGB)", "Display P3", "CMYK: Generic CMYK", "Lab"] && bySource.map { $0.keys.count } == [4, 1, 1, 1]
+          && bySource[0].keys == Array(mixedKeys.prefix(4)) && bySource.flatMap { $0.keys }.sorted() == mixedKeys.sorted(),
+          "grouped by how they were captured: hex, Display P3, each press, Lab, every colour once and in its own order")
+    check(mixed.groups(of: mixedKeys, by: .none, profile: screenOnly).isEmpty && mixed.groups(of: [], by: .hue, profile: screenOnly).isEmpty,
+          "grouping by nothing, or an empty page, gives no groups")
+    let byHue = mixed.groups(of: Array(mixedKeys.prefix(4)), by: .hue, profile: screenOnly), byLight = mixed.groups(of: Array(mixedKeys.prefix(4)), by: .lightness, profile: screenOnly)
+    check(byHue.map { $0.title } == ["Reds", "Blues", "Neutrals"] && byHue[2].keys == ["#808080", "#F2F2FF"] && byLight.map { $0.title } == ["Light", "Mid", "Dark"] && byLight[0].keys == ["#F2F2FF"] && byLight[2].keys == ["#0000FF"],
+          "by hue in the order of the wheel with greys last; by lightness from light to dark")
+    let byRange = mixed.groups(of: ["#808080", "#0000FF"], by: .range, profile: withPrint)
+    check(byRange.map { $0.title } == ["In Range In Every Channel", "Out Of Range In At Least One Channel"] && byRange[1].keys == ["#0000FF"] && mixed.inRange("#0000FF", for: screenOnly),
+          "by range: a blue no press can print is out of range for a print profile and in range for a screen one")
+    mixed.setTags(ofColour: "#FF0000", ["brand"], at: t); mixed.setTags(ofColour: "#0000FF", ["accent", "zed"], at: t)
+    check(mixed.groups(of: Array(mixedKeys.prefix(3)), by: .tag, profile: screenOnly).map { $0.title } == ["#accent", "#brand", "Untagged"], "by tag: each colour under its first tag, untagged last")
+    check(mixed.shown(mixedKeys, filter: .beyondSRGB, profile: screenOnly) == [mixedKeys[4]] && mixed.shown(mixedKeys, filter: .withinSRGB, profile: screenOnly).count == 6
+          && mixed.shown(mixedKeys, filter: .all, profile: screenOnly) == mixedKeys && mixed.shown(["#808080", "#0000FF"], filter: .outOfRange, profile: withPrint) == ["#0000FF"],
+          "the filters: everything, what sRGB holds, what it cannot, and what the profile cannot")
+    let ownAdds = PaletteSlot.page(mixedKeys, groups: bySource, offersNew: true), oneAdd = PaletteSlot.page(Array(mixedKeys.prefix(4)), groups: byHue, offersNew: true)
+    check(bySource.map { $0.start?.kind } == [NewColourSheet.Kind.hex.rawValue, NewColourSheet.Kind.p3.rawValue, NewColourSheet.Kind.cmyk.rawValue, NewColourSheet.Kind.lab.rawValue]
+          && bySource[2].start?.press == PressProfiles.generic && ownAdds.counts == [5, 2, 2, 2] && ownAdds.slots[4] == .add(bySource[0].start) && ownAdds.slots.last == .add(bySource[3].start),
+          "grouped by how they were captured, every group ends with a blank swatch that starts a colour of its own kind, a build for its own press")
+    check(oneAdd.counts == [1, 1, 3] && oneAdd.slots.filter { $0.key == nil } == [.add(nil)] && PaletteSlot.page(mixedKeys, groups: bySource, offersNew: false).slots.count == 7
+          && PaletteSlot.page(["#FF0000"], groups: [], offersNew: true).slots == [.colour("#FF0000"), .add(nil)] && PaletteSlot.page([], groups: [], offersNew: true).counts.isEmpty,
+          "any other grouping, or none, has one blank swatch at the end; a locked page has none")
+    check(GroupHeaderView.text(bySource[0]) == "Hex (sRGB)  \u{00B7}  4", "a group's title carries its count")
+
     var pickLib = Library()
     let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
     pickLib.activeSwatchID = pickPalette

@@ -43,9 +43,14 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     private var kind: Kind { Kind(rawValue: kinds.selectedSegment) ?? .p3 }
 
     /// `palette` names where the colour is going, for the message; `done` is handed the colour to add.
-    init(palette: String?, press chosen: String, done: @escaping (ColourDefinition) -> Void) {
+    init(palette: String?, press chosen: String, start: NewColourStart? = nil, done: @escaping (ColourDefinition) -> Void) {
         self.done = done
         super.init(frame: .zero)
+        // Opens on the kind asked for, or the kind used last time.
+        let first = start?.kind ?? preferences.integer(forKey: "newColourKind")
+        kinds.selectedSegment = Kind(rawValue: first) != nil ? first : 0
+        shown = kind
+        let chosen = start?.press ?? chosen
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
@@ -232,13 +237,19 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     }
 
     private var shown = Kind.p3
-    @objc private func kindChanged() { if kind != shown { shown = kind; show() } }
+    @objc private func kindChanged() {
+        guard kind != shown else { return }
+        shown = kind
+        preferences.set(kind.rawValue, forKey: "newColourKind")
+        show()
+    }
     @objc private func valueChanged() { problem.stringValue = ""; update() }
     func controlTextDidChange(_ obj: Notification) { valueChanged() }
 
     @objc private func confirmTapped() {
         let result = typed
         guard let colour = result.colour else { problem.stringValue = result.problem; return }
+        preferences.set(kind.rawValue, forKey: "newColourKind")
         removeFromSuperview()
         done(colour)
     }

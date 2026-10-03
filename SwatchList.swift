@@ -40,27 +40,35 @@ final class SwatchListView: NSView {
     private let scroll = LetGoScrollView()
     private let stack = NSStackView()
     private var rows: [SwatchRow] = []
+    private var titles: [NSView] = []
+    private var shownGroups: [PaletteGroup] = []
     private var palette: UUID?
     /// Opens a colour's sheet: the colour, and whether on Notes (0) or History (1).
     var onOpen: ((String, Int) -> Void)?
-    /// The blank swatch under the last row was pressed.
-    var onAdd: (() -> Void)?
-    private let addTile = AddSwatchTile(radius: 10)
-    private let addRow = NSView()
+    /// A blank swatch was pressed: the page's one, or a group's own, which says what kind of colour to start.
+    var onAdd: ((NewColourStart?) -> Void)?
+    private var addRows: [NSView] = []
+    private var shownOffer = false
+
+    /// A row holding one blank swatch, the size of the swatch tiles above it.
+    private func addRow(_ start: NewColourStart?) -> NSView {
+        let row = NSView(), tile = AddSwatchTile(radius: 10)
+        tile.onPress = { [weak self] in self?.onAdd?(start) }
+        for v in [row, tile] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        row.addSubview(tile)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: SwatchListStyle.rowHeight),
+            tile.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            tile.topAnchor.constraint(equalTo: row.topAnchor),
+            tile.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            tile.widthAnchor.constraint(equalToConstant: SwatchListStyle.tileWidth),
+        ])
+        return row
+    }
 
     init(library: LibraryController) {
         self.library = library
         super.init(frame: .zero)
-        addTile.onPress = { [weak self] in self?.onAdd?() }
-        for v in [addRow, addTile] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        addRow.addSubview(addTile)
-        NSLayoutConstraint.activate([
-            addRow.heightAnchor.constraint(equalToConstant: SwatchListStyle.rowHeight),
-            addTile.leadingAnchor.constraint(equalTo: addRow.leadingAnchor),
-            addTile.topAnchor.constraint(equalTo: addRow.topAnchor),
-            addTile.bottomAnchor.constraint(equalTo: addRow.bottomAnchor),
-            addTile.widthAnchor.constraint(equalToConstant: SwatchListStyle.tileWidth),
-        ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = SwatchListStyle.rowGap
@@ -90,28 +98,50 @@ final class SwatchListView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Shows the colours in order. The same colours as before are refreshed where they stand.
-    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false) {
-        addRow.isHidden = !offersNew
-        if palette == self.palette, rows.map({ $0.hex }) == hexes, addRow.superview != nil {
+    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = []) {
+        if palette == self.palette, rows.map({ $0.hex }) == hexes, groups == shownGroups, offersNew == shownOffer, !stack.arrangedSubviews.isEmpty || !offersNew {
             rows.forEach { $0.refresh(locked: locked) }
             return
         }
         self.palette = palette
-        rows.forEach { $0.removeFromSuperview() }
-        rows = hexes.map { hex in
+        shownGroups = groups
+        shownOffer = offersNew
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        titles = []
+        addRows = []
+        let made = Dictionary(uniqueKeysWithValues: hexes.map { hex -> (String, SwatchRow) in
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
-            return row
-        }
-        for row in rows {
+            return (hex, row)
+        })
+        rows = hexes.compactMap { made[$0] }
+        // The same page the grid lays out: the colours group by group, with the blank swatches where they fall.
+        let page = PaletteSlot.page(hexes, groups: groups, offersNew: offersNew)
+        var starts: [Int: PaletteGroup] = [:]
+        var at = 0
+        for (group, count) in zip(groups, page.counts) { starts[at] = group; at += count }
+        for (i, slot) in page.slots.enumerated() {
+            if let group = starts[i] {
+                let title = NSTextField(labelWithString: GroupHeaderView.text(group))
+                title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
+                title.textColor = .secondaryLabelColor
+                if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(SwatchListStyle.rowGap + 10, after: last) }
+                stack.addArrangedSubview(title)
+                titles.append(title)
+            }
+            let row: NSView
+            switch slot {
+            case .colour(let hex):
+                guard let made = made[hex] else { continue }
+                made.refresh(locked: locked)
+                row = made
+            case .add(let start):
+                row = addRow(start)
+                addRows.append(row)
+            }
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            row.refresh(locked: locked)
         }
-        // The blank swatch always follows the last colour.
-        addRow.removeFromSuperview()
-        stack.addArrangedSubview(addRow)
-        addRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     func scrollToTop() {

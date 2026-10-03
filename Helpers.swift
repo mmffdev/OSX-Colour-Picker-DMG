@@ -504,7 +504,14 @@ final class GridLayout: NSCollectionViewLayout {
     /// Item width in, item height out.
     var height: (CGFloat) -> CGFloat = { $0 }
 
+    /// How many items each titled group holds, in order. Empty: one run with no titles. Each group
+    /// starts a new row under a title of its own; the counts must add up to the number of items.
+    var groupCounts: [Int] = []
+    var headerHeight: CGFloat = 0
+    static let headerKind = "groupHeader"
+
     private var frames: [NSRect] = []
+    private var headers: [NSRect] = []
     private var size = NSSize.zero
     private var width: CGFloat = 0
 
@@ -524,6 +531,23 @@ final class GridLayout: NSCollectionViewLayout {
         let h = height(w).rounded()
         let used = w * CGFloat(columns) + spacing * CGFloat(columns - 1)
         let left = max(0, floor((width - used) / 2))
+        headers = []
+        if !groupCounts.isEmpty, groupCounts.reduce(0, +) == count {
+            // Titled groups: each a title across the page, then its own rows.
+            frames = []
+            var y = margins.top
+            for n in groupCounts {
+                headers.append(NSRect(x: left, y: y, width: used, height: headerHeight))
+                y += headerHeight
+                for i in 0..<n {
+                    frames.append(NSRect(x: left + CGFloat(i % columns) * (w + spacing), y: y + CGFloat(i / columns) * (h + spacing), width: w, height: h))
+                }
+                let rows = CGFloat((n + columns - 1) / columns)
+                y += rows * h + max(0, rows - 1) * spacing + spacing
+            }
+            size = NSSize(width: width, height: y - spacing + margins.bottom)
+            return
+        }
         frames = (0..<count).map { i in
             NSRect(x: left + CGFloat(i % columns) * (w + spacing),
                    y: margins.top + CGFloat(i / columns) * (h + spacing), width: w, height: h)
@@ -540,8 +564,18 @@ final class GridLayout: NSCollectionViewLayout {
         return a
     }
 
+    private func header(_ i: Int) -> NSCollectionViewLayoutAttributes {
+        let a = NSCollectionViewLayoutAttributes(forSupplementaryViewOfKind: GridLayout.headerKind, with: IndexPath(item: i, section: 0))
+        a.frame = headers[i]
+        return a
+    }
+
     override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
-        frames.indices.filter { frames[$0].intersects(rect) }.map(attributes)
+        frames.indices.filter { frames[$0].intersects(rect) }.map(attributes) + headers.indices.filter { headers[$0].intersects(rect) }.map(header)
+    }
+
+    override func layoutAttributesForSupplementaryView(ofKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        kind == GridLayout.headerKind && headers.indices.contains(indexPath.item) ? header(indexPath.item) : nil
     }
 
     override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {

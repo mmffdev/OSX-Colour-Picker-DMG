@@ -805,13 +805,16 @@ final class LibraryController: NSObject {
     }
 
     /// Set by the window: shows the New Colour sheet for a palette, or for All Swatches when there is none.
-    var onNewColour: ((UUID?) -> Void)?
+    var onNewColour: ((UUID?, NewColourStart?) -> Void)?
 
     /// A colour typed in as P3, CMYK, Lab or hex: into the palette showing, or All Swatches.
-    @objc func newColour() {
+    @objc func newColour() { startColour(nil) }
+
+    /// `start` opens the sheet on one kind of colour: what a group's own blank swatch asks for.
+    func startColour(_ start: NewColourStart?) {
         var palette: UUID?
         if case .palette(let id)? = current, library.swatch(id)?.styles == nil { palette = id }
-        onNewColour?(palette)
+        onNewColour?(palette, start)
     }
 
     func add(colour definition: ColourDefinition, to palette: UUID?) {
