@@ -109,10 +109,13 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarOutlineView.trailingPad),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             strip.widthAnchor.constraint(equalToConstant: 36),
             strip.heightAnchor.constraint(equalToConstant: 12),
+            // The gear is the right-hand column every row shares; the project row's padlock sits on it.
+            gear.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            gear.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -192,15 +195,15 @@ final class ProjectHeaderCell: NSTableCellView {
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarOutlineView.trailingPad),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             // The plus sits on the title's own middle line, whatever height the button would take.
             add.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             add.widthAnchor.constraint(equalToConstant: 16),
             add.heightAnchor.constraint(equalToConstant: 16),
             lock.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            lock.widthAnchor.constraint(equalToConstant: 16),
-            lock.heightAnchor.constraint(equalToConstant: 16),
+            lock.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            lock.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -274,6 +277,9 @@ final class ThemedRowView: NSTableRowView {
 }
 
 final class SidebarOutlineView: NSOutlineView {
+    /// The right-hand column of icons (gears, padlocks) is this wide and this far from the edge on every row.
+    static let trailingIcon: CGFloat = 16
+    static let trailingPad: CGFloat = 4
     var onDeleteKey: (() -> Void)?
     /// Shift-F on a row.
     var onFavouriteKey: (() -> Void)?
