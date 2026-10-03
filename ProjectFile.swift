@@ -38,33 +38,17 @@ struct ProjectFile: Codable, Equatable {
     /// The file inside the package that holds the project.
     static let inner = "project.json"
 
-    /// Dates are written the readable way, to the millisecond, so a file reads back exactly.
-    private static let clock: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let plainClock = ISO8601DateFormatter()
-
+    /// Dates are kept as milliseconds since 1970: whole numbers, so a file reads back exactly as written.
     func data() throws -> Data {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .custom { date, encoder in
-            var c = encoder.singleValueContainer()
-            try c.encode(ProjectFile.clock.string(from: date))
-        }
+        e.dateEncodingStrategy = .millisecondsSince1970
         return try e.encode(self)
     }
 
     static func read(_ data: Data) throws -> ProjectFile {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .custom { decoder in
-            let s = try decoder.singleValueContainer().decode(String.self)
-            guard let date = clock.date(from: s) ?? plainClock.date(from: s) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a date: \(s)"))
-            }
-            return date
-        }
+        d.dateDecodingStrategy = .millisecondsSince1970
         return try d.decode(ProjectFile.self, from: data)
     }
 }

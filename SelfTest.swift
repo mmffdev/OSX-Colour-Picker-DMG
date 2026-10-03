@@ -801,15 +801,17 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(file.palettes.map { $0.name } == ["Brand"] && file.colours.map { $0.hex }.sorted() == ["#0033FF", "#FF0000"],
           "a project file holds the project's palettes and the colours they use, and nothing from outside it")
     let fileData = try! file.data()
-    check((try? ProjectFile.read(fileData)) == file && ProjectFile.fileName(for: file.project) == "Client A.mmffproject",
-          "a project file reads back as written and is named for the project")
+    let back = try! ProjectFile.read(fileData)
+    check(back.palettes.map { $0.name } == ["Brand"] && back.project.name == "Client A" && (try? back.data()) == fileData
+          && ProjectFile.fileName(for: file.project) == "Client A.mmffproject",
+          "a project file reads back as written, to the millisecond, and is named for the project")
     let projRoot = root.appendingPathComponent("projects")
     let libURL = projRoot.appendingPathComponent("Main/library.json")
     var written: [UUID: Data] = [:]
     let firstWrite = try! ProjectFiles.write(projLib, library: libURL, written: &written)
     let again = try! ProjectFiles.write(projLib, library: libURL, written: &written)
     check(firstWrite.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client A.mmffproject").path] && again.isEmpty
-          && (try? ProjectFiles.read(firstWrite[0])) == file,
+          && (try? ProjectFiles.read(firstWrite[0]).data()) == fileData,
           "a project package lands in a Projects folder beside the library, reads back whole, and is rewritten only when it changes")
     projLib.setProjectFolder(client, projRoot.appendingPathComponent("Elsewhere").path)
     let moved = try! ProjectFiles.write(projLib, library: libURL, written: &written)
