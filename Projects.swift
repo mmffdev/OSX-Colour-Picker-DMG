@@ -463,6 +463,16 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         guard let key = sender.identifier?.rawValue, let section = ProjectField.Section(rawValue: key) else { return }
         let saved = FormMemoryStore.load().records(for: section)
         let menu = NSMenu()
+        if section == .studio {
+            // The organisation set in Settings is always on offer here, ahead of what the form has remembered.
+            let organisation = ProjectField.tidy(Prefs.organisation)
+            let name = [ProjectField.ownerCompany, .ownerName].compactMap { organisation[$0.rawValue] }.first
+            let item = menu.addItem(withTitle: organisation.isEmpty ? "My Organisation (Not Set Yet: Settings, Organisation)" : "My Organisation" + (name.map { ": " + menuTitle($0) } ?? ""),
+                                    action: organisation.isEmpty ? nil : #selector(useOrganisation), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = !organisation.isEmpty
+            menu.addItem(.separator())
+        }
         if saved.isEmpty {
             let lead = FormMemory.lead(of: section).first?.title ?? "Name"
             menu.addItem(withTitle: "No Saved \(section.rawValue) Yet", action: nil, keyEquivalent: "").isEnabled = false
@@ -494,6 +504,14 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         guard let (section, record) = record(sender) else { return }
         show(FormMemoryStore.load().filling(values, with: record, in: section))
         say("Filled \(section.rawValue) from \(record.name).", good: true)
+    }
+
+    @objc private func useOrganisation() {
+        let organisation = ProjectField.tidy(Prefs.organisation)
+        guard !organisation.isEmpty else { return }
+        let record = FormMemory.SectionRecord(id: UUID(), name: "My Organisation", values: organisation, savedAt: Date())
+        show(FormMemory().filling(values, with: record, in: .studio))
+        say("Filled Studio from your organisation.", good: true)
     }
 
     @objc private func forgetSavedSection(_ sender: NSMenuItem) {
