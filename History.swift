@@ -161,6 +161,7 @@ func stepSymbol(for title: String) -> String {
     if t.hasPrefix("delete") { return "trash" }
     if t.hasPrefix("rename") { return "pencil" }
     if t.hasPrefix("describe") { return "text.alignleft" }
+    if t.contains("colour profile") { return "dial.medium" }
     if t.contains("star") { return "star" }
     if t.contains("tag") { return "tag" }
     if t.contains("pairing") || t.contains("typography") || t.contains("font") { return "textformat" }

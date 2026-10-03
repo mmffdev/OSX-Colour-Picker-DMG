@@ -100,7 +100,7 @@ extension Library {
     /// The profile a palette works to: its own, else its project's, else the house default, else the first on offer.
     /// A profile is read from the library's own copy, and from the house's when the library has none.
     func profile(forPalette id: UUID?, house: [ColourProfile], houseDefault: UUID?) -> (profile: ColourProfile, origin: ProfileOrigin) {
-        func find(_ id: UUID?) -> ColourProfile? { id.flatMap { want in profileRecord(want) ?? house.first { $0.id == want } } }
+        func find(_ id: UUID?) -> ColourProfile? { id.flatMap { newest($0, house: house) } }
         let palette = id.flatMap { swatch($0) }
         if let own = find(palette?.profile) { return (own, .palette) }
         if let projects = find(palette?.projectID.flatMap { project($0)?.profile }) { return (projects, .project) }
@@ -109,8 +109,16 @@ extension Library {
 
     /// The profile a project's palettes use by default.
     func profile(forProject id: UUID, house: [ColourProfile], houseDefault: UUID?) -> (profile: ColourProfile, origin: ProfileOrigin) {
-        if let want = project(id)?.profile, let found = profileRecord(want) ?? house.first(where: { $0.id == want }) { return (found, .project) }
+        if let want = project(id)?.profile, let found = newest(want, house: house) { return (found, .project) }
         return (houseDefault.flatMap { want in house.first { $0.id == want } } ?? house.first ?? ColourProfiles.starters[0], .house)
+    }
+
+    /// A profile by id: the library's own copy or the house's, whichever was changed later, so an
+    /// edit made in Settings shows at once and a library still works on a Mac that lacks the profile.
+    func newest(_ id: UUID, house: [ColourProfile]) -> ColourProfile? {
+        let mine = profileRecord(id), theirs = house.first { $0.id == id }
+        guard let a = mine, let b = theirs else { return mine ?? theirs }
+        return b.changedAt > a.changedAt ? b : a
     }
 
     /// A colour's full definition. One known only by its hex has the hex as its sRGB source.

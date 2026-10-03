@@ -502,6 +502,34 @@ final class LibraryController: NSObject {
         })
     }
 
+    // MARK: Colour profiles
+
+    /// The house's profiles, from Settings.
+    var houseProfiles: [ColourProfile] { ColourProfiles.load() }
+
+    /// Every profile on offer: the house's, then any this library uses that the house no longer has.
+    var offeredProfiles: [ColourProfile] {
+        let house = houseProfiles
+        return house + library.colourProfiles.filter { mine in !house.contains { $0.id == mine.id } }
+    }
+
+    func profile(forPalette id: UUID?) -> (profile: ColourProfile, origin: ProfileOrigin) {
+        library.profile(forPalette: id, house: houseProfiles, houseDefault: ColourProfiles.houseDefault)
+    }
+
+    func profile(forProject id: UUID) -> (profile: ColourProfile, origin: ProfileOrigin) {
+        library.profile(forProject: id, house: houseProfiles, houseDefault: ColourProfiles.houseDefault)
+    }
+
+    /// Gives a palette a profile of its own; nil goes back to its project's or the house's.
+    func setProfile(_ profile: ColourProfile?, ofPalette id: UUID) {
+        apply("Set Colour Profile") { $0.setProfile(profile, ofPalette: id) }
+    }
+
+    func setProfile(_ profile: ColourProfile?, ofProject id: UUID) {
+        apply("Set Colour Profile") { $0.setProfile(profile, ofProject: id) }
+    }
+
     /// A project's details are on its Overview page.
     func editProject(_ id: UUID) {
         guard library.project(id) != nil else { return }

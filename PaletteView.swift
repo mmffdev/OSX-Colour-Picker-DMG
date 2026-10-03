@@ -281,6 +281,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private let selecting = NSStackView()
     private var restSubtitle = ""
     private let sort = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// The colour profile this palette is proofed for: its own, or the one it inherits.
+    private let profile = NSPopUpButton(frame: .zero, pullsDown: false)
     private let spectrum = SpectrumView()
     private let grid = SwatchGridView()
     private let scroll = PagingScrollView()
@@ -378,7 +380,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         tagBar.isHidden = true
 
         // The shared header: the name has the top row to itself; under it, the count on the left and the actions on the right.
-        browsing.setViews([tagButton, star, target, copyAll, wcag, labels, sort], in: .leading)
+        profile.controlSize = .small
+        profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        profile.target = self
+        profile.action = #selector(profileChanged)
+        browsing.setViews([tagButton, star, target, copyAll, wcag, labels, profile, sort], in: .leading)
         browsing.spacing = 12
 
         sizeCards()
@@ -503,6 +509,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         target.contentTintColor = isTarget ? .controlAccentColor : .secondaryLabelColor
         target.toolTip = isTarget ? "New picks are added to this palette. Click to stop." : "Send new picks to this palette"
         sort.selectItem(at: [SortOrder.oldest, .newest, .colour].firstIndex(of: library.paletteSort) ?? 0)
+        fillProfiles(for: s)
 
         spectrum.hexes = hexes
 
@@ -547,6 +554,30 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// Takes the sheet down, keeping what was typed; used when the page goes elsewhere.
     func dismissSheet() {
         sheet?.finish()
+    }
+
+    /// The profile menu: first what the palette inherits, then every profile it could have of its own.
+    private func fillProfiles(for s: Swatch) {
+        let inherited = s.projectID.map { library.profile(forProject: $0) } ?? library.profile(forPalette: nil)
+        profile.removeAllItems()
+        profile.addItem(withTitle: (s.projectID == nil ? "House Profile: " : "Project Profile: ") + inherited.profile.name)
+        profile.menu?.addItem(.separator())
+        for p in library.offeredProfiles {
+            profile.addItem(withTitle: p.name)
+            profile.lastItem?.representedObject = p.id.uuidString
+            profile.lastItem?.toolTip = p.summary
+        }
+        let own = s.profile.flatMap { id in profile.itemArray.firstIndex { ($0.representedObject as? String) == id.uuidString } }
+        profile.selectItem(at: own ?? 0)
+        profile.isEnabled = !(header.lock ?? false)
+        let using = library.profile(forPalette: s.id).profile
+        profile.toolTip = "The colour profile this palette is proofed for: \(using.summary)"
+    }
+
+    @objc private func profileChanged() {
+        guard let id = paletteID else { return }
+        let chosen = (profile.selectedItem?.representedObject as? String).flatMap(UUID.init(uuidString:))
+        library.setProfile(chosen.flatMap { want in library.offeredProfiles.first { $0.id == want } }, ofPalette: id)
     }
 
     @objc private func showGrid() { setList(false) }

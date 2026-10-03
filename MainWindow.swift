@@ -602,7 +602,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     }
 
     @objc private func prefsChanged() {
-        if case .palette = selection { content.palette.reload() } else { content.all.reload() }
+        if case .palette = selection { content.palette.reload() } else if case .overview = selection { content.overview.reload() } else { content.all.reload() }
         content.restStatus()
     }
 

@@ -2,7 +2,7 @@
 
 The reference for the product's direction and its colour foundation. It records what Rick defined, what was proposed, the questions raised and the answers given, so the reasoning is never lost.
 
-**Status on 2026-10-03:** sections 1 and 2 are Rick's definition and are settled. Sections 3 to 9 are a proposed design, discussed and refined, **awaiting Rick's go**. Nothing in it is built.
+**Status on 2026-10-03:** sections 1 and 2 are Rick's definition. Rick approved the design the same day ("I agree with your findings. Build it"), adding that a palette selects a named profile because one project can need different options per palette. Section 8 says what is built and what is not.
 
 Backlog: runway PR-23, objective "Colour Management And Proofing". Ideas list: [scratch.md](scratch.md).
 
@@ -138,15 +138,46 @@ There is no such thing as "the CMYK value" of a colour. A CMYK figure means some
 ### 7.4 Pinned values
 A channel's worked-out value can be replaced by an approved one. An agency's signed-off CMYK build is rarely what a profile gives. The pinned value is what gets delivered; the proof still shows how far it sits from the master.
 
-## 8. Stages (proposed)
+## 7.5 Colour profiles: where the options are captured
 
-| Stage | Delivers | Visible |
+Added by Rick on approval. Options are captured once, as high up as they make sense, and flow down.
+
+| Level | Holds | Where |
 |---|---|---|
-| 1 | The master colour record; existing colours carried over or started clean; files and sync on the new record; self-tests | Nothing changes, by design |
-| 2 | The picker keeps wide gamut; importing ASE, ACO, GPL and CLR keeps the values those files carry | Truer picks; existing libraries come in |
-| 3 | Channels and proofs on every swatch; rendering intents; the Gamut tool | The first enterprise feature |
-| 4 | Print conditions, ink reporting, pinned values, approval status | Sign-off |
-| 5 | Delivery per channel: print swatches, LUT, OCIO, spec sheet, each at its own bit depth | Handover |
+| **House** | The studio's named profiles, and which is the default | Settings, Colour |
+| **Project** | The profile its palettes work to | The project's Overview page, on the action bar |
+| **Palette** | A profile of its own, when it differs from its project's | The palette's action bar |
+| **Delivery** | Format and bit depth | At export (not built) |
+
+A **colour profile** is a named set of channels: screen, video and rendering spaces, and at most one print condition (a press profile and a rendering intent). Five come with the app: Screen And Web, Print, Video, Rendering And Effects, Every Channel. A profile in use is copied into the library and into the project's file, so both stay whole when they travel. An edit in Settings shows at once, because the newer copy is the one used.
+
+## 8. Stages
+
+| Stage | Delivers | State on 2026-10-03 |
+|---|---|---|
+| 1 | The master colour record; existing colours carried over; files and sync on the new record; self-tests | **Half built.** The engine and the record exist and every colour has a master. The colour's identity is still its hex (see below) |
+| 2 | The picker keeps wide gamut; importing ASE, ACO, GPL and CLR keeps the values those files carry | Not built. Waits on the identity change |
+| 3 | Channels and proofs on every swatch; rendering intents; the Gamut tool | **Built:** profiles, and the Channels view in every swatch's sheet. The Gamut tool is still paused |
+| 4 | Print conditions, ink reporting, pinned values, approval status | **Part built:** press profile and intent per profile, total ink shown. No ink limit warning, no pinned values, no approval |
+| 5 | Delivery per channel: print swatches, LUT, OCIO, spec sheet, each at its own bit depth | Not built |
+
+### What is built (2026-10-03)
+
+- **The colour engine** (`ColourEngine.swift`): the master in XYZ (D50), 64-bit; exact conversion to and from sRGB, Display P3, Adobe RGB, Rec. 709, Rec. 2020 and ACEScg by matrix maths with Bradford adaptation; Lab (D50); the CIEDE2000 difference, checked against published figures; press profiles read from the Mac and run through the system's engine; a rendering per channel with its value, difference and range.
+- **Existing colours carried over without rewriting anything.** A colour known by its hex has that hex as its sRGB source; its master is worked out from it. No library file changed.
+- **Colour profiles** (`ColourProfiles.swift`), section 7.5: house, project and palette levels, kept in the library and the project file, with sync rules.
+- **The Channels view:** a swatch's sheet lists its source, master, kind and profile, then every channel with the master and the channel's colour side by side, the value, the difference and In Range or Out Of Range.
+- **Settings, Colour:** make, name, duplicate and delete profiles; tick their channels; choose the press profile and intent; choose the house default.
+- Light colours above white are held whole in ACEScg; the engine is ready for them, though nothing in the app can make one yet.
+
+### What is not built, and why it matters
+
+- **The colour's identity is still its hex.** This is the second half of stage 1 and the largest single change: about 280 references in 22 files. Until it is done, a colour outside sRGB cannot be stored, so wide-gamut picking, typed CMYK or Lab colours, and imports that keep their values all wait on it. Every colour in the app today is therefore inside sRGB, and the screen and video channels all read "In Range". Print is the channel that already tells you something new.
+- **Black point compensation is off.** Asked for through the system's engine it put ink on pure white, which is wrong. It needs a route that can be trusted.
+- **Absolute colorimetric is not offered.** The system's engine will not run it from a master. It needs the paper white read from the profile itself.
+- **Video code values are full range.** Broadcast legal range (64 to 940) is not offered yet.
+- **The naive CMYK row on cards is still there.** Section 7.3 says it goes; it has not gone yet.
+- **Press profiles are not shipped with the app.** The app uses what is on the Mac: the system's Generic CMYK, and Adobe's set when Adobe apps are installed (FOGRA39, GRACoL, SWOP and others).
 
 **Paused work.** A Gamut tool was started on 2026-10-03 before this design existed: the CIE 1931 chromaticity diagram, gamut triangles for sRGB, Display P3, Adobe RGB and Rec. 2020, a palette plotted on it, and a print-shift check using ΔE 2000. It is kept in a git stash named "Gamut tool, paused 2026-10-03", with two self-tests failing. It returns at stage 3, rebuilt on the master colour.
 
@@ -154,9 +185,9 @@ A channel's worked-out value can be replaced by an approved one. An agency's sig
 
 | # | Decision | Recommendation |
 |---|---|---|
-| 1 | The master: XYZ (D50) in float, source kept, spectral optional, surface or light | Yes |
-| 2 | Bit depth chosen per delivery, never stored | Yes |
-| 3 | Existing palettes: convert them or start clean | Convert; it is cheap. Projects, their form data and the organisation details stay either way |
+| 1 | The master: XYZ (D50) in float, source kept, spectral optional, surface or light | **Agreed by Rick, 2026-10-03** |
+| 2 | Bit depth chosen per delivery, never stored | **Agreed by Rick, 2026-10-03** |
+| 3 | Existing palettes: convert them or start clean | **Agreed: convert.** Done without rewriting any file |
 | 4 | Which press profiles first | FOGRA39 and FOGRA51 for Europe, GRACoL and SWOP for the US. To be set by the presses Rick's network runs |
 | 5 | Reference libraries (Pantone, RAL, NCS, Toyo) | Match against libraries the user supplies, until licensing is looked into |
 | 6 | What a LUT made from a palette does | To be defined. One suggestion: a creative "palette look", clearly labelled as not a technical conversion |
@@ -180,6 +211,8 @@ A channel's worked-out value can be replaced by an approved one. An agency's sig
 | 3 | CMYK is not a single target: profile, total ink limit, black generation | Half: profile yes, ink and black no | Section 7.3 |
 | 4 | White point matters; standardise and be consistent | Half: stated vaguely | Section 4, "White point" |
 | 5 | Precision: 16-bit integer or 32-bit float | Yes | Section 4, "Precision": 64-bit float, exact in text files |
+
+**Approval.** Asked how the options would be captured, Claude proposed capturing each once at the highest level that makes sense: house, project, colour, delivery. Rick agreed and added that a project can need different options per palette, so a palette selects a named profile (section 7.5). He approved the design and said to build it.
 
 **Earlier "no" notes.** Notes in the old scratch file said no to Pantone and RAL matching, to `.cube` export and left CMYK naive. Those were Claude's own calls in the first v3 build on 2026-10-01, never Rick's rulings. Under the product definition all three are open and wanted.
 

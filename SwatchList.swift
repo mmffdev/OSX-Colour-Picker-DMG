@@ -112,6 +112,7 @@ final class SwatchRow: NSView {
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
     private lazy var edit = toolButton("Edit Notes", "pencil", "Write Notes On This Colour", target: self, action: #selector(editTapped))
+    private lazy var channels = toolButton("Channels", "dial.medium", "See This Colour's Value And Fidelity In Each Channel Of The Palette's Profile", target: self, action: #selector(channelsTapped))
     private lazy var history = toolButton("History", "clock.arrow.circlepath", "See What Happened To This Colour In This Palette", target: self, action: #selector(historyTapped))
     private let note = NSTextField(wrappingLabelWithString: "")
 
@@ -140,7 +141,7 @@ final class SwatchRow: NSView {
         info.alignment = .leading
         info.spacing = 6
 
-        let bar = NSStackView(views: [edit, history])
+        let bar = NSStackView(views: [edit, channels, history])
         bar.orientation = .horizontal
         bar.spacing = PageStyle.barSpacing
 
@@ -196,7 +197,8 @@ final class SwatchRow: NSView {
 
     @objc private func copyTapped() { library?.copy(hex) }
     @objc private func editTapped() { onOpen?(0) }
-    @objc private func historyTapped() { onOpen?(1) }
+    @objc private func channelsTapped() { onOpen?(1) }
+    @objc private func historyTapped() { onOpen?(2) }
 }
 
 // ---------- The swatch's sheet ----------
@@ -216,7 +218,9 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
     private let panel = SheetPanel()
     private let name = NSTextField(labelWithString: "")
     private let swatch = NSView()
-    private let tabs = ToggleBar(labels: ["Notes", "History"])
+    private let tabs = ToggleBar(labels: ["Notes", "Channels", "History"])
+    private let proofs = NSStackView()
+    private let proofsScroll = LetGoScrollView()
     private lazy var play = toolButton("Play Back", "play.fill", "Walk Through What Happened To This Colour, Oldest First", target: self, action: #selector(playTapped))
     private lazy var done = toolButton("Done", "checkmark", "Keep The Notes And Close (\u{2318}Return)", target: self, action: #selector(doneTapped))
     private lazy var cancel = toolButton("Cancel", "xmark", "Close Without Keeping Changes (Escape)", target: self, action: #selector(cancelTapped))
@@ -302,6 +306,26 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
         stepsScroll.autohidesScrollers = true
         stepsScroll.drawsBackground = false
 
+        proofs.orientation = .vertical
+        proofs.alignment = .leading
+        proofs.spacing = 14
+        let proofPage = FlippedView()
+        proofPage.addSubview(proofs)
+        proofsScroll.documentView = proofPage
+        proofsScroll.hasVerticalScroller = true
+        proofsScroll.autohidesScrollers = true
+        proofsScroll.drawsBackground = false
+        for v in [proofs, proofPage] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        NSLayoutConstraint.activate([
+            proofPage.topAnchor.constraint(equalTo: proofsScroll.contentView.topAnchor),
+            proofPage.leadingAnchor.constraint(equalTo: proofsScroll.contentView.leadingAnchor),
+            proofPage.trailingAnchor.constraint(equalTo: proofsScroll.contentView.trailingAnchor),
+            proofs.topAnchor.constraint(equalTo: proofPage.topAnchor, constant: 2),
+            proofs.leadingAnchor.constraint(equalTo: proofPage.leadingAnchor),
+            proofs.trailingAnchor.constraint(equalTo: proofPage.trailingAnchor),
+            proofs.bottomAnchor.constraint(equalTo: proofPage.bottomAnchor),
+        ])
+
         lockNote.stringValue = locked ? "The project is locked. Unlock it to change these notes." : "Return starts a new line. \u{2318}Return keeps the notes."
         let lockSpacer = NSView()
         lockSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
@@ -312,7 +336,7 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
         foot.spacing = PageStyle.barSpacing
 
         addSubview(panel)
-        let parts: [NSView] = [name, swatch, values, bar, textBox, stepsScroll, none, foot]
+        let parts: [NSView] = [name, swatch, values, bar, textBox, proofsScroll, stepsScroll, none, foot]
         for v in parts + [panel, textScroll, steps, page] { v.translatesAutoresizingMaskIntoConstraints = false }
         parts.forEach { panel.addSubview($0) }
         let s = SwatchListStyle.self, pad = s.sheetPad
@@ -351,7 +375,7 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
             steps.trailingAnchor.constraint(equalTo: page.trailingAnchor),
             steps.bottomAnchor.constraint(equalTo: page.bottomAnchor),
         ])
-        for box in [textBox, stepsScroll] as [NSView] {
+        for box in [textBox, proofsScroll, stepsScroll] as [NSView] {
             NSLayoutConstraint.activate([
                 box.leadingAnchor.constraint(equalTo: name.leadingAnchor),
                 box.trailingAnchor.constraint(equalTo: name.trailingAnchor),
@@ -360,9 +384,92 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
             ])
         }
         fillSteps()
+        fillProofs()
         showTab()
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The colour in every channel of the palette's profile: the value to use, how far it sits
+    /// from the master, and whether the channel can show it at all.
+    private func fillProofs() {
+        guard let library = library, let definition = library.library.definition(of: hex) else { return }
+        proofs.views.forEach { $0.removeFromSuperview() }
+        let using = library.profile(forPalette: palette)
+        let from = using.origin == .palette ? "This Palette's Own" : using.origin == .project ? "From The Project" : "The House Profile"
+        func fact(_ label: String, _ value: String) -> NSView {
+            let l = caption(label.uppercased().padding(toLength: 9, withPad: " ", startingAt: 0) + value)
+            l.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
+            l.isSelectable = true
+            return l
+        }
+        let facts = NSStackView(views: [fact("Source", definition.sourceText), fact("Master", definition.masterText),
+                                        fact("Kind", definition.kind == .surface ? "Surface: ink or paint, seen by the light that falls on it" : "Light: emitted, with a brightness of its own"),
+                                        fact("Profile", "\(using.profile.name)  (\(from))")])
+        facts.orientation = .vertical
+        facts.alignment = .leading
+        facts.spacing = 2
+        proofs.addArrangedSubview(facts)
+        if using.profile.channels.isEmpty {
+            proofs.addArrangedSubview(caption("This profile has no channels. Add some in Settings, under Colour.", size: TextSize.body))
+        }
+        for channel in using.profile.channels {
+            let row = proofRow(Rendering.of(definition, in: channel), master: definition.master)
+            proofs.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: proofs.widthAnchor).isActive = true
+        }
+    }
+
+    /// One channel: the master beside what the channel gives, its name, the value, and the verdict.
+    private func proofRow(_ r: Rendering, master: XYZ) -> NSView {
+        func chip(_ colour: NSColor?, _ tip: String) -> NSView {
+            let v = NSView()
+            v.wantsLayer = true
+            v.layer?.backgroundColor = (colour ?? .clear).cgColor
+            v.layer?.borderWidth = 0.5
+            v.layer?.borderColor = NSColor.black.withAlphaComponent(0.3).cgColor
+            v.toolTip = tip
+            v.translatesAutoresizingMaskIntoConstraints = false
+            v.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            v.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            return v
+        }
+        // The master and the channel's colour side by side, touching, so a shift shows as an edge between them.
+        let pair = NSStackView(views: [chip(master.display, "The Master, As This Screen Shows It"), chip(r.shown?.display, "What This Channel Gives")])
+        pair.spacing = 0
+        let title = NSTextField(labelWithString: r.channel.name)
+        title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
+        title.lineBreakMode = .byTruncatingTail
+        let detail = caption(r.detail)
+        detail.lineBreakMode = .byTruncatingTail
+        let names = NSStackView(views: [title, detail])
+        names.orientation = .vertical
+        names.alignment = .leading
+        names.spacing = 1
+        // The names take the spare width, so every row's name starts on one left edge beside its chips.
+        names.setHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        names.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        let value = NSTextField(labelWithString: r.value ?? "No Value")
+        value.font = NSFont.monospacedSystemFont(ofSize: TextSize.body, weight: .regular)
+        value.textColor = r.value == nil ? .tertiaryLabelColor : .labelColor
+        value.alignment = .right
+        value.isSelectable = true
+        let verdict = caption(r.difference.map { String(format: "\u{0394}E %.1f", $0) + (r.inRange ? "  \u{00B7}  In Range" : "  \u{00B7}  Out Of Range") } ?? "Not Worked Out")
+        verdict.alignment = .right
+        verdict.textColor = r.inRange ? .secondaryLabelColor : .systemOrange
+        let figures = NSStackView(views: [value, verdict])
+        figures.orientation = .vertical
+        figures.alignment = .trailing
+        figures.spacing = 1
+        figures.setHuggingPriority(.required, for: .horizontal)
+        figures.setClippingResistancePriority(.required, for: .horizontal)
+        let row = NSStackView(views: [pair, names, figures])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
 
     /// Lays the sheet over the whole window and centres its panel on `page`, the full height of it.
     func present(over page: NSView) {
@@ -442,11 +549,13 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
     }
 
     private func showTab() {
-        let history = tabs.selectedSegment == 1
-        textBox.isHidden = history
+        let notes = tabs.selectedSegment == 0, history = tabs.selectedSegment == 2
+        textBox.isHidden = !notes
+        proofsScroll.isHidden = tabs.selectedSegment != 1
         stepsScroll.isHidden = !history || lines.isEmpty
         none.isHidden = !history || !lines.isEmpty
         play.isHidden = !history
+        lockNote.isHidden = !notes
     }
 
     private func fillSteps() {

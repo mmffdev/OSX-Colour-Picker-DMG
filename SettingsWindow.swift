@@ -591,6 +591,144 @@ final class OrganisationPanel: SettingsPanel, NSTextFieldDelegate {
     }
 }
 
+// MARK: Colour
+
+/// The house's colour profiles: named sets of channels a project or a palette is proofed for.
+/// Every change is kept as it is made.
+final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
+    private var profiles: [ColourProfile] = []
+    private var selected: UUID?
+    private lazy var picker = popup([], #selector(picked))
+    private let nameField = NSTextField()
+    private var spaceChecks: [(space: RGBSpace, box: NSButton)] = []
+    private lazy var printCheck = check("Print, through a press profile", #selector(changed))
+    private lazy var press = popup(PressProfiles.all.map { $0.name }, #selector(changed))
+    private lazy var intent = popup(RenderingIntent.allCases.map { $0.name }, #selector(changed))
+    private lazy var houseDefault = check("Use for palettes and projects with no profile of their own", #selector(defaultChanged))
+    private lazy var remove = button("Delete", #selector(deleteTapped))
+
+    override func rows() -> [[NSView]] {
+        nameField.delegate = self
+        spaceChecks = RGBSpace.allCases.map { ($0, check("\($0.name): \($0.about)", #selector(changed))) }
+        var out: [[NSView]] = [
+            [heading("Colour Profiles"), blank],
+            [label("Profile:"), row([picker, button("New", #selector(newTapped)), button("Duplicate", #selector(duplicateTapped)), remove])],
+            [label("Name:"), nameField],
+            [blank, houseDefault],
+            [heading("Channels"), blank],
+        ]
+        var lastChannel = ""
+        for (space, box) in spaceChecks {
+            out.append([space.channel == lastChannel ? blank : label(space.channel + ":"), box])
+            lastChannel = space.channel
+        }
+        out += [
+            [label("Print:"), printCheck],
+            [label("Press profile:"), press],
+            [label("Rendering intent:"), intent],
+            [blank, note("A profile is the set of channels a piece of work is delivered to. A project picks one on its Overview page and a palette can pick its own. Each swatch then shows, under Channels, the value to use in every channel and how far it sits from the master colour. Press profiles are the ICC files on this Mac. Relative colorimetric keeps a colour that is in range exactly as it is, which is what a brand colour needs.")],
+        ]
+        return out
+    }
+
+    override func refresh() {
+        profiles = ColourProfiles.load()
+        if selected == nil || !profiles.contains(where: { $0.id == selected }) { selected = ColourProfiles.houseDefault ?? profiles.first?.id }
+        if !profiles.contains(where: { $0.id == selected }) { selected = profiles.first?.id }
+        show()
+    }
+
+    private var current: Int? { profiles.firstIndex { $0.id == selected } }
+
+    private func show() {
+        picker.removeAllItems()
+        picker.addItems(withTitles: profiles.map { $0.name })
+        guard let i = current else { return }
+        picker.selectItem(at: i)
+        let p = profiles[i]
+        if nameField.currentEditor() == nil { nameField.stringValue = p.name }
+        for (space, box) in spaceChecks { box.state = p.holds(space.rawValue) ? .on : .off }
+        printCheck.state = p.print != nil ? .on : .off
+        let chosenPress = p.print?.press ?? PressProfiles.generic
+        if press.itemTitles.contains(chosenPress) { press.selectItem(withTitle: chosenPress) }
+        intent.selectItem(at: RenderingIntent.allCases.firstIndex(of: p.print?.intent ?? .relative) ?? 0)
+        press.isEnabled = p.print != nil
+        intent.isEnabled = p.print != nil
+        houseDefault.state = (ColourProfiles.houseDefault ?? profiles.first?.id) == p.id ? .on : .off
+        remove.isEnabled = profiles.count > 1
+    }
+
+    /// Writes the profiles and tells the pages, which show their proofs afresh.
+    private func keep() {
+        try? ColourProfiles.save(profiles)
+        NotificationCenter.default.post(name: .prefsDidChange, object: nil)
+    }
+
+    @objc private func picked() {
+        view.window?.makeFirstResponder(nil)
+        if profiles.indices.contains(picker.indexOfSelectedItem) { selected = profiles[picker.indexOfSelectedItem].id }
+        show()
+    }
+
+    @objc private func changed() {
+        guard let i = current else { return }
+        var channels = spaceChecks.filter { $0.box.state == .on }.map { ProfileChannel(space: $0.space.rawValue) }
+        if printCheck.state == .on {
+            channels.append(ProfileChannel(space: ProfileChannel.print, press: press.titleOfSelectedItem ?? PressProfiles.generic,
+                                           intent: RenderingIntent.allCases[max(intent.indexOfSelectedItem, 0)]))
+        }
+        profiles[i].channels = channels
+        profiles[i].changedAt = Date()
+        keep()
+        show()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let i = current else { return }
+        let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, typed != profiles[i].name else { nameField.stringValue = profiles[i].name; return }
+        profiles[i].name = typed
+        profiles[i].changedAt = Date()
+        keep()
+        show()
+    }
+
+    @objc private func defaultChanged() {
+        guard let i = current else { return }
+        // There is always a default: unticking the one that is it leaves it ticked.
+        ColourProfiles.houseDefault = profiles[i].id
+        keep()
+        show()
+    }
+
+    private func add(_ profile: ColourProfile) {
+        view.window?.makeFirstResponder(nil)
+        profiles.append(profile)
+        selected = profile.id
+        keep()
+        show()
+        view.window?.makeFirstResponder(nameField)
+    }
+
+    @objc private func newTapped() {
+        add(ColourProfile(id: UUID(), name: uniqueName("New Profile", among: profiles.map { $0.name }), channels: [ProfileChannel(space: RGBSpace.srgb.rawValue)], changedAt: Date()))
+    }
+
+    @objc private func duplicateTapped() {
+        guard let i = current else { return }
+        add(ColourProfile(id: UUID(), name: uniqueName(profiles[i].name + " Copy", among: profiles.map { $0.name }), channels: profiles[i].channels, changedAt: Date()))
+    }
+
+    @objc private func deleteTapped() {
+        guard let i = current, profiles.count > 1 else { return }
+        let gone = profiles.remove(at: i).id
+        if ColourProfiles.houseDefault == gone { ColourProfiles.houseDefault = profiles.first?.id }
+        selected = profiles[min(i, profiles.count - 1)].id
+        keep()
+        show()
+    }
+}
+
 // MARK: History
 
 final class HistoryPanel: SettingsPanel {
@@ -659,6 +797,7 @@ final class SettingsWindowController: NSWindowController {
         panels = [
             GeneralPanel(library: library, title: "General", icon: "gearshape"),
             OrganisationPanel(library: library, title: "Organisation", icon: "building.2"),
+            ColourPanel(library: library, title: "Colour", icon: "dial.medium"),
             AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
             ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
             ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),

@@ -12,6 +12,8 @@ final class OverviewViewController: NSViewController {
     private let library: LibraryController
     private let header = PageHeader()
     private let host = NSView()
+    /// The colour profile the project's palettes work to, unless one has its own.
+    private let profile = NSPopUpButton(frame: .zero, pullsDown: false)
     private var form: ProjectFormController?
     private(set) var projectID: UUID?
     /// What the form on show was built from; a change to any of it builds the form afresh.
@@ -26,6 +28,11 @@ final class OverviewViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
+        profile.controlSize = .small
+        profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        profile.target = self
+        profile.action = #selector(profileChanged)
+        header.bar.addArrangedSubview(profile)
         for v in [header, host] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(v) }
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -37,6 +44,28 @@ final class OverviewViewController: NSViewController {
             host.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             host.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+    }
+
+    private func fillProfiles(for project: Project) {
+        let house = library.profile(forPalette: nil)
+        profile.removeAllItems()
+        profile.addItem(withTitle: "House Profile: " + house.profile.name)
+        profile.menu?.addItem(.separator())
+        for p in library.offeredProfiles {
+            profile.addItem(withTitle: p.name)
+            profile.lastItem?.representedObject = p.id.uuidString
+            profile.lastItem?.toolTip = p.summary
+        }
+        let own = project.profile.flatMap { id in profile.itemArray.firstIndex { ($0.representedObject as? String) == id.uuidString } }
+        profile.selectItem(at: own ?? 0)
+        profile.isEnabled = !project.isLocked
+        profile.toolTip = "The colour profile this project's palettes are proofed for: \(library.profile(forProject: project.id).profile.summary)"
+    }
+
+    @objc private func profileChanged() {
+        guard let id = projectID else { return }
+        let chosen = (profile.selectedItem?.representedObject as? String).flatMap(UUID.init(uuidString:))
+        library.setProfile(chosen.flatMap { want in library.offeredProfiles.first { $0.id == want } }, ofProject: id)
     }
 
     func show(_ id: UUID) {
@@ -53,6 +82,7 @@ final class OverviewViewController: NSViewController {
         header.setProject(project.name) { [weak self] in self?.library.onRevealProject?(id) }
         header.striped = true
         header.lock = project.isLocked
+        fillProfiles(for: project)
 
         // The form is left alone while what it shows is unchanged, so typing is not lost to an unrelated change.
         let now = Built(id: id, name: project.name, details: project.details ?? [:], locked: project.isLocked)
