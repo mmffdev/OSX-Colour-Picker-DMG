@@ -1557,6 +1557,17 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && HistogramType.cmyk.warnings(for: [2, 50, 96, 0]) == ["Cyan In White Out", "Yellow In Black"],
           "a channel outside the safe range is named with the zone it is in: black and white out for a screen, dot loss and fill-in for a press")
 
+    check(HistogramType.offered.map { $0.title } == ["RGB", "HSL", "HSV", "CMYK", "P3", "Adobe", "BT.2020", "L*a*b*"] && Set(HistogramType.offered) == Set(HistogramType.allCases)
+          && HistogramType.allCases.allSatisfy { $0.channels.count == $0.ranges.count && $0.channels.count == $0.colours.count && $0.values(of: "#4F8093")?.count == $0.channels.count },
+          "every set of values a card shows has a histogram, in the order of the card's rows")
+    let labSpread = Histogram.counts(of: ["#8E00E9"], as: .lab), hueSpread = Histogram.counts(of: ["#4F8093"], as: .hsl)
+    check(HistogramType.hsl.values(of: "#4F8093") == [197, 30, 44] && HistogramType.hsv.values(of: "#4F8093") == [197, 46, 58] && HistogramType.lab.values(of: "#8E00E9") == [40, 73, -83]
+          && hueSpread[0].count == 361 && hueSpread[0][197] == 1 && labSpread[1].count == 256 && labSpread[1][73 + 128] == 1 && labSpread[2][-83 + 128] == 1,
+          "their values are the numbers on the card, counted on each channel's own scale; a* and b* run below nothing")
+    check(HistogramType.lab.place(-128, in: 1) == 0 && HistogramType.lab.place(127, in: 2) == 1 && HistogramType.hsl.place(180, in: 0) == 0.5 && HistogramType.rgb.place(999, in: 0) == 1
+          && HistogramType.hsl.safe == nil && HistogramType.lab.warnings(for: [0, -128, 127]).isEmpty && HistogramType.p3.warnings(for: [255, 128, 128]) == ["Red In White Out"],
+          "each value is placed along its own scale; hue, saturation, lightness and Lab have no unsafe ends, the RGB spaces all do")
+
     var pickLib = Library()
     let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
     pickLib.activeSwatchID = pickPalette

@@ -9,52 +9,133 @@ import AppKit
 // spikes which coincide go white, as an image editor's "Colours" histogram does. Split, each
 // channel has a strip of its own, one under the other.
 
+/// Every set of values a card can show has a histogram. (Hex is the RGB values written in base 16,
+/// so RGB is its histogram.) The raw values are kept in preferences, so new kinds go at the end.
 enum HistogramType: Int, CaseIterable {
-    case rgb, cmyk
+    case rgb, cmyk, hsl, hsv, p3, adobeRGB, rec2020, lab
 
-    var title: String { self == .rgb ? "RGB" : "CMYK" }
-    var channels: [String] { self == .rgb ? ["Red", "Green", "Blue"] : ["Cyan", "Magenta", "Yellow", "Black"] }
-    /// The top of the scale as its users write it.
-    var top: Int { self == .rgb ? 255 : 100 }
-    var bins: Int { top + 1 }
-    var colours: [NSColor] {
-        self == .rgb
-            ? [NSColor(srgbRed: 1, green: 0.22, blue: 0.16, alpha: 1), NSColor(srgbRed: 0.25, green: 0.9, blue: 0.25, alpha: 1), NSColor(srgbRed: 0.2, green: 0.35, blue: 1, alpha: 1)]
-            : [NSColor(srgbRed: 0, green: 0.75, blue: 0.95, alpha: 1), NSColor(srgbRed: 0.95, green: 0.1, blue: 0.6, alpha: 1), NSColor(srgbRed: 1, green: 0.9, blue: 0.1, alpha: 1), NSColor(white: 0.72, alpha: 1)]
+    /// The order they are offered in: the order of a card's rows.
+    static let offered: [HistogramType] = [.rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab]
+
+    var title: String {
+        switch self {
+        case .rgb: return "RGB"
+        case .cmyk: return "CMYK"
+        case .hsl: return "HSL"
+        case .hsv: return "HSV"
+        case .p3: return "P3"
+        case .adobeRGB: return "Adobe"
+        case .rec2020: return "BT.2020"
+        case .lab: return "L*a*b*"
+        }
     }
 
-    /// The safe range. Outside it detail is lost: on a screen or in video, values under 16 crush to
-    /// black and over 235 blow out to white; on a press, a dot under 3% does not hold and the paper
-    /// shows through, and over 95% the dots fill in to solid.
-    var safe: ClosedRange<Int> { self == .rgb ? 16...235 : 3...95 }
+    var channels: [String] {
+        switch self {
+        case .rgb, .p3, .adobeRGB, .rec2020: return ["Red", "Green", "Blue"]
+        case .cmyk: return ["Cyan", "Magenta", "Yellow", "Black"]
+        case .hsl: return ["Hue", "Saturation", "Lightness"]
+        case .hsv: return ["Hue", "Saturation", "Value"]
+        case .lab: return ["L*", "a*", "b*"]
+        }
+    }
+
+    /// Each channel's scale as its users write it: 0 to 255, 0 to 360 degrees, 0 to 100 percent, -128 to 127.
+    var ranges: [ClosedRange<Int>] {
+        switch self {
+        case .rgb, .p3, .adobeRGB, .rec2020: return [0...255, 0...255, 0...255]
+        case .cmyk: return [0...100, 0...100, 0...100, 0...100]
+        case .hsl, .hsv: return [0...360, 0...100, 0...100]
+        case .lab: return [0...100, -128...127, -128...127]
+        }
+    }
+
+    /// The scales in words, for the bar.
+    var scale: String {
+        switch self {
+        case .rgb, .p3, .adobeRGB, .rec2020: return "0 To 255"
+        case .cmyk: return "0 To 100, For \(PrintCondition.current.press ?? PressProfiles.generic)"
+        case .hsl, .hsv: return "Hue 0 To 360, The Rest 0 To 100"
+        case .lab: return "L* 0 To 100, a* And b* \u{2212}128 To 127"
+        }
+    }
+
+    var colours: [NSColor] {
+        let red = NSColor(srgbRed: 1, green: 0.22, blue: 0.16, alpha: 1), green = NSColor(srgbRed: 0.25, green: 0.9, blue: 0.25, alpha: 1), blue = NSColor(srgbRed: 0.2, green: 0.35, blue: 1, alpha: 1)
+        switch self {
+        case .rgb, .p3, .adobeRGB, .rec2020: return [red, green, blue]
+        case .cmyk: return [NSColor(srgbRed: 0, green: 0.75, blue: 0.95, alpha: 1), NSColor(srgbRed: 0.95, green: 0.1, blue: 0.6, alpha: 1), NSColor(srgbRed: 1, green: 0.9, blue: 0.1, alpha: 1), NSColor(white: 0.72, alpha: 1)]
+        // Not colours of light, so they are simply three that tell apart: the hue, how strong, how light.
+        case .hsl, .hsv: return [NSColor(srgbRed: 0.75, green: 0.35, blue: 1, alpha: 1), NSColor(srgbRed: 0.1, green: 0.8, blue: 0.75, alpha: 1), NSColor(white: 0.8, alpha: 1)]
+        // Lightness, then the two opponent axes: green to red, blue to yellow.
+        case .lab: return [NSColor(white: 0.8, alpha: 1), NSColor(srgbRed: 1, green: 0.35, blue: 0.5, alpha: 1), NSColor(srgbRed: 1, green: 0.75, blue: 0.15, alpha: 1)]
+        }
+    }
+
+    /// The safe range, where there is one. Outside it detail is lost: on a screen or in video,
+    /// values under 16 crush to black and over 235 blow out to white; on a press, a dot under 3%
+    /// does not hold and the paper shows through, and over 95% the dots fill in to solid. Hue,
+    /// saturation, lightness and Lab have no such limits: every value of theirs is a usable one.
+    var safe: ClosedRange<Int>? {
+        switch self {
+        case .rgb, .p3, .adobeRGB, .rec2020: return 16...235
+        case .cmyk: return 3...95
+        case .hsl, .hsv, .lab: return nil
+        }
+    }
     /// What the zone below and above the safe range is called.
-    var zones: (low: String, high: String) { self == .rgb ? ("Black", "White Out") : ("White Out", "Black") }
+    var zones: (low: String, high: String) { self == .cmyk ? ("White Out", "Black") : ("Black", "White Out") }
 
     /// The channels of a colour that sit outside the safe range: "Red In White Out, Blue In Black".
     func warnings(for values: [Int]) -> [String] {
-        zip(channels, values).compactMap { name, value in
+        guard let safe = safe else { return [] }
+        return zip(channels, values).compactMap { name, value in
             // No ink at all is not a risk: there is no dot to lose. Only a dot too small to hold is.
             if self == .cmyk, value == 0 { return nil }
             return value < safe.lowerBound ? "\(name) In \(zones.low)" : value > safe.upperBound ? "\(name) In \(zones.high)" : nil
         }
     }
 
-    /// A colour's channel values on this scale: sRGB bytes, or the ink percentages for the press in force.
-    func values(of key: String) -> [Int]? {
+    /// The card row these values are, where it is one.
+    private var format: ColourFormat? {
         switch self {
-        case .rgb: return ColourValues(key).map { [$0.r, $0.g, $0.b] }
-        case .cmyk: return PrintCondition.inks(of: key)
+        case .rgb: return .rgb
+        case .hsl: return .hsl
+        case .hsv: return .hsv
+        case .p3: return .p3
+        case .adobeRGB: return .adobeRGB
+        case .rec2020: return .rec2020
+        case .lab: return .lab
+        case .cmyk: return nil
         }
+    }
+
+    /// A colour's channel values on this scale: the very numbers its card shows, or the ink
+    /// percentages for the press in force. Lab is rounded to whole numbers.
+    func values(of key: String) -> [Int]? {
+        guard let format = format else { return PrintCondition.inks(of: key) }
+        guard ColourValues(key) != nil else { return nil }
+        let numbers = format.fields(key).compactMap { Double($0) }.map { Int($0.rounded()) }
+        return numbers.count == channels.count ? numbers : nil
+    }
+
+    /// Where a value sits along its channel's scale, 0 to 1.
+    func place(_ value: Int, in channel: Int) -> CGFloat {
+        let range = ranges[channel]
+        return CGFloat(min(max(value, range.lowerBound), range.upperBound) - range.lowerBound) / CGFloat(range.count - 1)
     }
 }
 
 enum Histogram {
-    /// How many of the colours fall at each value, for each channel: counts[channel][value].
+    /// How many of the colours fall at each value, for each channel: counts[channel][value - the scale's lowest].
     static func counts(of keys: [String], as type: HistogramType) -> [[Int]] {
-        var out = Array(repeating: Array(repeating: 0, count: type.bins), count: type.channels.count)
+        var out = type.ranges.map { Array(repeating: 0, count: $0.count) }
         for key in keys {
             guard let values = type.values(of: key), values.count == type.channels.count else { continue }
-            for (channel, value) in values.enumerated() { out[channel][min(max(value, 0), type.top)] += 1 }
+            for (channel, value) in values.enumerated() {
+                let range = type.ranges[channel]
+                out[channel][min(max(value, range.lowerBound), range.upperBound) - range.lowerBound] += 1
+            }
         }
         return out
     }
@@ -90,7 +171,7 @@ final class HistogramView: NSView {
                 let label = NSAttributedString(string: "\(type.channels[channel])  \(value)", attributes: [
                     .font: NSFont.systemFont(ofSize: TextSize.caption, weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(0.7)])
                 // The label keeps clear of the spike: on the right while the value is low, on the left once it is high.
-                let low = (own?[safe: channel] ?? 0) < type.top / 2
+                let low = type.place(own?[safe: channel] ?? type.ranges[channel].lowerBound, in: channel) < 0.5
                 label.draw(at: NSPoint(x: low ? strip.maxX - label.size().width - 8 : strip.minX + 8, y: strip.minY + 4))
             }
         } else {
@@ -110,14 +191,15 @@ final class HistogramView: NSView {
         frame.addClip()
         if lit { context.compositingOperation = .plusLighter }
         let inner = rect.insetBy(dx: 6, dy: 5)
-        let step = inner.width / CGFloat(type.top)
-        func x(_ value: Int) -> CGFloat { inner.minX + CGFloat(value) * step }
+        func x(_ value: Int, _ channel: Int) -> CGFloat { inner.minX + type.place(value, in: channel) * inner.width }
         // The zones outside the safe range, shaded at each end with a line where safe begins and ends.
         context.saveGraphicsState()
         context.compositingOperation = .sourceOver
-        let low = NSRect(x: rect.minX, y: rect.minY, width: x(type.safe.lowerBound) - rect.minX, height: rect.height)
-        let high = NSRect(x: x(type.safe.upperBound), y: rect.minY, width: rect.maxX - x(type.safe.upperBound), height: rect.height)
-        for zone in [low, high] {
+        // Only where the values have a safe range, which is the same for every channel that does.
+        let safe = type.safe ?? type.ranges[0]
+        let low = NSRect(x: rect.minX, y: rect.minY, width: x(safe.lowerBound, 0) - rect.minX, height: rect.height)
+        let high = NSRect(x: x(safe.upperBound, 0), y: rect.minY, width: rect.maxX - x(safe.upperBound, 0), height: rect.height)
+        for zone in (type.safe == nil ? [] : [low, high]) {
             NSColor(white: 1, alpha: 0.07).setFill()
             zone.fill()
             // Fine diagonal lines, so a zone reads as "not here" without a colour of its own.
@@ -131,7 +213,7 @@ final class HistogramView: NSView {
             hatch.stroke()
             context.restoreGraphicsState()
         }
-        NSColor(white: 1, alpha: 0.28).setFill()
+        NSColor(white: 1, alpha: type.safe == nil ? 0 : 0.28).setFill()
         NSRect(x: low.maxX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
         NSRect(x: high.minX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
         context.restoreGraphicsState()
@@ -140,14 +222,14 @@ final class HistogramView: NSView {
             let colour = type.colours[channel]
             if counts.indices.contains(channel) {
                 colour.withAlphaComponent(0.38).setFill()
-                for (value, count) in counts[channel].enumerated() where count > 0 {
+                for (offset, count) in counts[channel].enumerated() where count > 0 {
                     let h = max(3, inner.height * 0.6 * CGFloat(count) / tallest)
-                    NSRect(x: x(value) - 1.5, y: inner.maxY - h, width: 3, height: h).fill()
+                    NSRect(x: x(offset + type.ranges[channel].lowerBound, channel) - 1.5, y: inner.maxY - h, width: 3, height: h).fill()
                 }
             }
             if let value = own?[safe: channel] {
                 colour.setFill()
-                NSRect(x: x(value) - 1.5, y: inner.minY, width: 3, height: inner.height).fill()
+                NSRect(x: x(value, channel) - 1.5, y: inner.minY, width: 3, height: inner.height).fill()
             }
         }
         context.restoreGraphicsState()
@@ -191,18 +273,18 @@ final class HistogramPanel: NSView {
         plot.counts = Histogram.counts(of: population, as: type)
         let unsafe = plot.own.map { type.warnings(for: $0) } ?? []
         about.textColor = unsafe.isEmpty ? .tertiaryLabelColor : .systemOrange
-        let values = plot.own.map { zip(type.channels, $0).map { "\($0.prefix(1)) \($1)" }.joined(separator: "   ") } ?? ""
+        let values = plot.own.map { zip(type.channels, $0).map { "\($0.count > 2 ? String($0.prefix(1)) : $0) \($1)" }.joined(separator: "   ") } ?? ""
         about.stringValue = plot.own == nil ? "Not Worked Out: The Press Profile Is Not On This Mac" : unsafe.isEmpty ? values : values + "   \u{00B7}   " + unsafe.joined(separator: ", ")
-        plot.toolTip = type == .rgb
-            ? "Bright: This Colour. Faint: Every Colour On The Page. The Shaded Ends Are Outside The Safe Range: Under 16 Crushes To Black, Over 235 Blows Out To White."
-            : "Bright: This Colour. Faint: Every Colour On The Page. The Shaded Ends Are Outside The Safe Range: Under 3% The Dot Does Not Hold, Over 95% It Fills In To Solid."
+        plot.toolTip = "Bright: This Colour. Faint: Every Colour On The Page." + (type.safe == nil ? ""
+            : type == .cmyk ? " The Shaded Ends Are Outside The Safe Range: Under 3% The Dot Does Not Hold, Over 95% It Fills In To Solid."
+            : " The Shaded Ends Are Outside The Safe Range: Under 16 Crushes To Black, Over 235 Blows Out To White.")
     }
 }
 
 /// The second bar, shown while Histogram is on: the choices every swatch's histogram follows.
 final class HistogramBar: NSView {
     var onChange: (() -> Void)?
-    private lazy var types = ToggleBar(labels: HistogramType.allCases.map { $0.title }, target: self, action: #selector(changed))
+    private lazy var types = ToggleBar(labels: HistogramType.offered.map { $0.title }, target: self, action: #selector(changed))
     private lazy var layouts = ToggleBar(labels: ["Merged", "Per Channel"], target: self, action: #selector(changed))
     private let about = caption("")
 
@@ -236,14 +318,14 @@ final class HistogramBar: NSView {
 
     func refresh() {
         let type = Prefs.histogramType
-        types.selectedSegment = type.rawValue
+        types.selectedSegment = HistogramType.offered.firstIndex(of: type) ?? 0
         layouts.selectedSegment = Prefs.histogramSplit ? 1 : 0
-        let scale = type == .rgb ? "0 To 255" : "0 To 100, For \(PrintCondition.current.press ?? PressProfiles.generic)"
-        about.stringValue = "\(scale)  \u{00B7}  Safe \(type.safe.lowerBound) To \(type.safe.upperBound)  \u{00B7}  Bright: The Swatch. Faint: Every Colour On The Page."
+        let safe = type.safe.map { "  \u{00B7}  Safe \($0.lowerBound) To \($0.upperBound)" } ?? ""
+        about.stringValue = "\(type.scale)\(safe)  \u{00B7}  Bright: The Swatch. Faint: Every Colour On The Page."
     }
 
     @objc private func changed() {
-        Prefs.histogramType = HistogramType(rawValue: types.selectedSegment) ?? .rgb
+        Prefs.histogramType = HistogramType.offered.indices.contains(types.selectedSegment) ? HistogramType.offered[types.selectedSegment] : .rgb
         Prefs.histogramSplit = layouts.selectedSegment == 1
         refresh()
         onChange?()
