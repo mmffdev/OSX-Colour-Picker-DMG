@@ -409,6 +409,12 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
         facts.alignment = .leading
         facts.spacing = 2
         proofs.addArrangedSubview(facts)
+        // A screen can only show what it can show: when the colour is beyond it, the chips are the nearest it has and the numbers are the truth.
+        if !definition.master.shows(on: window?.screen ?? NSScreen.main) {
+            let beyond = caption("Beyond This Screen: The Chips Show The Nearest It Can. Trust The Numbers.")
+            beyond.textColor = .systemOrange
+            proofs.addArrangedSubview(beyond)
+        }
         if using.profile.channels.isEmpty {
             proofs.addArrangedSubview(caption("This profile has no channels. Add some in Settings, under Colour.", size: TextSize.body))
         }
@@ -434,7 +440,7 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
             return v
         }
         // The master and the channel's colour side by side, touching, so a shift shows as an edge between them.
-        let pair = NSStackView(views: [chip(master.display, "The Master, As This Screen Shows It"), chip(r.shown?.display, "What This Channel Gives")])
+        let pair = NSStackView(views: [chip(master.display, "The Master, As Near As This Screen Can Show It"), chip(r.shown?.display, "What This Channel Gives")])
         pair.spacing = 0
         let title = NSTextField(labelWithString: r.channel.name)
         title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)

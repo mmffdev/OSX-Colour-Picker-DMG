@@ -516,9 +516,20 @@ struct Rendering: Equatable {
 }
 
 extension XYZ {
-    /// The colour as this screen can show it: sRGB, held in range.
+    /// The colour for painting on screen: Display P3, held in range, so a wide screen shows a
+    /// colour beyond sRGB as it is and the system brings it in for a screen that cannot.
     var display: NSColor {
-        let v = RGBSpace.srgb.values(of: self).map { CGFloat(min(max($0, 0), 1)) }
-        return NSColor(srgbRed: v[0], green: v[1], blue: v[2], alpha: 1)
+        let v = RGBSpace.displayP3.values(of: self).map { CGFloat(min(max($0, 0), 1)) }
+        return NSColor(displayP3Red: v[0], green: v[1], blue: v[2], alpha: 1)
+    }
+
+    /// Whether a space can hold the colour as it is.
+    func fits(_ space: RGBSpace) -> Bool {
+        space.linearValues(of: self).allSatisfy { $0 >= -RGBSpace.slack && $0 <= 1 + RGBSpace.slack }
+    }
+
+    /// Whether a screen can show the colour as it is: within Display P3 on a wide screen, within sRGB on any other.
+    func shows(on screen: NSScreen?) -> Bool {
+        fits(screen?.canRepresent(.p3) == true ? .displayP3 : .srgb)
     }
 }

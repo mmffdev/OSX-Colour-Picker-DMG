@@ -1501,6 +1501,9 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(ColourDefinition.picked(NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1))?.source.space == RGBSpace.displayP3.rawValue
           && ColourDefinition.picked(NSColor(srgbRed: 79.0 / 255, green: 128.0 / 255, blue: 147.0 / 255, alpha: 1))?.sourceText == plainRGB.sourceText,
           "a pick from a wide screen is kept in Display P3 when sRGB cannot hold it, and as a plain hex when it can")
+    check(vivid.master.display.colorSpace == .displayP3 && near(Double(vivid.master.display.redComponent), 1, 0.001) && near(Double(vivid.master.display.greenComponent), 0, 0.001)
+          && vivid.master.fits(.displayP3) && !vivid.master.fits(.srgb) && !RGBSpace.rec2020.master(of: [0, 1, 0]).fits(.displayP3) && plainRGB.master.shows(on: nil) && !vivid.master.shows(on: nil),
+          "a proof chip is painted in Display P3, so a colour beyond sRGB is not flattened; a colour beyond the screen is known to be so")
     let readP3 = NewColourSheet.read(.p3, ["255", "0", "0", ""], press: PressProfiles.generic), readInks = NewColourSheet.read(.cmyk, ["0", "90%", "85", "0"], press: PressProfiles.generic)
     check(readP3.colour == vivid && readInks.colour?.source.values == [0, 0.9, 0.85, 0] && NewColourSheet.read(.lab, ["52", "\u{2212}60", "40"], press: "").colour == ColourDefinition.lab(52, -60, 40)
           && NewColourSheet.read(.hex, ["4f8093"], press: "").colour == plainRGB,

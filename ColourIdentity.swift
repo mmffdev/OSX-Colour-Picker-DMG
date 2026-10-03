@@ -88,7 +88,7 @@ extension ColourDefinition {
     }
 
     /// Whether sRGB can show the colour as it is.
-    var fitsSRGB: Bool { RGBSpace.srgb.linearValues(of: master).allSatisfy { $0 >= -RGBSpace.slack && $0 <= 1 + RGBSpace.slack } }
+    var fitsSRGB: Bool { master.fits(.srgb) }
 
     /// What a picked colour is kept as: a plain hex when sRGB holds it, as it always was; otherwise
     /// the Display P3 values the screen showed, so a vivid colour is not flattened by being picked.
