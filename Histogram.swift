@@ -172,7 +172,6 @@ final class HistogramPanel: NSView {
         about.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         for v in [plot, about] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: HistogramPanel.width),
             plot.topAnchor.constraint(equalTo: topAnchor),
             plot.leadingAnchor.constraint(equalTo: leadingAnchor),
             plot.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -269,6 +268,11 @@ extension Prefs {
     static var paletteHistory: Bool {
         get { preferences.bool(forKey: "paletteHistory") }
         set { preferences.set(newValue, forKey: "paletteHistory") }
+    }
+    /// Notes are shown until switched off.
+    static var paletteNotes: Bool {
+        get { preferences.object(forKey: "paletteNotes") == nil ? true : preferences.bool(forKey: "paletteNotes") }
+        set { preferences.set(newValue, forKey: "paletteNotes") }
     }
     static var histograms: Bool {
         get { preferences.bool(forKey: "paletteHistograms") }

@@ -155,19 +155,21 @@ final class SwatchListView: NSView {
 /// What the bar above the swatches has switched on for every one of them.
 struct RowPanels: Equatable {
     var channels = false
+    var notes = true
     var history = false
     var histogram = false
     var type = HistogramType.rgb
     var split = false
 
     static var chosen: RowPanels {
-        RowPanels(channels: Prefs.paletteChannels, history: Prefs.paletteHistory, histogram: Prefs.histograms, type: Prefs.histogramType, split: Prefs.histogramSplit)
+        RowPanels(channels: Prefs.paletteChannels, notes: Prefs.paletteNotes, history: Prefs.paletteHistory, histogram: Prefs.histograms, type: Prefs.histogramType, split: Prefs.histogramSplit)
     }
 }
 
-/// One colour: its tile, its name and values, then whatever the bar above has switched on (its
-/// histogram, its channels, its history) and its notes as text. The row has no buttons of its
-/// own: pressing the notes opens the colour's sheet.
+/// One colour: its tile, its name and values, then four slots side by side, each switched on or
+/// off for every swatch from the bar above: Histogram, Channels, Notes, History. The slots that
+/// are on share the row's width equally. The row has no buttons of its own: pressing the notes,
+/// or the colour's name, opens its sheet.
 final class SwatchRow: NSView {
     static let panelWidth: CGFloat = 460
     let hex: String
@@ -178,6 +180,10 @@ final class SwatchRow: NSView {
     private let histogramPanel = HistogramPanel()
     private let channelsPanel = NSStackView()
     private let historyPanel = NSStackView()
+    private let histogramSlot = NSStackView()
+    private let notesSlot = NSStackView()
+    private var slotsWidth: NSLayoutConstraint!
+    static let slotGap: CGFloat = 28
     private var shown: RowPanels?
     private var shownAmong: [String] = []
 
@@ -219,22 +225,32 @@ final class SwatchRow: NSView {
         // The text is the way in: a press on it opens the colour's sheet, on its notes.
         note.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(editTapped)))
 
-        for panel in [channelsPanel, historyPanel] {
-            panel.orientation = .vertical
-            panel.alignment = .leading
-            panel.spacing = 6
-            panel.isHidden = true
-            panel.translatesAutoresizingMaskIntoConstraints = false
-            panel.widthAnchor.constraint(equalToConstant: SwatchRow.panelWidth).isActive = true
+        // The name is a way in too, for when the notes are switched off.
+        name.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(editTapped)))
+        name.toolTip = "Click For This Colour's Notes, Channels And History"
+
+        histogramSlot.setViews([heading("Histogram"), histogramPanel], in: .top)
+        notesSlot.setViews([heading("Notes"), note], in: .top)
+        for slot in [histogramSlot, channelsPanel, notesSlot, historyPanel] {
+            slot.orientation = .vertical
+            slot.alignment = .leading
+            slot.spacing = 6
+            slot.isHidden = true
+            slot.translatesAutoresizingMaskIntoConstraints = false
         }
         historyPanel.spacing = 3
-        histogramPanel.isHidden = true
-        // Beside the values: whatever is switched on, then the notes. The row grows to hold them
-        // and the swatches below move down; the tile keeps its size.
-        let body = NSStackView(views: [histogramPanel, channelsPanel, historyPanel, note])
-        body.orientation = .vertical
-        body.alignment = .leading
-        body.spacing = 12
+        histogramPanel.widthAnchor.constraint(equalTo: histogramSlot.widthAnchor).isActive = true
+        note.widthAnchor.constraint(equalTo: notesSlot.widthAnchor).isActive = true
+        // Beside the values: the four slots in a row, sharing the width between those that are on.
+        // The row grows to the tallest of them and the swatches below move down; the tile keeps its size.
+        let body = NSStackView(views: [histogramSlot, channelsPanel, notesSlot, historyPanel])
+        body.orientation = .horizontal
+        body.alignment = .top
+        body.distribution = .fillEqually
+        body.spacing = SwatchRow.slotGap
+        // As wide as its slots want, up to the row's edge.
+        slotsWidth = body.widthAnchor.constraint(equalToConstant: SwatchRow.panelWidth)
+        slotsWidth.priority = .defaultHigh
         for v in [tile, info, body] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let s = SwatchListStyle.self
         let least = heightAnchor.constraint(equalToConstant: s.rowHeight)
@@ -250,10 +266,10 @@ final class SwatchRow: NSView {
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
             body.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            slotsWidth,
             body.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             body.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-            note.widthAnchor.constraint(equalTo: body.widthAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -282,7 +298,10 @@ final class SwatchRow: NSView {
         guard panels != shown || population != shownAmong else { return }
         shown = panels
         shownAmong = population
-        histogramPanel.isHidden = !panels.histogram
+        histogramSlot.isHidden = !panels.histogram
+        notesSlot.isHidden = !panels.notes
+        let on = CGFloat([panels.histogram, panels.channels, panels.notes, panels.history].filter { $0 }.count)
+        slotsWidth.constant = max(1, on) * SwatchRow.panelWidth + max(0, on - 1) * SwatchRow.slotGap
         if panels.histogram { histogramPanel.show(hex, among: population, type: panels.type, split: panels.split) }
         channelsPanel.isHidden = !panels.channels
         if panels.channels { fillChannels() }
