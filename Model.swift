@@ -29,6 +29,9 @@ struct Project: Codable, Equatable {
     var folder: String? = nil
     /// Set once the project's file has been written. From then on a missing file is reported, never quietly remade.
     var fileKnown: Bool? = nil
+    /// Locked: nothing in the project may change until it is unlocked. Kept in the project file too.
+    var locked: Bool? = nil
+    var isLocked: Bool { locked ?? false }
 }
 
 struct SwatchEntry: Codable, Equatable {
@@ -463,6 +466,23 @@ extension Library {
     mutating func setProjectFolder(_ id: UUID, _ path: String?) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         projects[i].folder = path
+    }
+
+    mutating func setProjectLocked(_ id: UUID, _ on: Bool) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].locked = on ? true : nil
+    }
+
+    /// The name of a locked project that `after` would change, or nil. A project locked before and
+    /// still locked after must be the same in every way; unlocking it is the one change allowed.
+    func lockedProjectChanged(by after: Library) -> String? {
+        for p in projects where p.isLocked {
+            guard let later = after.project(p.id), later.isLocked else { continue }
+            if later != p || after.palettes(in: p.id) != palettes(in: p.id) { return p.name }
+        }
+        // Deleting a locked project is a change to it too.
+        for p in projects where p.isLocked && after.project(p.id) == nil { return p.name }
+        return nil
     }
 
     mutating func markProjectFile(_ id: UUID, known: Bool) {
@@ -923,9 +943,9 @@ final class LibraryStore {
     /// Re-reads from disk before changing anything, so picks made by the
     /// hotkey process while the window is open are never overwritten.
     @discardableResult
-    func mutate(_ body: (inout Library) -> Void) throws -> Library {
+    func mutate(_ body: (inout Library) throws -> Void) throws -> Library {
         var lib = try load()
-        body(&lib)
+        try body(&lib)
         try save(lib)
         return lib
     }

@@ -313,7 +313,11 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
         guard let s = library.library.swatch(new), let styles = s.styles else { return }
         if name.currentEditor() == nil { name.stringValue = s.name }
         var parts = [plural(styles.count, "Pairing")]
-        if let project = s.projectID.flatMap({ library.library.project($0)?.name }) { parts.append("In \(project)") }
+        let project = s.projectID.flatMap { pid in library.library.project(pid).map { (pid, $0.name) } }
+        header.setProject(project?.1) { [weak self] in if let pid = project?.0 { self?.library.onRevealProject?(pid) } }
+        header.striped = project != nil
+        header.lock = s.projectID.flatMap { library.library.project($0)?.isLocked }
+        name.isEditable = !(header.lock ?? false)
         let lost = Set(styles.flatMap { $0.fonts }.filter { !fontInstalled($0) })
         if !lost.isEmpty { parts.append(plural(lost.count, "Font") + " Missing") }
         header.subtitle.stringValue = parts.joined(separator: "  \u{00B7}  ")

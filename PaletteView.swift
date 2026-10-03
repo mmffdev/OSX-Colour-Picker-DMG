@@ -477,6 +477,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         if s.custom { parts.append("Custom palette") }
         if isTarget { parts.append("Picks go here") }
         restSubtitle = parts.joined(separator: "  \u{00B7}  ")
+        // A project palette says so: its project as a pill, and stripes behind the title.
+        let project = s.projectID.flatMap { pid in library.library.project(pid).map { (pid, $0.name) } }
+        header.setProject(project?.1) { [weak self] in if let pid = project?.0 { self?.library.onRevealProject?(pid) } }
+        header.striped = project != nil
+        header.lock = s.projectID.flatMap { library.library.project($0)?.isLocked }
+        nameField.isEditable = !(header.lock ?? false)
 
         star.image = symbol(s.favourite ? "star.fill" : "star", "Favourite")
         star.contentTintColor = s.favourite ? .systemYellow : .secondaryLabelColor

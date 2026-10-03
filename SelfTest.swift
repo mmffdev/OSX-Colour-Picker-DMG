@@ -853,6 +853,46 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && !fm.fileExists(atPath: projRoot.appendingPathComponent("Main/Projects/Client A").path),
           "a renamed project's folder and file take the new name")
 
+    print("copy to project")
+    var copyLib = Library()
+    let tc = Date(timeIntervalSince1970: 1_760_000_000)
+    let srcProject = copyLib.createProject(named: "Source", at: tc)
+    let dstProject = copyLib.createProject(named: "Client", at: tc)
+    let srcPalette = copyLib.createSwatch(at: tc)
+    _ = copyLib.renameSwatch(srcPalette, to: "Brand")
+    _ = copyLib.add(["#FF0000", "#0033FF"], toSwatch: srcPalette, at: tc)
+    copyLib.setName("Fire", of: "#FF0000", in: srcPalette, at: tc)
+    copyLib.move(srcPalette, to: srcProject, index: 0, at: tc)
+    // The same steps the app takes for Copy To Project, in the model.
+    let dup = copyLib.createSwatch(at: tc.addingTimeInterval(1))
+    _ = copyLib.renameSwatch(dup, to: "Brand (Client)")
+    _ = copyLib.add(copyLib.hexes(inSwatch: srcPalette, by: .oldest), toSwatch: dup, at: tc)
+    copyLib.setName("Fire", of: "#FF0000", in: dup, at: tc)
+    copyLib.move(dup, to: dstProject, index: Int.max, at: tc)
+    _ = copyLib.add(["#00FF00"], toSwatch: dup, at: tc)
+    check(copyLib.palettes(in: srcProject).map { $0.name } == ["Brand"] && copyLib.palettes(in: dstProject).map { $0.name } == ["Brand (Client)"]
+          && copyLib.hexes(inSwatch: srcPalette, by: .oldest) == ["#FF0000", "#0033FF"] && copyLib.hexes(inSwatch: dup, by: .oldest).count == 3
+          && copyLib.name(of: "#FF0000", in: dup) == "Fire",
+          "a palette copied to a project is a second palette there, named for its new home, keeping colour names, and the original is left alone")
+
+    print("locked projects")
+    var lockLib = Library()
+    let lp = lockLib.createProject(named: "Locked", at: tc)
+    let lpal = lockLib.createSwatch(at: tc); _ = lockLib.add(["#123456"], toSwatch: lpal, at: tc); lockLib.move(lpal, to: lp, index: 0, at: tc)
+    lockLib.setProjectLocked(lp, true)
+    var attempt = lockLib; _ = attempt.add(["#654321"], toSwatch: lpal, at: tc)
+    check(lockLib.lockedProjectChanged(by: attempt) == "Locked", "adding a colour to a palette in a locked project is refused by name")
+    attempt = lockLib; _ = attempt.renameProject(lp, to: "Other", at: tc)
+    check(lockLib.lockedProjectChanged(by: attempt) == "Locked", "renaming a locked project is refused")
+    attempt = lockLib; attempt.deleteProject(lp, at: tc)
+    check(lockLib.lockedProjectChanged(by: attempt) == "Locked", "deleting a locked project is refused")
+    attempt = lockLib; attempt.setProjectLocked(lp, false)
+    check(lockLib.lockedProjectChanged(by: attempt) == nil, "unlocking is the one change a locked project allows")
+    attempt = lockLib; let elsewhere = attempt.createSwatch(at: tc); _ = attempt.add(["#ABCDEF"], toSwatch: elsewhere, at: tc)
+    check(lockLib.lockedProjectChanged(by: attempt) == nil, "work outside the locked project goes on as normal")
+    let lockedFile = ProjectFile(project: lockLib.project(lp)!, in: lockLib)
+    check((try? ProjectFile.read(lockedFile.data()))?.project.isLocked == true, "the lock travels in the project file")
+
     print("history")
     var hist = StepHistory()
     var hLib = Library()

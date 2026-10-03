@@ -158,6 +158,8 @@ final class ProjectHeaderCell: NSTableCellView {
     private let folder = NSImageView()
     private let warning = NSImageView()
     private var add: NSButton!
+    private var lock: NSButton!
+    var onLock: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -174,7 +176,11 @@ final class ProjectHeaderCell: NSTableCellView {
         warning.contentTintColor = .systemOrange
         warning.toolTip = "The project's file is missing. Click to see what happened."
         warning.isHidden = true
-        let stack = NSStackView(views: [folder, title, warning, add])
+        lock = symbolButton("lock.open", tooltip: "Lock the project so nothing in it can change", target: self, action: #selector(lockTapped))
+        lock.image = symbol("lock.open", "", size: 11)
+        lock.contentTintColor = .tertiaryLabelColor
+        lock.imagePosition = .imageOnly
+        let stack = NSStackView(views: [folder, title, warning, lock, add])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
@@ -188,13 +194,23 @@ final class ProjectHeaderCell: NSTableCellView {
             add.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             add.widthAnchor.constraint(equalToConstant: 16),
             add.heightAnchor.constraint(equalToConstant: 16),
+            lock.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            lock.widthAnchor.constraint(equalToConstant: 16),
+            lock.heightAnchor.constraint(equalToConstant: 16),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false) {
+    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false, locked: Bool? = nil) {
         title.stringValue = name
         warning.isHidden = !lost
+        lock.isHidden = locked == nil
+        if let locked = locked {
+            lock.image = symbol(locked ? "lock.fill" : "lock.open", "", size: 11)
+            lock.contentTintColor = locked ? .systemOrange : .tertiaryLabelColor
+            lock.toolTip = locked ? "Locked: nothing in the project can change. Click to unlock" : "Lock the project so nothing in it can change"
+        }
+        add.isHidden = locked == true
         title.font = heading ? SidebarOutlineView.headingFont : NSFont.systemFont(ofSize: NSFont.systemFontSize)
         title.textColor = .labelColor
         folder.isHidden = heading
@@ -202,6 +218,7 @@ final class ProjectHeaderCell: NSTableCellView {
         add.setAccessibilityLabel(tooltip)
     }
     @objc private func addTapped() { onAdd?() }
+    @objc private func lockTapped() { onLock?() }
 }
 
 final class SidebarOutlineView: NSOutlineView {
@@ -425,6 +442,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
     private func isCollapsed(_ node: SidebarNode) -> Bool { preferences.bool(forKey: key(node)) }
 
+    /// Opens a project in the list and scrolls to it, without changing what the page shows.
+    func reveal(project id: UUID) {
+        guard let node = projectNodes[id] else { return }
+        outline.expandItem(projectsGroup)
+        outline.expandItem(node)
+        let row = outline.row(forItem: node)
+        guard row >= 0 else { return }
+        outline.scrollRowToVisible(row)
+        // A brief highlight so the eye lands on it, then the real selection comes back.
+        settingSelection = true
+        outline.selectRowIndexes([row], byExtendingSelection: false)
+        settingSelection = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in guard let self = self else { return }; self.select(self.selection) }
+    }
+
     /// Highlights the row for `selection` without reporting it back as a user choice.
     func select(_ new: Selection) {
         selection = new
@@ -505,8 +537,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = node.projectID {
             let cell = o.makeView(withIdentifier: ProjectHeaderCell.identifier, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = ProjectHeaderCell.identifier; return c }()
-            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: library.lostProjects[id] != nil)
+            let locked = lib.project(id)?.isLocked ?? false
+            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: library.lostProjects[id] != nil, locked: locked)
             cell.onAdd = { [weak self] in self?.library.addPalette(to: id) }
+            cell.onLock = { [weak self] in self?.library.setProjectLocked(id, !locked) }
             return cell
         }
         if node.kind == .typography {
@@ -782,6 +816,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let fresh = move.addItem(withTitle: "New Project\u{2026}", action: #selector(moveToNewClicked(_:)), keyEquivalent: "")
             fresh.target = self; fresh.representedObject = id
             menu.addItem(withTitle: "Move to Project", action: nil, keyEquivalent: "").submenu = move
+            // A copy is independent from then on: the way to start another project from this one.
+            let copy = NSMenu()
+            for p in library.library.orderedProjects where p.id != s.projectID {
+                let i = copy.addItem(withTitle: p.name, action: #selector(copyToProjectClicked(_:)), keyEquivalent: "")
+                i.target = self; i.representedObject = [id, p.id]
+            }
+            if !copy.items.isEmpty { copy.addItem(.separator()) }
+            let loose = copy.addItem(withTitle: "Palettes, Outside Any Project", action: #selector(copyToProjectClicked(_:)), keyEquivalent: "")
+            loose.target = self; loose.representedObject = [id]
+            menu.addItem(withTitle: "Copy to Project", action: nil, keyEquivalent: "").submenu = copy
             menu.addItem(.separator())
             add("Copy All", #selector(copyClicked(_:)), id)
             add("Export\u{2026}", #selector(exportClicked(_:)), id)
@@ -839,6 +883,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         library.move(palette: palette, to: ids.count > 1 ? ids[1] : nil, index: Int.max)
     }
     @objc private func moveToNewClicked(_ s: NSMenuItem) { if let id = id(s) { library.startProject(moving: id) } }
+    @objc private func copyToProjectClicked(_ s: NSMenuItem) {
+        guard let ids = s.representedObject as? [UUID], let palette = ids.first else { return }
+        library.copy(palette: palette, to: ids.count > 1 ? ids[1] : nil)
+    }
     @objc private func newInProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.addPalette(to: id) } }
     @objc private func projectDetailsClicked(_ s: NSMenuItem) { if let id = id(s) { library.editProject(id) } }
     @objc private func renameProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.renameProject(id) } }

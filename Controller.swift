@@ -36,6 +36,8 @@ final class LibraryController: NSObject {
 
     /// Asks the window to show something. `rename` puts the palette's name into edit mode.
     var onShow: ((Selection, _ rename: Bool) -> Void)?
+    /// Scrolls the sidebar to a project and opens it; set by the window.
+    var onRevealProject: ((UUID) -> Void)?
     /// Asks the visible page to scroll to and select a swatch.
     var onReveal: ((String) -> Void)?
     /// Lays a form over the page (nil takes it away), filling its width or in a centred column; set by the window.
@@ -110,12 +112,28 @@ final class LibraryController: NSObject {
         sync()
     }
 
+    struct LockedProject: LocalizedError {
+        let name: String
+        var errorDescription: String? { "\u{201C}\(name)\u{201D} is locked." }
+        var recoverySuggestion: String? { "Unlock the project in the sidebar to change what is in it." }
+    }
+
     /// Every change goes through here, and becomes a step in the history under `title`.
+    /// A change to anything in a locked project is refused before it is saved.
     func apply(_ title: String = "Change", _ body: (inout Library) -> Void) {
         let before = library
         do {
-            library = try store.mutate(body)
+            library = try store.mutate { lib in
+                var trial = lib
+                body(&trial)
+                if let name = lib.lockedProjectChanged(by: trial) { throw LockedProject(name: name) }
+                lib = trial
+            }
             loadedStamp = store.modificationDate
+        } catch let locked as LockedProject {
+            flash("\(locked.errorDescription ?? "") \(locked.recoverySuggestion ?? "")")
+            NSSound.beep()
+            return
         } catch {
             show(error)
         }
@@ -223,6 +241,14 @@ final class LibraryController: NSObject {
     func projectFolderURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.root(for: $0, library: store.url, master: ProjectFiles.folder) } }
 
     /// Gives the project a folder of its own, or nil to put it back under the master folder, moving its folder.
+    func setProjectLocked(_ id: UUID, _ on: Bool) {
+        apply(on ? "Lock Project" : "Unlock Project") { $0.setProjectLocked(id, on) }
+    }
+
+    func isLocked(palette id: UUID) -> Bool {
+        library.swatch(id)?.projectID.flatMap { library.project($0)?.isLocked } ?? false
+    }
+
     func setProjectFolder(_ id: UUID, _ folder: URL?) {
         guard let p = library.project(id) else { return }
         let old = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder)
@@ -626,6 +652,35 @@ final class LibraryController: NSObject {
             return
         }
         createPalette(named: "\(s.name) copy", hexes: library.hexes(inSwatch: id, by: .oldest), custom: s.custom)
+    }
+
+    /// A copy of the palette in another project (or loose), independent from then on. The original stays.
+    func copy(palette id: UUID, to project: UUID?) {
+        guard let s = library.swatch(id) else { return }
+        let home = project.flatMap { library.project($0)?.name }
+        let name = home.map { "\(s.name) (\($0))" } ?? "\(s.name) copy"
+        var copy: UUID?
+        apply("Copy To Project") { lib in
+            if let styles = s.styles {
+                let new = lib.createTypography(named: name, in: project)
+                for style in styles {
+                    lib.setStyle(TypeStyle(id: UUID(), name: style.name, ink: style.ink, paper: style.paper, heading: style.heading,
+                                           body: style.body, headingFont: style.headingFont, bodyFont: style.bodyFont), in: new)
+                }
+                copy = new
+            } else {
+                let new = lib.createSwatch()
+                _ = lib.renameSwatch(new, to: name)
+                _ = lib.add(lib.hexes(inSwatch: id, by: .oldest), toSwatch: new)
+                for hex in lib.hexes(inSwatch: id, by: .oldest) {
+                    if let own = lib.swatch(id)?.entries.first(where: { $0.hex == hex })?.name { lib.setName(own, of: hex, in: new) }
+                }
+                if let tags = s.tags { lib.setTags(ofPalette: new, tags) }
+                lib.move(new, to: project, index: Int.max)
+                copy = new
+            }
+        }
+        if let copy = copy { onShow?(.palette(copy), false) }
     }
 
     func delete(palette id: UUID) {
