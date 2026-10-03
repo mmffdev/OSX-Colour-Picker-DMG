@@ -492,6 +492,7 @@ final class SettingsWindowController: NSWindowController {
         }
         win.contentViewController = tabs
         win.center()
+        shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3Settings")   // comes back where it was left
         showPanel(preferences.integer(forKey: "settingsPanel"))
         panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in preferences.set(tabs.selectedTabViewItemIndex, forKey: "settingsPanel") }

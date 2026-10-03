@@ -224,6 +224,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         split.splitView.autosaveName = "MMFFDevColour3Split"
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
         win.center()
+        // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
+        shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3MainWindow")
 
         let toolbar = NSToolbar(identifier: "MMFFDevColour3Toolbar")
