@@ -459,21 +459,24 @@ final class SaveBar: NSView, NSTextFieldDelegate {
     @objc private func projectTapped(_ sender: NSButton) {
         let menu = NSMenu()
         let projects = library.library.orderedProjects
-        if projects.isEmpty {
-            menu.addItem(withTitle: "No Projects Yet", action: nil, keyEquivalent: "").isEnabled = false
-            menu.addItem(.separator())
-            menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
-        }
+        if projects.isEmpty { menu.addItem(withTitle: "No Projects Yet", action: nil, keyEquivalent: "").isEnabled = false }
         for p in projects {
             let item = menu.addItem(withTitle: p.name, action: #selector(keepNew(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = p.id
         }
+        // Always offered: a new project, made by name, with these colours as its first palette.
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "New Project\u{2026}", action: #selector(keepInNewProject), keyEquivalent: "").target = self
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
     }
 
     @objc private func keepNew(_ sender: NSMenuItem) {
         library.keep(colours(), named: chosenName, in: sender.representedObject as? UUID)
+    }
+
+    @objc private func keepInNewProject() {
+        library.startProject(keeping: colours(), named: chosenName)
     }
 
     @objc private func keepIn(_ sender: NSMenuItem) {

@@ -476,6 +476,20 @@ final class LibraryController: NSObject {
         })
     }
 
+    /// Asks for a project's name, makes it, and keeps `hexes` in it as a palette. The page stays
+    /// where it is: this is for a tool, such as Colour Lab, saving its colours without leaving.
+    func startProject(keeping hexes: [String], named paletteName: String) {
+        onPrompt?(ModalPrompt(title: "New Project", message: "Name the project. These colours go into it as the palette \u{201C}\(paletteName)\u{201D}.",
+                              placeholder: "Client, product or piece of work", confirm: "Create Project", symbol: "folder.badge.plus",
+                              check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
+            guard let self = self else { return }
+            var id: UUID?
+            self.apply("New Project") { lib in id = lib.createProject(named: name) }
+            guard let made = id, self.library.project(made) != nil else { return }
+            self.keep(hexes, named: paletteName, in: made)
+        })
+    }
+
     /// A project's details are on its Overview page.
     func editProject(_ id: UUID) {
         guard library.project(id) != nil else { return }
