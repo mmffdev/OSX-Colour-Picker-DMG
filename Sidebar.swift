@@ -409,9 +409,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
+        // Solid, not see-through: the list and its scroll view both paint the theme's background.
+        scroll.drawsBackground = true
+        scroll.backgroundColor = Theme.background
+        outline.backgroundColor = Theme.background
+        outline.usesAlternatingRowBackgroundColors = false
         self.scroll = scroll
+        NotificationCenter.default.addObserver(self, selector: #selector(themeChanged), name: .themeDidChange, object: nil)
         // Under the full-width toolbar, with a flat background of its own; the first row sits on the pages' title line.
         let root = SidebarBackdrop()
         root.addSubview(scroll)
@@ -426,6 +431,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private var scroll: NSScrollView!
+
+    @objc private func themeChanged() {
+        scroll.backgroundColor = Theme.background
+        outline.backgroundColor = Theme.background
+        view.needsDisplay = true
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
