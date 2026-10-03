@@ -1361,6 +1361,11 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let back = shop.copyPalette(inAlpha, to: nil, withNotes: false, at: t.addingTimeInterval(6))!
     check(shop.swatch(back)?.projectID == nil && !shop.hasNotes(back) && shop.palettes(in: nil).count == 2, "a project's palette copied back to Palettes arrives without its notes")
     check(mergeLibraries(local: shop, remote: shop).swatch(inAlpha)?.copiedFrom == stock, "where a copy came from survives a sync")
+    shop.setNote("Stock note.", of: "#F55805", in: stock, at: t.addingTimeInterval(6))
+    let withStockNotes = shop.copyPalette(stock, to: beta, withNotes: true, at: t.addingTimeInterval(7))!
+    let withoutStockNotes = shop.copyPalette(stock, to: beta, withNotes: false, at: t.addingTimeInterval(7))!
+    check(shop.note(of: "#F55805", in: withStockNotes) == "Stock note." && !shop.hasNotes(withoutStockNotes) && shop.note(of: "#F55805", in: stock) == "Stock note.",
+          "a loose palette has notes of its own, and a project's copy takes them or not as asked")
     let pair = shop.createTypography(named: "Type", at: t)
     shop.setStyle(TypeStyle(id: UUID(), name: "Body", ink: "#101010", paper: "#FFFFFF", heading: "H", body: "B", headingFont: nil, bodyFont: nil), in: pair)
     let pairCopy = shop.copyPalette(pair, to: alpha, withNotes: false, at: t.addingTimeInterval(7))!

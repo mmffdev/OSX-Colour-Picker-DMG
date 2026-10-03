@@ -74,9 +74,12 @@ enum Prefs {
     /// History is kept per library (catalogue): on unless turned off for that one.
     static func historyEnabled(for catalogue: String) -> Bool { bool("history.\(catalogue)", true) }
     static func setHistoryEnabled(_ on: Bool, for catalogue: String) { d.set(on, forKey: "history.\(catalogue)") }
-    /// How a project palette is laid out: cards in a grid, or one colour to a row with its description.
-    static func paletteIsList(_ id: UUID) -> Bool { bool("paletteList.\(id.uuidString)", false) }
-    static func setPaletteIsList(_ on: Bool, for id: UUID) { d.set(on, forKey: "paletteList.\(id.uuidString)") }
+    /// How palettes are laid out: cards in a grid, or one colour to a row with its notes. One
+    /// choice for every palette, so it holds as the user goes from one palette to the next.
+    static var paletteListView: Bool {
+        get { bool("paletteListView", false) }
+        set { d.set(newValue, forKey: "paletteListView") }
+    }
     static var historyRailShown: Bool {
         get { bool("historyRail", false) }
         set { d.set(newValue, forKey: "historyRail") }

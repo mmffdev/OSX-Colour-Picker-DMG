@@ -4,8 +4,8 @@ import AppKit
 //
 // One colour to a row: the colour itself, what it is called, and the notes written on it, as text.
 // Edit opens the swatch's sheet, where the notes are written and the colour's history is read.
-// Notes are kept on the palette's entry for that colour, so they travel in the project's file.
-// Only palettes in a project have this view.
+// Notes are kept on the palette's entry for that colour: in the library for a loose palette, and in
+// the project's file too for a project's. Any palette can be seen this way.
 
 enum SwatchListStyle {
     static let rowHeight: CGFloat = 132

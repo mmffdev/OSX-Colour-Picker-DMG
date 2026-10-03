@@ -284,7 +284,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private let spectrum = SpectrumView()
     private let grid = SwatchGridView()
     private let scroll = PagingScrollView()
-    /// The vertical view: one colour to a row with its description and history. Project palettes only.
+    /// The vertical view: one colour to a row with its notes and history.
     private lazy var list = SwatchListView(library: library)
     private lazy var gridButton = symbolButton("square.grid.2x2", tooltip: "Grid View", target: self, action: #selector(showGrid))
     private lazy var listButton = symbolButton("rectangle.grid.1x2", tooltip: "Vertical View, With Descriptions And History", target: self, action: #selector(showList))
@@ -506,9 +506,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         spectrum.hexes = hexes
 
-        // A project palette offers two views, switched from the title panel's right: cards, or one colour to a row.
-        let asList = project != nil && Prefs.paletteIsList(id)
-        header.trailing.isHidden = project == nil
+        // Two views, switched from the title panel's right: cards, or one colour to a row with its notes.
+        // The choice is the user's for every palette, so it holds from one palette to the next.
+        let asList = Prefs.paletteListView
+        header.trailing.isHidden = false
         for (button, name, on) in [(gridButton, "square.grid.2x2", !asList), (listButton, "rectangle.grid.1x2", asList)] {
             button.image = symbol(name, button.toolTip ?? "", size: PageHeader.titleSymbol, weight: .semibold)
             button.contentTintColor = on ? .labelColor : .tertiaryLabelColor
@@ -551,8 +552,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     @objc private func showGrid() { setList(false) }
     @objc private func showList() { setList(true) }
     private func setList(_ on: Bool) {
-        guard let id = paletteID, Prefs.paletteIsList(id) != on else { return }
-        Prefs.setPaletteIsList(on, for: id)
+        guard Prefs.paletteListView != on else { return }
+        Prefs.paletteListView = on
         reload()
     }
 

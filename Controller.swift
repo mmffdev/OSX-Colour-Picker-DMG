@@ -462,12 +462,14 @@ final class LibraryController: NSObject {
             self.apply("New Project") { lib in
                 let made = lib.createProject(named: name)
                 lib.setProjectDetails(made, values)
-                // A copy of the palette asked for goes in; failing that, of the open one, so the project is not born empty.
-                if let palette = palette { lib.copyPalette(palette, to: made, index: 0, withNotes: false) }
-                else if case .palette(let open)? = self.current, lib.swatch(open)?.projectID == nil { lib.copyPalette(open, to: made, index: 0, withNotes: false) }
                 id = made
             }
             self.flash("Created project \(id.flatMap { self.library.project($0)?.name } ?? name)")
+            // Then the copy goes in by the usual door, which asks about notes when the palette has some.
+            guard let made = id, self.library.project(made) != nil else { return }
+            var first = palette
+            if first == nil, case .palette(let open)? = self.current, self.library.swatch(open)?.projectID == nil { first = open }
+            if let first = first { self.move(palette: first, to: made, index: 0) }
         }
     }
 
@@ -544,6 +546,7 @@ final class LibraryController: NSObject {
     /// Puts a palette at a place in a list. Within its own list that is a move. Into a project,
     /// between projects, or back to the Palettes list, it goes as a copy: a project owns its
     /// palettes outright, so its notes, lock and history are its own and the original is untouched.
+    /// A palette with notes asks first whether the copy takes them.
     func move(palette id: UUID, to project: UUID?, index: Int) {
         guard let s = library.swatch(id) else { return }
         if s.projectID == project {
@@ -559,12 +562,12 @@ final class LibraryController: NSObject {
             self.flash(home.map { "Copied \(s.name) Into \($0)" + (notes ? ", With Its Notes" : "") } ?? "Copied \(s.name) To Palettes")
             self.onShow?(.palette(made), false)
         }
-        // Notes are one project's words on its colours. They are offered only to another project, and only when there are some.
-        guard s.projectID != nil, project != nil, library.hasNotes(id), let ask = onAsk else { place(false); return }
-        let from = s.projectID.flatMap { library.project($0)?.name } ?? "its project"
-        let to = project.flatMap { library.project($0)?.name } ?? "the project"
+        // Notes may be wanted in the copy or not, so when there are some the user is asked, whichever way the copy goes.
+        guard library.hasNotes(id), let ask = onAsk else { place(false); return }
+        let from = s.projectID.flatMap { library.project($0)?.name } ?? "Palettes"
+        let to = project.flatMap { library.project($0)?.name } ?? "Palettes"
         ask("Copy The Notes Across?",
-            "\(s.name) has notes written for \(from). The copy going into \(to) can take them with it or start clean. The notes in \(from) stay as they are either way.",
+            "\(s.name) has notes written on its colours. The copy going into \(to) can take them with it or start clean. The notes on the original in \(from) stay as they are either way.",
             [ModalChoice(title: "Copy With Notes", symbol: "doc.on.doc.fill") { place(true) },
              ModalChoice(title: "Copy Without Notes", symbol: "doc.on.doc") { place(false) },
              ModalChoice(title: "Cancel", symbol: "xmark") {}])
