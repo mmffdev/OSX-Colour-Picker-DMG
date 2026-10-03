@@ -28,6 +28,8 @@ enum Selection: Equatable {
     case lab
     /// cTools: checking a text colour against a background.
     case contrast
+    /// A project's Overview page, in its Information bucket.
+    case overview(UUID)
 }
 
 final class LibraryController: NSObject {
@@ -506,6 +508,7 @@ final class LibraryController: NSObject {
     /// The project the page showing belongs to, if any.
     var currentProject: UUID? {
         if case .palette(let id)? = current { return library.swatch(id)?.projectID }
+        if case .overview(let id)? = current { return id }
         return nil
     }
 
@@ -815,6 +818,8 @@ final class LibraryController: NSObject {
             return [ExportPalette(name: "Tagged \(t)", colours: hexes.map { ExportColour(name: colourName($0), hex: $0) })]
         case .lab: return labPalette.map { [$0] } ?? []
         case .contrast: return contrastPalette.map { [$0] } ?? []
+        // From a project's Overview, the export is the project: each of its palettes of colours.
+        case .overview(let id): return library.palettes(in: id).filter { !$0.isTypography }.compactMap { library.exportPalette($0.id, by: paletteSort) }
         }
     }
 
@@ -831,6 +836,9 @@ final class LibraryController: NSObject {
         case .palette(let id):
             guard let s = library.swatch(id) else { return }
             pack = library.designPack(named: s.name, palettes: [id], owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)
+        case .overview(let id):
+            exportDesignPack(project: id)
+            return
         case .all, .tag, .lab, .contrast:
             pack = library.designPack(named: catalogue == Catalogues.mainName ? "Colour Library" : catalogue,
                                       owner: Prefs.licenceOwner, licence: Prefs.licenceText, order: paletteSort)

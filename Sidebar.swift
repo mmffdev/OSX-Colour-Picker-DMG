@@ -24,7 +24,11 @@ final class SidebarNode: NSObject {
         case typography
         /// The "Typography" bucket inside a project, above its tags, holding its Typography palettes.
         case projectTypography(UUID)
-        /// The "Palettes" bucket inside a project, first of its buckets, holding its palettes of colours.
+        /// The "Information" bucket inside a project, always first, holding its pages.
+        case projectInformation(UUID)
+        /// The Overview page in a project's Information bucket.
+        case overview(UUID)
+        /// The "Palettes" bucket inside a project, after Information, holding its palettes of colours.
         case projectPalettes(UUID)
         case palette(UUID)
     }
@@ -46,6 +50,7 @@ final class SidebarNode: NSObject {
         if case .projectTags = kind { return true }
         if case .projectTypography = kind { return true }
         if case .projectPalettes = kind { return true }
+        if case .projectInformation = kind { return true }
         return isGroup || projectID != nil
     }
 
@@ -312,7 +317,7 @@ final class SidebarOutlineView: NSOutlineView {
         // A project's Tags and Typography buckets are inset alike, and so is what they hold.
         func bucket(_ kind: SidebarNode.Kind?) -> Bool {
             switch kind {
-            case .projectTags?, .projectTypography?, .projectPalettes?: return true
+            case .projectTags?, .projectTypography?, .projectPalettes?, .projectInformation?: return true
             default: return false
             }
         }
@@ -364,6 +369,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let toolsGroup = SidebarNode(.tools)
     private let typography = SidebarNode(.typography)
     private var paletteBuckets: [UUID: SidebarNode] = [:]
+    private var infoBuckets: [UUID: SidebarNode] = [:]
     private var typeBuckets: [UUID: SidebarNode] = [:]
     private let projectsGroup = SidebarNode(.projects)
     private var tagBuckets: [UUID: SidebarNode] = [:]
@@ -466,6 +472,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let held = lib.palettes(in: p.id)
             // Its palettes of colours sit in a bucket of their own, like its Typography palettes and tags.
             node.children = []
+            // Information comes first, always, and every project has it: part of the scaffold, with its Overview page.
+            let info = infoBuckets[p.id] ?? SidebarNode(.projectInformation(p.id))
+            infoBuckets[p.id] = info
+            if info.children.isEmpty { info.children = [SidebarNode(.overview(p.id))] }
+            node.children.append(info)
+            buckets.append(info)
             let colours = held.filter { !$0.isTypography }
             if !colours.isEmpty {
                 let bucket = paletteBuckets[p.id] ?? SidebarNode(.projectPalettes(p.id))
@@ -551,6 +563,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch (node.kind, selection) {
         case (.all, .all), (.lab, .lab), (.contrast, .contrast): return true
         case (.palette(let a), .palette(let b)): return a == b
+        case (.overview(let a), .overview(let b)): return a == b
         case (.tag(let a), .tag(let b)): return a.lowercased() == b.lowercased()
         default: return false
         }
@@ -583,6 +596,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if case .projectTags = node.kind { return false }
         if case .projectTypography = node.kind { return false }
         if case .projectPalettes = node.kind { return false }
+        if case .projectInformation = node.kind { return false }
         return true
     }
     // Each main heading after the first carries the gap that separates it from the section above.
@@ -668,6 +682,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Palettes that belong to this project"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
+        case .projectInformation:
+            cell.textField?.stringValue = "Information"
+            cell.imageView?.image = symbol("info.circle", "Project information", size: 11)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.toolTip = "What this project is: its pages of information"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
+        case .overview:
+            cell.textField?.stringValue = "Overview"
+            cell.imageView?.image = symbol("doc.text", "Overview", size: 11)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.toolTip = "The project at a glance"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .projectTypography:
             cell.textField?.stringValue = "Typography"
             cell.imageView?.image = symbol("textformat", "Project typography", size: 11)
@@ -756,6 +782,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .all: selection = .all
         case .lab: selection = .lab
         case .contrast: selection = .contrast
+        case .overview(let id): selection = .overview(id)
         case .tag(let t): selection = .tag(t)
         case .editTags:
             // Not a place to be: open the editor and put the highlight back where it was.

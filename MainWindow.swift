@@ -28,6 +28,7 @@ final class ContentViewController: NSViewController {
     let lab: LabViewController
     let contrast: ContrastViewController
     let typography: TypographyViewController
+    let overview: OverviewViewController
     private let library: LibraryController
     private let status = caption("")
     /// The footer: a hairline, then the status line. Placed by the window, full width.
@@ -45,7 +46,9 @@ final class ContentViewController: NSViewController {
         lab = LabViewController(library: library)
         contrast = ContrastViewController(library: library)
         typography = TypographyViewController(library: library)
+        overview = OverviewViewController(library: library)
         super.init(nibName: nil, bundle: nil)
+        addChild(overview)
         addChild(palette)
         addChild(all)
         addChild(lab)
@@ -292,6 +295,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case "contrast": show(.contrast)
         case "all": show(.all)
         case let page? where page.hasPrefix("tag:"): show(.tag(String(page.dropFirst(4))))
+        case let page? where page.hasPrefix("overview:"): show(UUID(uuidString: String(page.dropFirst(9))).map { .overview($0) } ?? .all)
         default: show(palette ?? .all)
         }
     }
@@ -362,6 +366,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         content.palette.dismissSheet()
         var s = requested
         if case .palette(let id) = s, library.library.swatch(id) == nil { s = .all }
+        if case .overview(let id) = s, library.library.project(id) == nil { s = .all }
         if s != .all, content.all.building { content.all.stopBuilding() }
         if !content.all.building, !builderItem.isCollapsed { builderItem.isCollapsed = true }
         // Contrast offers cLab's wheel as a palette only when it is reached from cLab.
@@ -374,6 +379,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         case .lab: preferences.set("lab", forKey: "lastPage")
         case .contrast: preferences.set("contrast", forKey: "lastPage")
         case .palette: preferences.set("palette", forKey: "lastPage")
+        case .overview(let id): preferences.set("overview:" + id.uuidString, forKey: "lastPage")
         }
         switch s {
         case .all:
@@ -390,6 +396,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             content.show(content.palette)
             content.palette.show(id)
             preferences.set(id.uuidString, forKey: "lastPalette")
+        case .overview(let id):
+            content.show(content.overview)
+            content.overview.show(id)
         case .lab:
             content.show(content.lab)
         case .contrast:
@@ -414,6 +423,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             window?.title = "Colour Lab" + where_
         case .contrast:
             window?.title = "Contrast" + where_
+        case .overview(let id):
+            window?.title = (library.library.project(id).map { "\($0.name) \u{2014} Overview" } ?? "Overview") + where_
         }
     }
 
