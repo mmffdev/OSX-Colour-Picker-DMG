@@ -212,7 +212,8 @@ final class SwatchRow: NSView {
         values.orientation = .vertical
         values.alignment = .leading
         values.spacing = 2
-        let info = NSStackView(views: [name, values])
+        // The values are a column like the others, under a heading of their own.
+        let info = NSStackView(views: [heading("Meta"), name, values])
         info.orientation = .vertical
         info.alignment = .leading
         info.spacing = 6
@@ -309,9 +310,12 @@ final class SwatchRow: NSView {
         if panels.history { fillHistory() }
     }
 
+    /// A column's heading: the sidebar's bucket headings exactly, bold and in the full text colour.
     private func heading(_ text: String) -> NSTextField {
-        let l = caption(text.uppercased())
-        l.textColor = .tertiaryLabelColor
+        let l = NSTextField(labelWithString: text)
+        l.font = SidebarOutlineView.headingFont
+        l.textColor = .labelColor
+        l.lineBreakMode = .byTruncatingTail
         return l
     }
 
