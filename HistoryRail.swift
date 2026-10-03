@@ -29,7 +29,7 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         table.addTableColumn(column)
         table.headerView = nil
         table.style = .plain
-        table.rowHeight = 36
+        table.rowHeight = 40
         table.dataSource = self
         table.delegate = self
         table.allowsEmptySelection = true
@@ -78,7 +78,8 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         let id = NSUserInterfaceItemIdentifier("step")
         let cell = tableView.makeView(withIdentifier: id, owner: self) as? StepCell ?? { let c = StepCell(); c.identifier = id; return c }()
         let step = library.history.steps[row]
-        cell.show(step, project: step.project.flatMap { library.library.project($0)?.name }, isPast: row > library.history.current)
+        cell.show(step, change: library.history.change(at: row), project: step.project.flatMap { library.library.project($0)?.name },
+                  isPast: row > library.history.current)
         return cell
     }
 
@@ -110,25 +111,43 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
     }
 }
 
-/// A step: its title, then who and when underneath.
+/// A step: a symbol for what it did, its title, then when, where, and which colours came or went,
+/// each with a tiny swatch of itself.
 private final class StepCell: NSTableCellView {
+    private let icon = NSImageView()
     private let title = NSTextField(labelWithString: "")
     private let detail = caption("")
+    private let chips = NSStackView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.setContentHuggingPriority(.required, for: .horizontal)
         title.font = NSFont.systemFont(ofSize: TextSize.body)
         title.lineBreakMode = .byTruncatingTail
-        let column = NSStackView(views: [title, detail])
+        detail.lineBreakMode = .byTruncatingTail
+        chips.orientation = .horizontal
+        chips.spacing = 3
+        chips.setContentHuggingPriority(.required, for: .horizontal)
+        let line = NSStackView(views: [chips, detail])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.spacing = 6
+        let column = NSStackView(views: [title, line])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 1
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
+        let row = NSStackView(views: [icon, column])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
         NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            column.centerYAnchor.constraint(equalTo: centerYAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 18),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -140,12 +159,32 @@ private final class StepCell: NSTableCellView {
         return f
     }()
 
-    func show(_ step: HistoryStep, project: String?, isPast: Bool) {
+    func show(_ step: HistoryStep, change: StepChange, project: String?, isPast: Bool) {
+        icon.image = symbol(stepSymbol(for: step.title), step.title, size: 13)
+        icon.contentTintColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
         title.stringValue = step.title
         title.textColor = isPast ? .tertiaryLabelColor : .labelColor
-        var parts = [StepCell.clock.string(from: step.date)]
+        var parts: [String] = []
+        // The colours that came or went, by name: "Scarlet added", "Blaze Orange, Orange removed".
+        if !change.added.isEmpty { parts.append(change.added.prefix(2).map(colourName).joined(separator: ", ") + (change.added.count > 2 ? " +\(change.added.count - 2)" : "") + " added") }
+        if !change.removed.isEmpty { parts.append(change.removed.prefix(2).map(colourName).joined(separator: ", ") + (change.removed.count > 2 ? " +\(change.removed.count - 2)" : "") + " removed") }
+        parts.append(StepCell.clock.string(from: step.date))
         if let p = project { parts.append(p) }
         detail.stringValue = parts.joined(separator: "  \u{00B7}  ")
+        chips.views.forEach { $0.removeFromSuperview() }
+        for hex in (change.added + change.removed).prefix(4) {
+            let chip = NSView()
+            chip.wantsLayer = true
+            chip.layer?.backgroundColor = colorFromHex(hex)?.cgColor
+            chip.layer?.cornerRadius = 3
+            chip.layer?.borderWidth = 0.5
+            chip.layer?.borderColor = NSColor.black.withAlphaComponent(0.25).cgColor
+            chip.translatesAutoresizingMaskIntoConstraints = false
+            chip.widthAnchor.constraint(equalToConstant: 12).isActive = true
+            chip.heightAnchor.constraint(equalToConstant: 12).isActive = true
+            chips.addArrangedSubview(chip)
+        }
+        chips.isHidden = chips.views.isEmpty
     }
 }
 

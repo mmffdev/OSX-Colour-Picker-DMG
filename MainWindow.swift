@@ -313,6 +313,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: library)
+        nc.addObserver(self, selector: #selector(projectFilesChanged), name: .projectFilesDidChange, object: library)
         nc.addObserver(self, selector: #selector(stateChanged), name: .appStateDidChange, object: library)
         nc.addObserver(self, selector: #selector(prefsChanged), name: .prefsDidChange, object: nil)
         nc.addObserver(self, selector: #selector(statusMessage(_:)), name: .statusMessage, object: library)
@@ -447,6 +448,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     }
 
     // MARK: Keeping up
+
+    @objc private func projectFilesChanged() { sidebar.reload() }
 
     @objc private func libraryChanged() {
         sidebar.reload()

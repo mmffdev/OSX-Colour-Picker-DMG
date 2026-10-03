@@ -156,6 +156,7 @@ final class ProjectHeaderCell: NSTableCellView {
     var onAdd: (() -> Void)?
     private let title = NSTextField(labelWithString: "")
     private let folder = NSImageView()
+    private let warning = NSImageView()
     private var add: NSButton!
 
     override init(frame: NSRect) {
@@ -169,7 +170,11 @@ final class ProjectHeaderCell: NSTableCellView {
         add.image = symbol("plus.circle", "", size: 12)
         add.contentTintColor = .tertiaryLabelColor
         add.imagePosition = .imageOnly
-        let stack = NSStackView(views: [folder, title, add])
+        warning.image = symbol("exclamationmark.triangle.fill", "Project file missing", size: 12)
+        warning.contentTintColor = .systemOrange
+        warning.toolTip = "The project's file is missing. Click to see what happened."
+        warning.isHidden = true
+        let stack = NSStackView(views: [folder, title, warning, add])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
@@ -187,8 +192,9 @@ final class ProjectHeaderCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String, heading: Bool = false, tooltip: String) {
+    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false) {
         title.stringValue = name
+        warning.isHidden = !lost
         title.font = heading ? SidebarOutlineView.headingFont : NSFont.systemFont(ofSize: NSFont.systemFontSize)
         title.textColor = .labelColor
         folder.isHidden = heading
@@ -499,7 +505,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = node.projectID {
             let cell = o.makeView(withIdentifier: ProjectHeaderCell.identifier, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = ProjectHeaderCell.identifier; return c }()
-            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project")
+            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: library.lostProjects[id] != nil)
             cell.onAdd = { [weak self] in self?.library.addPalette(to: id) }
             return cell
         }
@@ -641,6 +647,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .editTags:
             // Not a place to be: open the editor and put the highlight back where it was.
             library.showTagEditor()
+            select(selection)
+            return
+        case .project(let id) where library.lostProjects[id] != nil:
+            library.showLostProject(id)
             select(selection)
             return
         default: return

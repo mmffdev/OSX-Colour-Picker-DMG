@@ -25,8 +25,10 @@ struct Project: Codable, Equatable {
     /// The project form's answers, by ProjectField; nil until some are given.
     var details: [String: String]? = nil
     var detailsChangedAt: Date? = nil
-    /// A folder of the project's own for its file; nil is the master Projects folder.
+    /// The project's own folder, when it has been given one; nil puts it under the master Projects folder.
     var folder: String? = nil
+    /// Set once the project's file has been written. From then on a missing file is reported, never quietly remade.
+    var fileKnown: Bool? = nil
 }
 
 struct SwatchEntry: Codable, Equatable {
@@ -461,6 +463,11 @@ extension Library {
     mutating func setProjectFolder(_ id: UUID, _ path: String?) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         projects[i].folder = path
+    }
+
+    mutating func markProjectFile(_ id: UUID, known: Bool) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].fileKnown = known
     }
 
     mutating func deleteProject(_ id: UUID, at date: Date = Date()) {

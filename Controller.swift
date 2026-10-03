@@ -9,6 +9,8 @@ extension Notification.Name {
     /// Colours or palettes changed.
     static let libraryDidChange = Notification.Name("libraryDidChange")
     static let historyDidChange = Notification.Name("historyDidChange")
+    /// Project files were written, or one was found missing.
+    static let projectFilesDidChange = Notification.Name("projectFilesDidChange")
     /// Catalogue, sync status or picking state changed.
     static let appStateDidChange = Notification.Name("appStateDidChange")
     /// A short confirmation for the status bar. userInfo["text"].
@@ -194,25 +196,83 @@ final class LibraryController: NSObject {
         projectFilesTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.writeProjectFiles() }
     }
 
+    /// Projects whose file has existed and cannot be found, with why.
+    private(set) var lostProjects: [UUID: ProjectFiles.Loss] = [:]
+
     func writeProjectFiles() {
         do {
-            _ = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder,
-                                       history: Prefs.projectHistory && historyEnabled ? history : nil, written: &projectFilesWritten)
-        }
-        catch { flash("Could not write a project file: \(error.localizedDescription)") }
+            let done = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder,
+                                              history: Prefs.projectHistory && historyEnabled ? history : nil, written: &projectFilesWritten)
+            if !done.firstTime.isEmpty {
+                // Remembered without becoming a step: it is bookkeeping, not a change the user made.
+                library = try store.mutate { lib in for id in done.firstTime { lib.markProjectFile(id, known: true) } }
+                loadedStamp = store.modificationDate
+            }
+        } catch { flash("Could not write a project file: \(error.localizedDescription)") }
+        let lost = ProjectFiles.lost(in: library, library: store.url, master: ProjectFiles.folder)
+        let changed = lost != lostProjects
+        lostProjects = lost
+        if changed { NotificationCenter.default.post(name: .projectFilesDidChange, object: self) }
     }
 
-    /// The project's file, written now.
+    /// The project's file, where it should be.
     func projectFileURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.url(for: $0, library: store.url, master: ProjectFiles.folder) } }
+    func projectFolderURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.root(for: $0, library: store.url, master: ProjectFiles.folder) } }
 
-    /// Gives the project a folder of its own, or nil to put it back in the master folder, and moves its file.
+    /// Gives the project a folder of its own, or nil to put it back under the master folder, moving its folder.
     func setProjectFolder(_ id: UUID, _ folder: URL?) {
         guard let p = library.project(id) else { return }
-        let old = ProjectFiles.url(for: p, library: store.url, master: ProjectFiles.folder)
+        let old = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder)
         apply("Keep Project In") { $0.setProjectFolder(id, folder?.path) }
         projectFilesWritten[id] = nil
+        if let new = projectFolderURL(id), new != old, FileManager.default.fileExists(atPath: old.path) {
+            try? FileManager.default.removeItem(at: new)
+            try? FileManager.default.moveItem(at: old, to: new)
+        }
         writeProjectFiles()
-        if let new = projectFileURL(id), new != old { try? FileManager.default.removeItem(at: old) }
+    }
+
+    /// Lets the user point at the project's file after it was moved; the folder structure is built round it if need be.
+    func relocateProject(_ id: UUID) {
+        guard let p = library.project(id) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [UTType(filenameExtension: ProjectFiles.fileExtension) ?? .data]
+        panel.prompt = "Use This"
+        panel.message = "Find \u{201C}\(p.name)\u{201D}: its \(ProjectFiles.fileExtension) file, or the folder holding it"
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, let url = panel.url else { return }
+            do {
+                let root = try ProjectFiles.adopt(url, for: p)
+                let under = ProjectFiles.master(library: self.store.url, master: ProjectFiles.folder)
+                let inMaster = root.deletingLastPathComponent().resolvingSymlinksInPath() == under.resolvingSymlinksInPath()
+                let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : root.path
+                self.apply("Find Project File") { $0.setProjectFolder(id, own) }
+                self.projectFilesWritten[id] = nil
+                self.writeProjectFiles()
+                self.flash("\u{201C}\(p.name)\u{201D} found")
+                self.onCover?(nil, false)
+            } catch {
+                self.show(error)
+            }
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// Writes a lost project's file afresh from the library, because the user asked.
+    func rewriteProjectFile(_ id: UUID) {
+        guard library.project(id) != nil else { return }
+        library = (try? store.mutate { $0.markProjectFile(id, known: false) }) ?? library
+        projectFilesWritten[id] = nil
+        writeProjectFiles()
+        onCover?(nil, false)
+    }
+
+    /// The page shown for a project whose file is gone.
+    func showLostProject(_ id: UUID) {
+        guard let p = library.project(id), let loss = lostProjects[id] else { return }
+        onCover?(LostProjectController(library: self, project: p, loss: loss), true)
     }
 
     @objc func chooseProjectsFolder() {
@@ -241,11 +301,11 @@ final class LibraryController: NSObject {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Keep Project Here"
-        panel.message = "Choose a folder for \u{201C}\(p.name)\u{201D} and its file"
-        panel.directoryURL = ProjectFiles.folder(for: p, library: store.url, master: ProjectFiles.folder)
+        panel.message = "Choose where the \u{201C}\(p.name)\u{201D} folder should live"
+        panel.directoryURL = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder).deletingLastPathComponent()
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard r == .OK, let url = panel.url else { return }
-            self?.setProjectFolder(id, url)
+            self?.setProjectFolder(id, url.appendingPathComponent(filesystemName(p.name)))
             self?.flash("\u{201C}\(p.name)\u{201D} is kept in \(url.lastPathComponent)")
         }
         if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
@@ -253,7 +313,8 @@ final class LibraryController: NSObject {
 
     func showProjectFile(_ id: UUID) {
         writeProjectFiles()
-        if let url = projectFileURL(id) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        if let url = projectFileURL(id), FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        else if let root = projectFolderURL(id) { NSWorkspace.shared.activateFileViewerSelecting([root]) }
     }
     private func stateChanged() { NotificationCenter.default.post(name: .appStateDidChange, object: self) }
 

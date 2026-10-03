@@ -810,13 +810,48 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     var written: [UUID: Data] = [:]
     let firstWrite = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
     let again = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    check(firstWrite.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client A.mmffproject").path] && again.isEmpty
-          && (try? ProjectFiles.read(firstWrite[0]).data()) == fileData,
-          "a project package lands in a Projects folder beside the library, reads back whole, and is rewritten only when it changes")
-    projLib.setProjectFolder(client, projRoot.appendingPathComponent("Elsewhere").path)
-    let moved = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    check(moved.map { $0.lastPathComponent } == ["Client A.mmffproject"] && moved[0].deletingLastPathComponent().lastPathComponent == "Elsewhere",
-          "a project given a folder of its own is written there")
+    let expected = projRoot.appendingPathComponent("Main/Projects/Client A/Config/Client A.config")
+    check(firstWrite.files.map { $0.path } == [expected.path] && firstWrite.firstTime == [client] && again.files.isEmpty
+          && (try? ProjectFiles.read(expected).data()) == fileData,
+          "a project is a folder named for it, with its file in Config, under a Projects folder beside the library; written only when it changes")
+    projLib.markProjectFile(client, known: true)
+    check(ProjectFiles.lost(in: projLib, library: libURL, master: nil).isEmpty, "a project whose file is where it should be is not lost")
+    try! fm.removeItem(at: expected.deletingLastPathComponent().deletingLastPathComponent())
+    let lostNow = ProjectFiles.lost(in: projLib, library: libURL, master: nil)
+    let afterLoss = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
+    check(lostNow[client] == .missing(expected: expected) && afterLoss.files.isEmpty && !fm.fileExists(atPath: expected.path),
+          "a project file that has existed and is gone is reported, and never quietly written again")
+    check(ProjectFiles.lost(in: projLib, library: projRoot.appendingPathComponent("Gone/library.json"), master: nil)[client]
+          == .unavailable(folder: projRoot.appendingPathComponent("Gone/Projects")), "a Projects folder that is not there is reported as unavailable, not as a lost file")
+    // Found again, as a file on its own: the folder structure is built round it.
+    let loose = projRoot.appendingPathComponent("Found/Client A.config")
+    try! fm.createDirectory(at: loose.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try! fileData.write(to: loose)
+    let adopted = try! ProjectFiles.adopt(loose, for: projLib.project(client)!)
+    check(adopted.path == projRoot.appendingPathComponent("Found/Client A").path
+          && fm.fileExists(atPath: adopted.appendingPathComponent("Config/Client A.config").path) && !fm.fileExists(atPath: loose.path),
+          "a found file on its own is given its folder structure beside it")
+    check((try? ProjectFiles.adopt(adopted, for: projLib.project(client)!))?.path == adopted.path
+          && (try? ProjectFiles.adopt(adopted.appendingPathComponent("Config"), for: projLib.project(client)!))?.path == adopted.path,
+          "the project folder, or its Config folder, is accepted as the file's home")
+    var otherLib = Library()
+    let otherProject = otherLib.createProject(named: "Other", at: tp)
+    check((try? ProjectFiles.adopt(adopted, for: otherLib.project(otherProject)!)) == nil, "a file that belongs to a different project is refused")
+    projLib.setProjectFolder(client, adopted.path)
+    projLib.markProjectFile(client, known: true)
+    check(ProjectFiles.lost(in: projLib, library: libURL, master: nil).isEmpty, "once found, the project is lost no more")
+    // Renamed: the folder and file follow the new name on the next write.
+    projLib.setProjectFolder(client, nil)
+    projLib.markProjectFile(client, known: false)
+    written[client] = nil
+    _ = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
+    projLib.markProjectFile(client, known: true)
+    _ = projLib.renameProject(client, to: "Client B")
+    written[client] = nil
+    let renamed = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
+    check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Config/Client B.config").path]
+          && !fm.fileExists(atPath: projRoot.appendingPathComponent("Main/Projects/Client A").path),
+          "a renamed project's folder and file take the new name")
 
     print("history")
     var hist = StepHistory()
@@ -841,6 +876,17 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "a new step taken from an earlier one cuts off the steps after it")
     hist.delete(at: 0)
     check(hist.steps.map { $0.title } == ["New Project", "Rename Project"] && hist.current == 1, "a step can be deleted and the current one follows")
+    var hist3 = StepHistory()
+    var cLib = Library()
+    hist3.record("Opened", library: cLib, before: nil, limit: 0, at: th)
+    let cs = cLib.createSwatch(at: th); cLib.add(["#FF2400", "#00FF00"], toSwatch: cs, at: th)
+    hist3.record("Add Colours", library: cLib, before: hist3.steps.last!.library, limit: 0, at: th)
+    cLib.remove(["#00FF00"], fromSwatch: cs, at: th)
+    hist3.record("Remove Colours", library: cLib, before: hist3.steps.last!.library, limit: 0, at: th)
+    check(hist3.change(at: 1) == StepChange(added: ["#FF2400", "#00FF00"], removed: []) && hist3.change(at: 2) == StepChange(added: [], removed: ["#00FF00"])
+          && hist3.change(at: 0).isEmpty, "a step knows which colours it brought in or took out")
+    check(stepSymbol(for: "Pick Colour") == "eyedropper" && stepSymbol(for: "Delete Palette") == "trash" && stepSymbol(for: "Rename Tag") == "pencil"
+          && stepSymbol(for: "Sync") == "arrow.triangle.2.circlepath" && stepSymbol(for: "Something Else") == "circle", "each kind of step has a symbol")
     for i in 0..<5 { hist.record("Step \(i)", library: hLib, before: hLib, limit: 3, at: th) }
     check(hist.steps.count == 3 && hist.steps.last?.title == "Step 4" && hist.current == 2, "a limit keeps only the newest steps")
     let hRoot = root.appendingPathComponent("history/library.json")

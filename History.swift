@@ -63,6 +63,58 @@ struct StepHistory: Codable, Equatable {
     }
 }
 
+/// What a step did to the colours, read off the libraries before and after it.
+struct StepChange: Equatable {
+    var added: [String] = []
+    var removed: [String] = []
+    var isEmpty: Bool { added.isEmpty && removed.isEmpty }
+}
+
+extension StepHistory {
+    /// Colours the step brought in or took out: new to the library, or new to or gone from a palette.
+    func change(at index: Int) -> StepChange {
+        guard index > 0, steps.indices.contains(index) else { return StepChange() }
+        let before = steps[index - 1].library, after = steps[index].library
+        var change = StepChange()
+        let had = Set(before.colours.map { $0.hex }), has = Set(after.colours.map { $0.hex })
+        change.added = after.colours.map { $0.hex }.filter { !had.contains($0) }
+        change.removed = before.colours.map { $0.hex }.filter { !has.contains($0) }
+        if change.isEmpty {
+            // Within palettes: a colour added to or removed from one.
+            for s in after.swatches {
+                let was = Set(before.swatch(s.id)?.entries.map { $0.hex } ?? [])
+                for e in s.entries where !was.contains(e.hex) { change.added.append(e.hex) }
+            }
+            for s in before.swatches {
+                let now = Set(after.swatch(s.id)?.entries.map { $0.hex } ?? [])
+                for e in s.entries where !now.contains(e.hex) { change.removed.append(e.hex) }
+            }
+        }
+        return change
+    }
+}
+
+/// The symbol for a step, by what its title says it did.
+func stepSymbol(for title: String) -> String {
+    let t = title.lowercased()
+    if t.hasPrefix("opened") { return "clock" }
+    if t.hasPrefix("sync") { return "arrow.triangle.2.circlepath" }
+    if t.hasPrefix("pick") { return "eyedropper" }
+    if t.contains("send picks") { return "scope" }
+    if t.hasPrefix("add colour") || t.hasPrefix("keep colours") || t.hasPrefix("create palette") { return "plus.circle" }
+    if t.hasPrefix("remove") || t.hasPrefix("delete colour") { return "minus.circle" }
+    if t.hasPrefix("delete") { return "trash" }
+    if t.hasPrefix("rename") { return "pencil" }
+    if t.contains("star") { return "star" }
+    if t.contains("tag") { return "tag" }
+    if t.contains("pairing") || t.contains("typography") || t.contains("font") { return "textformat" }
+    if t.contains("project") { return "folder" }
+    if t.hasPrefix("arrange") || t.hasPrefix("move") { return "arrow.up.arrow.down" }
+    if t.contains("palette") { return "swatchpalette" }
+    if t.contains("import") { return "square.and.arrow.down" }
+    return "circle"
+}
+
 extension Library {
     /// The one project whose record or palettes differ from `old`; nil when none or several do.
     func projectTouched(since old: Library) -> UUID? {
