@@ -241,6 +241,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         split.addSplitViewItem(main)
         split.addSplitViewItem(builderItem)
         split.addSplitViewItem(historyItem)
+        addGrips()
         // The split view above, the footer across the whole width below it.
         let root = NSViewController()
         root.view = NSView()
@@ -458,18 +459,42 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private static let splitKey = "NSSplitView Subview Frames MMFFDevColour3Split"
 
     private func applyStartWidths() {
+        split.splitView.layoutSubtreeIfNeeded()
+        setWidth(MainWindowController.sidebarStartWidth, of: sideItem)
+        if !historyItem.isCollapsed { setWidth(MainWindowController.railStartWidth, of: historyItem) }
+    }
+
+    /// Gives a side pane a width by moving the divider on its inner edge. Set, measured and corrected,
+    /// since a collapsed pane's dividers can sit between a rail and the page.
+    private func setWidth(_ wanted: CGFloat, of item: NSSplitViewItem) {
         let view = split.splitView
-        view.layoutSubtreeIfNeeded()
-        view.setPosition(MainWindowController.sidebarStartWidth, ofDividerAt: 0)
-        if !historyItem.isCollapsed {
-            // Set, measure, and correct: the collapsed builder rail's dividers sit between the page and this rail.
-            let divider = view.arrangedSubviews.count - 2
-            let target = MainWindowController.railStartWidth
-            var position = view.bounds.width - target - view.dividerThickness
-            view.setPosition(position, ofDividerAt: divider)
+        guard let index = split.splitViewItems.firstIndex(of: item), view.arrangedSubviews.indices.contains(index) else { return }
+        let width = max(item.minimumThickness, min(wanted, view.bounds.width - 420 - 240))
+        if index == 0 { view.setPosition(width, ofDividerAt: 0); return }
+        let pane = view.arrangedSubviews[index]
+        // The divider that moves is the one against the nearest open pane to the left: a collapsed
+        // pane in between has no width to give, so its own divider cannot move.
+        var divider = index - 1
+        while divider > 0, split.splitViewItems[divider].isCollapsed { divider -= 1 }
+        for _ in 0..<3 {
+            let got = pane.frame.width
+            if abs(got - width) < 0.5 { break }
+            let at = view.arrangedSubviews[divider].frame.maxX
+            view.setPosition(at + (got - width), ofDividerAt: divider)
             view.layoutSubtreeIfNeeded()
-            let got = historyItem.viewController.view.frame.width
-            if got != target { position -= target - got; view.setPosition(position, ofDividerAt: divider) }
+        }
+    }
+
+    /// A notch on the inner edge of each side pane: drag to resize, double-click for the starting width.
+    private func addGrips() {
+        for (item, edge, start) in [(sideItem!, PaneGrip.Edge.trailing, MainWindowController.sidebarStartWidth),
+                                    (builderItem!, .leading, MainWindowController.railStartWidth),
+                                    (historyItem!, .leading, MainWindowController.railStartWidth)] {
+            let grip = PaneGrip(edge: edge)
+            grip.width = { item.viewController.view.frame.width }
+            grip.onResize = { [weak self] width in self?.setWidth(width, of: item) }
+            grip.onReset = { [weak self] in self?.setWidth(start, of: item) }
+            grip.attach(to: item.viewController.view)
         }
     }
 

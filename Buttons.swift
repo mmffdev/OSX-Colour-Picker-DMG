@@ -50,7 +50,7 @@ private func tinted(_ image: NSImage, _ colour: NSColor) -> NSImage {
     return out
 }
 
-private func watchTheme(_ view: NSView) {
+func watchTheme(_ view: NSView) {
     for name in [Notification.Name.prefsDidChange, .themeDidChange] {
         NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak view] _ in view?.needsDisplay = true }
     }
