@@ -219,7 +219,9 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Fills the row when it can, giving way to the cap on the text's width.
-    private func fill(_ c: NSLayoutConstraint) -> NSLayoutConstraint { c.priority = .defaultHigh; return c }
+    /// Weaker than the hold a split pane has on its own width (250 and up), so a wide page is never
+    /// pulled narrow by its text: the page keeps the window's spare width and the text stops at its cap.
+    private func fill(_ c: NSLayoutConstraint) -> NSLayoutConstraint { c.priority = NSLayoutConstraint.Priority(200); return c }
 
     override func updateLayer() {
         super.updateLayer()

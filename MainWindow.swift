@@ -172,6 +172,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private let content: ContentViewController
     private let builder: BuilderViewController
     private var builderItem: NSSplitViewItem!
+    /// False on a first run: no pane widths have been saved yet, so the starting widths are used.
+    private var startWidthsKnown = true
     private var historyItem: NSSplitViewItem!
     private var sideItem: NSSplitViewItem!
     private lazy var historyRail = HistoryRailController(library: library)
@@ -259,6 +261,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         win.setContentSize(NSSize(width: 1080, height: 700))
         // The window takes its saved place first, so the panes' saved widths are laid into a window of the right size.
         restoreFrame()
+        startWidthsKnown = preferences.object(forKey: MainWindowController.splitKey) != nil
         split.splitView.autosaveName = "MMFFDevColour3Split"
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
         historyItem.isCollapsed = !Prefs.historyRailShown
@@ -448,6 +451,28 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // the main screen when the saved screen's usable area has changed since, as it does with three screens.
     private var frameSettled = false
 
+    /// The side panes' widths on a first run, before the user has dragged them. After that the
+    /// widths are whatever they were left at; nothing is fixed but the minimums.
+    static let sidebarStartWidth: CGFloat = 260
+    static let railStartWidth: CGFloat = 320
+    private static let splitKey = "NSSplitView Subview Frames MMFFDevColour3Split"
+
+    private func applyStartWidths() {
+        let view = split.splitView
+        view.layoutSubtreeIfNeeded()
+        view.setPosition(MainWindowController.sidebarStartWidth, ofDividerAt: 0)
+        if !historyItem.isCollapsed {
+            // Set, measure, and correct: the collapsed builder rail's dividers sit between the page and this rail.
+            let divider = view.arrangedSubviews.count - 2
+            let target = MainWindowController.railStartWidth
+            var position = view.bounds.width - target - view.dividerThickness
+            view.setPosition(position, ofDividerAt: divider)
+            view.layoutSubtreeIfNeeded()
+            let got = historyItem.viewController.view.frame.width
+            if got != target { position -= target - got; view.setPosition(position, ofDividerAt: divider) }
+        }
+    }
+
     /// Puts the window where it was last left, if any of that place is still on a screen.
     private func restoreFrame() {
         guard let win = window, let text = preferences.string(forKey: "mainWindowFrame") else { return }
@@ -468,8 +493,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         super.showWindow(sender)
         guard !frameSettled else { return }
         restoreFrame()
+        let firstRun = !startWidthsKnown
         DispatchQueue.main.async {
             self.restoreFrame()
+            if firstRun { self.applyStartWidths() }
             self.frameSettled = true
         }
     }
