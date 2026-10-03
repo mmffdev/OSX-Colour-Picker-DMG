@@ -9,7 +9,8 @@ import AppKit
 final class PaneGrip: NSView {
     /// Which edge of its pane the notch sits on: the sidebar's is its right, a rail's is its left.
     enum Edge { case trailing, leading }
-    static let size = NSSize(width: 8, height: 60)
+    /// As tall as the title panel, so beside a striped title it runs the stripes' full height.
+    static var size: NSSize { NSSize(width: 16, height: PageStyle.titlePanelHeight) }
 
     private let edge: Edge
     /// Asked for the pane's width now, at the start of a drag.
@@ -32,13 +33,13 @@ final class PaneGrip: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Puts the notch on the pane's inner edge, half way down.
+    /// Puts the notch on the pane's inner edge, at the top, level with the title panel.
     func attach(to pane: NSView) {
         pane.addSubview(self, positioned: .above, relativeTo: nil)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: PaneGrip.size.width),
             heightAnchor.constraint(equalToConstant: PaneGrip.size.height),
-            centerYAnchor.constraint(equalTo: pane.centerYAnchor),
+            topAnchor.constraint(equalTo: pane.safeAreaLayoutGuide.topAnchor),
             edge == .trailing ? trailingAnchor.constraint(equalTo: pane.trailingAnchor) : leadingAnchor.constraint(equalTo: pane.leadingAnchor),
         ])
     }
@@ -58,7 +59,7 @@ final class PaneGrip: NSView {
         // One short line down the middle, to say it can be held.
         let ink = held ? Theme.buttonActiveText : hovering ? Theme.buttonHoverText : Theme.text
         ink.withAlphaComponent(held || hovering ? 0.8 : 0.35).setFill()
-        NSBezierPath(roundedRect: NSRect(x: b.midX - 0.75 + (edge == .trailing ? 1 : -1), y: b.midY - 7, width: 1.5, height: 14), xRadius: 0.75, yRadius: 0.75).fill()
+        NSBezierPath(roundedRect: NSRect(x: b.midX - 1 + (edge == .trailing ? 2 : -2), y: b.midY - 8, width: 2, height: 16), xRadius: 1, yRadius: 1).fill()
     }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
