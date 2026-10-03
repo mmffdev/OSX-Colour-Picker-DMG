@@ -170,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m.addItem(.separator())
             add(m, "Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", nil, [.command, .control])
             add(m, "Show History", #selector(MainWindowController.toggleHistory), "y", main, [.command, .shift])
+            m.addItem(.separator())
+            add(m, "Lighter Background", #selector(MainWindowController.lighterBackground), "]", main)
+            add(m, "Darker Background", #selector(MainWindowController.darkerBackground), "[", main)
             add(m, "Customise Toolbar\u{2026}", #selector(NSWindow.runToolbarCustomizationPalette(_:)))
         }
         menu("Window") { m in

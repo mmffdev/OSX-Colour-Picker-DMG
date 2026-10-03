@@ -123,6 +123,80 @@ func identityColour(_ id: UUID) -> NSColor {
     return NSColor(hue: hue, saturation: 0.62 - lift, brightness: 0.78 + lift, alpha: 1)
 }
 
+// ---------- Theme ----------
+//
+// The app's background: the system's own, or one of five greys from white to black in quarter
+// steps. Everything that draws a background reads Theme.background; text, scrollers and borders
+// follow the light or dark appearance the step implies.
+
+extension Notification.Name {
+    static let themeDidChange = Notification.Name("themeDidChange")
+}
+
+enum Theme {
+    static let levels = ["#FFFFFF", "#BFBFBF", "#808080", "#404040", "#000000"]
+
+    /// nil is the system's own background.
+    static var level: Int? {
+        get { let v = preferences.integer(forKey: "theme.level"); return preferences.object(forKey: "theme.level") == nil || v < 0 ? nil : min(v, levels.count - 1) }
+        set { preferences.set(newValue ?? -1, forKey: "theme.level") }
+    }
+
+    static var background: NSColor { level.flatMap { colorFromHex(levels[$0]) } ?? .windowBackgroundColor }
+
+    /// Dark text on the two light steps; light text from mid grey down.
+    static var appearance: NSAppearance? { level.flatMap { NSAppearance(named: $0 >= 2 ? .darkAqua : .aqua) } }
+
+    static var isDark: Bool {
+        if let l = level { return l >= 2 }
+        return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    /// Scroller knobs that show against the background.
+    static var knobStyle: NSScroller.KnobStyle { isDark ? .light : .dark }
+
+    static func step(_ by: Int) {
+        let now = level ?? 2
+        level = max(0, min(levels.count - 1, now + by))
+        NotificationCenter.default.post(name: .themeDidChange, object: nil)
+    }
+
+    /// Applies the background and appearance to a window and every scroll view in it.
+    static func apply(to window: NSWindow) {
+        window.backgroundColor = background
+        window.appearance = appearance
+        func walk(_ v: NSView) {
+            if let s = v as? NSScrollView { s.scrollerKnobStyle = knobStyle; s.autohidesScrollers = true }
+            v.subviews.forEach(walk)
+        }
+        if let content = window.contentView { walk(content); content.needsDisplay = true }
+    }
+
+    /// Barber-pole stripes, 20 points wide with 20-point gaps at 45 degrees, three percent lighter
+    /// than the background in the dark steps and three percent darker in the light, clipped to `band`.
+    static func drawStripes(in band: NSRect) {
+        let base = background.usingColorSpace(.deviceRGB) ?? .gray
+        let shade = base.blended(withFraction: 0.03, of: isDark ? .white : .black) ?? base
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.clip(to: band)
+        shade.setFill()
+        let stripe: CGFloat = 20, step: CGFloat = 40
+        var x = band.minX - band.height
+        while x < band.maxX + band.height {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: x, y: band.minY))
+            path.line(to: NSPoint(x: x + stripe, y: band.minY))
+            path.line(to: NSPoint(x: x + stripe + band.height, y: band.maxY))
+            path.line(to: NSPoint(x: x + band.height, y: band.maxY))
+            path.close()
+            path.fill()
+            x += step
+        }
+        ctx.restoreGState()
+    }
+}
+
 /// A scroll view that lets go of a flick once the pointer has left it. macOS keeps sending a
 /// flick's momentum to the view where it began, so the sidebar would go on scrolling while the
 /// mouse was already over the page; this drops those events instead.
@@ -547,7 +621,7 @@ final class DropOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.withAlphaComponent(0.94).setFill()
+        Theme.background.withAlphaComponent(0.94).setFill()
         bounds.fill()
         let frame = NSBezierPath(roundedRect: bounds.insetBy(dx: 18, dy: 18), xRadius: 16, yRadius: 16)
         NSColor.gray.withAlphaComponent(0.10).setFill()

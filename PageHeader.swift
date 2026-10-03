@@ -110,33 +110,12 @@ final class PageHeader: NSView {
     /// width, touching the top, the title in its middle, with the bar clear beneath it.
     override func draw(_ dirtyRect: NSRect) {
         guard striped else { return }
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let base = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB) ?? .gray
-        let shade = base.blended(withFraction: 0.03, of: dark ? .white : .black) ?? base
         // The view is not flipped: the top edge is bounds.maxY, and the panel hangs from it.
-        let band = NSRect(x: 0, y: bounds.maxY - PageStyle.titlePanelHeight, width: bounds.width, height: PageStyle.titlePanelHeight)
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.saveGState()
-        ctx.clip(to: band)
-        shade.setFill()
-        let stripe: CGFloat = 20, step: CGFloat = 40
-        // Each stripe is a parallelogram leaning at 45 degrees, wide enough to cross the band whole.
-        var x = band.minX - band.height
-        while x < band.maxX + band.height {
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: x, y: band.minY))
-            path.line(to: NSPoint(x: x + stripe, y: band.minY))
-            path.line(to: NSPoint(x: x + stripe + band.height, y: band.maxY))
-            path.line(to: NSPoint(x: x + band.height, y: band.maxY))
-            path.close()
-            path.fill()
-            x += step
-        }
-        ctx.restoreGState()
+        Theme.drawStripes(in: NSRect(x: 0, y: bounds.maxY - PageStyle.titlePanelHeight, width: bounds.width, height: PageStyle.titlePanelHeight))
     }
+
 }
 
-/// A small rounded pill with a symbol and a name, used for where something belongs.
 final class PillButton: NSButton {
     private let onClick: () -> Void
 

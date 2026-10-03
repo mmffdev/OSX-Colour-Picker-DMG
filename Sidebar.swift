@@ -180,12 +180,14 @@ final class ProjectHeaderCell: NSTableCellView {
         lock.image = symbol("lock.open", "", size: 11)
         lock.contentTintColor = .tertiaryLabelColor
         lock.imagePosition = .imageOnly
-        // The padlock sits on its own at the far right, clear of the plus and padded from the edge.
-        let stack = NSStackView(views: [folder, title, warning, add, lock])
+        // The padlock sits on its own at the far right: a spacer takes up the slack after the plus.
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let stack = NSStackView(views: [folder, title, warning, add, spacer, lock])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
-        stack.setCustomSpacing(12, after: add)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -221,6 +223,24 @@ final class ProjectHeaderCell: NSTableCellView {
     }
     @objc private func addTapped() { onAdd?() }
     @objc private func lockTapped() { onLock?() }
+}
+
+/// The sidebar's own background: the theme's, flat, in place of the system's tinted sidebar.
+final class SidebarBackdrop: NSView {
+    override var isOpaque: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.background.setFill()
+        dirtyRect.fill()
+    }
+    override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
+}
+
+/// The band at the top of the sidebar, level with the page's title panel, striped when the page's is.
+final class SidebarBand: NSView {
+    var striped = false { didSet { if striped != oldValue { needsDisplay = true } } }
+    override func draw(_ dirtyRect: NSRect) {
+        if striped { Theme.drawStripes(in: bounds) }
+    }
 }
 
 /// A row that draws its selection in the theme's colours and turns its text to match, when the
@@ -396,10 +416,35 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let scroll = LetGoScrollView()
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
-        scroll.automaticallyAdjustsContentInsets = true
-        view = scroll
+        scroll.automaticallyAdjustsContentInsets = false
+        self.scroll = scroll
+        // The sidebar sits under the same header band as the page, with no tint of its own.
+        let root = SidebarBackdrop()
+        root.addSubview(band)
+        root.addSubview(scroll)
+        band.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            band.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            band.heightAnchor.constraint(equalToConstant: PageStyle.titlePanelHeight),
+            scroll.topAnchor.constraint(equalTo: band.bottomAnchor, constant: PageStyle.barGap),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        view = root
+        NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .selectionDidChange, object: library)
     }
+
+    private var scroll: NSScrollView!
+    private let band = SidebarBand()
+
+    /// The band is striped while the page showing belongs to a project, as the page's own title panel is.
+    @objc private func pageChanged() { band.striped = library.currentProject != nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -409,14 +454,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// The list starts below the toolbar, set down so that the first row's middle is on the pages' title line.
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard let scroll = view as? NSScrollView else { return }
-        let extra = PageStyle.titleCentre - 14 // the first row is 28 points tall
-        let top = view.safeAreaInsets.top + extra
-        if scroll.automaticallyAdjustsContentInsets || scroll.contentInsets.top != top {
-            scroll.automaticallyAdjustsContentInsets = false
-            scroll.contentInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
-            scroll.scrollerInsets = NSEdgeInsets(top: -extra, left: 0, bottom: 0, right: 0)
-        }
+        pageChanged()
     }
 
     // MARK: Contents

@@ -19,7 +19,8 @@ private extension NSToolbarItem.Identifier {
     static let lab = NSToolbarItem.Identifier("lab")
 }
 
-/// The middle pane: whichever page is showing, with the status bar beneath it.
+/// The middle pane: whichever page is showing. Its status bar is the window's footer, which the
+/// window lays across its whole width under the sidebar, the page and the rails.
 final class ContentViewController: NSViewController {
     let palette: PaletteViewController
     let all: AllSwatchesViewController
@@ -28,6 +29,9 @@ final class ContentViewController: NSViewController {
     let typography: TypographyViewController
     private let library: LibraryController
     private let status = caption("")
+    /// The footer: a hairline, then the status line. Placed by the window, full width.
+    let footer = NSView()
+    static let footerHeight: CGFloat = 26
     private let host = NSView()
     private var showing: NSViewController?
     private var cover: (view: NSView, form: NSViewController)?
@@ -54,23 +58,27 @@ final class ContentViewController: NSViewController {
         drop.onDropImage = { [weak self] url in self?.library.importPalette(from: url) }
         view = drop
 
-        let line = hairline()
-        status.font = NSFont.systemFont(ofSize: 11)
-        for v in [host, line, status] as [NSView] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            drop.addSubview(v)
-        }
+        host.translatesAutoresizingMaskIntoConstraints = false
+        drop.addSubview(host)
         NSLayoutConstraint.activate([
             host.topAnchor.constraint(equalTo: drop.topAnchor),
             host.leadingAnchor.constraint(equalTo: drop.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: drop.trailingAnchor),
-            host.bottomAnchor.constraint(equalTo: line.topAnchor),
-            line.leadingAnchor.constraint(equalTo: drop.leadingAnchor),
-            line.trailingAnchor.constraint(equalTo: drop.trailingAnchor),
-            line.bottomAnchor.constraint(equalTo: drop.bottomAnchor, constant: -26),
-            status.leadingAnchor.constraint(equalTo: drop.leadingAnchor, constant: 20),
-            status.trailingAnchor.constraint(lessThanOrEqualTo: drop.trailingAnchor, constant: -20),
-            status.centerYAnchor.constraint(equalTo: drop.bottomAnchor, constant: -13),
+            host.bottomAnchor.constraint(equalTo: drop.bottomAnchor),
+        ])
+
+        let line = hairline()
+        for v in [line, status] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            footer.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            line.topAnchor.constraint(equalTo: footer.topAnchor),
+            line.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
+            line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
+            status.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: PageStyle.side),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: footer.trailingAnchor, constant: -PageStyle.side),
+            status.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
         ])
     }
 
@@ -81,7 +89,7 @@ final class ContentViewController: NSViewController {
         let back = NSBox()
         back.boxType = .custom
         back.borderWidth = 0
-        back.fillColor = .windowBackgroundColor
+        back.fillColor = Theme.background
         back.translatesAutoresizingMaskIntoConstraints = false
         form.view.translatesAutoresizingMaskIntoConstraints = false
         addChild(form)
@@ -229,7 +237,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         split.addSplitViewItem(main)
         split.addSplitViewItem(builderItem)
         split.addSplitViewItem(historyItem)
-        win.contentViewController = split
+        // The split view above, the footer across the whole width below it.
+        let root = NSViewController()
+        root.view = NSView()
+        root.addChild(split)
+        let footer = content.footer
+        for v in [split.view, footer] { v.translatesAutoresizingMaskIntoConstraints = false; root.view.addSubview(v) }
+        NSLayoutConstraint.activate([
+            split.view.topAnchor.constraint(equalTo: root.view.topAnchor),
+            split.view.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            split.view.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            split.view.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            footer.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
+            footer.heightAnchor.constraint(equalToConstant: ContentViewController.footerHeight),
+        ])
+        win.contentViewController = root
         win.setContentSize(NSSize(width: 1080, height: 700))
         split.splitView.autosaveName = "MMFFDevColour3Split"
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
@@ -238,6 +262,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
         shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3MainWindow")
+        Theme.apply(to: win)
+        DispatchQueue.main.async { Theme.apply(to: win) }   // once more after every page has its views
         if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_TRACE"] != nil {
             let screens = NSScreen.screens.map { NSStringFromRect($0.frame) }.joined(separator: " | ")
             NSLog("trace screens: %@", screens)
@@ -316,6 +342,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: library)
         nc.addObserver(self, selector: #selector(projectFilesChanged), name: .projectFilesDidChange, object: library)
+        nc.addObserver(self, selector: #selector(themeChanged), name: .themeDidChange, object: nil)
         nc.addObserver(self, selector: #selector(stateChanged), name: .appStateDidChange, object: library)
         nc.addObserver(self, selector: #selector(prefsChanged), name: .prefsDidChange, object: nil)
         nc.addObserver(self, selector: #selector(statusMessage(_:)), name: .statusMessage, object: library)
@@ -452,6 +479,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Keeping up
 
     @objc private func projectFilesChanged() { sidebar.reload() }
+    @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
+    @objc func lighterBackground() { Theme.step(-1) }
+    @objc func darkerBackground() { Theme.step(1) }
 
     @objc private func libraryChanged() {
         sidebar.reload()
