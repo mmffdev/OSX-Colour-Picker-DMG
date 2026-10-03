@@ -43,10 +43,24 @@ final class SwatchListView: NSView {
     private var palette: UUID?
     /// Opens a colour's sheet: the colour, and whether on Notes (0) or History (1).
     var onOpen: ((String, Int) -> Void)?
+    /// The blank swatch under the last row was pressed.
+    var onAdd: (() -> Void)?
+    private let addTile = AddSwatchTile(radius: 10)
+    private let addRow = NSView()
 
     init(library: LibraryController) {
         self.library = library
         super.init(frame: .zero)
+        addTile.onPress = { [weak self] in self?.onAdd?() }
+        for v in [addRow, addTile] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        addRow.addSubview(addTile)
+        NSLayoutConstraint.activate([
+            addRow.heightAnchor.constraint(equalToConstant: SwatchListStyle.rowHeight),
+            addTile.leadingAnchor.constraint(equalTo: addRow.leadingAnchor),
+            addTile.topAnchor.constraint(equalTo: addRow.topAnchor),
+            addTile.bottomAnchor.constraint(equalTo: addRow.bottomAnchor),
+            addTile.widthAnchor.constraint(equalToConstant: SwatchListStyle.tileWidth),
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = SwatchListStyle.rowGap
@@ -76,8 +90,9 @@ final class SwatchListView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Shows the colours in order. The same colours as before are refreshed where they stand.
-    func show(_ hexes: [String], in palette: UUID, locked: Bool) {
-        if palette == self.palette, rows.map({ $0.hex }) == hexes {
+    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false) {
+        addRow.isHidden = !offersNew
+        if palette == self.palette, rows.map({ $0.hex }) == hexes, addRow.superview != nil {
             rows.forEach { $0.refresh(locked: locked) }
             return
         }
@@ -93,6 +108,10 @@ final class SwatchListView: NSView {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             row.refresh(locked: locked)
         }
+        // The blank swatch always follows the last colour.
+        addRow.removeFromSuperview()
+        stack.addArrangedSubview(addRow)
+        addRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     func scrollToTop() {

@@ -158,7 +158,8 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
             panel.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 8),
             panel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -8),
         ])
-        window?.makeFirstResponder(fields[0])
+        // After the click that opened the sheet has finished, or the grid takes the focus back.
+        DispatchQueue.main.async { [weak self] in if let self = self { self.window?.makeFirstResponder(self.fields[0]) } }
     }
 
     override var wantsUpdateLayer: Bool { true }
@@ -261,4 +262,80 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     }
     override func scrollWheel(with event: NSEvent) {}
     override func rightMouseDown(with event: NSEvent) {}
+}
+
+// ---------- The blank swatch that adds one ----------
+
+/// A blank swatch the size of its neighbours, with a ringed plus in the middle. Pressing it opens
+/// New Colour. Drawn in the theme's button greys, so it never competes with the colours beside it.
+final class AddSwatchTile: NSView {
+    var onPress: (() -> Void)?
+    private let radius: CGFloat
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var pressed = false { didSet { needsDisplay = true } }
+    private var tracking: NSTrackingArea?
+
+    init(radius: CGFloat) {
+        self.radius = radius
+        super.init(frame: .zero)
+        toolTip = "New Colour: Type It As Display P3, CMYK, Lab Or Hex (\u{21E7}\u{2318}K)"
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("New Colour")
+        watchTheme(self)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; pressed = false }
+    override func mouseDown(with event: NSEvent) { pressed = true }
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        let was = pressed
+        pressed = false
+        if was && inside { onPress?() }
+    }
+    // A blank swatch has no swatch menu; the click stops here rather than reaching the grid.
+    override func rightMouseDown(with event: NSEvent) {}
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let fill = pressed ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.buttonRest
+        let ink = (pressed ? Theme.buttonActiveText : hovering ? Theme.buttonHoverText : Theme.text).withAlphaComponent(hovering || pressed ? 0.9 : 0.5)
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+        fill.setFill()
+        shape.fill()
+        NSColor.labelColor.withAlphaComponent(0.14).setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+
+        // The ring and its plus: a fixed size, so the mark is the same on a card and on a row.
+        let size: CGFloat = 44, arm: CGFloat = 9
+        let ring = NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
+        ink.setStroke()
+        let circle = NSBezierPath(ovalIn: ring)
+        circle.lineWidth = 1.5
+        circle.stroke()
+        let plus = NSBezierPath()
+        plus.move(to: NSPoint(x: bounds.midX - arm, y: bounds.midY)); plus.line(to: NSPoint(x: bounds.midX + arm, y: bounds.midY))
+        plus.move(to: NSPoint(x: bounds.midX, y: bounds.midY - arm)); plus.line(to: NSPoint(x: bounds.midX, y: bounds.midY + arm))
+        plus.lineWidth = 1.5
+        plus.lineCapStyle = .round
+        plus.stroke()
+    }
+}
+
+/// The blank swatch as the last card of a palette's grid.
+final class AddCard: NSCollectionViewItem {
+    static let identifier = NSUserInterfaceItemIdentifier("addCard")
+    let tile = AddSwatchTile(radius: 12)
+    override func loadView() { view = tile }
+    // Never shown as selected: it is a button, not a swatch.
+    override var isSelected: Bool { get { false } set {} }
 }

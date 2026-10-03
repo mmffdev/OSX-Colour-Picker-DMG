@@ -397,6 +397,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         grid.allowsMultipleSelection = true
         grid.backgroundColors = [.clear]
         grid.register(ColourCard.self, forItemWithIdentifier: ColourCard.identifier)
+        grid.register(AddCard.self, forItemWithIdentifier: AddCard.identifier)
+        list.onAdd = { [weak self] in self?.library.newColour() }
         grid.onClick = { [weak self] ip in self?.clicked(ip) }
         grid.onDelete = { [weak self] in self?.removeSelected() }
         grid.onCopy = { [weak self] in self?.copySelected() }
@@ -527,13 +529,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         list.isHidden = !asList
         wcag.isHidden = asList   // the card's own extras; a row shows its values always
         labels.isHidden = asList
-        if asList { list.show(hexes, in: id, locked: header.lock ?? false) }
+        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew) }
 
         sizeCards()
         grid.reloadData()
         updateHeader()
 
-        empty.isHidden = !hexes.isEmpty
+        empty.isHidden = !hexes.isEmpty || offersNew   // the blank swatch says what to do next
         empty.stringValue = !search.isEmpty ? "No swatches in this palette match \u{201C}\(search)\u{201D}."
             : "No swatches yet.\n" + (Shortcuts.display(for: "togglePicking").map { "Press \($0) to pick" } ?? "Pick")
                 + " colours into this palette, or drop an image on the window."
@@ -612,9 +614,17 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     // MARK: Grid
 
     func numberOfSections(in cv: NSCollectionView) -> Int { 1 }
-    func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { hexes.count }
+    /// The blank swatch that adds a colour follows the last one, unless the project is locked or a search is narrowing the page.
+    private var offersNew: Bool { !(header.lock ?? false) && search.isEmpty }
+
+    func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { hexes.count + (offersNew ? 1 : 0) }
 
     func collectionView(_ cv: NSCollectionView, itemForRepresentedObjectAt ip: IndexPath) -> NSCollectionViewItem {
+        if ip.item >= hexes.count {
+            let add = cv.makeItem(withIdentifier: AddCard.identifier, for: ip) as! AddCard
+            add.tile.onPress = { [weak self] in self?.library.newColour() }
+            return add
+        }
         let card = cv.makeItem(withIdentifier: ColourCard.identifier, for: ip) as! ColourCard
         let hex = hexes[ip.item]
         card.library = library
