@@ -46,7 +46,7 @@ final class PageHeader: NSView {
         NSLayoutConstraint.activate([
             title.centerYAnchor.constraint(equalTo: topAnchor, constant: PageStyle.titleCentre),
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PageStyle.side),
+            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),
             bar.topAnchor.constraint(equalTo: title.bottomAnchor, constant: PageStyle.barGap),
             bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
             bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),

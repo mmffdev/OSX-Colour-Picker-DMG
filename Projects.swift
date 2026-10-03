@@ -227,8 +227,8 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 680))
 
-        let heading = NSTextField(labelWithString: mode == .newProject ? "New Project" : mode == .project ? "Project Details" : "Project Template")
-        heading.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        let header = PageHeader(actions: [templates])
+        header.title.stringValue = mode == .newProject ? "New Project" : mode == .project ? "Project Details" : "Project Template"
         let nameLabel = fieldLabel(isTemplate ? "Template name" : "Project name")
         nameField.stringValue = startName
         nameField.placeholderString = isTemplate ? "Client or studio the details belong to" : "Client, product or piece of work"
@@ -288,20 +288,20 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         save.keyEquivalent = "\r"
         let top = hairline(), bottom = hairline()
 
-        for v in [heading, templates, nameLabel, nameField, top, scroll, bottom, message, cancel, save] as [NSView] {
+        for v in [header, nameLabel, nameField, top, scroll, bottom, message, cancel, save] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: 640),
-            heading.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 18),
-            heading.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
-            templates.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
-            templates.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
+            header.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: PageStyle.height),
             nameLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
             nameLabel.widthAnchor.constraint(equalToConstant: 160),
             nameLabel.firstBaselineAnchor.constraint(equalTo: nameField.firstBaselineAnchor),
-            nameField.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 16),
+            nameField.topAnchor.constraint(equalTo: header.bottomAnchor),
             nameField.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 10),
             nameField.widthAnchor.constraint(equalToConstant: 400),
             top.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 14),

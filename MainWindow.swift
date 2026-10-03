@@ -91,7 +91,8 @@ final class ContentViewController: NSViewController {
             back.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             back.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             back.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            form.view.topAnchor.constraint(equalTo: back.topAnchor),
+            // The box runs under the toolbar; the form starts below it, so its header sits where every page's does.
+            form.view.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor),
             form.view.bottomAnchor.constraint(equalTo: back.bottomAnchor),
         ] + (fills ? [form.view.leadingAnchor.constraint(equalTo: back.leadingAnchor),
                       form.view.trailingAnchor.constraint(equalTo: back.trailingAnchor)]
@@ -227,6 +228,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
         shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3MainWindow")
+        if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_TRACE"] != nil {
+            let screens = NSScreen.screens.map { NSStringFromRect($0.frame) }.joined(separator: " | ")
+            NSLog("trace screens: %@", screens)
+            NSLog("trace after autosave: %@", NSStringFromRect(win.frame))
+            for t in [1.0, 3.0] { DispatchQueue.main.asyncAfter(deadline: .now() + t) { NSLog("trace at %.0fs: %@  on %@", t, NSStringFromRect(win.frame), win.screen.map { NSStringFromRect($0.frame) } ?? "no screen") } }
+            NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: win, queue: nil) { _ in NSLog("trace moved to: %@", NSStringFromRect(win.frame)) }
+        }
 
         let toolbar = NSToolbar(identifier: "MMFFDevColour3Toolbar")
         toolbar.delegate = self
