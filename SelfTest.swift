@@ -1420,6 +1420,40 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
               "no ink is paper white, solid black is dark, and white needs no ink")
     } else { check(false, "a build typed in by hand has a master through its press profile") }
 
+    check(RGBSpace.videoCode(0, legal: true) == 64 && RGBSpace.videoCode(1, legal: true) == 940 && RGBSpace.videoCode(0, legal: false) == 0 && RGBSpace.videoCode(1, legal: false) == 1023
+          && (Rendering.of(steel, in: ProfileChannel(space: "rec709", legal: true)).value ?? "").hasSuffix("(10-bit, legal range)")
+          && (Rendering.of(steel, in: ProfileChannel(space: "rec709")).value ?? "").hasSuffix("(10-bit, full range)"),
+          "video black and white read 64 and 940 in legal range, 0 and 1023 in full range, and every video value names its range")
+    let blackMaster = XYZ(x: 0, y: 0, z: 0), darkMaster = RGBSpace.srgb.master(of: [0.06, 0.06, 0.06])
+    if let plainWhite = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true),
+       let lifted = PrintBuild.of(darkMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true),
+       let clipped = PrintBuild.of(darkMaster, press: PressProfiles.generic, intent: .relative),
+       let deepest = PrintBuild.of(blackMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true) {
+        let level = PressProfiles.blackLevel(of: PressProfiles.generic)
+        check(plainWhite.totalInk < 1 && level > 0 && level < 0.2 && lifted.printed.y >= clipped.printed.y && near(deepest.printed.y, level, 0.01),
+              "with black point compensation white still takes no ink, black lands on the press's darkest black, and a dark colour is no darker than without it")
+    } else { check(false, "black point compensation gives a build") }
+    var icc = Data(count: 128)
+    func bytes(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24), UInt8((v >> 16) & 0xFF), UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
+    icc.append(contentsOf: bytes(1) + bytes(0x77747074) + bytes(144) + bytes(20) + bytes(0x58595A20) + bytes(0) + bytes(UInt32(0.90 * 65536)) + bytes(UInt32(0.95 * 65536)) + bytes(UInt32(0.80 * 65536)))
+    let readWhite = PressProfiles.mediaWhite(inProfile: icc)
+    check(readWhite.map { near($0.x, 0.90, 0.0001) && near($0.y, 0.95, 0.0001) && near($0.z, 0.80, 0.0001) } == true && PressProfiles.mediaWhite(inProfile: Data(count: 60)) == nil,
+          "the paper white is read from a press profile's own data, and data that is no profile gives none")
+    let paper2 = PressProfiles.paperWhite(of: PressProfiles.generic)
+    if let onPaper = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .absolute), let against = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .relative) {
+        check(paper2.y > 0.5 && paper2.y <= 1.01 && onPaper.totalInk < 1 && close(onPaper.printed, against.printed.x * paper2.x / XYZ.d50.x, against.printed.y * paper2.y / XYZ.d50.y, against.printed.z * paper2.z / XYZ.d50.z, 0.001)
+              && PressProfiles.paperWhite(of: "No Such Press") == XYZ.d50,
+              "an absolute proof shows white as the paper itself, with no ink; a profile that is not here is taken as a perfect white")
+    } else { check(false, "an absolute colorimetric proof gives a build") }
+    let typedBuild = ColourDefinition(source: ColourSource(space: "cmyk", values: [0, 0.9, 0.85, 0], press: PressProfiles.generic),
+                                      master: PrintBuild.master(ofInks: [0, 0.9, 0.85, 0], press: PressProfiles.generic) ?? XYZ.d50, kind: .surface)
+    let asGiven = Rendering.of(typedBuild, in: generic), otherPress = Rendering.of(typedBuild, in: ProfileChannel(space: ProfileChannel.print, press: "No Such Press"))
+    check(asGiven.value == "C 0  M 90  Y 85  K 0" && asGiven.difference == 0 && asGiven.inRange && asGiven.detail.hasPrefix("As Given") && asGiven.detail.contains("Total Ink 175%") && otherPress.value == nil,
+          "a build typed for a press is delivered to that press exactly as given, with its total ink")
+    check(RenderingIntent.allCases.map { $0.name } == ["Relative Colorimetric", "Absolute Colorimetric", "Perceptual"]
+          && Rendering.of(steel, in: ProfileChannel(space: ProfileChannel.print, press: PressProfiles.generic, intent: .relative, blackPoint: true)).detail.contains("Black Point Compensation"),
+          "three rendering intents are on offer, and a print value says when black point compensation is on")
+
     print("colour profiles: palette, project, house")
     var studio = Library()
     studio.addPick("#4F8093", at: t)

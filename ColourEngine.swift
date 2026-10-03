@@ -196,14 +196,22 @@ enum RGBSpace: String, CaseIterable, Codable {
     /// parts in a thousand, which no eye sees. Display P3's red sits that far outside Rec. 2020.
     static let slack = 0.002
 
+    var isVideo: Bool { self == .rec709 || self == .rec2020 }
+
+    /// A value 0 to 1 as a 10-bit video code: 0 to 1023 in full range, 64 to 940 in broadcast legal range.
+    static func videoCode(_ v: Double, legal: Bool) -> Int {
+        let held = min(max(v, 0), 1)
+        return Int((legal ? 64 + held * 876 : held * 1023).rounded())
+    }
+
     /// Values as this space's users write them.
-    func text(_ v: [Double]) -> String {
+    func text(_ v: [Double], legal: Bool = false) -> String {
         func whole(_ x: Double, _ top: Double) -> Int { Int((min(max(x, 0), 1) * top).rounded()) }
         switch self {
         case .srgb: return String(format: "#%02X%02X%02X", whole(v[0], 255), whole(v[1], 255), whole(v[2], 255))
         case .displayP3: return v.map { String(format: "%.3f", $0) }.joined(separator: ", ")
         case .adobeRGB: return v.map { "\(whole($0, 255))" }.joined(separator: ", ")
-        case .rec709, .rec2020: return v.map { "\(whole($0, 1023))" }.joined(separator: ", ") + "  (10-bit, full range)"
+        case .rec709, .rec2020: return v.map { "\(RGBSpace.videoCode($0, legal: legal))" }.joined(separator: ", ") + (legal ? "  (10-bit, legal range)" : "  (10-bit, full range)")
         case .acescg: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
         }
     }
@@ -270,28 +278,34 @@ func deltaE2000(_ p: LabD50, _ q: LabD50) -> Double {
 // MARK: Rendering intents
 
 /// The rule for bringing a colour a medium cannot show into its range.
-///
-/// Absolute colorimetric, which shows a colour on the paper's own white, is not here yet: the
-/// system's engine will not run it from a master. It needs the paper white read from the profile.
 enum RenderingIntent: String, Codable, CaseIterable {
     /// Keeps every colour in range exactly; brings one out of range to the nearest edge. The default for swatches.
     case relative
+    /// As relative, and measured against the paper's own white, so the proof shows the colour on that stock.
+    /// The system's engine will not run this from a master, so the app applies the paper white itself.
+    case absolute
     /// Compresses everything to fit, shifting even colours in range. For images, not single colours.
     case perceptual
 
     var name: String {
         switch self {
         case .relative: return "Relative Colorimetric"
+        case .absolute: return "Absolute Colorimetric"
         case .perceptual: return "Perceptual"
         }
     }
 
-    var system: CGColorRenderingIntent {
+    /// What it does, in a line, for the Settings pane.
+    var about: String {
         switch self {
-        case .relative: return .relativeColorimetric
-        case .perceptual: return .perceptual
+        case .relative: return "A colour in range is kept exactly; one out of range goes to the nearest edge"
+        case .absolute: return "As relative, shown on the paper's own white: the proof of how it will look on that stock"
+        case .perceptual: return "Everything is compressed to fit, so even colours in range shift. For images"
         }
     }
+
+    /// What the system's engine is asked for. Absolute is relative with the paper white applied by the app.
+    var system: CGColorRenderingIntent { self == .perceptual ? .perceptual : .relativeColorimetric }
 }
 
 // MARK: Press profiles
@@ -329,6 +343,50 @@ enum PressProfiles {
     }()
 
     private static var spaces: [String: CGColorSpace] = [:]
+    private static var whites: [String: XYZ] = [:]
+    private static var blacks: [String: Double] = [:]
+
+    /// The paper white a profile was measured on, read from the profile's own file ("wtpt"). D50,
+    /// a perfect white, when the profile gives none.
+    static func paperWhite(of name: String) -> XYZ {
+        if let have = whites[name] { return have }
+        let white = all.first { $0.name == name }.flatMap { FileManager.default.contents(atPath: $0.path) }.flatMap(mediaWhite(inProfile:)) ?? XYZ.d50
+        whites[name] = white
+        return white
+    }
+
+    /// Reads the media white point from ICC profile data: a header of 128 bytes, a table of tags,
+    /// and under the tag "wtpt" three fixed-point numbers.
+    static func mediaWhite(inProfile data: Data) -> XYZ? {
+        func word(_ at: Int) -> UInt32? {
+            guard at >= 0, at + 4 <= data.count else { return nil }
+            return data.subdata(in: at..<at + 4).reduce(0) { $0 << 8 | UInt32($1) }
+        }
+        guard let count = word(128), count < 512 else { return nil }
+        for i in 0..<Int(count) {
+            let entry = 132 + i * 12
+            guard let signature = word(entry), signature == 0x77747074, let offset = word(entry + 4), let size = word(entry + 8), size >= 20 else { continue }
+            let at = Int(offset) + 8   // past the type name and four reserved bytes
+            guard let x = word(at), let y = word(at + 4), let z = word(at + 8) else { return nil }
+            func fixed(_ v: UInt32) -> Double { Double(Int32(bitPattern: v)) / 65536 }
+            let white = XYZ(x: fixed(x), y: fixed(y), z: fixed(z))
+            return white.y > 0.5 && white.y <= 1.01 ? white : nil   // a sane paper, or nothing
+        }
+        return nil
+    }
+
+    /// How bright the press's darkest black is, as a fraction of its white: what pure black comes back as.
+    static func blackLevel(of name: String) -> Double {
+        if let have = blacks[name] { return have }
+        var level = 0.0
+        if let space = space(named: name), let black = CGColor(colorSpace: CGColorSpace(name: CGColorSpace.genericXYZ)!, components: [0, 0, 0, 1]),
+           let ink = black.converted(to: space, intent: .relativeColorimetric, options: nil),
+           let back = ink.converted(to: CGColorSpace(name: CGColorSpace.genericXYZ)!, intent: .relativeColorimetric, options: nil)?.components, back.count >= 3 {
+            level = min(max(Double(back[1]), 0), 0.2)
+        }
+        blacks[name] = level
+        return level
+    }
 
     /// The colour space of a profile by name; nil when the profile is not on this Mac.
     static func space(named name: String) -> CGColorSpace? {
@@ -356,14 +414,27 @@ struct PrintBuild: Equatable {
         return zip(names, inks).map { "\($0) \(Int(($1 * 100).rounded()))" }.joined(separator: "  ")
     }
 
-    /// Sends a master through the profile and back. Black point compensation is left off: asked
-    /// for through this engine it puts ink on pure white, which is wrong, so it waits for a route that can be trusted.
-    static func of(_ master: XYZ, press: String, intent: RenderingIntent) -> PrintBuild? {
-        guard let space = PressProfiles.space(named: press),
-              let colour = CGColor(colorSpace: masterSpace, components: [CGFloat(master.x), CGFloat(master.y), CGFloat(master.z), 1]) else { return nil }
-        guard let ink = colour.converted(to: space, intent: intent.system, options: nil), let c = ink.components, c.count >= 4,
+    /// Sends a master through the profile and back.
+    ///
+    /// Absolute colorimetric: the master is first expressed against the paper's white, and the
+    /// result is shown on that paper. Black point compensation: the master is scaled so that pure
+    /// black lands on the press's darkest black and white stays white, which keeps dark colours
+    /// apart at the cost of lifting them slightly. Both are worked out here; the system's engine
+    /// is asked only for the plain conversion, which is the part it does reliably.
+    static func of(_ master: XYZ, press: String, intent: RenderingIntent, blackPoint: Bool = false) -> PrintBuild? {
+        guard let space = PressProfiles.space(named: press) else { return nil }
+        let white = intent == .absolute ? PressProfiles.paperWhite(of: press) : XYZ.d50
+        var given = XYZ(x: master.x * XYZ.d50.x / white.x, y: master.y * XYZ.d50.y / white.y, z: master.z * XYZ.d50.z / white.z)
+        if blackPoint, intent != .perceptual {
+            let black = PressProfiles.blackLevel(of: press)
+            given = XYZ(x: given.x * (1 - black) + black * XYZ.d50.x, y: given.y * (1 - black) + black * XYZ.d50.y, z: given.z * (1 - black) + black * XYZ.d50.z)
+        }
+        guard let colour = CGColor(colorSpace: masterSpace, components: [CGFloat(given.x), CGFloat(given.y), CGFloat(given.z), 1]),
+              let ink = colour.converted(to: space, intent: intent.system, options: nil), let c = ink.components, c.count >= 4,
               let back = ink.converted(to: masterSpace, intent: .relativeColorimetric, options: nil)?.components, back.count >= 3 else { return nil }
-        return PrintBuild(inks: c.prefix(4).map { Double($0) }, printed: XYZ(x: Double(back[0]), y: Double(back[1]), z: Double(back[2])))
+        // What the build looks like: against a perfect white, or on its own paper for an absolute proof.
+        let printed = XYZ(x: Double(back[0]) * white.x / XYZ.d50.x, y: Double(back[1]) * white.y / XYZ.d50.y, z: Double(back[2]) * white.z / XYZ.d50.z)
+        return PrintBuild(inks: c.prefix(4).map { Double($0) }, printed: printed)
     }
 
     /// The master of a build typed in by hand: what those inks make on that press.
@@ -385,6 +456,10 @@ struct ProfileChannel: Codable, Equatable {
     var press: String? = nil
     /// For print: how an out-of-range colour is brought in. nil is relative colorimetric.
     var intent: RenderingIntent? = nil
+    /// For print: black point compensation. nil is off, so a colour in range is kept exactly.
+    var blackPoint: Bool? = nil
+    /// For video: code values in broadcast legal range (64 to 940). nil is full range (0 to 1023).
+    var legal: Bool? = nil
 
     static let print = "print"
     var isPrint: Bool { space == ProfileChannel.print }
@@ -420,16 +495,23 @@ struct Rendering: Equatable {
             let within = space.linearValues(of: master).allSatisfy { $0 >= -RGBSpace.slack && (open || $0 <= 1 + RGBSpace.slack) }
             let held = raw.map { open ? max($0, 0) : min(max($0, 0), 1) }
             let shown = space.master(of: held)
-            return Rendering(channel: channel, value: space.text(held), shown: shown, difference: deltaE2000(master.lab, shown.lab), inRange: within,
+            return Rendering(channel: channel, value: space.text(held, legal: channel.legal ?? false), shown: shown, difference: deltaE2000(master.lab, shown.lab), inRange: within,
                              detail: within ? space.about : "Outside \(space.name): the nearest it can show")
         }
-        let press = channel.press ?? PressProfiles.generic, intent = channel.intent ?? .relative
-        guard let build = PrintBuild.of(master, press: press, intent: intent) else {
+        let press = channel.press ?? PressProfiles.generic, intent = channel.intent ?? .relative, blackPoint = channel.blackPoint ?? false
+        // A colour given as a build for this very press is delivered as given: the build is the truth, not a round trip through maths.
+        if definition.source.space == "cmyk", definition.source.press == press, definition.source.values.count == 4 {
+            let build = PrintBuild(inks: definition.source.values, printed: master)
+            return Rendering(channel: channel, value: build.text, shown: master, difference: 0, inRange: true,
+                             detail: "As Given  \u{00B7}  Total Ink \(Int(build.totalInk.rounded()))%")
+        }
+        guard let build = PrintBuild.of(master, press: press, intent: intent, blackPoint: blackPoint) else {
             return Rendering(channel: channel, value: nil, shown: nil, difference: nil, inRange: false, detail: "The profile \u{201C}\(press)\u{201D} is not on this Mac")
         }
         let difference = deltaE2000(master.lab, build.printed.lab)
+        let extras = (blackPoint && intent != .perceptual ? "  \u{00B7}  Black Point Compensation" : "")
         return Rendering(channel: channel, value: build.text, shown: build.printed, difference: difference, inRange: difference <= Rendering.visible,
-                         detail: "\(intent.name)  \u{00B7}  Total Ink \(Int(build.totalInk.rounded()))%")
+                         detail: "\(intent.name)\(extras)  \u{00B7}  Total Ink \(Int(build.totalInk.rounded()))%")
     }
 }
 
