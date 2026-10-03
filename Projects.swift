@@ -210,6 +210,8 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
     let templates = NSPopUpButton(frame: .zero, pullsDown: true)
     private let message = NSTextField(labelWithString: "")
     private var controls: [(field: ProjectField, control: NSControl)] = []
+    /// The saved-values buttons, one per field and one per section; each carries its key as its identifier.
+    private var savedButtons: [NSButton] = []
 
     init(mode: Mode, name: String, values: [String: String], onSave: @escaping (String, [String: String]) -> Void) {
         self.mode = mode
@@ -256,11 +258,16 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
             let title = NSTextField(labelWithString: section.rawValue)
             title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
             headingRows.append(rows.count)
-            rows.append([title, NSGridCell.emptyContentView])
+            // The section's own saved sets, on the same column as each field's saved values.
+            let sectionSaved: NSView = FormMemory.lead(of: section).isEmpty ? NSGridCell.emptyContentView
+                : savedButton("Fill This Whole Section From A Saved \(section.rawValue)", #selector(sectionSavedTapped(_:)), key: section.rawValue)
+            rows.append([title, NSGridCell.emptyContentView, sectionSaved])
             for field in fields {
                 let control = makeControl(for: field)
                 controls.append((field, control))
-                rows.append([fieldLabel(field.title), control])
+                let saved: NSView = FormMemory.remembers(field) ? savedButton("Use A Saved \(field.title)", #selector(fieldSavedTapped(_:)), key: field.rawValue)
+                    : NSGridCell.emptyContentView
+                rows.append([fieldLabel(field.title), control, saved])
             }
         }
         let grid = NSGridView(views: rows)
@@ -269,6 +276,8 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 0).width = 160
         grid.column(at: 1).width = 400
+        grid.column(at: 2).width = 20
+        grid.column(at: 2).xPlacement = .center
         grid.rowAlignment = .firstBaseline
         for r in headingRows {
             grid.row(at: r).topPadding = r == 0 ? 0 : 14
@@ -296,7 +305,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
             save = toolButton("Save", "checkmark", "Save The Project's Details (\u{2318}S)", target: self, action: #selector(saveTapped))
             save.keyEquivalent = "s"
             save.keyEquivalentModifierMask = .command
-            for c in [nameField, cancel, save] + controls.map({ $0.control }) as [NSControl] { c.isEnabled = !locked }
+            for c in [nameField, cancel, save] + controls.map({ $0.control }) + savedButtons as [NSControl] { c.isEnabled = !locked }
             templates.isEnabled = !locked
             if locked { say("The project is locked. Unlock it to change these details.", good: true) }
         } else {
@@ -389,6 +398,100 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         }
     }
 
+    // MARK: Saved values
+
+    private func savedButton(_ tip: String, _ action: Selector, key: String) -> NSButton {
+        let b = symbolButton("square.stack", tooltip: tip, target: self, action: action)
+        b.image = symbol("square.stack", tip, size: 12)
+        b.identifier = NSUserInterfaceItemIdentifier(key)
+        savedButtons.append(b)
+        return b
+    }
+
+    /// One line for a menu: the first line of the value, cut short if it runs on.
+    private func menuTitle(_ value: String) -> String {
+        let first = value.split(whereSeparator: { $0.isNewline }).first.map(String.init) ?? value
+        let more = first.count < value.trimmingCharacters(in: .whitespacesAndNewlines).count
+        return (first.count > 60 ? String(first.prefix(60)) + "\u{2026}" : first) + (more && first.count <= 60 ? " \u{2026}" : "")
+    }
+
+    @objc private func fieldSavedTapped(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, let field = ProjectField(rawValue: key) else { return }
+        let saved = FormMemoryStore.load().remembered(for: field)
+        let menu = NSMenu()
+        if saved.isEmpty {
+            menu.addItem(withTitle: "Nothing Saved For \(field.title) Yet", action: nil, keyEquivalent: "").isEnabled = false
+            menu.addItem(withTitle: "What You Type Here Is Remembered When The Form Is Saved", action: nil, keyEquivalent: "").isEnabled = false
+        }
+        let forget = NSMenu()
+        for value in saved {
+            let item = menu.addItem(withTitle: menuTitle(value), action: #selector(useSavedValue(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = [key, value]
+            let drop = forget.addItem(withTitle: menuTitle(value), action: #selector(forgetSavedValue(_:)), keyEquivalent: "")
+            drop.target = self
+            drop.representedObject = [key, value]
+        }
+        if !saved.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Forget", action: nil, keyEquivalent: "").submenu = forget
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func useSavedValue(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2,
+              let control = controls.first(where: { $0.field.rawValue == pair[0] })?.control else { return }
+        control.stringValue = pair[1]
+    }
+
+    @objc private func forgetSavedValue(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2, let field = ProjectField(rawValue: pair[0]) else { return }
+        FormMemoryStore.update { $0.forget(pair[1], for: field) }
+    }
+
+    @objc private func sectionSavedTapped(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, let section = ProjectField.Section(rawValue: key) else { return }
+        let saved = FormMemoryStore.load().records(for: section)
+        let menu = NSMenu()
+        if saved.isEmpty {
+            let lead = FormMemory.lead(of: section).first?.title ?? "Name"
+            menu.addItem(withTitle: "No Saved \(section.rawValue) Yet", action: nil, keyEquivalent: "").isEnabled = false
+            menu.addItem(withTitle: "A Section Is Remembered Under Its \(lead) When The Form Is Saved", action: nil, keyEquivalent: "").isEnabled = false
+        }
+        let forget = NSMenu()
+        for record in saved {
+            let item = menu.addItem(withTitle: menuTitle(record.name), action: #selector(useSavedSection(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = [key, record.id.uuidString]
+            let drop = forget.addItem(withTitle: menuTitle(record.name), action: #selector(forgetSavedSection(_:)), keyEquivalent: "")
+            drop.target = self
+            drop.representedObject = [key, record.id.uuidString]
+        }
+        if !saved.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Forget", action: nil, keyEquivalent: "").submenu = forget
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    private func record(_ sender: NSMenuItem) -> (ProjectField.Section, FormMemory.SectionRecord)? {
+        guard let pair = sender.representedObject as? [String], pair.count == 2, let section = ProjectField.Section(rawValue: pair[0]),
+              let record = FormMemoryStore.load().records(for: section).first(where: { $0.id.uuidString == pair[1] }) else { return nil }
+        return (section, record)
+    }
+
+    @objc private func useSavedSection(_ sender: NSMenuItem) {
+        guard let (section, record) = record(sender) else { return }
+        show(FormMemoryStore.load().filling(values, with: record, in: section))
+        say("Filled \(section.rawValue) from \(record.name).", good: true)
+    }
+
+    @objc private func forgetSavedSection(_ sender: NSMenuItem) {
+        guard let (section, record) = record(sender) else { return }
+        FormMemoryStore.update { $0.forget(record: record.id, in: section) }
+    }
+
     // MARK: Values
 
     private var values: [String: String] {
@@ -479,6 +582,8 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let answers = ProjectField.tidy(values, templateOnly: isTemplate)
         if let problem = ProjectField.problem(name: name, values: answers, naming: isTemplate ? "template" : "project") { say(problem); return }
+        // What a project's form holds is remembered for next time: each field, and each section under its name.
+        if !isTemplate { FormMemoryStore.update { $0.remember(answers) } }
         if embedded {
             // The page stays; what was saved becomes what Revert goes back to.
             startName = name

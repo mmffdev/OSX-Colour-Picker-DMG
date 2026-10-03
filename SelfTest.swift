@@ -1334,6 +1334,38 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(steps.steps(changing: "#F55805", in: nweb).isEmpty, "and says nothing for a palette where nothing happened to it")
 
 
+    print("what the project form remembers")
+    var memory = FormMemory()
+    memory.remember(["clientCompany": " ACME Company ", "clientContact": "Wile E.", "clientEmail": "wile@acme.com", "status": "Active", "ownerCompany": "MMFFDev", "notes": ""], at: t)
+    check(memory.remembered(for: .clientCompany) == ["ACME Company"] && memory.remembered(for: .clientEmail) == ["wile@acme.com"]
+          && memory.remembered(for: .status).isEmpty && memory.remembered(for: .notes).isEmpty,
+          "each field typed into is remembered under that field; a fixed choice and a blank are not")
+    check(memory.records(for: .client).map { $0.name } == ["ACME Company"] && memory.records(for: .client).first?.values == ["clientCompany": "ACME Company", "clientContact": "Wile E.", "clientEmail": "wile@acme.com"]
+          && memory.records(for: .studio).map { $0.name } == ["MMFFDev"] && memory.records(for: .project).isEmpty,
+          "each section is kept whole under its leading field's value; the job's own section is not kept")
+    let acme = memory.records(for: .client)[0].id
+    memory.remember(["clientCompany": "ACME Company 2", "clientContact": "Road Runner"], at: t.addingTimeInterval(1))
+    memory.remember(["clientCompany": "acme company", "clientContact": "Wile E. Coyote", "clientPhone": "555"], at: t.addingTimeInterval(2))
+    check(memory.records(for: .client).map { $0.name } == ["acme company", "ACME Company 2"] && memory.records(for: .client)[0].id == acme
+          && memory.records(for: .client)[0].values["clientPhone"] == "555" && memory.records(for: .client)[0].values["clientEmail"] == nil
+          && memory.records(for: .client)[0].savedAt == t.addingTimeInterval(2),
+          "a section saved again under the same name replaces what was kept and keeps its id; another name is another record")
+    check(memory.remembered(for: .clientCompany) == ["acme company", "ACME Company 2", "ACME Company"] && memory.remembered(for: .clientContact).first == "Wile E. Coyote",
+          "a field lists its values newest first")
+    let filled = memory.filling(["clientCompany": "Old", "clientEmail": "old@old.com", "ownerCompany": "MMFFDev", "description": "Job"], with: memory.records(for: .client)[1], in: .client)
+    check(filled["clientCompany"] == "ACME Company 2" && filled["clientContact"] == "Road Runner" && filled["clientEmail"] == "" && filled["ownerCompany"] == "MMFFDev" && filled["description"] == "Job",
+          "filling a section from a record sets its fields, clears those the record lacks, and leaves the other sections alone")
+    memory.forget("ACME Company", for: .clientCompany)
+    memory.forget(record: acme, in: .client)
+    check(memory.remembered(for: .clientCompany) == ["acme company", "ACME Company 2"] && memory.records(for: .client).map { $0.name } == ["ACME Company 2"],
+          "a value and a record can each be forgotten")
+    let memoryFolder = FileManager.default.temporaryDirectory.appendingPathComponent("mmffdev-colour3-memory-\(UUID().uuidString)")
+    let memoryFile = memoryFolder.appendingPathComponent("form-memory.json")
+    try? FormMemoryStore.save(memory, to: memoryFile)
+    defer { try? FileManager.default.removeItem(at: memoryFolder) }
+    check(FormMemoryStore.load(from: memoryFile) == memory && FormMemoryStore.load(from: memoryFolder.appendingPathComponent("none.json")) == FormMemory(),
+          "the memory reads back from its file as it was written, and a missing file is an empty memory")
+
     print("a project takes a copy of a palette")
     var shop = Library()
     shop.addPick("#F55805", at: t); shop.addPick("#101010", at: t)
