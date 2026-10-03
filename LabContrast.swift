@@ -595,7 +595,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private func arrange(in b: NSRect) {
         let pad: CGFloat = 20, bar: CGFloat = 28, gap: CGFloat = 14
         let w = b.width - pad * 2
-        let head = view.safeAreaInsets.top + 14 // the page runs under the toolbar; its contents must not
+        let head = view.safeAreaInsets.top + PageLayout.titleCentre - bar / 2 // the page runs under the toolbar; its contents must not
 
         heading.sizeToFit()
         heading.frame.origin = NSPoint(x: pad, y: head + (bar - heading.frame.height) / 2)
@@ -653,17 +653,18 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         method.frame.origin = NSPoint(x: width - method.frame.width, y: y + 5)
         badge.frame = NSRect(x: 0, y: y, width: width - method.frame.width - 8, height: 30)
         y += 30 + 8
+        // What the number means, right under the score and the WCAG 2 / APCA switch.
+        why.preferredMaxLayoutWidth = width
+        let noteHeight = why.intrinsicContentSize.height
+        why.frame = NSRect(x: 0, y: y, width: width, height: noteHeight)
+        y += noteHeight + 14
         table.frame = NSRect(x: 0, y: y, width: width, height: 88)
         y += 88 + 10
         goal.frame = NSRect(x: 0, y: y, width: width, height: 22)
         y += 26
         fixInk.frame = NSRect(x: 0, y: y, width: (width - 6) / 2, height: 22)
         fixPaper.frame = NSRect(x: (width + 6) / 2, y: y, width: (width - 6) / 2, height: 22)
-        y += 22 + 12
-        why.preferredMaxLayoutWidth = width
-        let noteHeight = why.intrinsicContentSize.height
-        why.frame = NSRect(x: 0, y: y, width: width, height: noteHeight)
-        y += noteHeight + 28
+        y += 22 + 28
 
         from.frame = NSRect(x: 0, y: y, width: width, height: 22)
         y += 26
@@ -759,11 +760,11 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         fixInk.isEnabled = !met
         fixPaper.isEnabled = !met
 
-        // The note under the page says what the number means and, for APCA, where it stands.
-        let lead = apca ? "APCA  " : "Contrast  "
+        // The note under the score says what the number means and, for APCA, where it stands.
+        let lead = apca ? "APCA  " : "WCAG 2  "
         let rest = apca
             ? "Lc scores how readable the text is, from 0 to about 106, and knows light-on-dark from dark-on-light. APCA is drafted for WCAG 3 and is not yet a standard: audits, contracts and accessibility law still ask for the WCAG 2 ratio."
-            : "The ratio compares how light two colours are, from 1 (the same) to 21 (black on white). Body text needs 4.5; large text, icons and controls need 3."
+            : "The ratio compares how light two colours are, from 1 (the same) to 21 (black on white). It is the standard that audits, contracts and accessibility law ask for. Body text needs 4.5; large text, icons and controls need 3."
         let note = NSMutableAttributedString(string: lead, attributes: [.font: NSFont.systemFont(ofSize: TextSize.body, weight: .semibold), .foregroundColor: NSColor.labelColor])
         note.append(NSAttributedString(string: rest, attributes: [.font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.secondaryLabelColor]))
         why.attributedStringValue = note

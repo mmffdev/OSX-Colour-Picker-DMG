@@ -492,8 +492,12 @@ final class SettingsWindowController: NSWindowController {
         }
         win.contentViewController = tabs
         win.center()
+        win.setFrameAutosaveName("MMFFDevColour3Settings")   // comes back where it was left
+        showPanel(preferences.integer(forKey: "settingsPanel"))
+        panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in preferences.set(tabs.selectedTabViewItemIndex, forKey: "settingsPanel") }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .appStateDidChange, object: library)
     }
+    private var panelWatch: NSKeyValueObservation?
 
     @objc func refresh() { panels.forEach { if $0.isViewLoaded { $0.refresh() } } }
 

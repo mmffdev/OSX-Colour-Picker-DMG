@@ -337,6 +337,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         reload()
     }
 
+    /// The list starts below the toolbar, set down so that the first row's middle is on the pages' title line.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard let scroll = view as? NSScrollView else { return }
+        let extra = PageLayout.titleCentre - 14 // the first row is 28 points tall
+        let top = view.safeAreaInsets.top + extra
+        if scroll.automaticallyAdjustsContentInsets || scroll.contentInsets.top != top {
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.contentInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+            scroll.scrollerInsets = NSEdgeInsets(top: -extra, left: 0, bottom: 0, right: 0)
+        }
+    }
+
     // MARK: Contents
 
     func reload() {

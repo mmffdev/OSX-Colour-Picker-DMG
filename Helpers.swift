@@ -51,6 +51,12 @@ func symbolButton(_ name: String, tooltip: String, target: AnyObject, action: Se
 
 /// The app's type scale, Apple's: 13 for anything read, 11 for labels over fields and captions,
 /// never smaller; 20 for a page title. Text drawn inside swatch tiles is sized to fit and is the one exception.
+/// Every page's title, and the sidebar's first row, are centred this far below the toolbar, so a
+/// line through the title's middle runs through the middle of "Library".
+enum PageLayout {
+    static let titleCentre: CGFloat = 28
+}
+
 enum TextSize {
     static let title: CGFloat = 20
     static let body: CGFloat = 13

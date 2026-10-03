@@ -235,9 +235,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
         wire()
         library.reload()
-        // Opens on the palette last looked at, even if All Swatches was visited since.
+        // Opens where it was closed: the page last shown, or the palette last looked at.
         let saved = preferences.string(forKey: "lastPalette").flatMap(UUID.init(uuidString:))
-        show(saved.flatMap { library.library.swatch($0) != nil ? .palette($0) : nil } ?? .all)
+        let palette = saved.flatMap { library.library.swatch($0) != nil ? Selection.palette($0) : nil }
+        switch preferences.string(forKey: "lastPage") {
+        case "lab": show(.lab)
+        case "contrast": show(.contrast)
+        case "all": show(.all)
+        case let page? where page.hasPrefix("tag:"): show(.tag(String(page.dropFirst(4))))
+        default: show(palette ?? .all)
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -303,6 +310,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         if s == .contrast, selection != .contrast { content.contrast.arrive(fromLab: selection == .lab) }
         selection = s
         library.current = s
+        switch s {
+        case .all: preferences.set("all", forKey: "lastPage")
+        case .tag(let t): preferences.set("tag:" + t, forKey: "lastPage")
+        case .lab: preferences.set("lab", forKey: "lastPage")
+        case .contrast: preferences.set("contrast", forKey: "lastPage")
+        case .palette: preferences.set("palette", forKey: "lastPage")
+        }
         switch s {
         case .all:
             content.show(content.all)

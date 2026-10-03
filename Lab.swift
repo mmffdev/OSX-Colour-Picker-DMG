@@ -603,7 +603,7 @@ final class LabViewController: NSViewController {
     private func arrange(in b: NSRect) {
         let pad: CGFloat = 20, bar: CGFloat = 28, gap: CGFloat = 14
         let w = b.width - pad * 2
-        let head = view.safeAreaInsets.top + 14 // the page runs under the toolbar; its contents must not
+        let head = view.safeAreaInsets.top + PageLayout.titleCentre - bar / 2 // the page runs under the toolbar; its contents must not
 
         heading.sizeToFit()
         heading.frame.origin = NSPoint(x: pad, y: head + (bar - heading.frame.height) / 2)

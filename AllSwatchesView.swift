@@ -398,12 +398,16 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         // 66 points unless its contents need more; never left to stretch into the page below.
         let filterHeight = filter.heightAnchor.constraint(equalToConstant: 66)
         filterHeight.priority = .defaultHigh
+        // The title sits on the same line as every other page's, unless the builder bar needs the room.
+        let titleLine = titleLabel.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: PageLayout.titleCentre)
+        titleLine.priority = .defaultHigh
         NSLayoutConstraint.activate([
             builderBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             builderBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             builderBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             builderHeight,
-            filter.topAnchor.constraint(equalTo: builderBar.bottomAnchor, constant: 6),
+            filter.topAnchor.constraint(greaterThanOrEqualTo: builderBar.bottomAnchor, constant: 6),
+            titleLine,
             filter.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             filter.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             filter.heightAnchor.constraint(greaterThanOrEqualToConstant: 66),   // taller while the tag bar shows its second row
