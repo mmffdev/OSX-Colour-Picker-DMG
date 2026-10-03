@@ -18,9 +18,10 @@ enum PageStyle {
     static let barGap: CGFloat = 8
     static let barSpacing: CGFloat = 8
     /// From the top safe area to where the page's own content starts.
-    static let height: CGFloat = 88
-    /// The title panel runs from the top edge, the full width, down to this far below the title.
-    static let titlePad: CGFloat = 8
+    static let height: CGFloat = 96
+    /// The title panel runs from the top edge, the full width, to twice the title centre, so the
+    /// title sits in its exact middle with the same clear space above and below.
+    static var titlePanelHeight: CGFloat { titleCentre * 2 }
 }
 
 final class PageHeader: NSView {
@@ -76,7 +77,7 @@ final class PageHeader: NSView {
             titleRow.centerYAnchor.constraint(equalTo: topAnchor, constant: PageStyle.titleCentre),
             titleRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
             titleRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),
-            bar.topAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: PageStyle.titlePad + PageStyle.barGap),
+            bar.topAnchor.constraint(equalTo: topAnchor, constant: PageStyle.titlePanelHeight + PageStyle.barGap),
             bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
             bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PageStyle.side),
             bar.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.barHeight),
@@ -106,15 +107,14 @@ final class PageHeader: NSView {
 
     /// Stripes 20 points wide with 20-point gaps at 45 degrees, three percent lighter than
     /// the background in dark mode and three percent darker in light, on the title panel: the full
-    /// width, touching the top, down to `titlePad` below the title, with the bar clear beneath it.
+    /// width, touching the top, the title in its middle, with the bar clear beneath it.
     override func draw(_ dirtyRect: NSRect) {
-        guard striped, let titleRow = titleRow else { return }
+        guard striped else { return }
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let base = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB) ?? .gray
         let shade = base.blended(withFraction: 0.03, of: dark ? .white : .black) ?? base
-        // The view is not flipped: the top edge is bounds.maxY, and the panel reaches down past the title.
-        let floor = titleRow.frame.minY - PageStyle.titlePad
-        let band = NSRect(x: 0, y: floor, width: bounds.width, height: bounds.maxY - floor)
+        // The view is not flipped: the top edge is bounds.maxY, and the panel hangs from it.
+        let band = NSRect(x: 0, y: bounds.maxY - PageStyle.titlePanelHeight, width: bounds.width, height: PageStyle.titlePanelHeight)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
         ctx.clip(to: band)
