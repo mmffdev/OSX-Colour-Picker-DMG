@@ -31,8 +31,10 @@ extension Theme {
     static var buttonActiveText: NSColor { Prefs.buttonActiveText.flatMap(colorFromHex) ?? text }
 }
 
+/// The one set of numbers every button and toggle on a page is drawn from. A button is as tall as
+/// the action bar's row, whatever holds it; nothing on a page sets a button height of its own.
 enum ButtonStyle {
-    static let height: CGFloat = 24
+    static var height: CGFloat { PageStyle.barHeight }
     static let smallHeight: CGFloat = 20
     static let radius: CGFloat = 6
     static let pad: CGFloat = 10
@@ -70,9 +72,26 @@ final class ThemedButton: NSButton {
         isBordered = false
         font = NSFont.systemFont(ofSize: TextSize.body)
         setButtonType(.momentaryChange)
+        // The height is pinned, not left to AppKit, which otherwise sizes some buttons from the cell
+        // and others from the numbers here. Just short of required, so a button laid out by frame still works.
+        let tall = heightAnchor.constraint(equalToConstant: ButtonStyle.height)
+        tall.priority = NSLayoutConstraint.Priority(999)
+        tall.isActive = true
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            setContentHuggingPriority(.required, for: axis)
+            setContentCompressionResistancePriority(.required, for: axis)
+        }
         watchTheme(self)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    override var image: NSImage? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    override func sizeToFit() { setFrameSize(intrinsicContentSize) }
+    /// None: AppKit pads a button's frame beyond its layout size by amounts that vary with its image
+    /// and title, which is what made two buttons of one kind come out at two heights.
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+    override var fittingSize: NSSize { intrinsicContentSize }
 
     private var label: NSAttributedString {
         NSAttributedString(string: title, attributes: [.font: font ?? NSFont.systemFont(ofSize: TextSize.body)])
