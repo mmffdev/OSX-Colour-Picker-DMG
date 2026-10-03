@@ -355,6 +355,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     func show(_ requested: Selection) {
         content.uncover()   // going somewhere else leaves an open form behind
+        content.palette.dismissSheet()
         var s = requested
         if case .palette(let id) = s, library.library.swatch(id) == nil { s = .all }
         if s != .all, content.all.building { content.all.stopBuilding() }

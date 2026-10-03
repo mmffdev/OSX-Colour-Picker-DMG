@@ -413,6 +413,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         empty.font = NSFont.systemFont(ofSize: 13)
 
         header.trailing.setViews([gridButton, listButton], in: .leading)
+        list.onOpen = { [weak self] hex, tab in self?.openSheet(for: hex, tab: tab) }
         header.trailing.isHidden = true
         for v in [header, spectrum, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -449,6 +450,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
     func show(_ id: UUID) {
         let switching = id != paletteID
+        if switching { dismissSheet() }
         if switching { tagBar.end(saving: false) }
         paletteID = id
         reload()
@@ -525,6 +527,25 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         empty.stringValue = !search.isEmpty ? "No swatches in this palette match \u{201C}\(search)\u{201D}."
             : "No swatches yet.\n" + (Shortcuts.display(for: "togglePicking").map { "Press \($0) to pick" } ?? "Pick")
                 + " colours into this palette, or drop an image on the window."
+    }
+
+    /// The swatch's sheet, while one is up: notes and history for one colour, centred on this page.
+    private var sheet: SwatchSheet?
+
+    private func openSheet(for hex: String, tab: Int) {
+        guard let id = paletteID, sheet == nil else { return }
+        let new = SwatchSheet(hex: hex, palette: id, library: library, tab: tab, locked: header.lock ?? false)
+        new.onClose = { [weak self] in
+            self?.sheet = nil
+            self?.view.window?.makeFirstResponder(self?.view)
+        }
+        sheet = new
+        new.present(over: view)
+    }
+
+    /// Takes the sheet down, keeping what was typed; used when the page goes elsewhere.
+    func dismissSheet() {
+        sheet?.finish()
     }
 
     @objc private func showGrid() { setList(false) }

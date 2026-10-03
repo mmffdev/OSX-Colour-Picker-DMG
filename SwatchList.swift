@@ -2,10 +2,10 @@ import AppKit
 
 // ---------- The vertical view of a project palette ----------
 //
-// One colour to a row: the colour itself, what it is called, and beside it two tabs. Description
-// is the designer's words on why the colour is here, kept in the project's file with the palette.
-// History lists everything that happened to that colour in this palette, read from the library's
-// history, and plays it back. Only palettes in a project have this view.
+// One colour to a row: the colour itself, what it is called, and the notes written on it, as text.
+// Edit opens the swatch's sheet, where the notes are written and the colour's history is read.
+// Notes are kept on the palette's entry for that colour, so they travel in the project's file.
+// Only palettes in a project have this view.
 
 enum SwatchListStyle {
     static let rowHeight: CGFloat = 132
@@ -13,10 +13,26 @@ enum SwatchListStyle {
     static let tileWidth: CGFloat = 132
     static let infoWidth: CGFloat = 170
     static let gap: CGFloat = 16
+    /// The sheet: its width, its inset from the page's top and bottom, and the padding inside it.
+    static let sheetWidth: CGFloat = 560
+    static let sheetInset: CGFloat = 16
+    static let sheetPad: CGFloat = 20
+    static let sheetSwatch: CGFloat = 120
 }
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// The colour's values, one to a line, labels padded so the values stand in a column.
+private func valueLines(for hex: String, limit: Int) -> [NSTextField] {
+    var formats = Prefs.cardRows
+    if !formats.contains(.hex) { formats.insert(.hex, at: 0) }
+    return formats.prefix(limit).map { format in
+        let line = caption(format.label.uppercased().padding(toLength: 8, withPad: " ", startingAt: 0) + format.text(hex, lowercase: Prefs.lowercaseHex))
+        line.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
+        return line
+    }
 }
 
 final class SwatchListView: NSView {
@@ -25,8 +41,8 @@ final class SwatchListView: NSView {
     private let stack = NSStackView()
     private var rows: [SwatchRow] = []
     private var palette: UUID?
-    /// The tab each colour was left on, so a reload does not flip it back.
-    private var tabs: [String: Int] = [:]
+    /// Opens a colour's sheet: the colour, and whether on Notes (0) or History (1).
+    var onOpen: ((String, Int) -> Void)?
 
     init(library: LibraryController) {
         self.library = library
@@ -59,20 +75,17 @@ final class SwatchListView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Shows the colours in order. The same colours as before are refreshed where they stand, so
-    /// a description being typed in one row is not lost when another is saved.
+    /// Shows the colours in order. The same colours as before are refreshed where they stand.
     func show(_ hexes: [String], in palette: UUID, locked: Bool) {
-        if palette != self.palette { tabs = [:] }
         if palette == self.palette, rows.map({ $0.hex }) == hexes {
             rows.forEach { $0.refresh(locked: locked) }
             return
         }
-        rows.forEach { $0.commit() }   // anything half typed is kept before the rows go
         self.palette = palette
         rows.forEach { $0.removeFromSuperview() }
         rows = hexes.map { hex in
-            let row = SwatchRow(hex: hex, palette: palette, library: library, tab: tabs[hex] ?? 0)
-            row.onTab = { [weak self] tab in self?.tabs[hex] = tab }
+            let row = SwatchRow(hex: hex, palette: palette, library: library)
+            row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
             return row
         }
         for row in rows {
@@ -88,27 +101,21 @@ final class SwatchListView: NSView {
     }
 }
 
-/// One colour: its tile, its name and values, then Description or History.
-final class SwatchRow: NSView, NSTextFieldDelegate {
+/// One colour: its tile, its name and values, then its notes as text, with Edit and History.
+final class SwatchRow: NSView {
     let hex: String
     private let palette: UUID
     private weak var library: LibraryController?
-    var onTab: ((Int) -> Void)?
+    var onOpen: ((Int) -> Void)?
 
     private let tile = NSView()
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
-    private let tabs = ToggleBar(labels: ["Description", "History"])
-    private lazy var play = toolButton("Play Back", "play.fill", "Walk through what happened to this colour, oldest first", target: self, action: #selector(playTapped))
-    private let note = NSTextField()
-    private let noteBox = NSView()
-    private let steps = NSStackView()
-    private let stepsScroll = LetGoScrollView()
-    private let none = caption("", size: TextSize.body)
-    private var lines: [(row: NSStackView, step: SwatchStep)] = []
-    private var playing: Timer?
+    private lazy var edit = toolButton("Edit Notes", "pencil", "Write Notes On This Colour", target: self, action: #selector(editTapped))
+    private lazy var history = toolButton("History", "clock.arrow.circlepath", "See What Happened To This Colour In This Palette", target: self, action: #selector(historyTapped))
+    private let note = NSTextField(wrappingLabelWithString: "")
 
-    init(hex: String, palette: UUID, library: LibraryController, tab: Int) {
+    init(hex: String, palette: UUID, library: LibraryController) {
         self.hex = hex
         self.palette = palette
         self.library = library
@@ -120,7 +127,6 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         tile.layer?.cornerRadius = 10
         tile.layer?.cornerCurve = .continuous
         tile.layer?.borderWidth = 1
-        tile.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
         tile.toolTip = "Click to copy"
         tile.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(copyTapped)))
 
@@ -134,45 +140,21 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         info.alignment = .leading
         info.spacing = 6
 
-        tabs.target = self
-        tabs.action = #selector(tabChanged)
-        tabs.selectedSegment = tab
-        tabs.setContentHuggingPriority(.required, for: .horizontal)
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let top = NSStackView(views: [tabs, spacer, play])
-        top.orientation = .horizontal
-        top.alignment = .centerY
-        top.spacing = PageStyle.barSpacing
+        let bar = NSStackView(views: [edit, history])
+        bar.orientation = .horizontal
+        bar.spacing = PageStyle.barSpacing
 
-        note.isBordered = false
-        note.drawsBackground = false
-        note.focusRingType = .none
         note.font = NSFont.systemFont(ofSize: TextSize.body)
-        note.placeholderString = "Notes\u{2026}"
-        note.cell?.wraps = true
-        note.cell?.isScrollable = false
-        note.cell?.usesSingleLineMode = false
-        note.lineBreakMode = .byWordWrapping
-        note.delegate = self
-        noteBox.wantsLayer = true
-        noteBox.layer?.cornerRadius = 8
-        noteBox.layer?.cornerCurve = .continuous
-        noteBox.addSubview(note)
+        note.maximumNumberOfLines = 5
+        note.lineBreakMode = .byTruncatingTail
+        note.cell?.truncatesLastVisibleLine = true
+        note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The text is the way in too: a double-click on it opens the sheet.
+        let twice = NSClickGestureRecognizer(target: self, action: #selector(editTapped))
+        twice.numberOfClicksRequired = 2
+        note.addGestureRecognizer(twice)
 
-        steps.orientation = .vertical
-        steps.alignment = .leading
-        steps.spacing = 4
-        let page = FlippedView()
-        for v in [steps, page] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        page.addSubview(steps)
-        stepsScroll.documentView = page
-        stepsScroll.hasVerticalScroller = true
-        stepsScroll.autohidesScrollers = true
-        stepsScroll.drawsBackground = false
-
-        for v in [tile, info, top, noteBox, stepsScroll, none, note] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        for v in [tile, info, top, noteBox, stepsScroll, none] as [NSView] { addSubview(v) }
+        for v in [tile, info, bar, note] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let s = SwatchListStyle.self
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: s.rowHeight),
@@ -183,25 +165,184 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
             info.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: s.gap),
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
-            top.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
-            top.trailingAnchor.constraint(equalTo: trailingAnchor),   // the notes and history run the row's full width
-            top.topAnchor.constraint(equalTo: topAnchor),
-            top.heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
-            tabs.heightAnchor.constraint(equalTo: play.heightAnchor),
+            bar.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
+            bar.topAnchor.constraint(equalTo: topAnchor),
+            note.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            note.trailingAnchor.constraint(equalTo: trailingAnchor),
+            note.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap),
+            note.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
-        for box in [noteBox, stepsScroll] as [NSView] {
-            NSLayoutConstraint.activate([
-                box.leadingAnchor.constraint(equalTo: top.leadingAnchor),
-                box.trailingAnchor.constraint(equalTo: top.trailingAnchor),
-                box.topAnchor.constraint(equalTo: top.bottomAnchor, constant: PageStyle.barGap),
-                box.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateLayer() {
+        super.updateLayer()
+        tile.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+    }
+    override var wantsUpdateLayer: Bool { true }
+
+    func refresh(locked: Bool) {
+        guard let library = library else { return }
+        name.stringValue = library.library.name(of: hex, in: palette)
+        values.views.forEach { $0.removeFromSuperview() }
+        valueLines(for: hex, limit: 4).forEach { values.addArrangedSubview($0) }
+        let text = library.library.note(of: hex, in: palette)
+        note.stringValue = text ?? "No Notes Yet."
+        note.textColor = text == nil ? .tertiaryLabelColor : .labelColor
+        edit.title = locked ? "View Notes" : "Edit Notes"
+        edit.invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    @objc private func copyTapped() { library?.copy(hex) }
+    @objc private func editTapped() { onOpen?(0) }
+    @objc private func historyTapped() { onOpen?(1) }
+}
+
+// ---------- The swatch's sheet ----------
+//
+// A tall panel locked to the dead centre of the page, above everything in the window, the side
+// panes included: if they have been dragged so wide that the page has no room, the sheet lies over
+// them. Top to bottom: the colour's name, the colour, a bar that switches between Notes and
+// History, then one or the other. Done keeps the notes; Cancel, Escape, leaves them as they were.
+
+final class SwatchSheet: NSView, NSTextViewDelegate {
+    private let hex: String
+    private let palette: UUID
+    private weak var library: LibraryController?
+    private let locked: Bool
+    var onClose: (() -> Void)?
+
+    private let panel = SheetPanel()
+    private let name = NSTextField(labelWithString: "")
+    private let swatch = NSView()
+    private let tabs = ToggleBar(labels: ["Notes", "History"])
+    private lazy var play = toolButton("Play Back", "play.fill", "Walk Through What Happened To This Colour, Oldest First", target: self, action: #selector(playTapped))
+    private lazy var done = toolButton("Done", "checkmark", "Keep The Notes And Close (\u{2318}Return)", target: self, action: #selector(doneTapped))
+    private lazy var cancel = toolButton("Cancel", "xmark", "Close Without Keeping Changes (Escape)", target: self, action: #selector(cancelTapped))
+    private let text = NSTextView()
+    private let textScroll = NSScrollView()
+    private let textBox = NSView()
+    private let steps = NSStackView()
+    private let stepsScroll = LetGoScrollView()
+    private let none = caption("", size: TextSize.body)
+    private let lockNote = caption("")
+    private var lines: [(row: NSStackView, step: SwatchStep)] = []
+    private var playing: Timer?
+
+    init(hex: String, palette: UUID, library: LibraryController, tab: Int, locked: Bool) {
+        self.hex = hex
+        self.palette = palette
+        self.library = library
+        self.locked = locked
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+
+        panel.wantsLayer = true
+        panel.layer?.cornerRadius = 14
+        panel.layer?.cornerCurve = .continuous
+        panel.layer?.borderWidth = 1
+        panel.shadow = { let s = NSShadow(); s.shadowBlurRadius = 30; s.shadowOffset = NSSize(width: 0, height: -8); s.shadowColor = NSColor.black.withAlphaComponent(0.45); return s }()
+
+        name.font = PageStyle.titleFont
+        name.lineBreakMode = .byTruncatingTail
+        name.stringValue = library.library.name(of: hex, in: palette)
+
+        swatch.wantsLayer = true
+        swatch.layer?.backgroundColor = colorFromHex(hex)?.cgColor
+        swatch.layer?.cornerRadius = 10
+        swatch.layer?.cornerCurve = .continuous
+        swatch.layer?.borderWidth = 1
+        let values = NSStackView(views: valueLines(for: hex, limit: 9))
+        values.orientation = .vertical
+        values.alignment = .leading
+        values.spacing = 2
+
+        tabs.target = self
+        tabs.action = #selector(tabChanged)
+        tabs.selectedSegment = tab
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let bar = NSStackView(views: [tabs, spacer, play])
+        bar.orientation = .horizontal
+        bar.alignment = .centerY
+        bar.spacing = PageStyle.barSpacing
+
+        text.isRichText = false
+        text.font = NSFont.systemFont(ofSize: TextSize.body)
+        text.textColor = .labelColor
+        text.drawsBackground = false
+        text.textContainerInset = NSSize(width: 8, height: 10)
+        text.isEditable = !locked
+        text.allowsUndo = true
+        text.delegate = self
+        text.string = library.library.note(of: hex, in: palette) ?? ""
+        text.autoresizingMask = [.width]
+        text.isVerticallyResizable = true
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        text.textContainer?.widthTracksTextView = true
+        textScroll.documentView = text
+        textScroll.hasVerticalScroller = true
+        textScroll.autohidesScrollers = true
+        textScroll.drawsBackground = false
+        textBox.wantsLayer = true
+        textBox.layer?.cornerRadius = 8
+        textBox.layer?.cornerCurve = .continuous
+        textBox.addSubview(textScroll)
+
+        steps.orientation = .vertical
+        steps.alignment = .leading
+        steps.spacing = 6
+        let page = FlippedView()
+        page.addSubview(steps)
+        stepsScroll.documentView = page
+        stepsScroll.hasVerticalScroller = true
+        stepsScroll.autohidesScrollers = true
+        stepsScroll.drawsBackground = false
+
+        lockNote.stringValue = locked ? "The project is locked. Unlock it to change these notes." : "Return starts a new line. \u{2318}Return keeps the notes."
+        let lockSpacer = NSView()
+        lockSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        lockNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let foot = NSStackView(views: [lockNote, lockSpacer, cancel, done])
+        foot.orientation = .horizontal
+        foot.alignment = .centerY
+        foot.spacing = PageStyle.barSpacing
+
+        addSubview(panel)
+        let parts: [NSView] = [name, swatch, values, bar, textBox, stepsScroll, none, foot]
+        for v in parts + [panel, textScroll, steps, page] { v.translatesAutoresizingMaskIntoConstraints = false }
+        parts.forEach { panel.addSubview($0) }
+        let s = SwatchListStyle.self, pad = s.sheetPad
         NSLayoutConstraint.activate([
-            note.leadingAnchor.constraint(equalTo: noteBox.leadingAnchor, constant: 10),
-            note.trailingAnchor.constraint(equalTo: noteBox.trailingAnchor, constant: -10),
-            note.topAnchor.constraint(equalTo: noteBox.topAnchor, constant: 8),
-            note.bottomAnchor.constraint(lessThanOrEqualTo: noteBox.bottomAnchor, constant: -8),
+            panel.widthAnchor.constraint(equalToConstant: s.sheetWidth),
+            name.topAnchor.constraint(equalTo: panel.topAnchor, constant: pad),
+            name.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: pad),
+            name.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -pad),
+            swatch.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 12),
+            swatch.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            swatch.heightAnchor.constraint(equalToConstant: s.sheetSwatch),
+            swatch.trailingAnchor.constraint(equalTo: values.leadingAnchor, constant: -s.gap),
+            values.trailingAnchor.constraint(equalTo: name.trailingAnchor),
+            values.topAnchor.constraint(equalTo: swatch.topAnchor, constant: 2),
+            values.widthAnchor.constraint(equalToConstant: s.infoWidth),
+            bar.topAnchor.constraint(equalTo: swatch.bottomAnchor, constant: 16),
+            bar.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: name.trailingAnchor),
+            bar.heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
+            foot.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            foot.trailingAnchor.constraint(equalTo: name.trailingAnchor),
+            foot.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -pad),
+            foot.heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
+            none.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            none.trailingAnchor.constraint(lessThanOrEqualTo: name.trailingAnchor),
+            none.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap + 2),
+            textScroll.topAnchor.constraint(equalTo: textBox.topAnchor),
+            textScroll.leadingAnchor.constraint(equalTo: textBox.leadingAnchor),
+            textScroll.trailingAnchor.constraint(equalTo: textBox.trailingAnchor),
+            textScroll.bottomAnchor.constraint(equalTo: textBox.bottomAnchor),
             page.topAnchor.constraint(equalTo: stepsScroll.contentView.topAnchor),
             page.leadingAnchor.constraint(equalTo: stepsScroll.contentView.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: stepsScroll.contentView.trailingAnchor),
@@ -209,41 +350,103 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
             steps.leadingAnchor.constraint(equalTo: page.leadingAnchor),
             steps.trailingAnchor.constraint(equalTo: page.trailingAnchor),
             steps.bottomAnchor.constraint(equalTo: page.bottomAnchor),
-            none.leadingAnchor.constraint(equalTo: top.leadingAnchor),
-            none.topAnchor.constraint(equalTo: top.bottomAnchor, constant: PageStyle.barGap + 2),
-            none.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
+        for box in [textBox, stepsScroll] as [NSView] {
+            NSLayoutConstraint.activate([
+                box.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+                box.trailingAnchor.constraint(equalTo: name.trailingAnchor),
+                box.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap),
+                box.bottomAnchor.constraint(equalTo: foot.topAnchor, constant: -16),
+            ])
+        }
+        fillSteps()
+        showTab()
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Fills the row when it can, giving way to the cap on the text's width.
+    /// Lays the sheet over the whole window and centres its panel on `page`, the full height of it.
+    func present(over page: NSView) {
+        guard let root = page.window?.contentView else { return }
+        root.addSubview(self, positioned: .above, relativeTo: nil)
+        let centre = panel.centerXAnchor.constraint(equalTo: page.centerXAnchor)
+        centre.priority = .defaultHigh   // dead centre of the page, unless that would leave the window
+        NSLayoutConstraint.activate([
+            topAnchor.constraint(equalTo: root.topAnchor),
+            bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            centre,
+            panel.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 8),
+            panel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -8),
+            panel.topAnchor.constraint(equalTo: page.safeAreaLayoutGuide.topAnchor, constant: SwatchListStyle.sheetInset),
+            panel.bottomAnchor.constraint(equalTo: page.bottomAnchor, constant: -SwatchListStyle.sheetInset),
+        ])
+        alphaValue = 0
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.12; animator().alphaValue = 1 }
+        window?.makeFirstResponder(tabs.selectedSegment == 0 && !locked ? text : self)
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
     override func updateLayer() {
         super.updateLayer()
-        noteBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
-        tile.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+        panel.layer?.backgroundColor = Theme.grey(0.05).cgColor
+        panel.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor
+        swatch.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+        textBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
     }
     override var wantsUpdateLayer: Bool { true }
 
-    /// Brings the row up to date with the library. A description being typed is left alone.
-    func refresh(locked: Bool) {
-        guard let library = library else { return }
-        if playing == nil { name.stringValue = library.library.name(of: hex, in: palette) }
-        values.views.forEach { $0.removeFromSuperview() }
-        var formats = Prefs.cardRows
-        if !formats.contains(.hex) { formats.insert(.hex, at: 0) }
-        for format in formats.prefix(4) {
-            // Labels padded to one width, so the values stand in a column.
-            let line = caption(format.label.uppercased().padding(toLength: 8, withPad: " ", startingAt: 0) + format.text(hex, lowercase: Prefs.lowercaseHex))
-            line.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
-            values.addArrangedSubview(line)
-        }
-        if note.currentEditor() == nil { note.stringValue = library.library.note(of: hex, in: palette) ?? "" }
-        note.isEditable = !locked
-        note.placeholderString = locked ? "Project Locked. Unlock It To Write Notes." : "Notes\u{2026}"
-        note.toolTip = locked ? "The project is locked: unlock it to write here" : nil
-        fillSteps()
+    // MARK: Closing
+
+    private var changed: Bool { text.string.trimmingCharacters(in: .whitespacesAndNewlines) != (library?.library.note(of: hex, in: palette) ?? "") }
+
+    private func close(keeping: Bool) {
+        stopPlaying()
+        if keeping, !locked, changed { library?.describe(swatch: hex, in: palette, as: text.string) }
+        removeFromSuperview()
+        onClose?()
+    }
+
+    /// Keeps what was typed and closes: for when the page is about to go elsewhere.
+    func finish() { close(keeping: true) }
+
+    @objc private func doneTapped() { close(keeping: true) }
+    @objc private func cancelTapped() { close(keeping: false) }
+    override func cancelOperation(_ sender: Any?) { close(keeping: false) }
+
+    /// A click outside the panel is Done: what was typed is kept, never thrown away by a stray click.
+    override func mouseDown(with event: NSEvent) {
+        if !panel.frame.contains(convert(event.locationInWindow, from: nil)) { close(keeping: true) }
+    }
+    // Nothing behind the sheet is reachable while it is up.
+    override func scrollWheel(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), event.keyCode == 36 || event.keyCode == 76 { close(keeping: true); return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.cancelOperation(_:)) { close(keeping: false); return true }
+        return false
+    }
+
+    // MARK: Notes and history
+
+    @objc private func tabChanged() {
+        stopPlaying()
         showTab()
-        needsDisplay = true
+        if tabs.selectedSegment == 0, !locked { window?.makeFirstResponder(text) }
+    }
+
+    private func showTab() {
+        let history = tabs.selectedSegment == 1
+        textBox.isHidden = history
+        stepsScroll.isHidden = !history || lines.isEmpty
+        none.isHidden = !history || !lines.isEmpty
+        play.isHidden = !history
     }
 
     private func fillSteps() {
@@ -276,56 +479,6 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         play.isEnabled = lines.count > 1
     }
 
-    private func showTab() {
-        let history = tabs.selectedSegment == 1
-        noteBox.isHidden = history
-        stepsScroll.isHidden = !history || lines.isEmpty
-        none.isHidden = !history || !lines.isEmpty
-        play.isHidden = !history
-    }
-
-    @objc private func tabChanged() {
-        stopPlaying()
-        onTab?(tabs.selectedSegment)
-        showTab()
-    }
-
-    @objc private func copyTapped() { library?.copy(hex) }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil, note.currentEditor() != nil { commit() }
-        super.viewWillMove(toWindow: newWindow)
-    }
-
-    /// A click on the row away from the note ends the typing, which saves it.
-    override func mouseDown(with event: NSEvent) {
-        if note.currentEditor() != nil { window?.makeFirstResponder(nil) } else { super.mouseDown(with: event) }
-    }
-
-    // MARK: Description
-
-    func controlTextDidEndEditing(_ obj: Notification) { commit() }
-
-    /// Saves what has been typed, if it differs from what is kept. Called when editing ends and
-    /// whenever the row is about to go, so a note is never lost by clicking away or changing page.
-    func commit() {
-        guard let library = library, note.isEditable else { return }
-        let typed = note.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard typed != (library.library.note(of: hex, in: palette) ?? "") else { return }
-        library.describe(swatch: hex, in: palette, as: typed)
-    }
-
-    /// Return ends the description; Option-Return starts a new line in it.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        if selector == #selector(NSResponder.insertNewline(_:)), NSApp.currentEvent?.modifierFlags.contains(.option) == true {
-            textView.insertNewlineIgnoringFieldEditor(nil)
-            return true
-        }
-        return false
-    }
-
-    // MARK: Play back
-
     /// Walks the colour's steps, oldest first: each line lights in turn and the name shows what it
     /// was called then. Nothing in the library changes; this only shows what happened.
     @objc private func playTapped() {
@@ -344,12 +497,12 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         for (i, line) in lines.enumerated() {
             let on = index == nil || i == index
             for case let label as NSTextField in line.row.views.prefix(2) { label.textColor = on ? .labelColor : .tertiaryLabelColor }
-            (line.row.views.first as? NSImageView)?.contentTintColor = i == index ? .controlAccentColor : .secondaryLabelColor
+            (line.row.views.first as? NSImageView)?.contentTintColor = i == index ? .labelColor : .secondaryLabelColor
         }
         guard let index = index, lines.indices.contains(index) else { return }
         let entry = lines[index].step.entry
         name.stringValue = entry.map { $0.name ?? colourName(hex) } ?? colourName(hex)
-        tile.alphaValue = entry == nil ? 0.25 : 1
+        swatch.alphaValue = entry == nil ? 0.25 : 1
         lines[index].row.scrollToVisible(lines[index].row.bounds)
     }
 
@@ -357,7 +510,12 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         playing?.invalidate()
         playing = nil
         light(nil)
-        tile.alphaValue = 1
+        swatch.alphaValue = 1
         if let library = library { name.stringValue = library.library.name(of: hex, in: palette) }
     }
+}
+
+/// The sheet's panel: clicks on it stay on it.
+private final class SheetPanel: NSView {
+    override func mouseDown(with event: NSEvent) {}
 }
