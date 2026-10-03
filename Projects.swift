@@ -11,7 +11,8 @@ import AppKit
 enum ProjectField: String, CaseIterable {
     case description, reference, purchaseOrder, status, startDate, dueDate
     case clientCompany, clientContact, clientRole, clientEmail, clientPhone, clientWebsite, clientAddress, clientCompanyNumber, clientTaxNumber
-    case ownerName, ownerCompany, ownerEmail, ownerPhone, ownerWebsite, ownerAddress
+    case ownerCompany, ownerDepartment, ownerName, ownerContact, ownerRole, ownerEmail, ownerPhone, ownerExtension, ownerMobile,
+         ownerWebsite, ownerAddress, ownerCompanyNumber, ownerTaxNumber
     case copyright, usageTerms, confidentiality
     case colourSpace, brandGuidelines
     case notes
@@ -30,7 +31,8 @@ enum ProjectField: String, CaseIterable {
         case .description, .reference, .purchaseOrder, .status, .startDate, .dueDate: return .project
         case .clientCompany, .clientContact, .clientRole, .clientEmail, .clientPhone, .clientWebsite, .clientAddress,
              .clientCompanyNumber, .clientTaxNumber: return .client
-        case .ownerName, .ownerCompany, .ownerEmail, .ownerPhone, .ownerWebsite, .ownerAddress: return .studio
+        case .ownerCompany, .ownerDepartment, .ownerName, .ownerContact, .ownerRole, .ownerEmail, .ownerPhone, .ownerExtension, .ownerMobile,
+             .ownerWebsite, .ownerAddress, .ownerCompanyNumber, .ownerTaxNumber: return .studio
         case .copyright, .usageTerms, .confidentiality: return .rights
         case .colourSpace, .brandGuidelines: return .colour
         case .notes: return .notes
@@ -60,6 +62,13 @@ enum ProjectField: String, CaseIterable {
         case .ownerPhone: return "Phone"
         case .ownerWebsite: return "Website"
         case .ownerAddress: return "Address"
+        case .ownerDepartment: return "Department"
+        case .ownerContact: return "Contact name"
+        case .ownerRole: return "Job title"
+        case .ownerExtension: return "Extension"
+        case .ownerMobile: return "Mobile number"
+        case .ownerCompanyNumber: return "Company number"
+        case .ownerTaxNumber: return "VAT / tax number"
         case .copyright: return "Copyright notice"
         case .usageTerms: return "Usage terms"
         case .confidentiality: return "Confidentiality"

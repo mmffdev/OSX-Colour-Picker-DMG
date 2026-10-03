@@ -1366,6 +1366,11 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(FormMemoryStore.load(from: memoryFile) == memory && FormMemoryStore.load(from: memoryFolder.appendingPathComponent("none.json")) == FormMemory(),
           "the memory reads back from its file as it was written, and a missing file is an empty memory")
 
+    check(ProjectField.fields(in: .studio).map { $0.title } == ["Studio", "Department", "Project owner", "Contact name", "Job title", "Email", "Phone", "Extension",
+                                                                 "Mobile number", "Website", "Address", "Company number", "VAT / tax number"]
+          && ProjectField.tidy(["ownerDepartment": " Design ", "ownerMobile": "07", "nonsense": "x"]) == ["ownerDepartment": "Design", "ownerMobile": "07"],
+          "the Studio section holds the organisation's fields in order, and the new ones are kept like the rest")
+
     print("a project takes a copy of a palette")
     var shop = Library()
     shop.addPick("#F55805", at: t); shop.addPick("#101010", at: t)

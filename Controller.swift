@@ -467,7 +467,13 @@ final class LibraryController: NSObject {
                               check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
-            self.apply("New Project") { lib in id = lib.createProject(named: name) }
+            self.apply("New Project") { lib in
+                let made = lib.createProject(named: name)
+                // The Studio section starts as the organisation set in Settings; the form can change any of it.
+                let organisation = ProjectField.tidy(Prefs.organisation)
+                if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
+                id = made
+            }
             guard let made = id, let project = self.library.project(made) else { return }
             self.flash("Created Project \(project.name)")
             self.onShow?(.overview(made), false)
@@ -484,7 +490,13 @@ final class LibraryController: NSObject {
                               check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
-            self.apply("New Project") { lib in id = lib.createProject(named: name) }
+            self.apply("New Project") { lib in
+                let made = lib.createProject(named: name)
+                // The Studio section starts as the organisation set in Settings; the form can change any of it.
+                let organisation = ProjectField.tidy(Prefs.organisation)
+                if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
+                id = made
+            }
             guard let made = id, self.library.project(made) != nil else { return }
             self.keep(hexes, named: paletteName, in: made)
         })

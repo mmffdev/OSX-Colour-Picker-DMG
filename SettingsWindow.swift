@@ -542,6 +542,55 @@ final class ThemePanel: SettingsPanel {
     }
 }
 
+// MARK: Organisation
+
+/// Who is using the app: the same fields as the project form's Studio section. Kept as typed, and
+/// laid into the Studio section of every new project, where each can still be changed or filled
+/// from a template.
+final class OrganisationPanel: SettingsPanel, NSTextFieldDelegate {
+    private var fields: [(field: ProjectField, box: NSTextField)] = []
+
+    override func rows() -> [[NSView]] {
+        var out: [[NSView]] = [[heading("Organisation"), blank]]
+        for field in ProjectField.fields(in: .studio) {
+            let box = NSTextField()
+            box.placeholderString = field.placeholder
+            box.delegate = self
+            if field.kind == .lines {
+                box.tag = 1   // Return starts a new line in these
+                box.usesSingleLineMode = false
+                box.cell?.wraps = true
+                box.cell?.isScrollable = false
+                box.heightAnchor.constraint(equalToConstant: 58).isActive = true
+            }
+            fields.append((field, box))
+            out.append([label(field.title + ":"), box])
+        }
+        out.append([blank, note("Your own organisation. A new project's Studio section starts with these details; on the project's Overview page any of them can be changed, or filled from a saved template.")])
+        return out
+    }
+
+    override func refresh() {
+        let saved = Prefs.organisation
+        for (field, box) in fields where box.currentEditor() == nil { box.stringValue = saved[field.rawValue] ?? "" }
+    }
+
+    private func keep() {
+        var values: [String: String] = [:]
+        for (field, box) in fields { values[field.rawValue] = box.stringValue }
+        Prefs.organisation = ProjectField.tidy(values)
+    }
+
+    func controlTextDidChange(_ obj: Notification) { keep() }
+    func controlTextDidEndEditing(_ obj: Notification) { keep() }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard control.tag == 1, selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        textView.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+}
+
 // MARK: History
 
 final class HistoryPanel: SettingsPanel {
@@ -609,6 +658,7 @@ final class SettingsWindowController: NSWindowController {
 
         panels = [
             GeneralPanel(library: library, title: "General", icon: "gearshape"),
+            OrganisationPanel(library: library, title: "Organisation", icon: "building.2"),
             AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
             ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
             ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),

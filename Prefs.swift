@@ -69,6 +69,15 @@ enum Prefs {
     static var buttonActiveBackground: String? { get { colour("theme.button.activeBackground") } set { setColour(newValue, "theme.button.activeBackground") } }
     static var buttonActiveText: String? { get { colour("theme.button.activeText") } set { setColour(newValue, "theme.button.activeText") } }
 
+    // MARK: Organisation
+
+    /// The organisation using the app, as the project form's Studio fields: field key to value.
+    /// A new project's Studio section starts as this.
+    static var organisation: [String: String] {
+        get { d.dictionary(forKey: "organisation") as? [String: String] ?? [:] }
+        set { d.set(newValue, forKey: "organisation") }
+    }
+
     // MARK: History
 
     /// History is kept per library (catalogue): on unless turned off for that one.
