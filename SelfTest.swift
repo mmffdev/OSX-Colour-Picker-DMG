@@ -1543,6 +1543,20 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           "any other grouping, or none, has one blank swatch at the end; a locked page has none")
     check(GroupHeaderView.text(bySource[0]) == "Hex (sRGB)  \u{00B7}  4", "a group's title carries its count")
 
+    print("histograms")
+    PrintCondition.current = PrintCondition.fallback
+    let spread = Histogram.counts(of: ["#FF0000", "#FF8000", "#0000FF", "nonsense"], as: .rgb)
+    check(spread.count == 3 && spread[0].count == 256 && spread[0][255] == 2 && spread[0][0] == 1 && spread[1][128] == 1 && spread[1][0] == 2 && spread[2][255] == 1 && spread.map { $0.reduce(0, +) } == [3, 3, 3],
+          "a palette's histogram counts every colour once in each channel, at its value, and leaves out what is not a colour")
+    let inkSpread = Histogram.counts(of: ["#FFFFFF"], as: .cmyk)
+    check(HistogramType.rgb.values(of: "#A3E900") == [163, 233, 0] && HistogramType.cmyk.values(of: "#FFFFFF") == [0, 0, 0, 0] && inkSpread.count == 4 && inkSpread[0].count == 101 && inkSpread.allSatisfy { $0[0] == 1 }
+          && HistogramType.rgb.values(of: vividKey) == [255, 0, 0] && HistogramType.cmyk.channels.count == HistogramType.cmyk.colours.count,
+          "a swatch's own values are its sRGB bytes or its ink percentages for the press in force")
+
+    check(HistogramType.rgb.warnings(for: [163, 233, 0]) == ["Blue In Black"] && HistogramType.rgb.warnings(for: [255, 128, 16]) == ["Red In White Out"] && HistogramType.rgb.warnings(for: [16, 128, 235]).isEmpty
+          && HistogramType.cmyk.warnings(for: [2, 50, 96, 0]) == ["Cyan In White Out", "Yellow In Black"],
+          "a channel outside the safe range is named with the zone it is in: black and white out for a screen, dot loss and fill-in for a press")
+
     var pickLib = Library()
     let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
     pickLib.activeSwatchID = pickPalette

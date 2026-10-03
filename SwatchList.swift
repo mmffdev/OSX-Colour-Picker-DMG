@@ -49,6 +49,10 @@ final class SwatchListView: NSView {
     var onAdd: ((NewColourStart?) -> Void)?
     private var addRows: [NSView] = []
     private var shownOffer = false
+    /// Each swatch's histogram: whether it is open, which values, and merged or a strip per channel.
+    /// Kept by colour, so it survives the page being laid out again.
+    private var histograms: [String: SwatchRow.HistogramState] = [:]
+    private var shownHistograms = false
 
     /// A row holding one blank swatch, the size of the swatch tiles above it.
     private func addRow(_ start: NewColourStart?) -> NSView {
@@ -98,7 +102,13 @@ final class SwatchListView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Shows the colours in order. The same colours as before are refreshed where they stand.
-    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = []) {
+    func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = [], histograms all: Bool = false) {
+        // The bar's Histogram switch opens or closes every swatch's at once; a swatch's own button changes just its own.
+        if all != shownHistograms || palette != self.palette {
+            for hex in hexes { histograms[hex, default: SwatchRow.HistogramState()].open = all }
+            shownHistograms = all
+        }
+        defer { rows.forEach { $0.showHistogram(histograms[$0.hex] ?? SwatchRow.HistogramState(), among: hexes) } }
         if palette == self.palette, rows.map({ $0.hex }) == hexes, groups == shownGroups, offersNew == shownOffer, !stack.arrangedSubviews.isEmpty || !offersNew {
             rows.forEach { $0.refresh(locked: locked) }
             return
@@ -112,6 +122,7 @@ final class SwatchListView: NSView {
         let made = Dictionary(uniqueKeysWithValues: hexes.map { hex -> (String, SwatchRow) in
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
+            row.onHistogram = { [weak self] state in self?.histograms[hex] = state }
             return (hex, row)
         })
         rows = hexes.compactMap { made[$0] }
@@ -157,6 +168,19 @@ final class SwatchRow: NSView {
     private weak var library: LibraryController?
     var onOpen: ((Int) -> Void)?
 
+    struct HistogramState: Equatable {
+        var open = false
+        // A histogram opens the way the last one was left.
+        var type = Prefs.histogramType
+        var split = Prefs.histogramSplit
+    }
+    /// The swatch's histogram was opened, closed or changed.
+    var onHistogram: ((HistogramState) -> Void)?
+    private var histogramState = HistogramState()
+    private var population: [String] = []
+    private let histogramPanel = HistogramPanel()
+    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show This Colour's Channels Against The Whole Palette's", target: self, action: #selector(histogramTapped))
+
     private let tile = NSView()
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
@@ -190,7 +214,7 @@ final class SwatchRow: NSView {
         info.alignment = .leading
         info.spacing = 6
 
-        let bar = NSStackView(views: [edit, channels, history])
+        let bar = NSStackView(views: [edit, channels, history, histogram])
         bar.orientation = .horizontal
         bar.spacing = PageStyle.barSpacing
 
@@ -204,23 +228,42 @@ final class SwatchRow: NSView {
         twice.numberOfClicksRequired = 2
         note.addGestureRecognizer(twice)
 
-        for v in [tile, info, bar, note] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        // Under the bar: the histogram when it is open, then the notes. The row grows to hold them
+        // and the swatches below move down; the tile keeps its size.
+        histogramPanel.isHidden = true
+        histogramPanel.onChange = { [weak self] in
+            guard let self = self else { return }
+            self.histogramState.type = self.histogramPanel.type
+            self.histogramState.split = self.histogramPanel.split
+            Prefs.histogramType = self.histogramPanel.type
+            Prefs.histogramSplit = self.histogramPanel.split
+            self.onHistogram?(self.histogramState)
+        }
+        let body = NSStackView(views: [histogramPanel, note])
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.spacing = 10
+        for v in [tile, info, bar, body] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let s = SwatchListStyle.self
+        let least = heightAnchor.constraint(equalToConstant: s.rowHeight)
+        least.priority = .defaultLow
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: s.rowHeight),
+            least,
+            heightAnchor.constraint(greaterThanOrEqualToConstant: s.rowHeight),
             tile.leadingAnchor.constraint(equalTo: leadingAnchor),
             tile.topAnchor.constraint(equalTo: topAnchor),
-            tile.bottomAnchor.constraint(equalTo: bottomAnchor),
+            tile.heightAnchor.constraint(equalToConstant: s.rowHeight),
             tile.widthAnchor.constraint(equalToConstant: s.tileWidth),
             info.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: s.gap),
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
             bar.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
             bar.topAnchor.constraint(equalTo: topAnchor),
-            note.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            note.trailingAnchor.constraint(equalTo: trailingAnchor),
-            note.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap),
-            note.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            body.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: PageStyle.barGap),
+            body.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            note.widthAnchor.constraint(equalTo: body.widthAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -242,6 +285,22 @@ final class SwatchRow: NSView {
         edit.title = locked ? "View Notes" : "Edit Notes"
         edit.invalidateIntrinsicContentSize()
         needsDisplay = true
+    }
+
+    /// Opens or closes the histogram and sets its choices; `among` is the page's colours, shown faintly behind.
+    func showHistogram(_ state: HistogramState, among population: [String]) {
+        histogramState = state
+        self.population = population
+        histogramPanel.isHidden = !state.open
+        histogram.state = state.open ? .on : .off
+        histogram.needsDisplay = true
+        if state.open { histogramPanel.show(hex, among: population, type: state.type, split: state.split) }
+    }
+
+    @objc private func histogramTapped() {
+        histogramState.open.toggle()
+        showHistogram(histogramState, among: population)
+        onHistogram?(histogramState)
     }
 
     @objc private func copyTapped() { library?.copy(hex) }

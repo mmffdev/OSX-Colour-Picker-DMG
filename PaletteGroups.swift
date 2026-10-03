@@ -182,6 +182,7 @@ extension Library {
 final class PaletteViewBar: NSView {
     var onChange: (() -> Void)?
     private lazy var grouping = ToggleBar(labels: PaletteGrouping.allCases.map { $0.title }, target: self, action: #selector(groupingChanged))
+    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show Every Swatch's Histogram, In The Vertical View", target: self, action: #selector(histogramTapped))
     private lazy var filter = ToggleBar(labels: PaletteFilter.allCases.map { $0.title }, target: self, action: #selector(filterChanged))
 
     init() {
@@ -194,7 +195,7 @@ final class PaletteViewBar: NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let row = NSStackView(views: [groupLabel, grouping, spacer, showLabel, filter])
+        let row = NSStackView(views: [groupLabel, grouping, histogram, spacer, showLabel, filter])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = PageStyle.barSpacing
@@ -216,6 +217,15 @@ final class PaletteViewBar: NSView {
     func refresh() {
         grouping.selectedSegment = PaletteGrouping.allCases.firstIndex(of: Prefs.paletteGrouping) ?? 0
         filter.selectedSegment = PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0
+        histogram.state = Prefs.histograms ? .on : .off
+        histogram.needsDisplay = true
+    }
+
+    @objc private func histogramTapped() {
+        Prefs.histograms.toggle()
+        // Histograms sit beside each swatch's values, which only the vertical view has.
+        if Prefs.histograms { Prefs.paletteListView = true }
+        onChange?()
     }
 
     @objc private func groupingChanged() {

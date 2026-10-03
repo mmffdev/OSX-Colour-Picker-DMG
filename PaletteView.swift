@@ -556,7 +556,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         list.isHidden = !asList
         wcag.isHidden = asList   // the card's own extras; a row shows its values always
         labels.isHidden = asList
-        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups) }
+        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups, histograms: Prefs.histograms) }
 
         sizeCards()
         grid.reloadData()
@@ -617,6 +617,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private func setList(_ on: Bool) {
         guard Prefs.paletteListView != on else { return }
         Prefs.paletteListView = on
+        if !on { Prefs.histograms = false }   // the grid has nowhere to put them
         reload()
     }
 
