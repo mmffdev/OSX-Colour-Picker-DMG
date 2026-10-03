@@ -18,6 +18,8 @@ enum PageStyle {
     static let barSpacing: CGFloat = 8
     /// From the top safe area to where the page's own content starts.
     static let height: CGFloat = 80
+    /// Clear space round the title inside its own panel, when the panel is drawn (the project stripes).
+    static let titlePad: CGFloat = 8
 }
 
 final class PageHeader: NSView {
@@ -35,6 +37,7 @@ final class PageHeader: NSView {
     var striped = false { didSet { needsDisplay = true } }
     /// The padlock before the title, shown for anything in a project: open, or shut when the project is locked.
     private let lockMark = NSImageView()
+    private var titleRow: NSStackView!
     var lock: Bool? = nil {
         didSet {
             lockMark.isHidden = lock == nil
@@ -63,6 +66,7 @@ final class PageHeader: NSView {
         lockMark.isHidden = true
         lockMark.setContentHuggingPriority(.required, for: .horizontal)
         let titleRow = NSStackView(views: [lockMark, title])
+        self.titleRow = titleRow
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = 8
@@ -83,6 +87,11 @@ final class PageHeader: NSView {
     /// second row (a tag bar, say); the page then starts below that.
     var contentTop: CGFloat { max(PageStyle.height, bar.frame.maxY + PageStyle.side / 2) }
 
+    override func layout() {
+        super.layout()
+        if striped { needsDisplay = true }   // the panel follows the title's own size
+    }
+
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: PageStyle.height) }
 
     /// Shows one pill, or none, naming the project; a click runs `onClick`.
@@ -94,22 +103,23 @@ final class PageHeader: NSView {
         pills.isHidden = false
     }
 
-    /// Stripes 20 points wide with 20-point gaps at 45 degrees, in a shade a fifth lighter than the
-    /// background in dark mode and a fifth darker in light, across the title row.
+    /// Stripes 20 points wide with 20-point gaps at 45 degrees, in a shade a twentieth lighter than
+    /// the background in dark mode and a twentieth darker in light, on a rounded panel that hugs the
+    /// title with `titlePad` of clear space round it.
     override func draw(_ dirtyRect: NSRect) {
-        guard striped else { return }
+        guard striped, let titleRow = titleRow else { return }
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let base = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB) ?? .gray
-        let shade = base.blended(withFraction: 0.2, of: dark ? .white : .black) ?? base
-        let band = NSRect(x: 0, y: 0, width: bounds.width, height: PageStyle.titleCentre * 2)
+        let shade = base.blended(withFraction: 0.05, of: dark ? .white : .black) ?? base
+        let band = titleRow.frame.insetBy(dx: -PageStyle.titlePad, dy: -PageStyle.titlePad)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
-        ctx.clip(to: band)
+        NSBezierPath(roundedRect: band, xRadius: 6, yRadius: 6).addClip()
         shade.setFill()
         let stripe: CGFloat = 20, step: CGFloat = 40
         // Each stripe is a parallelogram leaning at 45 degrees, wide enough to cross the band whole.
-        var x = -band.height
-        while x < band.width + band.height {
+        var x = band.minX - band.height
+        while x < band.maxX + band.height {
             let path = NSBezierPath()
             path.move(to: NSPoint(x: x, y: band.minY))
             path.line(to: NSPoint(x: x + stripe, y: band.minY))
