@@ -19,7 +19,7 @@ private func label(_ s: String) -> NSTextField {
 
 private func note(_ s: String) -> NSTextField {
     let l = NSTextField(wrappingLabelWithString: s)
-    l.font = NSFont.systemFont(ofSize: 11)
+    l.font = NSFont.systemFont(ofSize: TextSize.body)
     l.textColor = .secondaryLabelColor
     l.preferredMaxLayoutWidth = 400
     return l

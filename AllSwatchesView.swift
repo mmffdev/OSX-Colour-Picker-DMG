@@ -828,7 +828,7 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
 
         hint.alignment = .center
         hint.textColor = .tertiaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 12)
+        hint.font = NSFont.systemFont(ofSize: TextSize.body)
 
         save = NSButton(title: "Save Palette", target: self, action: #selector(saveTapped))
         save.bezelStyle = .rounded
@@ -887,10 +887,10 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
         chip.layer?.borderWidth = 1
         chip.layer?.borderColor = NSColor.separatorColor.cgColor
         let name = NSTextField(labelWithString: colourName(hex))
-        name.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: .medium)
         name.lineBreakMode = .byTruncatingTail
         let code = NSTextField(labelWithString: ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex))
-        code.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        code.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
         code.textColor = .secondaryLabelColor
         let remove = symbolButton("xmark.circle.fill", tooltip: "Remove from the new palette", target: self, action: #selector(removeTapped(_:)))
         remove.tag = row

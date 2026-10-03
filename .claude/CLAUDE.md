@@ -27,3 +27,7 @@ Vector refuses titles that look like code ("cLab"), descriptions that do not ope
 ### The original home (not reachable from here)
 
 Earlier items sit in the Colour Picker workspace `de3bfb2c-9f1b-4c4a-bf75-bc872e32b1bd`, node `R26GHQXV` (node id `e51fc096-70b2-4b42-bc06-79c70b1e08bb`): runway PR-21, objective OB-75, themes TH-242 Feature List and TH-243 Core Architecture. `.mcp.json` still names that workspace (`VECTOR_MCP_REPOSITORY_WORKSPACE` / `_NODE`). Nothing has been moved across; if the connection is ever pointed back there, decide with Rick which home wins before writing.
+
+## Type scale
+
+`TextSize` in Helpers.swift is the only source of font sizes for UI text: `body` 13 for anything read (notes, names, fields, controls), `caption` 11 for labels over fields and captions, `title` 20 for a page title. Never below 11. Text painted inside swatch tiles is sized to fit and is the one exception. Every UI label starts with a capital.

@@ -38,7 +38,7 @@ final class TagBar: NSView, NSTokenFieldDelegate {
         title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         field.tokenStyle = .rounded
         field.placeholderString = "Add tags, separated by commas"
-        field.font = NSFont.systemFont(ofSize: 12)
+        field.font = NSFont.systemFont(ofSize: TextSize.body)
         field.delegate = self
         field.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

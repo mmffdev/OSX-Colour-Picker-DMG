@@ -128,10 +128,10 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
 
         name.font = NSFont.systemFont(ofSize: 17, weight: .bold)
         name.lineBreakMode = .byTruncatingTail
-        code.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        contrast.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        code.font = NSFont.monospacedSystemFont(ofSize: TextSize.body, weight: .regular)
+        contrast.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
         contrast.lineBreakMode = .byTruncatingTail
-        contrastTitle.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        contrastTitle.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .bold)
         rows.orientation = .vertical
         rows.spacing = 0
         rows.alignment = .leading

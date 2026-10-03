@@ -503,7 +503,7 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
         names.borderType = .bezelBorder
 
         preview.isEditable = false
-        preview.font = NSFont.systemFont(ofSize: 12)
+        preview.font = NSFont.systemFont(ofSize: TextSize.body)
         preview.isVerticallyResizable = true
         preview.textContainer?.widthTracksTextView = true
         preview.drawsBackground = false
@@ -567,9 +567,9 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
     private func showChosen() {
         buttons.forEach { $0.isEnabled = chosen != nil }
         let text = NSMutableAttributedString()
-        let plain: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.labelColor]
-        let quiet: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor]
-        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor]
+        let plain: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.labelColor]
+        let quiet: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.secondaryLabelColor]
+        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: TextSize.body, weight: .semibold), .foregroundColor: NSColor.labelColor]
         guard let template = chosen else {
             text.append(NSAttributedString(string: list.isEmpty ? "No templates yet.\n\nPress New\u{2026} to write one, or choose Save as Template in a project\u{2019}s form." : "", attributes: quiet))
             preview.textStorage?.setAttributedString(text)

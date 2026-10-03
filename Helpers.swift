@@ -49,7 +49,15 @@ func symbolButton(_ name: String, tooltip: String, target: AnyObject, action: Se
     return b
 }
 
-func caption(_ s: String, size: CGFloat = 12) -> NSTextField {
+/// The app's type scale, Apple's: 13 for anything read, 11 for labels over fields and captions,
+/// never smaller; 20 for a page title. Text drawn inside swatch tiles is sized to fit and is the one exception.
+enum TextSize {
+    static let title: CGFloat = 20
+    static let body: CGFloat = 13
+    static let caption: CGFloat = 11
+}
+
+func caption(_ s: String, size: CGFloat = TextSize.caption) -> NSTextField {
     let l = NSTextField(labelWithString: s)
     l.textColor = .secondaryLabelColor
     l.font = NSFont.systemFont(ofSize: size)

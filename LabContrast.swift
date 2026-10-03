@@ -64,8 +64,8 @@ private final class ContrastTable: NSView {
         func put(_ text: String, _ x: CGFloat, _ y: CGFloat, _ colour: NSColor, weight: NSFont.Weight = .regular, size: CGFloat = 11.5) {
             (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight), .foregroundColor: colour])
         }
-        put(headers.0, firstX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
-        put(headers.1, secondX, 0, .secondaryLabelColor, weight: .semibold, size: 10.5)
+        put(headers.0, firstX, 0, .secondaryLabelColor, weight: .semibold, size: 11)
+        put(headers.1, secondX, 0, .secondaryLabelColor, weight: .semibold, size: 11)
         for (i, r) in rows.enumerated() {
             let y = head + CGFloat(i) * row
             NSColor.separatorColor.setFill()
@@ -129,7 +129,7 @@ private final class TargetSpectrum: NSView {
             let mark = b.hex == pair.ink ? "T" : b.hex == pair.paper ? "B" : nil
             if let mark = mark, b.rect.width >= 12 {
                 let text = NSAttributedString(string: mark, attributes: [
-                    .font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: colorFromHex(readableText(on: b.hex)) ?? .white])
+                    .font: NSFont.systemFont(ofSize: TextSize.caption, weight: .bold), .foregroundColor: colorFromHex(readableText(on: b.hex)) ?? .white])
                 text.draw(at: NSPoint(x: b.rect.midX - text.size().width / 2, y: b.rect.midY - text.size().height / 2))
             }
         }
@@ -218,8 +218,8 @@ private final class PaletteShelf: NSView {
                 }
                 let style = NSMutableParagraphStyle()
                 style.lineBreakMode = .byTruncatingTail
-                (name as NSString).draw(in: NSRect(x: inset, y: rect.minY + 5, width: nameWidth - 8 - inset, height: 16), withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
+                (name as NSString).draw(in: NSRect(x: inset, y: rect.minY + 6, width: nameWidth - 8 - inset, height: 18), withAttributes: [
+                    .font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
                 let strip = NSRect(x: nameWidth, y: rect.minY + 6, width: bounds.width - nameWidth - inset, height: rect.height - 12)
                 guard !hexes.isEmpty else {
                     NSColor.tertiaryLabelColor.setStroke()
@@ -462,7 +462,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     private let scroll = NSScrollView()
     private let column = ControlColumn()
-    private let inkLabel = caption("Text Colour", size: 10.5), paperLabel = caption("Background", size: 10.5)
+    private let inkLabel = caption("Text Colour", size: 11), paperLabel = caption("Background", size: 11)
     private let inkChip = ChipButton(), paperChip = ChipButton()
     private let inkField = NSTextField(), paperField = NSTextField()
     private var swap: NSButton!
@@ -472,7 +472,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let goal = NSPopUpButton()
     private var fixInk: NSButton!, fixPaper: NSButton!
     private let from = NSPopUpButton()
-    private let hint = caption("", size: 10.5)
+    private let hint = caption("", size: 11)
     private let spectrum = TargetSpectrum()
     private var dropper: NSButton!
     private let shelf = PaletteShelf()
@@ -481,7 +481,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     private let headingFont = NSPopUpButton(), bodyFont = NSPopUpButton()
     private let preview = ContrastPreview()
-    private let gridTitle = caption("", size: 10.5)
+    private let gridTitle = caption("", size: 11)
     private let grid = ContrastGrid()
     private var sampler: NSColorSampler?
 
@@ -506,9 +506,10 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         undo = toolButton("", "arrow.uturn.backward", "Undo", target: self, action: #selector(undoTapped))
         redo = toolButton("", "arrow.uturn.forward", "Redo", target: self, action: #selector(redoTapped))
         toType = toolButton("Add To Typography", "textformat", "Keep This Pairing, With Its Words And Fonts, In A Typography Palette", target: self, action: #selector(typographyTapped(_:)))
-        why.font = NSFont.systemFont(ofSize: 11.5)
-        why.maximumNumberOfLines = 2
-        why.lineBreakMode = .byTruncatingTail
+        // The note sits in the column under the fix buttons and wraps to whatever it needs.
+        why.font = NSFont.systemFont(ofSize: TextSize.body)
+        why.maximumNumberOfLines = 0
+        why.lineBreakMode = .byWordWrapping
         method.controlSize = .small
         method.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         method.target = self
@@ -529,7 +530,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
             chip.setAccessibilityLabel(tip)
         }
         for (field, label) in [(inkField, "Text colour hex"), (paperField, "Background hex")] {
-            field.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            field.font = NSFont.monospacedSystemFont(ofSize: TextSize.body, weight: .regular)
             field.delegate = self
             field.cell?.usesSingleLineMode = true
             field.setAccessibilityLabel(label)
@@ -574,7 +575,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         grid.onPick = { [weak self] pair in self?.change { $0.pair = pair } }
 
         for v in [inkLabel, paperLabel, inkChip, paperChip, inkField, paperField, swap, badge, method, table, goal, fixInk, fixPaper,
-                  from, hint, spectrum, dropper, shelfScroll] as [NSView] { column.addSubview(v) }
+                  why, from, hint, spectrum, dropper, shelfScroll] as [NSView] { column.addSubview(v) }
         shelfScroll.documentView = shelf
         shelfScroll.hasVerticalScroller = true
         shelfScroll.drawsBackground = false
@@ -585,7 +586,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
         scroll.scrollerStyle = .overlay
-        for v in [heading, undo, redo, toType, scroll, headingFont, bodyFont, preview, gridTitle, grid, why, saveBar] as [NSView] { page.addSubview(v) }
+        for v in [heading, undo, redo, toType, scroll, headingFont, bodyFont, preview, gridTitle, grid, saveBar] as [NSView] { page.addSubview(v) }
         refresh()
     }
 
@@ -607,8 +608,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         }
         let foot = b.height - pad - bar
         saveBar.frame = NSRect(x: pad, y: foot, width: w, height: bar)
-        why.frame = NSRect(x: pad, y: foot - gap - 30, width: w, height: 30)
-        let top = head + bar + gap, bottom = why.frame.minY - 10, height = bottom - top
+        let top = head + bar + gap, bottom = foot - gap, height = bottom - top
 
         // The preview and grid take four fifths of what an even split would give them; the controls and palettes get the rest.
         let even = max(236, min(340, w * 0.42))
@@ -659,7 +659,11 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         y += 26
         fixInk.frame = NSRect(x: 0, y: y, width: (width - 6) / 2, height: 22)
         fixPaper.frame = NSRect(x: (width + 6) / 2, y: y, width: (width - 6) / 2, height: 22)
-        y += 22 + 28
+        y += 22 + 12
+        why.preferredMaxLayoutWidth = width
+        let noteHeight = why.intrinsicContentSize.height
+        why.frame = NSRect(x: 0, y: y, width: width, height: noteHeight)
+        y += noteHeight + 28
 
         from.frame = NSRect(x: 0, y: y, width: width, height: 22)
         y += 26
@@ -760,10 +764,10 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         let rest = apca
             ? "Lc scores how readable the text is, from 0 to about 106, and knows light-on-dark from dark-on-light. APCA is drafted for WCAG 3 and is not yet a standard: audits, contracts and accessibility law still ask for the WCAG 2 ratio."
             : "The ratio compares how light two colours are, from 1 (the same) to 21 (black on white). Body text needs 4.5; large text, icons and controls need 3."
-        let note = NSMutableAttributedString(string: lead, attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.labelColor])
-        note.append(NSAttributedString(string: rest, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        let note = NSMutableAttributedString(string: lead, attributes: [.font: NSFont.systemFont(ofSize: TextSize.body, weight: .semibold), .foregroundColor: NSColor.labelColor])
+        note.append(NSAttributedString(string: rest, attributes: [.font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.secondaryLabelColor]))
         why.attributedStringValue = note
-        why.toolTip = rest
+        view.needsLayout = true
         grid.apca = apca
 
         // The palette menu and the shelf below it list the same things, in the sidebar's groups:

@@ -106,9 +106,9 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
         let ratio = contrastRatio(style.ink, style.paper)
         let grade = ["AAA": "AAA", "AA": "AA", "AA large": "AA Large", "fail": "Fail"][contrastGrade(ratio)] ?? ""
         let line = NSMutableAttributedString(string: ContrastPair.text(ratio), attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor])
+            .font: NSFont.monospacedDigitSystemFont(ofSize: TextSize.body, weight: .semibold), .foregroundColor: NSColor.labelColor])
         line.append(NSAttributedString(string: "  " + grade, attributes: [
-            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: TextSize.body, weight: .semibold),
             .foregroundColor: ratio >= 4.5 ? NSColor.systemGreen : ratio >= 3 ? NSColor.systemOrange : NSColor.systemRed]))
         numbers.attributedStringValue = line
 

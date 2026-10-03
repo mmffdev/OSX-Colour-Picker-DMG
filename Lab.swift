@@ -563,7 +563,7 @@ final class LabViewController: NSViewController {
         slider.toolTip = "Brightness"
         slider.setAccessibilityLabel("Brightness")
 
-        why.font = NSFont.systemFont(ofSize: 11.5)
+        why.font = NSFont.systemFont(ofSize: TextSize.body)
         why.textColor = .secondaryLabelColor
         why.maximumNumberOfLines = 2
         why.lineBreakMode = .byTruncatingTail
@@ -619,7 +619,7 @@ final class LabViewController: NSViewController {
         saveBar.frame = NSRect(x: pad, y: foot, width: w, height: bar)
 
         // The caption runs the full width under the working area, so it never squeezes the wheel.
-        let whyHeight: CGFloat = 30
+        let whyHeight: CGFloat = 36
         why.frame = NSRect(x: pad, y: foot - gap - whyHeight, width: w, height: whyHeight)
 
         let top = head + bar + gap, bottom = why.frame.minY - 10
@@ -672,9 +672,9 @@ final class LabViewController: NSViewController {
         slider.toolTip = state.rule == .custom ? "Brightness Of The Ringed Colour" : "Brightness Of The Base Colour"
 
         let text = NSMutableAttributedString(string: state.rule.title + "  ", attributes: [
-            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.labelColor])
+            .font: NSFont.systemFont(ofSize: TextSize.body, weight: .semibold), .foregroundColor: NSColor.labelColor])
         text.append(NSAttributedString(string: state.rule.why, attributes: [
-            .font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+            .font: NSFont.systemFont(ofSize: TextSize.body), .foregroundColor: NSColor.secondaryLabelColor]))
         why.attributedStringValue = text
         why.toolTip = state.rule.why
 
