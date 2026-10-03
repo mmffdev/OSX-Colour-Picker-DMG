@@ -13,8 +13,6 @@ enum SwatchListStyle {
     static let tileWidth: CGFloat = 132
     static let infoWidth: CGFloat = 170
     static let gap: CGFloat = 16
-    /// The widest the description and history run: a line of text stays readable on a wide window.
-    static let textWidth: CGFloat = 720
 }
 
 private final class FlippedView: NSView {
@@ -185,8 +183,7 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
             top.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
-            fill(top.trailingAnchor.constraint(equalTo: trailingAnchor)),
-            top.widthAnchor.constraint(lessThanOrEqualToConstant: s.textWidth),
+            top.trailingAnchor.constraint(equalTo: trailingAnchor),   // the notes and history run the row's full width
             top.topAnchor.constraint(equalTo: topAnchor),
             top.heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
             tabs.heightAnchor.constraint(equalTo: play.heightAnchor),
@@ -219,10 +216,6 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Fills the row when it can, giving way to the cap on the text's width.
-    /// Weaker than the hold a split pane has on its own width (250 and up), so a wide page is never
-    /// pulled narrow by its text: the page keeps the window's spare width and the text stops at its cap.
-    private func fill(_ c: NSLayoutConstraint) -> NSLayoutConstraint { c.priority = NSLayoutConstraint.Priority(200); return c }
-
     override func updateLayer() {
         super.updateLayer()
         noteBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
