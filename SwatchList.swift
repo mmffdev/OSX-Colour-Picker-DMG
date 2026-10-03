@@ -93,7 +93,7 @@ final class SwatchListView: NSView {
             page.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             page.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: page.topAnchor, constant: 8),
+            stack.topAnchor.constraint(equalTo: page.topAnchor),
             stack.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: PageStyle.side),
             stack.trailingAnchor.constraint(equalTo: page.trailingAnchor, constant: -PageStyle.side),
             stack.bottomAnchor.constraint(equalTo: page.bottomAnchor, constant: -24),

@@ -315,7 +315,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private func sizeCards() {
         layout.minimumWidth = ColourCard.width
         layout.spacing = spacing
-        layout.margins = NSEdgeInsets(top: 8, left: side, bottom: 24, right: side)
+        layout.margins = NSEdgeInsets(top: 0, left: side, bottom: 24, right: side)   // the bar above keeps its own space
         layout.height = { _ in ColourCard.height }
         layout.headerHeight = GroupHeaderView.height
         // The blank swatch that adds a colour sits at the end of the last group.
@@ -458,10 +458,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
-            viewBar.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: PageStyle.barGap),
+            // Room to breathe: the same space above the bar as below it.
+            viewBar.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
             viewBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             viewBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
-            scroll.topAnchor.constraint(equalTo: viewBar.bottomAnchor, constant: 8),
+            scroll.topAnchor.constraint(equalTo: viewBar.bottomAnchor, constant: 30),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
