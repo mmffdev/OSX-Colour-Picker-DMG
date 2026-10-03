@@ -184,6 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 if CommandLine.arguments.contains("--self-test") {
     runSelfTest()
+} else if CommandLine.arguments.contains("--write-project-files") {
+    // Writes every project's package now, for scripts and for filling in files for projects made before they existed.
+    let controller = LibraryController()
+    controller.reload()
+    controller.writeProjectFiles()
+    for p in controller.library.orderedProjects { print(controller.projectFileURL(p.id)?.path ?? p.name) }
+    exit(0)
 } else if CommandLine.arguments.contains("--pick") {
     runPickMode()
 } else if CommandLine.arguments.contains("--halo-demo") {
