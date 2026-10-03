@@ -99,7 +99,7 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
     private let tile = NSView()
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
-    private let tabs = NSSegmentedControl(labels: ["Description", "History"], trackingMode: .selectOne, target: nil, action: nil)
+    private let tabs = ToggleBar(labels: ["Description", "History"])
     private lazy var play = toolButton("Play Back", "play.fill", "Walk through what happened to this colour, oldest first", target: self, action: #selector(playTapped))
     private let note = NSTextField()
     private let noteBox = NSView()
@@ -150,7 +150,7 @@ final class SwatchRow: NSView, NSTextFieldDelegate {
         note.drawsBackground = false
         note.focusRingType = .none
         note.font = NSFont.systemFont(ofSize: TextSize.body)
-        note.placeholderString = "Why is this colour here? Write it for the client."
+        note.placeholderString = "Notes\u{2026}"
         note.cell?.wraps = true
         note.cell?.isScrollable = false
         note.cell?.usesSingleLineMode = false

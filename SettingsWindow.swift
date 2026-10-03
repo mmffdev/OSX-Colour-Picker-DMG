@@ -476,38 +476,69 @@ final class ShortcutsPanel: SettingsPanel {
 final class ThemePanel: SettingsPanel {
     private let selectionBackground = NSColorWell()
     private let selectionText = NSColorWell()
+    private let hoverBackground = NSColorWell()
+    private let hoverText = NSColorWell()
+    private let activeBackground = NSColorWell()
+    private let activeText = NSColorWell()
 
     override func rows() -> [[NSView]] {
-        for well in [selectionBackground, selectionText] {
+        for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] {
             well.target = self
-            well.action = #selector(changed)
+            well.action = #selector(changed(_:))
             well.widthAnchor.constraint(equalToConstant: 44).isActive = true
             well.heightAnchor.constraint(equalToConstant: 24).isActive = true
         }
+        func pair(_ background: NSColorWell, _ text: NSColorWell) -> NSView {
+            row([background, caption("Background", size: TextSize.caption), text, caption("Text", size: TextSize.caption)])
+        }
         return [
             [heading("Sidebar"), blank],
-            [label("Selected row:"), row([selectionBackground, caption("Background", size: TextSize.caption), selectionText, caption("Text", size: TextSize.caption)])],
-            [blank, row([button("Use The System Colours", #selector(reset))])],
-            [blank, note("The colours behind and on the sidebar row that is selected. The system's own are the accent colour with white text.")],
+            [label("Selected Row:"), pair(selectionBackground, selectionText)],
+            [blank, row([button("Reset To Default", #selector(resetSidebar))])],
+            [heading("Buttons"), blank],
+            [label("Hover:"), pair(hoverBackground, hoverText)],
+            [label("Active:"), pair(activeBackground, activeText)],
+            [blank, row([button("Reset To Default", #selector(resetButtons))])],
+            [blank, note("Hover is a button under the pointer; Active is one being pressed, or the choice that is on in a toggle. The defaults are greys taken from the background, so the controls stay quiet beside your colours. They follow the background as it is stepped lighter or darker.")],
         ]
     }
 
     override func refresh() {
-        selectionBackground.color = Prefs.sidebarSelectionBackground.flatMap(colorFromHex) ?? .controlAccentColor
-        selectionText.color = Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? .white
+        selectionBackground.color = Theme.sidebarSelectionBackground
+        selectionText.color = Theme.sidebarSelectionText
+        hoverBackground.color = Theme.buttonHoverBackground
+        hoverText.color = Theme.buttonHoverText
+        activeBackground.color = Theme.buttonActiveBackground
+        activeText.color = Theme.buttonActiveText
     }
 
-    @objc private func changed() {
-        Prefs.sidebarSelectionBackground = hexOf(selectionBackground.color)
-        Prefs.sidebarSelectionText = hexOf(selectionText.color)
+    /// Only the well that was changed is kept; the others stay on their defaults.
+    @objc private func changed(_ well: NSColorWell) {
+        let hex = hexOf(well.color)
+        switch well {
+        case selectionBackground: Prefs.sidebarSelectionBackground = hex
+        case selectionText: Prefs.sidebarSelectionText = hex
+        case hoverBackground: Prefs.buttonHoverBackground = hex
+        case hoverText: Prefs.buttonHoverText = hex
+        case activeBackground: Prefs.buttonActiveBackground = hex
+        default: Prefs.buttonActiveText = hex
+        }
         library.reloadSidebarTheme()
     }
 
-    @objc private func reset() {
+    @objc private func resetSidebar() {
         Prefs.sidebarSelectionBackground = nil
         Prefs.sidebarSelectionText = nil
         refresh()
         library.reloadSidebarTheme()
+    }
+
+    @objc private func resetButtons() {
+        Prefs.buttonHoverBackground = nil
+        Prefs.buttonHoverText = nil
+        Prefs.buttonActiveBackground = nil
+        Prefs.buttonActiveText = nil
+        refresh()
     }
 }
 

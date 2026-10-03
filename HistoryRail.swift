@@ -10,7 +10,7 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
     private let library: LibraryController
     private let table = HistoryTable()
     private lazy var header = PageHeader(actions: [play, remove])
-    private lazy var scope = NSSegmentedControl(labels: ["Project", "Global"], trackingMode: .selectOne, target: self, action: #selector(scopeChanged))
+    private lazy var scope = ToggleBar(labels: ["Project", "Global"], target: self, action: #selector(scopeChanged))
     /// The project whose steps are listed; nil lists everything. Follows the page, until the user picks.
     private var project: UUID?
     private var pickedByUser = false
@@ -64,8 +64,6 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         ])
         // The toggle leads the bar, on the title's left edge, and stands as tall as the buttons beside it.
         header.bar.insertArrangedSubview(scope, at: 0)
-        scope.controlSize = .regular
-        scope.font = NSFont.systemFont(ofSize: TextSize.body)
         scope.setContentHuggingPriority(.required, for: .horizontal)
         scope.heightAnchor.constraint(equalTo: play.heightAnchor).isActive = true
         scope.centerYAnchor.constraint(equalTo: play.centerYAnchor).isActive = true

@@ -392,10 +392,7 @@ final class StripView: NSView {
 
 /// A push button with a small symbol, as the tools' pages use.
 func toolButton(_ title: String, _ icon: String, _ tip: String, target: AnyObject, action: Selector) -> NSButton {
-    let b = NSButton(title: title.isEmpty ? "" : " " + title, target: target, action: action)
-    b.image = symbol(icon, tip, size: 12)
-    b.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
-    b.bezelStyle = .rounded
+    let b = ThemedButton(title: title, image: symbol(icon, tip, size: 12), target: target, action: action)
     b.toolTip = tip
     b.setAccessibilityLabel(tip)
     return b

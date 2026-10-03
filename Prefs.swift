@@ -61,6 +61,14 @@ enum Prefs {
         set { d.set(newValue, forKey: "theme.sidebar.selectionText"); changed() }
     }
 
+    /// The main buttons and toggles under the pointer and when pressed or on, as "#RRGGBB"; nil is the theme's grey.
+    private static func colour(_ key: String) -> String? { d.string(forKey: key) }
+    private static func setColour(_ value: String?, _ key: String) { d.set(value, forKey: key); changed() }
+    static var buttonHoverBackground: String? { get { colour("theme.button.hoverBackground") } set { setColour(newValue, "theme.button.hoverBackground") } }
+    static var buttonHoverText: String? { get { colour("theme.button.hoverText") } set { setColour(newValue, "theme.button.hoverText") } }
+    static var buttonActiveBackground: String? { get { colour("theme.button.activeBackground") } set { setColour(newValue, "theme.button.activeBackground") } }
+    static var buttonActiveText: String? { get { colour("theme.button.activeText") } set { setColour(newValue, "theme.button.activeText") } }
+
     // MARK: History
 
     /// History is kept per library (catalogue): on unless turned off for that one.

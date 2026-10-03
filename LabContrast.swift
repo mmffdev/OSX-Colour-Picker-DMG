@@ -467,7 +467,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let inkField = NSTextField(), paperField = NSTextField()
     private var swap: NSButton!
     private let badge = NSTextField(labelWithString: "")
-    private let method = NSSegmentedControl(labels: ["WCAG 2", "APCA"], trackingMode: .selectOne, target: nil, action: nil)
+    private let method = ToggleBar(labels: ["WCAG 2", "APCA"])
     private let table = ContrastTable()
     private let goal = NSPopUpButton()
     private var fixInk: NSButton!, fixPaper: NSButton!

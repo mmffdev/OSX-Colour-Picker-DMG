@@ -244,13 +244,12 @@ final class ThemedRowView: NSTableRowView {
     private var tinted: [NSTextField: NSColor] = [:]
 
     override var isEmphasized: Bool {
-        get { Prefs.sidebarSelectionBackground == nil && super.isEmphasized }
+        get { false }   // never the system's accent: the theme draws the selection
         set { super.isEmphasized = newValue }
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
-        guard let hex = Prefs.sidebarSelectionBackground, let colour = colorFromHex(hex) else { super.drawSelection(in: dirtyRect); return }
-        colour.setFill()
+        Theme.sidebarSelectionBackground.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 0), xRadius: 6, yRadius: 6).fill()
     }
 
@@ -265,10 +264,13 @@ final class ThemedRowView: NSTableRowView {
 
     /// Every label in the row takes the theme's text colour while selected, and its own colour back after.
     func recolour() {
-        guard let hex = Prefs.sidebarSelectionText, let colour = colorFromHex(hex) else { return }
+        let colour = Theme.sidebarSelectionText
         func labels(in v: NSView) -> [NSTextField] { v.subviews.flatMap { ($0 as? NSTextField).map { [$0] } ?? labels(in: $0) } }
         if isSelected {
-            for l in labels(in: self) where tinted[l] == nil { tinted[l] = l.textColor ?? .labelColor; l.textColor = colour }
+            for l in labels(in: self) {
+                if tinted[l] == nil { tinted[l] = l.textColor ?? .labelColor }
+                l.textColor = colour
+            }
         } else {
             for (l, own) in tinted { l.textColor = own }
             tinted = [:]
