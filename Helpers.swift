@@ -205,7 +205,24 @@ enum Theme {
 /// A scroll view that lets go of a flick once the pointer has left it. macOS keeps sending a
 /// flick's momentum to the view where it began, so the sidebar would go on scrolling while the
 /// mouse was already over the page; this drops those events instead.
-final class LetGoScrollView: NSScrollView {
+/// A scroll view that does not move, or bounce, when everything in it is already on show. Every
+/// page's scroll view is one of these: a page that fits stays still under the wheel.
+class FittedScrollView: NSScrollView {
+    /// Whether the whole document is on show, with nothing to scroll to.
+    var fits: Bool {
+        guard let document = documentView else { return true }
+        let room = contentView.bounds.size, insets = contentInsets
+        return document.frame.height <= room.height - insets.top - insets.bottom + 0.5 && document.frame.width <= room.width - insets.left - insets.right + 0.5
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Nothing to scroll to: the wheel goes on to whatever holds this view, and nothing bounces.
+        if fits { nextResponder?.scrollWheel(with: event); return }
+        super.scrollWheel(with: event)
+    }
+}
+
+final class LetGoScrollView: FittedScrollView {
     override func scrollWheel(with event: NSEvent) {
         if !event.momentumPhase.isEmpty, !bounds.contains(convert(event.locationInWindow, from: nil)) { return }
         super.scrollWheel(with: event)
@@ -594,7 +611,7 @@ final class GridLayout: NSCollectionViewLayout {
 }
 
 /// A scroll view that reports when the user keeps scrolling past either end.
-final class PagingScrollView: NSScrollView {
+final class PagingScrollView: FittedScrollView {
     /// +1 past the bottom, -1 past the top.
     var onPage: ((Int) -> Void)?
     private var pushed: CGFloat = 0

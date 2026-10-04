@@ -282,7 +282,7 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
         let document = TagListView()
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(rows)
-        let scroll = NSScrollView()
+        let scroll = FittedScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.documentView = document

@@ -299,7 +299,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         grid.translatesAutoresizingMaskIntoConstraints = false
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(grid)
-        let scroll = NSScrollView()
+        let scroll = FittedScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.documentView = document

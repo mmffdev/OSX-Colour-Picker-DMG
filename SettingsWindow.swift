@@ -238,7 +238,7 @@ final class ExportPanel: SettingsPanel, NSTextFieldDelegate, NSTextViewDelegate 
         licence.delegate = self
         licence.autoresizingMask = [.width]
         licence.textContainer?.widthTracksTextView = true
-        let scroll = NSScrollView()
+        let scroll = FittedScrollView()
         scroll.documentView = licence
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder

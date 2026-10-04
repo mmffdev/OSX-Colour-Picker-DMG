@@ -268,7 +268,7 @@ final class TypographyViewController: NSViewController, NSTextFieldDelegate {
     private let name = NSTextField()
     private lazy var header = PageHeader(title: name, actions: [add])
     private var add: NSButton!
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     private let column = CardColumn()
     private let empty = NSTextField(wrappingLabelWithString: "")
     private var cards: [TypeCard] = []

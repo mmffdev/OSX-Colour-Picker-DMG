@@ -316,7 +316,7 @@ final class AnalysisViewController: NSViewController {
     private let subject: String
     private let keys: [String]
     private let onClose: () -> Void
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     private let page = AnalysisPage()
     private let column = NSStackView()
     /// The one panel filling the page, when there is one.

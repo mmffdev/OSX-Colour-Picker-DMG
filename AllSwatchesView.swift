@@ -246,7 +246,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     private var saveButton: NSButton!
     private var builderHeight: NSLayoutConstraint!
     private let grid = SwatchGridView()
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     private let layout = GridLayout()
     private let empty = NSTextField(wrappingLabelWithString: "")
 
