@@ -57,39 +57,63 @@ enum ColourVision: CaseIterable {
     }
 }
 
+/// The panels, in the order they are shown: what a decision turns on first (can everyone tell
+/// these apart, can they be read, will they print), then the palette's character (tone, hue),
+/// then how it looks put together.
 enum AnalysisKind: CaseIterable {
-    case list, hue, luminance, vision, gradient, combos, lightDark
+    case vision, contrast, separation, print, luminance, hue, combos, lightDark, gradient, list
 
     var title: String {
         switch self {
-        case .list: return "Colours List"
-        case .hue: return "Hue Distribution"
-        case .luminance: return "Luminance Map"
-        case .vision: return "Colour Blind Simulation"
-        case .gradient: return "View As Gradient"
-        case .combos: return "Colour Combos"
-        case .lightDark: return "Light And Dark"
+        case .vision: return "Colour Vision"
+        case .contrast: return "Contrast Grid"
+        case .separation: return "Separation"
+        case .print: return "Print Reach"
+        case .luminance: return "Tone"
+        case .hue: return "Hue Wheel"
+        case .combos: return "Pairings"
+        case .lightDark: return "On White, On Black"
+        case .gradient: return "Blend"
+        case .list: return "Bands"
         }
     }
 
     var about: String {
         switch self {
-        case .list: return "Every colour, top to bottom, with nothing between them"
-        case .hue: return "Where each colour sits round the hue circle; greys gather in the middle"
-        case .luminance: return "Each colour with its hue taken away: how light it is, as a percentage"
         case .vision: return "Each colour as people with the commonest colour vision deficiencies see it"
-        case .gradient: return "The colours run into one another, in order"
+        case .contrast: return "Each colour as text on every other, with the contrast ratio; a ring marks a pass for body text"
+        case .separation: return "How far apart every pair is; orange where some colour blind viewers would struggle to tell them apart"
+        case .print: return "Each colour over what the palette's press gives, with the difference"
+        case .luminance: return "Each colour with its hue taken away: how light it looks, as a percentage"
+        case .hue: return "Where each colour sits round the hue circle; greys gather in the middle"
         case .combos: return "Each colour as a ground with the next colour set on it"
         case .lightDark: return "Each colour on pure white and on the deepest black"
+        case .gradient: return "The colours run into one another, in order"
+        case .list: return "Every colour, top to bottom, with nothing between them"
         }
     }
 
     /// Whether the panel needs more than one colour to say anything.
-    var needsSeveral: Bool { self == .gradient || self == .combos }
+    var needsSeveral: Bool { [.contrast, .separation, .combos, .gradient, .list].contains(self) }
 
-    /// The panels for these colours: all seven for a palette, five for one swatch.
+    /// The panels for these colours: all of them for a palette, those that mean something for one swatch.
     static func offered(for count: Int) -> [AnalysisKind] { allCases.filter { count > 1 || !$0.needsSeveral } }
 }
+
+/// How far apart two colours are, for ordinary vision and at the worst for the colour vision
+/// deficiencies simulated. CIEDE2000; under about 6 two colours are hard to tell apart at a glance.
+func separation(_ a: String, _ b: String) -> (seen: Double, worst: Double)? {
+    guard let one = (ColourKeys.definition(of: a) ?? ColourDefinition.of(hex: a))?.master, let two = (ColourKeys.definition(of: b) ?? ColourDefinition.of(hex: b))?.master else { return nil }
+    let seen = deltaE2000(one.lab, two.lab)
+    let simulated = ColourVision.allCases.compactMap { kind -> Double? in
+        guard let p = kind.seen(a), let q = kind.seen(b) else { return nil }
+        return deltaE2000(RGBSpace.srgb.master(of: p).lab, RGBSpace.srgb.master(of: q).lab)
+    }
+    return (seen, min(seen, simulated.min() ?? seen))
+}
+
+/// Below this, two colours are hard to tell apart at a glance.
+let separationFloor = 6.0
 
 /// How light a colour is, 0 to 100: L* of its master, which is how light it looks, not how much light it sends.
 func lightness(of key: String) -> Double {
@@ -124,12 +148,107 @@ final class AnalysisPlot: NSView {
         NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).addClip()
         switch kind {
         case .list: drawList()
+        case .contrast: drawContrast()
+        case .separation: drawSeparation()
+        case .print: drawPrint()
         case .hue: drawHue()
         case .luminance: drawLuminance()
         case .vision: drawVision()
         case .gradient: drawGradient()
         case .combos: drawCombos()
         case .lightDark: drawLightDark()
+        }
+    }
+
+    /// The cells of a grid of every colour against every other, with a row and a column of the colours themselves.
+    private func cells() -> (key: CGFloat, cell: NSSize) {
+        let key: CGFloat = min(28, bounds.height / CGFloat(keys.count + 1))
+        return (key, NSSize(width: (bounds.width - key) / CGFloat(keys.count), height: (bounds.height - key) / CGFloat(keys.count)))
+    }
+    private func keyStrips(_ key: CGFloat, _ cell: NSSize) {
+        for (i, k) in keys.enumerated() {
+            fill(k).setFill()
+            NSRect(x: key + CGFloat(i) * cell.width, y: 0, width: cell.width + 1, height: key).fill()
+            NSRect(x: 0, y: key + CGFloat(i) * cell.height, width: key, height: cell.height + 1).fill()
+        }
+        Theme.background.setFill()
+        NSRect(x: 0, y: 0, width: key, height: key).fill()
+    }
+
+    /// Rows are grounds, columns are text: each cell is "Aa" in the column's colour on the row's, with the ratio.
+    private func drawContrast() {
+        let (key, cell) = cells()
+        keyStrips(key, cell)
+        for (row, ground) in keys.enumerated() {
+            for (column, ink) in keys.enumerated() {
+                let rect = NSRect(x: key + CGFloat(column) * cell.width, y: key + CGFloat(row) * cell.height, width: cell.width + 1, height: cell.height + 1)
+                fill(ground).setFill()
+                rect.fill()
+                guard row != column, cell.width > 26, cell.height > 18 else { continue }
+                let ratio = contrastRatio(ground, ink), plain = colorFromHex(readableText(on: displayHex(ground))) ?? .white
+                let sample = text("Aa", fill(ink), size: min(22, cell.height * 0.42), weight: .semibold)
+                let figure = text(String(format: "%.1f", ratio), plain.withAlphaComponent(0.75), size: 9.5, weight: .medium)
+                let tall = cell.height > 44
+                centred(sample, in: tall ? NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * 0.68) : rect)
+                if tall { centred(figure, in: NSRect(x: rect.minX, y: rect.minY + rect.height * 0.6, width: rect.width, height: rect.height * 0.34)) }
+                // A ring in the corner where body text passes (4.5 to 1); a faint one where only large text does (3 to 1).
+                if ratio >= 3 {
+                    let mark = NSBezierPath(ovalIn: NSRect(x: rect.maxX - 13, y: rect.minY + 5, width: 7, height: 7))
+                    plain.withAlphaComponent(ratio >= 4.5 ? 0.9 : 0.35).setStroke()
+                    mark.lineWidth = 1.5
+                    mark.stroke()
+                }
+            }
+        }
+    }
+
+    /// Each cell is the pair side by side, with how far apart they are. Orange where a colour blind viewer would struggle.
+    private func drawSeparation() {
+        let (key, cell) = cells()
+        keyStrips(key, cell)
+        for (row, one) in keys.enumerated() {
+            for (column, two) in keys.enumerated() {
+                let rect = NSRect(x: key + CGFloat(column) * cell.width, y: key + CGFloat(row) * cell.height, width: cell.width + 1, height: cell.height + 1)
+                guard row != column, let apart = separation(one, two) else { Theme.grey(0.04).setFill(); rect.fill(); continue }
+                fill(one).setFill()
+                NSRect(x: rect.minX, y: rect.minY, width: rect.width / 2, height: rect.height).fill()
+                fill(two).setFill()
+                NSRect(x: rect.midX, y: rect.minY, width: rect.width / 2 + 1, height: rect.height).fill()
+                guard cell.width > 30, cell.height > 18 else { continue }
+                let close = apart.worst < separationFloor
+                let label = text(String(format: "%.0f", apart.seen) + (close && apart.worst < apart.seen - 0.5 ? String(format: " \u{2192} %.0f", apart.worst) : ""), close ? .black : .white, size: 10, weight: .semibold)
+                let size = label.size(), pill = NSRect(x: rect.midX - size.width / 2 - 6, y: rect.midY - size.height / 2 - 2, width: size.width + 12, height: size.height + 4)
+                (close ? NSColor.systemOrange : NSColor.black.withAlphaComponent(0.55)).setFill()
+                NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+                label.draw(at: NSPoint(x: pill.minX + 6, y: pill.minY + 2))
+            }
+        }
+    }
+
+    /// A column per colour: the colour above, what the palette's press gives below, and the difference.
+    private func drawPrint() {
+        let each = bounds.width / CGFloat(keys.count), channel = PrintCondition.current
+        for (i, key) in keys.enumerated() {
+            let column = NSRect(x: (CGFloat(i) * each).rounded(), y: 0, width: each.rounded(.up) + 1, height: bounds.height)
+            fill(key).setFill()
+            NSRect(x: column.minX, y: 0, width: column.width, height: bounds.height / 2).fill()
+            let lower = NSRect(x: column.minX, y: bounds.height / 2, width: column.width, height: bounds.height / 2)
+            guard let colour = ColourKeys.definition(of: key) ?? ColourDefinition.of(hex: key) else { continue }
+            let printed = Rendering.of(colour, in: channel)
+            guard let shown = printed.shown, let difference = printed.difference else {
+                Theme.grey(0.08).setFill(); lower.fill()
+                if each > 40 { centred(text("No Press", .secondaryLabelColor), in: lower) }
+                continue
+            }
+            shown.display.setFill()
+            lower.fill()
+            guard each > 34 else { continue }
+            let far = difference > Rendering.visible
+            let label = text(String(format: "\u{0394}E %.1f", difference), far ? .black : .white, size: 10, weight: .semibold)
+            let size = label.size(), pill = NSRect(x: lower.midX - size.width / 2 - 6, y: lower.maxY - size.height - 12, width: size.width + 12, height: size.height + 4)
+            (far ? NSColor.systemOrange : NSColor.black.withAlphaComponent(0.55)).setFill()
+            NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+            label.draw(at: NSPoint(x: pill.minX + 6, y: pill.minY + 2))
         }
     }
 
@@ -387,7 +506,8 @@ final class AnalysisViewController: NSViewController {
     private func fill() {
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         heading.stringValue = "Analysis"
-        detail.stringValue = subject + "  \u{00B7}  " + (keys.count == 1 ? "One Swatch" : plural(keys.count, "Swatch", "Swatches")) + (expanded.map { "  \u{00B7}  " + $0.title } ?? "")
+        detail.stringValue = subject + "  \u{00B7}  " + (keys.count == 1 ? "One Swatch" : plural(keys.count, "Swatch", "Swatches"))
+            + "  \u{00B7}  Print: \(PrintCondition.name())" + (expanded.map { "  \u{00B7}  " + $0.title } ?? "")
         back.title = expanded == nil ? "Back" : "Every Panel"
         back.invalidateIntrinsicContentSize()
         if let kind = expanded {

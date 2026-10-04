@@ -1574,9 +1574,14 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && near(seenGrey[0], 128.0 / 255, 0.004) && near(seenGrey[1], 128.0 / 255, 0.004) && near(seenGrey[2], 128.0 / 255, 0.004)
           && ColourVision.allCases.allSatisfy { $0.seen("#FFFFFF")?.allSatisfy { near($0, 1, 0.002) } == true },
           "colour blind simulation: red loses its redness to someone with no red cones, and grey and white stay as they are for everyone")
-    check(AnalysisKind.offered(for: 5).count == 7 && AnalysisKind.offered(for: 1).map { $0.title } == ["Colours List", "Hue Distribution", "Luminance Map", "Colour Blind Simulation", "Light And Dark"]
+    check(AnalysisKind.offered(for: 5).map { $0.title } == ["Colour Vision", "Contrast Grid", "Separation", "Print Reach", "Tone", "Hue Wheel", "Pairings", "On White, On Black", "Blend", "Bands"]
+          && AnalysisKind.offered(for: 1).map { $0.title } == ["Colour Vision", "Print Reach", "Tone", "Hue Wheel", "On White, On Black"]
           && near(lightness(of: "#FFFFFF"), 100, 0.01) && near(lightness(of: "#000000"), 0, 0.01) && lightness(of: "#808080") > 50 && lightness(of: vividKey) > 40,
-          "a palette has seven panels and one swatch five, with no gradient or pairs; lightness is how light a colour looks, 0 to 100")
+          "a palette has ten panels, decisions first and looks last; one swatch has the five that mean something for one colour")
+    let redGreen = separation("#D03020", "#5A8A20"), blackWhite = separation("#000000", "#FFFFFF"), same = separation("#4F8093", "#4F8093")
+    check((redGreen?.seen ?? 0) > 30 && (redGreen?.worst ?? 99) < (redGreen?.seen ?? 0) / 2 && near(blackWhite?.seen ?? 0, 100, 0.5) && near(blackWhite?.worst ?? 0, 100, 0.5)
+          && same?.seen == 0 && separation("nonsense", "#FFFFFF") == nil,
+          "separation: a red and a green far apart to most eyes are much closer to a colour blind viewer; black and white are far apart for everyone")
 
     var pickLib = Library()
     let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
