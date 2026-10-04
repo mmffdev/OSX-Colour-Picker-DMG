@@ -1013,6 +1013,12 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
+    let plain = ColourDefinition.of(hex: "#4F8093").flatMap { NewColourSheet.fill(for: $0) }
+    let vivid = NewColourSheet.fill(for: ColourDefinition.displayP3([1, 0, 0]))
+    check(plain?.kind == .hex && plain?.values == ["#4F8093"] && vivid?.kind == .p3 && vivid?.values == ["255", "0", "0"],
+          "a colour picked into New Colour is typed in as its hex, or as Display P3 values when sRGB cannot hold it")
+    let again = vivid.flatMap { NewColourSheet.read($0.kind, $0.values, press: "") }?.colour
+    check(again == ColourDefinition.displayP3([1, 0, 0]), "and what is typed in reads back as the colour that was picked")
     check(HaloGeometry.wheelStep(speed: 1) == 44 && HaloGeometry.wheelStep(speed: 2) == 22 && HaloGeometry.wheelStep(speed: 0.5) == 88,
           "a faster wheel setting turns the ring in less travel, a slower one in more")
     let letters = HaloSettingsPanel.letters(back: {})

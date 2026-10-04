@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
-    /// "palette:<name>", "analysis:<palette name>", "analysis-one:<palette name>", "halo:<palette name>[/<action id>…]", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
+    /// "palette:<name>", "analysis:<palette name>", "analysis-one:<palette name>", "halo:<palette name>[/<action id>…]", "newcolour:<palette name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
     private func rehearse(_ main: MainWindowController) {
         let env = ProcessInfo.processInfo.environment
         guard env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_SHOW"] else { return }
@@ -96,6 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let s = self.library.library.swatches.first(where: { $0.name == names.first }) {
                     main.show(.palette(s.id))
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { main.rehearseHalo(choosing: Array(names.dropFirst())) }
+                }
+            case "newcolour":
+                if let p = self.library.library.swatches.first(where: { $0.name == arg }) {
+                    main.show(.palette(p.id))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.library.newColour() }
                 }
             case "build":
                 main.buildPalette()

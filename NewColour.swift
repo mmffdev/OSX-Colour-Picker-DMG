@@ -117,7 +117,8 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         problem.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let bar = NSStackView(views: [problem, spacer,
+        let bar = NSStackView(views: [toolButton("Pick", "eyedropper", "Pick A Colour From The Screen", target: self, action: #selector(pickTapped)),
+                                      problem, spacer,
                                       toolButton("Cancel", "xmark", "Cancel (Escape)", target: self, action: #selector(cancelTapped)),
                                       toolButton("Add Colour", "plus", "Add Colour (Return)", target: self, action: #selector(confirmTapped))])
         bar.orientation = .horizontal
@@ -240,6 +241,48 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         var lines = [colour.fitsSRGB ? "sRGB shows it as \(shown)." : "Beyond sRGB: the nearest sRGB can show is \(shown). Kept whole."]
         if kind == .cmyk { lines.append("Total Ink \(Int((colour.source.values.reduce(0, +) * 100).rounded()))%") }
         readout.stringValue = lines.joined(separator: "\n")
+    }
+
+    // MARK: Picking from the screen
+
+    private var sampler: NSColorSampler?
+
+    /// The screen picker, as the main one: the loupe, then the colour under it. What it picks
+    /// fills the sheet, to be looked at or changed before it is added. Escape in the loupe picks nothing.
+    @objc private func pickTapped() {
+        let sampler = NSColorSampler()
+        self.sampler = sampler
+        sampler.show { [weak self] colour in
+            guard let self = self else { return }
+            self.sampler = nil
+            guard let colour = colour, let picked = ColourDefinition.picked(colour), let fill = NewColourSheet.fill(for: picked) else { return }
+            playShutter()
+            self.take(fill.kind, fill.values)
+        }
+    }
+
+    /// What a picked colour is typed in as: its hex when sRGB holds it, as the main picker keeps
+    /// it; otherwise its Display P3 values, 0 to 255, so a vivid colour is kept whole.
+    static func fill(for picked: ColourDefinition) -> (kind: Kind, values: [String])? {
+        if picked.source.space == RGBSpace.srgb.rawValue { return (.hex, [RGBSpace.srgb.text(picked.source.values)]) }
+        guard picked.source.space == RGBSpace.displayP3.rawValue, picked.source.values.count == 3 else { return nil }
+        return (.p3, picked.source.values.map { value in
+            let text = String(format: "%.2f", value * 255)
+            return text.hasSuffix(".00") ? String(text.dropLast(3)) : text
+        })
+    }
+
+    /// Shows `kind` with these values typed in.
+    private func take(_ kind: Kind, _ values: [String]) {
+        if let at = Kind.offered.firstIndex(of: kind), kinds.selectedSegment != at {
+            kinds.selectedSegment = at
+            shown = kind
+            preferences.set(kind.rawValue, forKey: "newColourKind")
+            show()
+        }
+        for (field, value) in zip(fields, values) { field.stringValue = value }
+        valueChanged()
+        window?.makeFirstResponder(fields[0])
     }
 
     private var shown = Kind.p3
