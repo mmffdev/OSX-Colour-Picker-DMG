@@ -142,8 +142,8 @@ final class PageHeader: NSView {
         pills.isHidden = false
     }
 
-    /// Stripes 20 points wide with 20-point gaps at 45 degrees, three percent lighter than
-    /// the background in dark mode and three percent darker in light, on the title panel: the full
+    /// Stripes 20 points wide with 20-point gaps at 45 degrees, two percent lighter than
+    /// the background in dark mode and two percent darker in light, on the title panel: the full
     /// width, touching the top, the title in its middle, with the bar clear beneath it.
     override func draw(_ dirtyRect: NSRect) {
         guard striped else { return }

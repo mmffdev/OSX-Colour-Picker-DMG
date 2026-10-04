@@ -177,11 +177,11 @@ enum Theme {
         if let content = window.contentView { walk(content); content.needsDisplay = true }
     }
 
-    /// Barber-pole stripes, 20 points wide with 20-point gaps at 45 degrees, three percent lighter
-    /// than the background in the dark steps and three percent darker in the light, clipped to `band`.
+    /// Barber-pole stripes, 20 points wide with 20-point gaps at 45 degrees, two percent lighter
+    /// than the background in the dark steps and two percent darker in the light, clipped to `band`.
     static func drawStripes(in band: NSRect) {
         let base = background.usingColorSpace(.deviceRGB) ?? .gray
-        let shade = base.blended(withFraction: 0.03, of: isDark ? .white : .black) ?? base
+        let shade = base.blended(withFraction: 0.02, of: isDark ? .white : .black) ?? base
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
         ctx.clip(to: band)
