@@ -23,6 +23,7 @@ import Foundation
 enum ColourFiles {
     static let generator = "MMFFDev Colour 3"
     static let project = "colproject", palette = "colpalette", swatch = "colswatch", history = "colhistory"
+    static let catalogue = "colcatalogue", data = "coldata"
     /// The one file an earlier version wrote.
     static let legacyProject = "config"
     /// Every extension found in a project's Palettes folder.
@@ -52,7 +53,10 @@ struct ProjectDocument: Codable, Equatable {
     var project: Project
     var palettes: [UUID]
     var colours: [String]
-    var tags: [TagInfo]
+    /// The order its tags are held in; the tags themselves, and its profiles, are in its .coldata.
+    var tagOrder: [TagKey]? = nil
+    /// Written here by an earlier version, before .coldata held them. Still read.
+    var tags: [TagInfo]? = nil
     var profiles: [ColourProfile]? = nil
 }
 
@@ -166,18 +170,32 @@ struct ProjectFile: Codable, Equatable {
     func documents() throws -> [(path: String, data: Data)] {
         let e = ColourFiles.encoder(), base = filesystemName(project.name), names = paletteFileNames
         var out: [(path: String, data: Data)] = []
-        let doc = ProjectDocument(project: project, palettes: palettes.map { $0.id }, colours: colours.map { $0.hex }, tags: tags, profiles: profiles)
+        _ = names
+        let doc = ProjectDocument(project: project, palettes: palettes.map { $0.id }, colours: colours.map { $0.hex },
+                                  tagOrder: tags.map { TagKey(name: $0.name, project: $0.projectID) })
         out.append(("\(base).\(ColourFiles.project)", try e.encode(doc)))
+        out.append(("\(base).\(ColourFiles.data)", try e.encode(DataDocument(project: project.id, tags: tags, profiles: profiles ?? []))))
         if !history.isEmpty {
             out.append(("\(base).\(ColourFiles.history)", try e.encode(HistoryDocument(project: project.id, steps: history))))
         }
+        return out + (try ProjectFile.paletteDocuments(palettes, colours: colours, project: project.id))
+    }
+
+    /// Palettes as the files they are kept in: each with the colours it uses, and beside it a
+    /// file for every purpose it serves.
+    static func paletteDocuments(_ palettes: [Swatch], colours: [Colour], project: UUID?) throws -> [(path: String, data: Data)] {
+        let e = ColourFiles.encoder()
+        var out: [(path: String, data: Data)] = [], taken: [String] = []
         for palette in palettes {
-            let name = names[palette.id] ?? filesystemName(palette.name)
+            let name = uniqueName(filesystemName(palette.name), among: taken)
+            taken.append(name)
             let keys = Set(palette.entries.map { $0.hex } + (palette.styles ?? []).flatMap { [$0.ink, $0.paper] })
-            // The palette's purposes are files of their own beside it, so they are not said twice.
+            // A purpose the palette serves is a file of its own beside it, so it is not said twice.
+            // One that was taken off stays here, marked, so that a sync does not bring it back.
             var plain = palette
-            plain.purposes = nil
-            let file = PaletteDocument(project: project.id, palette: plain, colours: colours.filter { keys.contains($0.hex) })
+            let off = (palette.purposes ?? []).filter { !$0.isLive }
+            plain.purposes = off.isEmpty ? nil : off
+            let file = PaletteDocument(project: project, palette: plain, colours: colours.filter { keys.contains($0.hex) })
             out.append(("\(ProjectFiles.palettesFolder)/\(name).\(ColourFiles.palette)", try e.encode(file)))
             for settings in palette.purposes ?? [] where settings.isLive {
                 let side = PurposeDocument(palette: palette.id, paletteName: palette.name, settings: settings)
@@ -265,12 +283,20 @@ enum ProjectFiles {
     /// Writes every project's file, and only when its contents have changed since the last write.
     /// A project whose file has existed and is now gone is left alone: it is reported, not remade.
     /// Returns the files written and the projects written for the first time, which the caller marks.
-    static func write(_ lib: Library, library: URL, master: URL?, history: StepHistory? = nil, written: inout [UUID: Data]) throws -> (files: [URL], firstTime: [UUID]) {
+    /// `touchHistory` false leaves each project's history file as it is: the catalogue is saved
+    /// far more often than the history, which is written on its own.
+    /// `remaking` writes every project, even one whose file has gone: for the one time a catalogue
+    /// that held everything itself is turned into project files, when it is the only copy there is.
+    static func write(_ lib: Library, library: URL, master: URL?, history: StepHistory? = nil, touchHistory: Bool = true, remaking: Bool = false,
+                      written: inout [UUID: Data]) throws -> (files: [URL], firstTime: [UUID]) {
         let fm = FileManager.default
-        let gone = lost(in: lib, library: library, master: master)
+        let gone = remaking ? [:] : lost(in: lib, library: library, master: master)
         var files: [URL] = [], firstTime: [UUID] = []
+        // Every project is written before anything is cleared away, so a palette moved from one
+        // project to another is in its new home before it leaves its old one.
+        var clearing: [(folder: URL, documents: [(path: String, data: Data)])] = []
         for p in lib.orderedProjects where gone[p.id] == nil {
-            let whole = ProjectFile(project: p, in: lib, history: history?.steps(in: p.id) ?? [])
+            let whole = ProjectFile(project: p, in: lib, history: touchHistory ? history?.steps(in: p.id) ?? [] : [])
             let data = try whole.data()
             if written[p.id] == data { continue }
             var root = self.root(for: p, library: library, master: master)
@@ -291,26 +317,62 @@ enum ProjectFiles {
             // Each file is written only when what it holds has changed, and whatever is left in the
             // folder from a palette, a purpose or a history that is no longer there goes.
             let documents = try whole.documents()
-            let palettes = config.appendingPathComponent(palettesFolder)
-            try fm.createDirectory(at: palettes, withIntermediateDirectories: true)
-            let kept = Set(documents.map { config.appendingPathComponent($0.path).standardizedFileURL.path })
-            for document in documents {
-                let at = config.appendingPathComponent(document.path)
-                if (try? Data(contentsOf: at)) != document.data { try document.data.write(to: at, options: .atomic) }
-            }
-            for stale in (try? fm.contentsOfDirectory(at: palettes, includingPropertiesForKeys: nil)) ?? []
-                where ColourFiles.paletteFolder.contains(stale.pathExtension.lowercased()) && !kept.contains(stale.standardizedFileURL.path) {
-                try? fm.removeItem(at: stale)
-            }
-            for stale in (try? fm.contentsOfDirectory(at: config, includingPropertiesForKeys: nil)) ?? []
-                where stale.pathExtension.lowercased() == ColourFiles.history && !kept.contains(stale.standardizedFileURL.path) {
-                try? fm.removeItem(at: stale)
-            }
+            try put(documents, in: config, clearing: false)
+            clearing.append((config, documents))
+            // The one file an earlier version wrote, under this name, has been replaced.
+            try? fm.removeItem(at: legacyURL(in: root, name: p.name))
             written[p.id] = data
             files.append(file)
             if p.fileKnown != true { firstTime.append(p.id) }
         }
+        for item in clearing { clear(item.folder, keeping: item.documents, history: touchHistory) }
         return (files, firstTime)
+    }
+
+    /// Writes files into a folder, each only when what it holds has changed, and then clears away
+    /// whatever is left there from a palette or a purpose that is gone.
+    static func put(_ documents: [(path: String, data: Data)], in folder: URL, clearing: Bool = true) throws {
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent(palettesFolder), withIntermediateDirectories: true)
+        for document in documents {
+            let at = folder.appendingPathComponent(document.path)
+            if (try? Data(contentsOf: at)) != document.data { try document.data.write(to: at, options: .atomic) }
+        }
+        if clearing { clear(folder, keeping: documents, history: false) }
+    }
+
+    private static func clear(_ folder: URL, keeping documents: [(path: String, data: Data)], history: Bool) {
+        let fm = FileManager.default
+        let kept = Set(documents.map { folder.appendingPathComponent($0.path).standardizedFileURL.path })
+        for stale in (try? fm.contentsOfDirectory(at: folder.appendingPathComponent(palettesFolder), includingPropertiesForKeys: nil)) ?? []
+            where ColourFiles.paletteFolder.contains(stale.pathExtension.lowercased()) && !kept.contains(stale.standardizedFileURL.path) {
+            try? fm.removeItem(at: stale)
+        }
+        guard history else { return }
+        for stale in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            where stale.pathExtension.lowercased() == ColourFiles.history && !kept.contains(stale.standardizedFileURL.path) {
+            try? fm.removeItem(at: stale)
+        }
+    }
+
+    /// The palettes in a Palettes folder that belong to `project`, each with its purposes, and the colours they hold.
+    static func palettes(in folder: URL, project: UUID?) -> (palettes: [Swatch], colours: [Colour]) {
+        let d = ColourFiles.decoder()
+        var palettes: [Swatch] = [], colours: [Colour] = [], seen = Set<String>(), settings: [UUID: [PurposeConfig]] = [:]
+        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        for url in files {
+            guard let found = try? Data(contentsOf: url) else { continue }
+            if url.pathExtension.lowercased() == ColourFiles.palette, let p = try? d.decode(PaletteDocument.self, from: found), p.project == project {
+                palettes.append(p.palette)
+                for colour in p.colours where seen.insert(colour.hex).inserted { colours.append(colour) }
+            } else if Purpose.of(fileExtension: url.pathExtension) != nil, let s = try? d.decode(PurposeDocument.self, from: found) {
+                settings[s.palette, default: []].append(s.settings)
+            }
+        }
+        for at in palettes.indices {
+            let all = (palettes[at].purposes ?? []) + (settings[palettes[at].id] ?? [])
+            palettes[at].purposes = all.isEmpty ? nil : Purpose.allCases.compactMap { purpose in all.first { $0.purpose == purpose } }
+        }
+        return (palettes, colours)
     }
 
     /// Reads a project back whole: from its file and the palette, purpose and history files beside
@@ -318,25 +380,18 @@ enum ProjectFiles {
     static func read(_ file: URL) throws -> ProjectFile {
         let data = try Data(contentsOf: file), d = ColourFiles.decoder()
         guard let doc = try? d.decode(ProjectDocument.self, from: data), doc.format == "colour-project" else { return try ProjectFile.read(data) }
-        let fm = FileManager.default, config = file.deletingLastPathComponent()
-        let beside = (try? fm.contentsOfDirectory(at: config.appendingPathComponent(palettesFolder), includingPropertiesForKeys: nil)) ?? []
-        var palettes: [UUID: Swatch] = [:], colours: [String: Colour] = [:], settings: [UUID: [PurposeConfig]] = [:]
-        for url in beside {
-            guard let found = try? Data(contentsOf: url) else { continue }
-            if url.pathExtension.lowercased() == ColourFiles.palette, let p = try? d.decode(PaletteDocument.self, from: found), p.project == doc.project.id {
-                palettes[p.palette.id] = p.palette
-                for colour in p.colours { colours[colour.hex] = colour }
-            } else if Purpose.of(fileExtension: url.pathExtension) != nil, let s = try? d.decode(PurposeDocument.self, from: found) {
-                settings[s.palette, default: []].append(s.settings)
-            }
+        let config = file.deletingLastPathComponent()
+        let held = palettes(in: config.appendingPathComponent(palettesFolder), project: doc.project.id)
+        var tags = doc.tags ?? [], profiles = doc.profiles
+        if let found = try? Data(contentsOf: config.appendingPathComponent(file.deletingPathExtension().lastPathComponent + "." + ColourFiles.data)),
+           let own = try? d.decode(DataDocument.self, from: found), own.project == doc.project.id {
+            tags = own.tags
+            profiles = own.profiles.isEmpty ? nil : own.profiles
         }
-        var whole = try ProjectFile.read(ColourFiles.encoder().encode(Whole(project: doc.project, palettes: [], colours: [], tags: doc.tags, profiles: doc.profiles)))
-        whole.palettes = doc.palettes.compactMap { id in
-            guard var palette = palettes[id] else { return nil }
-            if let own = settings[id] { palette.purposes = Purpose.allCases.compactMap { purpose in own.first { $0.purpose == purpose } } }
-            return palette
-        }
-        whole.colours = doc.colours.compactMap { colours[$0] }
+        if let order = doc.tagOrder { tags = CatalogueFiles.ordered(tags, by: order) { TagKey(name: $0.name, project: $0.projectID) } }
+        var whole = try ProjectFile.read(ColourFiles.encoder().encode(Whole(project: doc.project, palettes: [], colours: [], tags: tags, profiles: profiles)))
+        whole.palettes = CatalogueFiles.ordered(held.palettes, by: doc.palettes) { $0.id }.filter { doc.palettes.contains($0.id) }
+        whole.colours = CatalogueFiles.ordered(held.colours, by: doc.colours) { $0.hex }
         let steps = config.appendingPathComponent(file.deletingPathExtension().lastPathComponent + "." + ColourFiles.history)
         if let found = try? Data(contentsOf: steps), let h = try? d.decode(HistoryDocument.self, from: found), h.project == doc.project.id { whole.history = h.steps }
         return whole

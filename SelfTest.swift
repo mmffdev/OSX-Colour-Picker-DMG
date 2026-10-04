@@ -429,9 +429,9 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
     let studio = try! mine.rename("Main", to: "Studio")
     check(studio == "Studio" && mine.names() == ["Studio"], "Main can be renamed, and then there is no Main")
     check((try! mine.store(for: "Studio").load()).colours.map { $0.hex } == ["#AA0000"], "the renamed catalogue keeps its colours")
-    check(!fm.fileExists(atPath: mine.root.appendingPathComponent("library.json").path)
-          && fm.fileExists(atPath: mine.directory(for: "Studio").appendingPathComponent("library.json").path),
-          "Main's files move into a folder of their own")
+    check(CatalogueFiles.index(in: mine.root) == nil && !fm.fileExists(atPath: mine.root.appendingPathComponent(CatalogueFiles.unfiled).path)
+          && fm.fileExists(atPath: mine.directory(for: "Studio").appendingPathComponent("Studio.colcatalogue").path),
+          "Main's files move into a folder of their own, and the catalogue's file takes the catalogue's name")
     check(Set(SyncEngine.catalogues(in: shared)) == ["Studio"], "the sync folder is renamed too, and the old name no longer lists")
     check(SyncEngine.renamedName(in: shared, of: "Main") == "Studio", "the old sync folder says where it went")
     check((try! mine.store(for: "Main").load()) == Library(), "a Main made after a rename starts empty, not seeded again")
@@ -899,6 +899,83 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Config/Client B.colproject").path]
           && !fm.fileExists(atPath: projRoot.appendingPathComponent("Main/Projects/Client A").path),
           "a renamed project's folder and file take the new name")
+
+    print("catalogue files")
+    let catDir = root.appendingPathComponent("catalogue/Studio")
+    let catStore = LibraryStore(directory: catDir, legacyURL: nil, name: "Studio")
+    var catLib = Library()
+    let tcat = Date(timeIntervalSince1970: 1_770_000_000)
+    let jobA = catLib.createProject(named: "Job A", at: tcat), jobB = catLib.createProject(named: "Job B", at: tcat)
+    let inA = catLib.createSwatch(at: tcat), inB = catLib.createSwatch(at: tcat.addingTimeInterval(1)), looseOne = catLib.createSwatch(at: tcat.addingTimeInterval(2))
+    _ = catLib.renameSwatch(inA, to: "Autumn"); _ = catLib.renameSwatch(inB, to: "Winter"); _ = catLib.renameSwatch(looseOne, to: "Scratch")
+    catLib.add(["#AA0000", "#00AA00"], toSwatch: inA, at: tcat)
+    catLib.add(["#0000AA"], toSwatch: inB, at: tcat)
+    catLib.add(["#111111"], toSwatch: looseOne, at: tcat)
+    catLib.activeSwatchID = nil   // a pick into the library alone, into no palette
+    catLib.addPick("#EEEEEE", at: tcat.addingTimeInterval(3))
+    catLib.move(inA, to: jobA, index: 0, at: tcat)
+    catLib.move(inB, to: jobB, index: 0, at: tcat)
+    catLib.setTag("brand", colour: "#FF8800", project: nil, at: tcat)
+    catLib.setTag("client", colour: nil, project: jobA, at: tcat)
+    catLib.setTags(ofPalette: inA, ["brand", "client"], at: tcat)
+    catLib.setPurpose(.print, on: true, ofPalette: inA, at: tcat)
+    catLib.setPurpose(.web, on: true, ofPalette: inA, at: tcat)
+    catLib.setPurpose(.web, on: false, ofPalette: inA, at: tcat.addingTimeInterval(1))
+    catLib.setProfile(ColourProfiles.starters[1], ofPalette: inA, at: tcat)
+    catLib.deleteSwatch(catLib.createSwatch(at: tcat), at: tcat.addingTimeInterval(4))
+    try! catStore.save(catLib)
+    let catBack = try! catStore.load()
+    check(catBack == catLib && catStore.unavailable.isEmpty, "a catalogue saved as an index and project files loads back exactly as it was")
+    let indexText = String(data: (try? Data(contentsOf: catStore.url)) ?? Data(), encoding: .utf8) ?? ""
+    let aConfig = catDir.appendingPathComponent("Projects/Job A/Config")
+    check(catStore.url.lastPathComponent == "Studio.colcatalogue" && indexText.contains("Job A") && !indexText.contains("Autumn")
+          && fm.fileExists(atPath: aConfig.appendingPathComponent("Job A.colproject").path) && fm.fileExists(atPath: aConfig.appendingPathComponent("Job A.coldata").path)
+          && fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colpalette").path) && fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colprint").path)
+          && !fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colweb").path)
+          && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Unfiled.coldata").path) && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Palettes/Scratch.colpalette").path),
+          "the catalogue's file is the index, named for the catalogue; each project holds its own palettes, and what belongs to no project is in Unfiled")
+    let unfiledData = try? ColourFiles.decoder().decode(DataDocument.self, from: Data(contentsOf: catDir.appendingPathComponent("Unfiled/Unfiled.coldata")))
+    let jobData = try? ColourFiles.decoder().decode(DataDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Job A.coldata")))
+    check(unfiledData?.colours.map { $0.hex } == ["#EEEEEE"] && unfiledData?.tags.map { $0.name } == ["brand"] && unfiledData?.profiles.map { $0.id } == [ColourProfiles.starters[1].id]
+          && jobData?.tags.map { $0.name }.sorted() == ["brand", "client"] && jobData?.project == jobA,
+          "Unfiled is the home of global tags, the profiles and colours no palette uses; a project's data holds its own tags and carries the global ones it wears")
+    // A project whose folder cannot be reached: listed, unavailable, never written over, and whole when it returns.
+    let away = root.appendingPathComponent("catalogue/Job B away")
+    try! fm.moveItem(at: catDir.appendingPathComponent("Projects/Job B"), to: away)
+    let without = try! catStore.load()
+    check(catStore.unavailable == [jobB] && without.projects.map { $0.name } == ["Job A", "Job B"] && without.swatch(inB) == nil && without.swatch(inA) != nil
+          && ProjectFiles.lost(in: without, library: catStore.url, master: nil)[jobB] != nil,
+          "a project whose files cannot be reached stays in the catalogue, marked unavailable, and is not taken to be deleted")
+    try! catStore.mutate { $0.addPick("#ABCDEF", at: tcat.addingTimeInterval(9)) }
+    check(!fm.fileExists(atPath: catDir.appendingPathComponent("Projects/Job B").path) && (try? catStore.load().projects.count) == 2,
+          "saving while a project is unavailable leaves it listed and writes nothing in its place")
+    try! fm.moveItem(at: away, to: catDir.appendingPathComponent("Projects/Job B"))
+    let returned = try! catStore.load()
+    check(catStore.unavailable.isEmpty && returned.swatch(inB)?.entries.map { $0.hex } == ["#0000AA"] && returned.colours.contains { $0.hex == "#ABCDEF" },
+          "when its files come back the project is whole again, with what was done meanwhile kept")
+    // A palette moved from one project to another: in its new home, gone from its old one.
+    try! catStore.mutate { $0.move(inA, to: jobB, index: 0, at: tcat.addingTimeInterval(20)) }
+    check(!fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colpalette").path) && !fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colprint").path)
+          && fm.fileExists(atPath: catDir.appendingPathComponent("Projects/Job B/Config/Palettes/Autumn.colprint").path)
+          && (try? catStore.load().swatch(inA)?.projectID) == jobB, "a palette moved to another project takes its files with it")
+    // A catalogue an earlier version kept in one file.
+    let oldDir = root.appendingPathComponent("catalogue/Earlier")
+    try! fm.createDirectory(at: oldDir, withIntermediateDirectories: true)
+    try! JSONEncoder.library.encode(catLib).write(to: oldDir.appendingPathComponent("library.json"))
+    // One of its projects had been marked as written and its folder is not there: the one file is the only copy, so it is made again.
+    var earlier = catLib
+    earlier.markProjectFile(jobA, known: true)
+    try! JSONEncoder.library.encode(earlier).write(to: oldDir.appendingPathComponent("library.json"))
+    let oldStore = LibraryStore(directory: oldDir, legacyURL: nil)
+    let converted = try! oldStore.load()
+    check(oldStore.unavailable.isEmpty && (try? oldStore.load().swatch(inA)?.entries.count) == 2 && oldStore.unavailable.isEmpty
+          && fm.fileExists(atPath: oldDir.appendingPathComponent("Projects/Job A/Config/Palettes/Autumn.colpalette").path),
+          "turning a one-file catalogue into project files writes every project, even one whose folder had gone, so nothing is left behind")
+    check(converted.swatches.map { $0.name } == catLib.swatches.map { $0.name } && fm.fileExists(atPath: oldDir.appendingPathComponent("Earlier.colcatalogue").path)
+          && !fm.fileExists(atPath: oldDir.appendingPathComponent("library.json").path)
+          && ((try? fm.contentsOfDirectory(atPath: oldDir.appendingPathComponent("Backups").path)) ?? []).contains { $0.hasPrefix("library before catalogue files") }
+          && (try? LibraryStore(directory: oldDir, legacyURL: nil).load().swatches.count) == catLib.swatches.count,
+          "a catalogue an earlier version kept in one file is saved as catalogue files, and the one file is kept among the backups")
 
     print("copy to project")
     var copyLib = Library()

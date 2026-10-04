@@ -1006,9 +1006,22 @@ final class LibraryStore {
     /// Set when an unreadable library file was moved aside during load.
     private(set) var quarantinedFile: URL?
 
-    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil) {
+    /// The one file an earlier version kept everything in. Read once, then kept as a backup.
+    let earlierURL: URL
+    /// The folder projects are kept under; nil puts them in "Projects" beside the catalogue.
+    let projectsFolder: URL?
+    /// Projects the catalogue lists whose files could not be reached at the last load. They are
+    /// shown as unavailable, and never written over.
+    private(set) var unavailable = Set<UUID>()
+    private var written: [UUID: Data] = [:]
+
+    /// `name` is the catalogue's, which its file is named for.
+    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil, projectsFolder: URL? = nil) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        self.url = directory.appendingPathComponent("library.json")
+        self.url = CatalogueFiles.index(in: directory)
+            ?? directory.appendingPathComponent(filesystemName(name ?? directory.lastPathComponent) + "." + ColourFiles.catalogue)
+        self.earlierURL = directory.appendingPathComponent("library.json")
+        self.projectsFolder = projectsFolder
         self.legacyURL = legacyURL
         self.previousURL = previousURL
     }
@@ -1034,15 +1047,28 @@ final class LibraryStore {
 
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
-        let fm = FileManager.default
+        let fm = FileManager.default, stamp = Int(Date().timeIntervalSince1970)
         if fm.fileExists(atPath: url.path) {
-            if let data = try? Data(contentsOf: url), let lib = try? decoder.decode(Library.self, from: data) {
-                return lib
+            if let loaded = try? CatalogueFiles.read(index: url, master: projectsFolder) {
+                unavailable = loaded.unavailable
+                return loaded.library
             }
             // Never overwrite a file we could not read — move it aside for recovery.
-            let stamp = Int(Date().timeIntervalSince1970)
-            let aside = url.deletingLastPathComponent().appendingPathComponent("library.unreadable-\(stamp).json")
+            let aside = url.deletingLastPathComponent().appendingPathComponent("unreadable-\(stamp)." + ColourFiles.catalogue + ".txt")
             try? fm.moveItem(at: url, to: aside)
+            quarantinedFile = aside
+        } else if fm.fileExists(atPath: earlierURL.path) {
+            // A catalogue an earlier version kept in one file: saved as a catalogue of project
+            // files, and the one file kept among the backups.
+            if let data = try? Data(contentsOf: earlierURL), let lib = try? decoder.decode(Library.self, from: data) {
+                try save(lib, remaking: true)
+                let backups = url.deletingLastPathComponent().appendingPathComponent("Backups")
+                try? fm.createDirectory(at: backups, withIntermediateDirectories: true)
+                try? fm.moveItem(at: earlierURL, to: backups.appendingPathComponent("library before catalogue files \(stamp).json"))
+                return lib
+            }
+            let aside = url.deletingLastPathComponent().appendingPathComponent("library.unreadable-\(stamp).json")
+            try? fm.moveItem(at: earlierURL, to: aside)
             quarantinedFile = aside
         }
         var lib = loadPrevious() ?? Library()
@@ -1051,9 +1077,13 @@ final class LibraryStore {
         return lib
     }
 
-    func save(_ lib: Library) throws {
+    func save(_ lib: Library) throws { try save(lib, remaking: false) }
+
+    private func save(_ lib: Library, remaking: Bool) throws {
         do {
-            try JSONEncoder.library.encode(lib).write(to: url, options: .atomic)
+            try CatalogueFiles.write(lib, index: url, master: projectsFolder, remaking: remaking, written: &written)
+        } catch let error as StoreError {
+            throw error
         } catch {
             throw StoreError.saveFailed(url, error)
         }

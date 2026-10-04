@@ -273,11 +273,21 @@ struct Catalogues {
     /// Earlier versions' libraries seed Main on a fresh install only — never after a rename.
     func store(for name: String) -> LibraryStore {
         let fresh = name == Catalogues.mainName && !hasMain && others().isEmpty
+        // Only the real catalogues use the Projects folder chosen in Settings; any other set of
+        // catalogues keeps its projects beside itself.
+        let chosen = root == Catalogues.standard.root ? ProjectFiles.folder : nil
         return LibraryStore(directory: directory(for: name), legacyURL: fresh ? legacyURL : nil,
-                            previousURL: fresh ? previousURL : nil)
+                            previousURL: fresh ? previousURL : nil, name: name, projectsFolder: chosen)
     }
 
-    private var hasMain: Bool { FileManager.default.fileExists(atPath: root.appendingPathComponent("library.json").path) }
+    private var hasMain: Bool { Catalogues.holdsCatalogue(root) }
+
+    /// Whether a folder holds a catalogue: its file, or the one file of an earlier version.
+    static func holdsCatalogue(_ dir: URL) -> Bool {
+        let fm = FileManager.default
+        return CatalogueFiles.index(in: dir) != nil || fm.fileExists(atPath: dir.appendingPathComponent("library.json").path)
+            || fm.fileExists(atPath: dir.appendingPathComponent(".library.json.icloud").path)
+    }
 
     private func others() -> [String] {
         Catalogues.subfoldersHoldingLibraries(in: folder)
@@ -303,13 +313,19 @@ struct Catalogues {
         let dest = directory(for: new)
         if old == Catalogues.mainName {
             try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            for item in ["library.json", "Backups"] {
+            let index = CatalogueFiles.index(in: root)?.lastPathComponent
+            for item in [index, "library.json", "library.history.json", "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }
         } else {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try fm.moveItem(at: directory(for: old), to: dest)
+        }
+        // The catalogue's file carries the catalogue's name.
+        if let index = CatalogueFiles.index(in: dest) {
+            let named = dest.appendingPathComponent(new + "." + ColourFiles.catalogue)
+            if index.lastPathComponent != named.lastPathComponent { try? fm.moveItem(at: index, to: named) }
         }
         if Catalogues.currentName == old || preferences.string(forKey: Catalogues.currentKey) == old {
             Catalogues.currentName = new
@@ -319,11 +335,7 @@ struct Catalogues {
 
     static func subfoldersHoldingLibraries(in dir: URL) -> [String] {
         let fm = FileManager.default
-        return ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { name in
-            let d = dir.appendingPathComponent(name)
-            return fm.fileExists(atPath: d.appendingPathComponent("library.json").path)
-                || fm.fileExists(atPath: d.appendingPathComponent(".library.json.icloud").path)
-        }
+        return ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { name in holdsCatalogue(dir.appendingPathComponent(name)) }
     }
 
     /// Creates an empty catalogue. The name is made unique and safe for a folder.
@@ -332,7 +344,7 @@ struct Catalogues {
         let name = uniqueName(filesystemName(raw), among: names())
         let dir = directory(for: name)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try LibraryStore(directory: dir, legacyURL: nil).save(library)
+        try store(for: name).save(library)
         return name
     }
 

@@ -326,7 +326,7 @@ final class CataloguePanel: SettingsPanel {
 
     @objc private func reveal() {
         NSWorkspace.shared.activateFileViewerSelecting(
-            [Catalogues.standard.directory(for: library.catalogue).appendingPathComponent("library.json")])
+            [library.store.url])
     }
 }
 
