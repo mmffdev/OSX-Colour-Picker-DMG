@@ -369,6 +369,33 @@ extension Prefs {
         let white = contrastRatio(shown, "#FFFFFF"), black = contrastRatio(shown, "#000000")
         return ("WCAG Text Contrast", String(format: "White %.1f %@  \u{00B7}  Black %.1f %@", white, contrastGrade(white), black, contrastGrade(black)))
     }
+    /// How a contrast result stands: it fails, it passes for large text only, or it passes.
+    enum ContrastVerdict { case fail, partial, pass }
+
+    /// The contrast of white and of black text on a colour, by the method chosen: a title, then
+    /// for each the number, its grade in words and how the grade stands.
+    static func contrast(for hex: String) -> (title: String, rows: [(name: String, value: String, grade: String, verdict: ContrastVerdict)]) {
+        let shown = displayHex(hex)
+        if contrastMethod == "apca" {
+            func row(_ name: String, _ text: String) -> (name: String, value: String, grade: String, verdict: ContrastVerdict) {
+                let lc = abs(apcaContrast(text: text, background: shown)), grade = apcaGrade(lc)
+                return (name, String(format: "Lc %.0f", lc), grade.grade, grade.verdict)
+            }
+            return ("APCA Text Contrast", [row("White", "#FFFFFF"), row("Black", "#000000")])
+        }
+        func row(_ name: String, _ text: String) -> (name: String, value: String, grade: String, verdict: ContrastVerdict) {
+            let ratio = contrastRatio(shown, text)
+            return (name, String(format: "%.1f", ratio), ratio >= 7 ? "AAA" : ratio >= 4.5 ? "AA" : ratio >= 3 ? "AA Large" : "Fail",
+                    ratio >= 4.5 ? .pass : ratio >= 3 ? .partial : .fail)
+        }
+        return ("WCAG Text Contrast", [row("White", "#FFFFFF"), row("Black", "#000000")])
+    }
+
+    /// APCA's lightness contrast in words: 75 and over suits body text, 60 other text, 45 large text only.
+    static func apcaGrade(_ lc: Double) -> (grade: String, verdict: ContrastVerdict) {
+        lc >= 75 ? ("Body", .pass) : lc >= 60 ? ("Text", .pass) : lc >= 45 ? ("Large", .partial) : ("Fail", .fail)
+    }
+
     /// Notes are shown until switched off.
     static var paletteNotes: Bool {
         get { preferences.object(forKey: "paletteNotes") == nil ? true : preferences.bool(forKey: "paletteNotes") }

@@ -351,19 +351,10 @@ final class SwatchRow: NSView {
             ])
         }
         if Prefs.showContrast {
-            let lines = Prefs.contrastLines(for: hex)
-            let title = NSTextField(labelWithString: lines.title)
-            title.font = NSFont.systemFont(ofSize: 10, weight: .bold)
-            title.textColor = NSColor.labelColor.withAlphaComponent(0.62)
-            let grade = NSTextField(labelWithString: lines.line)
-            grade.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
-            grade.textColor = .secondaryLabelColor
-            grade.lineBreakMode = .byTruncatingTail
-            grade.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
+            let contrast = ContrastReadout()
+            contrast.show(hex)
             if let last = values.views.last { values.setCustomSpacing(8, after: last) }
-            values.addArrangedSubview(title)
-            values.setCustomSpacing(2, after: title)
-            values.addArrangedSubview(grade)
+            values.addArrangedSubview(contrast)
         }
         values.isHidden = values.views.isEmpty
         let text = library.library.note(of: hex, in: palette)

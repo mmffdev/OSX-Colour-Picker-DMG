@@ -98,6 +98,92 @@ final class SpectrumView: NSView {
 /// A swatch in a palette's grid: the colour as a plain block, and under it, on the page, its name
 /// and its values, as All Swatches lays its tiles out. Nothing is written over the colour except
 /// the source of a colour that is not a plain sRGB value, and the button for its actions.
+/// The contrast of white and of black text on a colour: a heading in the columns' own style, then
+/// a row each with the number at reading size and the verdict in a coloured tag, green for a
+/// pass, amber for large text only, red for a fail.
+final class ContrastReadout: NSView {
+    static let rowHeight: CGFloat = 22
+    static let height: CGFloat = 18 + 2 * rowHeight
+
+    private let title = NSTextField(labelWithString: "")
+    private var names: [NSTextField] = [], values: [NSTextField] = [], tags: [GradeTag] = []
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        title.font = SidebarOutlineView.headingFont
+        title.textColor = .labelColor
+        title.lineBreakMode = .byTruncatingTail
+        title.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(title)
+        translatesAutoresizingMaskIntoConstraints = false
+        var constraints = [
+            title.topAnchor.constraint(equalTo: topAnchor),
+            title.leadingAnchor.constraint(equalTo: leadingAnchor),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            heightAnchor.constraint(equalToConstant: ContrastReadout.height),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+        ]
+        for at in 0..<2 {
+            let name = NSTextField(labelWithString: ""), value = NSTextField(labelWithString: ""), tag = GradeTag()
+            name.font = NSFont.systemFont(ofSize: TextSize.body)
+            name.textColor = .secondaryLabelColor
+            value.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.body, weight: .semibold)
+            value.textColor = .labelColor
+            let middle = 18 + ContrastReadout.rowHeight * (CGFloat(at) + 0.5)
+            for v in [name, value, tag] as [NSView] {
+                v.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(v)
+                constraints.append(v.centerYAnchor.constraint(equalTo: topAnchor, constant: middle))
+            }
+            constraints += [
+                name.leadingAnchor.constraint(equalTo: leadingAnchor),
+                value.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 50),
+                tag.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 104),
+            ]
+            names.append(name); values.append(value); tags.append(tag)
+        }
+        NSLayoutConstraint.activate(constraints)
+        toolTip = "The contrast of white and of black text on this colour"
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ hex: String) {
+        let contrast = Prefs.contrast(for: hex)
+        title.stringValue = contrast.title
+        for (at, row) in contrast.rows.prefix(2).enumerated() {
+            names[at].stringValue = row.name
+            values[at].stringValue = row.value
+            tags[at].show(row.grade, row.verdict)
+        }
+    }
+}
+
+/// A verdict in a small coloured tag.
+final class GradeTag: NSView {
+    private var text = "", verdict = Prefs.ContrastVerdict.fail
+    private var colour: NSColor { verdict == .pass ? .systemGreen : verdict == .partial ? .systemOrange : .systemRed }
+    private var string: NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: TextSize.caption, weight: .bold), .foregroundColor: colour])
+    }
+
+    func show(_ text: String, _ verdict: Prefs.ContrastVerdict) {
+        self.text = text
+        self.verdict = verdict
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+        setAccessibilityLabel(text)
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: ceil(string.size().width) + 14, height: 18) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        colour.withAlphaComponent(0.2).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+        let size = string.size()
+        string.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+}
+
 final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("card")
     /// The narrowest a card gets; they widen to fill the row.
@@ -107,7 +193,7 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
 
     /// Height for the rows and extras switched on in Settings.
     static var height: CGFloat {
-        chipHeight + 8 + (Prefs.showNames ? 24 : 0) + CGFloat(Prefs.cardRows.count) * rowHeight + (Prefs.showContrast ? 42 : 0) + 4
+        chipHeight + 8 + (Prefs.showNames ? 24 : 0) + CGFloat(Prefs.cardRows.count) * rowHeight + (Prefs.showContrast ? 8 + ContrastReadout.height : 0) + 4
     }
 
     var onCopyRow: ((ColourFormat) -> Void)?
@@ -121,8 +207,7 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     private let name = NSTextField(labelWithString: "")
     private let code = NSTextField(labelWithString: "")
     private let rows = NSStackView()
-    private let contrast = NSTextField(labelWithString: "")
-    private let contrastTitle = NSTextField(labelWithString: "WCAG Text Contrast")
+    private let contrast = ContrastReadout()
     private let halo = HaloTriggerView()
     private let below = NSStackView()
 
@@ -138,9 +223,6 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         name.lineBreakMode = .byTruncatingTail
         code.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .medium)
         code.lineBreakMode = .byTruncatingTail
-        contrast.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
-        contrast.lineBreakMode = .byTruncatingTail
-        contrastTitle.font = NSFont.systemFont(ofSize: 10, weight: .bold)
         rows.orientation = .vertical
         rows.spacing = 0
         rows.alignment = .leading
@@ -152,11 +234,7 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         }
 
         // Under the colour, top to bottom: the name, the values, the contrast. Whatever is switched off leaves no gap.
-        let grades = NSStackView(views: [contrastTitle, contrast])
-        grades.orientation = .vertical
-        grades.alignment = .leading
-        grades.spacing = 2
-        below.setViews([name, rows, grades], in: .top)
+        below.setViews([name, rows, contrast], in: .top)
         below.orientation = .vertical
         below.alignment = .leading
         below.spacing = 4
@@ -264,16 +342,8 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         }
 
         contrast.isHidden = !Prefs.showContrast
-        contrastTitle.isHidden = !Prefs.showContrast
-        contrastTitle.textColor = NSColor.labelColor.withAlphaComponent(0.62)
         rows.isHidden = Prefs.cardRows.isEmpty
-        if Prefs.showContrast {
-            let lines = Prefs.contrastLines(for: hex)
-            contrastTitle.stringValue = lines.title
-            contrast.stringValue = lines.line
-            contrast.textColor = .secondaryLabelColor
-            contrast.toolTip = "The contrast of white and of black text on this colour"
-        }
+        if Prefs.showContrast { contrast.show(hex) }
     }
 }
 

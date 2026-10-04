@@ -1029,6 +1029,8 @@ func runHaloTests(check: (Bool, String) -> Void) {
         check(inks.values.count == 4 && inks.working.last?.how.hasPrefix("Beyond this press") == true,
               "a pick turned into inks says when the press cannot print it")
     }
+    check(Prefs.apcaGrade(80).verdict == .pass && Prefs.apcaGrade(62).grade == "Text" && Prefs.apcaGrade(50).verdict == .partial && Prefs.apcaGrade(20).grade == "Fail",
+          "an APCA contrast is put in words: body, text, large only, or a fail")
     check(HaloGeometry.wheelStep(speed: 1) == 44 && HaloGeometry.wheelStep(speed: 2) == 22 && HaloGeometry.wheelStep(speed: 0.5) == 88,
           "a faster wheel setting turns the ring in less travel, a slower one in more")
     let letters = HaloSettingsPanel.letters(back: {})
