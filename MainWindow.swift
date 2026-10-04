@@ -343,6 +343,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         library.onCover = { [weak self] form, fills in
             if let form = form { self?.content.cover(with: form, fills: fills) } else { self?.content.uncover() }
         }
+        library.onAnalysis = { [weak self] subject, keys in
+            guard let self = self, !keys.isEmpty else { return }
+            self.content.cover(with: AnalysisViewController(subject: subject, keys: keys) { [weak self] in self?.content.uncover() }, fills: true)
+        }
         library.onOpenContrast = { [weak self] palette, style in
             self?.show(.contrast)
             self?.content.contrast.edit(style, in: palette)

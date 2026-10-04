@@ -196,26 +196,15 @@ final class PaletteViewBar: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         grouping.toolTip = "Split The Page Into Groups. Captured As: By How Each Colour Was Given. Range: By Whether Every Channel Of The Profile Can Hold It."
         filter.toolTip = "Show Only Some Colours. Out Of Range: Those A Channel Of The Profile Cannot Hold."
-        let groupLabel = caption("Group By"), showLabel = caption("Show")
-        for l in [groupLabel, showLabel] { l.textColor = .secondaryLabelColor }
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         // Left: what every swatch shows. Right: how the page is grouped, then what it shows.
-        let row = NSStackView(views: [histogram, channels, notes, history, spacer, groupLabel, grouping, showLabel, filter])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = PageStyle.barSpacing
-        row.setCustomSpacing(16, after: grouping)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        let bar = ActionBar(leading: [histogram, channels, notes, history], trailing: [ActionBar.label("Group By"), grouping, ActionBar.label("Show"), filter])
+        bar.setGap(16, after: grouping)
+        addSubview(bar)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
-            grouping.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
-            filter.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bar.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         refresh()
     }

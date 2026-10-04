@@ -137,6 +137,57 @@ final class ThemedButton: NSButton {
     }
 }
 
+/// The bar every page lays its controls out on: one row, as tall as a button, with a group at the
+/// left and a group at the right and the spare width between them. A label for a group is made
+/// with `ActionBar.label`. Pages put their buttons and toggles in one of these; nothing lays a
+/// row of controls out by hand.
+final class ActionBar: NSView {
+    private let row = NSStackView()
+
+    init(leading: [NSView], trailing: [NSView] = []) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        row.setViews(leading + [spacer] + trailing, in: .leading)
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = PageStyle.barSpacing
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        // A toggle is as tall as the buttons beside it.
+        for toggle in (leading + trailing).compactMap({ $0 as? ToggleBar }) {
+            toggle.heightAnchor.constraint(equalToConstant: ButtonStyle.height).isActive = true
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// A wider gap after one of the bar's views, to set one group apart from the next.
+    func setGap(_ gap: CGFloat, after view: NSView) { row.setCustomSpacing(gap, after: view) }
+
+    /// The quiet word in front of a group: "Group By", "Show".
+    static func label(_ text: String) -> NSTextField {
+        let l = caption(text)
+        l.textColor = .secondaryLabelColor
+        return l
+    }
+}
+
+/// A section's heading on a page: "Palette", "Swatches".
+func sectionHeading(_ text: String) -> NSTextField {
+    let l = NSTextField(labelWithString: text)
+    l.font = NSFont.systemFont(ofSize: 15, weight: .bold)
+    l.textColor = .labelColor
+    return l
+}
+
 /// A row of choices, one of them on: the theme's own segmented control.
 final class ToggleBar: NSControl {
     private let labels: [String]

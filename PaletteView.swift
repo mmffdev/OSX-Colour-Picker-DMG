@@ -296,6 +296,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// Under that, while Histogram is on: the choices every swatch's histogram follows.
     private let histogramBar = HistogramBar()
     private let bars = NSStackView()
+    private let paletteHeading = sectionHeading("Palette")
+    private let swatchesHeading = sectionHeading("Swatches")
+    /// Over the spectrum: what can be done with the palette as a whole.
+    private var paletteBar: ActionBar!
 
     private let nameField = NSTextField(labelWithString: "")
     private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
@@ -467,6 +471,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         header.trailing.setViews([gridButton, listButton], in: .leading)
         list.onOpen = { [weak self] hex, tab in self?.openSheet(for: hex, tab: tab) }
+        list.onHalo = { [weak self] hex, trigger in self?.openHalo(for: hex, from: trigger) }
         header.trailing.isHidden = true
         histogramBar.onChange = { [weak self] in self?.reload() }
         bars.setViews([viewBar, histogramBar], in: .top)
@@ -474,7 +479,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         bars.alignment = .leading
         bars.spacing = PageStyle.barGap
         for bar in [viewBar, histogramBar] { bar.widthAnchor.constraint(equalTo: bars.widthAnchor).isActive = true }
-        for v in [header, spectrum, bars, scroll, list, empty] as [NSView] {
+        // The page in two parts, each under its heading: the palette as a whole, then its swatches.
+        paletteBar = ActionBar(leading: [toolButton("Analysis", "chart.pie", "The Whole Palette Looked At Seven Ways: Hue, Lightness, Colour Blind Simulation, Gradient, Combos, Light And Dark", target: self, action: #selector(analysisTapped))])
+        for v in [header, paletteHeading, paletteBar, spectrum, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -487,12 +494,18 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
             headerHeight,
-            spectrum.topAnchor.constraint(equalTo: header.bottomAnchor),
+            paletteHeading.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            paletteHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            paletteBar.topAnchor.constraint(equalTo: paletteHeading.bottomAnchor, constant: 10),
+            paletteBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            paletteBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
+            spectrum.topAnchor.constraint(equalTo: paletteBar.bottomAnchor, constant: 12),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
-            // Room to breathe: the same space above the bar as below it.
-            bars.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
+            swatchesHeading.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
+            swatchesHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            bars.topAnchor.constraint(equalTo: swatchesHeading.bottomAnchor, constant: 10),
             bars.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             bars.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             scroll.topAnchor.constraint(equalTo: bars.bottomAnchor, constant: 30),
@@ -647,6 +660,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         library.setProfile(chosen.flatMap { want in library.offeredProfiles.first { $0.id == want } }, ofPalette: id)
     }
 
+    @objc private func analysisTapped() { if let id = paletteID { library.analyse(palette: id) } }
     @objc private func showGrid() { setList(false) }
     @objc private func showList() { setList(true) }
     private func setList(_ on: Bool) {
@@ -715,7 +729,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         haloHex = hex
         halo.caption = Prefs.showNames ? library.library.name(of: hex, in: paletteID) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags) { [weak self] in self?.halo.actions = $0 }
-        halo.open(centredIn: grid.enclosingScrollView ?? view, trigger: trigger)
+        halo.open(centredIn: Prefs.paletteListView ? list : (grid.enclosingScrollView ?? view), trigger: trigger)
     }
 
     private func clicked(_ ip: IndexPath) {
@@ -960,6 +974,9 @@ enum SwatchMenu {
             },
             HaloAction(id: "tags", label: "Tags\u{2026}", symbol: "tag") {
                 editTags?([hex])
+            },
+            HaloAction(id: "analysis", label: "Analysis", symbol: "chart.pie", description: "Hue, lightness, colour blind simulation, light and dark") {
+                library.analyse(swatch: hex, in: palette)
             },
         ]
         if let id = palette {

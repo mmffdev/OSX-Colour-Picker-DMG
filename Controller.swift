@@ -804,6 +804,20 @@ final class LibraryController: NSObject {
         flash(added == 0 ? "Already in \(name)" : "Added \(plural(added, "swatch", "swatches")) to \(name)")
     }
 
+    /// Set by the window: opens the Analysis page for some colours, named for the palette or swatch they are.
+    var onAnalysis: ((String, [String]) -> Void)?
+
+    /// The Analysis page for a whole palette, in the order its page shows.
+    func analyse(palette id: UUID) {
+        guard let swatch = library.swatch(id) else { return }
+        onAnalysis?(swatch.name, hexes(in: id))
+    }
+
+    /// The Analysis page for one swatch.
+    func analyse(swatch hex: String, in palette: UUID?) {
+        onAnalysis?(library.name(of: hex, in: palette), [hex])
+    }
+
     /// Set by the window: shows the New Colour sheet for a palette, or for All Swatches when there is none.
     var onNewColour: ((UUID?, NewColourStart?) -> Void)?
 

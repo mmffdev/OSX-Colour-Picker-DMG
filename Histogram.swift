@@ -307,21 +307,13 @@ final class HistogramBar: NSView {
         about.textColor = .secondaryLabelColor
         about.lineBreakMode = .byTruncatingTail
         about.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let label = caption("Histogram")
-        label.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [label, types, layouts, about])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = PageStyle.barSpacing
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        let bar = ActionBar(leading: [ActionBar.label("Histogram"), types, layouts, about])
+        addSubview(bar)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
-            types.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
-            layouts.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bar.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         refresh()
     }

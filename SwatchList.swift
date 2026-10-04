@@ -45,6 +45,8 @@ final class SwatchListView: NSView {
     private var palette: UUID?
     /// Opens a colour's sheet: the colour, and whether on Notes (0) or History (1).
     var onOpen: ((String, Int) -> Void)?
+    /// A swatch's actions button was pressed: the colour, and the button, so the halo knows its trigger.
+    var onHalo: ((String, NSView) -> Void)?
     /// A blank swatch was pressed: the page's one, or a group's own, which says what kind of colour to start.
     var onAdd: ((NewColourStart?) -> Void)?
     private var addRows: [NSView] = []
@@ -114,6 +116,7 @@ final class SwatchListView: NSView {
         let made = Dictionary(uniqueKeysWithValues: hexes.map { hex -> (String, SwatchRow) in
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
+            row.onHalo = { [weak self] trigger in self?.onHalo?(hex, trigger) }
             return (hex, row)
         })
         rows = hexes.compactMap { made[$0] }
@@ -189,6 +192,9 @@ final class SwatchRow: NSView {
     private var shown: RowPanels?
     private var shownAmong: [String] = []
 
+    /// The actions button was pressed; hands over the button so the halo knows its trigger.
+    var onHalo: ((NSView) -> Void)?
+    private let halo = HaloTriggerView()
     private let tile = NSView()
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
@@ -208,6 +214,18 @@ final class SwatchRow: NSView {
         tile.layer?.borderWidth = 1
         tile.toolTip = "Click to copy"
         tile.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(copyTapped)))
+        // The same actions button a grid card has, in the same corner.
+        halo.toolTip = "Actions"
+        halo.ink = colorFromHex(readableText(on: displayHex(hex))) ?? .white
+        halo.onPress = { [weak self] in if let self = self { self.onHalo?(self.halo) } }
+        halo.translatesAutoresizingMaskIntoConstraints = false
+        tile.addSubview(halo)
+        NSLayoutConstraint.activate([
+            halo.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -9),
+            halo.topAnchor.constraint(equalTo: tile.topAnchor, constant: 9),
+            halo.widthAnchor.constraint(equalToConstant: 24),
+            halo.heightAnchor.constraint(equalToConstant: 24),
+        ])
 
         name.font = NSFont.systemFont(ofSize: 15, weight: .semibold)   // as on a grid card
         name.lineBreakMode = .byTruncatingTail

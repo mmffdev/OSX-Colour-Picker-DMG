@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
-    /// "palette:<name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
+    /// "palette:<name>", "analysis:<palette name>", "analysis-one:<palette name>", "build:<hex>,<hex>", "settings:<panel number>", "search:<text>", "labels", "lab", "lab:<hex>", "tags", "tags:bar=<typed text>", "project:new" or "project:templates". Ignored otherwise.
     private func rehearse(_ main: MainWindowController) {
         let env = ProcessInfo.processInfo.environment
         guard env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_SHOW"] else { return }
@@ -83,6 +83,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch parts[0] {
             case "palette":
                 if let s = self.library.library.swatches.first(where: { $0.name == arg }) { main.show(.palette(s.id)) }
+            case "analysis", "analysis-one":
+                // The Analysis page for a palette, or for its first swatch.
+                if let s = self.library.library.swatches.first(where: { $0.name == arg }) {
+                    main.show(.palette(s.id))
+                    if parts[0] == "analysis" { self.library.analyse(palette: s.id) }
+                    else if let first = self.library.hexes(in: s.id).first { self.library.analyse(swatch: first, in: s.id) }
+                }
             case "build":
                 main.buildPalette()
                 main.rehearseBuilder(with: arg.split(separator: ",").map(String.init))

@@ -1568,6 +1568,16 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && HistogramType.hsl.safe == nil && HistogramType.lab.warnings(for: [0, -128, 127]).isEmpty && HistogramType.p3.warnings(for: [255, 128, 128]) == ["Red In White Out"],
           "each value is placed along its own scale; hue, saturation, lightness and Lab have no unsafe ends, the RGB spaces all do")
 
+    print("analysis")
+    let seenRed = ColourVision.protanopia.seen("#FF0000") ?? [], seenGrey = ColourVision.deuteranopia.seen("#808080") ?? []
+    check(ColourVision.allCases.count == 5 && seenRed.count == 3 && seenRed[0] < 0.6 && abs(seenRed[0] - seenRed[1]) < 0.25
+          && near(seenGrey[0], 128.0 / 255, 0.004) && near(seenGrey[1], 128.0 / 255, 0.004) && near(seenGrey[2], 128.0 / 255, 0.004)
+          && ColourVision.allCases.allSatisfy { $0.seen("#FFFFFF")?.allSatisfy { near($0, 1, 0.002) } == true },
+          "colour blind simulation: red loses its redness to someone with no red cones, and grey and white stay as they are for everyone")
+    check(AnalysisKind.offered(for: 5).count == 7 && AnalysisKind.offered(for: 1).map { $0.title } == ["Colours List", "Hue Distribution", "Luminance Map", "Colour Blind Simulation", "Light And Dark"]
+          && near(lightness(of: "#FFFFFF"), 100, 0.01) && near(lightness(of: "#000000"), 0, 0.01) && lightness(of: "#808080") > 50 && lightness(of: vividKey) > 40,
+          "a palette has seven panels and one swatch five, with no gradient or pairs; lightness is how light a colour looks, 0 to 100")
+
     var pickLib = Library()
     let pickPalette = pickLib.createSwatch(named: "Picks", hexes: [], at: t)
     pickLib.activeSwatchID = pickPalette
