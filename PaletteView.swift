@@ -294,7 +294,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// Under the spectrum: how the page is grouped and what it shows.
     // rail2 for this page: how the page is displayed, the palette as a whole, the selected swatch, labels and tags.
     let contextRail = ContextRail()
-    private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatch")
+    private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatches")
     private let labelsBucket = RailBucket("Labels"), tagsBucket = RailBucket("Tags")
     private let contrastMenu = NSPopUpButton(frame: .zero, pullsDown: false)
     private let groupMenu = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -732,8 +732,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         showMenu.selectItem(at: PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0)
         let asList = Prefs.paletteListView
         for (row, on) in zip(panelRows, [Prefs.paletteNotes && asList, Prefs.paletteHistory, Prefs.paletteChannels, Prefs.histograms]) { row.isOn = on }
-        // The Swatch bucket is there only while a swatch is selected.
-        swatchBucket.isHidden = selectedKey == nil
+        // Always there: these act on the whole page, and a filter that hides every swatch must stay within reach to be undone.
+        swatchBucket.isHidden = false
         let shown = Prefs.cardRows
         for (i, row) in labelRows.enumerated() { row.isOn = i == 0 ? Prefs.showNames : shown.contains(ColourFormat.cardRows[i - 1]) }
         // The palette's own tags, as rail1 lists tags: a press shows everything with that tag.
