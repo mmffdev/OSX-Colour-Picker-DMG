@@ -528,7 +528,10 @@ struct Rendering: Equatable {
             let within = space.linearValues(of: master).allSatisfy { $0 >= -RGBSpace.slack && (open || $0 <= 1 + RGBSpace.slack) }
             let held = raw.map { open ? max($0, 0) : min(max($0, 0), 1) }
             let shown = space.master(of: held)
-            return Rendering(channel: channel, value: space.text(held, legal: channel.legal ?? false), shown: shown, difference: deltaE2000(master.lab, shown.lab), inRange: within,
+            // sRGB is written both ways its users write it: the hex, then the same three values as numbers.
+            let written = space == .srgb ? space.text(held) + "   " + held.map { "\(Int((min(max($0, 0), 1) * 255).rounded()))" }.joined(separator: ", ")
+                : space.text(held, legal: channel.legal ?? false)
+            return Rendering(channel: channel, value: written, shown: shown, difference: deltaE2000(master.lab, shown.lab), inRange: within,
                              detail: (space.isVideo ? "Y\u{2032}CbCr " + space.yCbCr(held, legal: channel.legal ?? false).map { "\($0)" }.joined(separator: ", ") + "  \u{00B7}  " : "")
                                 + (within ? space.about : "Outside \(space.name): the nearest it can show"))
         }

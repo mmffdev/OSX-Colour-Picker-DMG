@@ -1402,17 +1402,17 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let steel = ColourDefinition.of(hex: "#4F8093")!
     let steelOnScreen = Rendering.of(steel, in: ProfileChannel(space: "srgb"))
     check(steel.source.space == "srgb" && steel.kind == .surface && steel.sourceText == "sRGB  #4F8093"
-          && steelOnScreen.value == "#4F8093" && steelOnScreen.inRange && (steelOnScreen.difference ?? 9) < 0.001,
+          && steelOnScreen.value == "#4F8093   79, 128, 147" && steelOnScreen.inRange && (steelOnScreen.difference ?? 9) < 0.001,
           "a colour known by its hex has the hex as its source, and renders to sRGB as itself")
     let vividRed = ColourDefinition(source: ColourSource(space: "displayP3", values: [1, 0, 0]), master: RGBSpace.displayP3.master(of: [1, 0, 0]), kind: .surface)
     let inSRGB = Rendering.of(vividRed, in: ProfileChannel(space: "srgb")), inP3 = Rendering.of(vividRed, in: ProfileChannel(space: "displayP3"))
     let in2020 = Rendering.of(vividRed, in: ProfileChannel(space: "rec2020"))
-    check(!inSRGB.inRange && inSRGB.value == "#FF0000" && (inSRGB.difference ?? 0) > Rendering.visible && inP3.inRange && (inP3.difference ?? 9) < 0.001 && in2020.inRange,
+    check(!inSRGB.inRange && inSRGB.value == "#FF0000   255, 0, 0" && (inSRGB.difference ?? 0) > Rendering.visible && inP3.inRange && (inP3.difference ?? 9) < 0.001 && in2020.inRange,
           "a Display P3 red is outside sRGB, which shows its nearest red and says how far off it is; P3 and Rec. 2020 hold it")
     let twiceWhite = XYZ(x: XYZ.d50.x * 2, y: 2, z: XYZ.d50.z * 2)
     let bright = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .light), in: ProfileChannel(space: "acescg"))
     let brightOnPaper = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .surface), in: ProfileChannel(space: "srgb"))
-    check(bright.inRange && (bright.difference ?? 9) < 0.001 && (bright.value ?? "").hasPrefix("2.0") && !brightOnPaper.inRange && brightOnPaper.value == "#FFFFFF",
+    check(bright.inRange && (bright.difference ?? 9) < 0.001 && (bright.value ?? "").hasPrefix("2.0") && !brightOnPaper.inRange && brightOnPaper.value == "#FFFFFF   255, 255, 255",
           "a light twice as bright as white is held whole in a rendering space, and is out of range for a screen")
     let generic = ProfileChannel(space: ProfileChannel.print, press: PressProfiles.generic, intent: .relative)
     let greenInk = Rendering.of(ColourDefinition.of(hex: "#00FF00")!, in: generic), greyInk = Rendering.of(ColourDefinition.of(hex: "#808080")!, in: generic)
