@@ -594,7 +594,7 @@ final class HaloSettingsPanel: SettingsPanel {
             [heading("Scrolling"), blank],
             [label("Mouse Sensitivity:"), row([caption("Slower", size: TextSize.caption), speed, caption("Faster", size: TextSize.caption)])],
             [blank, row([button("Test Halo", #selector(test(_:)))])],
-            [blank, note("How far the wheel or trackpad has to move to turn a ring by one place. Double-click the slider to put it back. Test Halo opens a halo of letters: Up grows the next ring, X steps back one ring and, on the first ring, closes it.")],
+            [blank, note("How far the wheel or trackpad has to move to turn a ring by one place. Double-click the slider to put it back. Test Halo opens a halo of letters: Up grows the next ring, the back arrow steps back one ring, and X closes the halo.")],
             [heading("Colours"), blank],
             [label("Information:"), haloPair("centre.background", "centre.text", reset: 0)],
         ]
@@ -638,8 +638,8 @@ final class HaloSettingsPanel: SettingsPanel {
         halo.open(over: sender)
     }
 
-    /// The alphabet over three rings: A to I, J to R, S to Z. Each ring ends with Up, which grows
-    /// the next ring (the last has none), and X, which steps back a ring or closes the first.
+    /// The alphabet over three rings: A to I, J to R, S to Z. Up grows the next ring (the last
+    /// has none), and X closes the halo from the first ring.
     static func letters(back: @escaping () -> Void) -> [HaloAction] {
         let rings = [Array("ABCDEFGHI"), Array("JKLMNOPQR"), Array("STUVWXYZ")]
         func ring(_ at: Int) -> [HaloAction] {
@@ -649,7 +649,8 @@ final class HaloSettingsPanel: SettingsPanel {
             if at + 1 < rings.count {
                 out.append(HaloAction(id: "up\(at)", label: "Up", symbol: "arrow.up", description: "Open ring \(at + 2)", children: { ring(at + 1) }))
             }
-            out.append(HaloAction(id: "x\(at)", label: "X", symbol: "xmark", description: at == 0 ? "Close the halo" : "Back to ring \(at)", keepsOpen: true, onSelect: back))
+            // The first ring closes with X; the rings outside it get the halo's own back arrow.
+            if at == 0 { out.append(HaloAction(id: "x", label: "X", symbol: "xmark", description: "Close the halo", keepsOpen: true, onSelect: back)) }
             return out
         }
         return ring(0)

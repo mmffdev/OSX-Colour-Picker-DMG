@@ -135,6 +135,11 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
         }
         shots.append(("ring2", { [weak self] in self?.card?.pressHalo(); press(["Move to palette"]) }))
         shots.append(("ring3", { [weak self] in self?.card?.pressHalo(); press(["Move to palette", "New palette"]) }))
+        shots.append(("letters", { [weak self] in
+            guard let self = self else { return }
+            self.halos[0].actions = HaloSettingsPanel.letters(back: {})
+            self.card?.pressHalo(); press(["Up", "Up"])
+        }))
         shots.append(("ring2-growing", { [weak self] in self?.card?.pressHalo(); press(["Move to palette"], after: 1.12) }))
         func next(_ at: Int) {
             guard at < shots.count else { NSApp.terminate(nil); return }

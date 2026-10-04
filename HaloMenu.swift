@@ -590,12 +590,21 @@ final class HaloMenu: NSResponder {
     /// Grows a ring of `actions` outside the working ring and hands it the pointer, wheel and keys.
     private func grow(_ actions: [HaloAction]) {
         guard !actions.isEmpty else { return }
-        let ring = ring(of: actions, grown: reduceMotion ? 0 : CACurrentMediaTime())
+        let ring = ring(of: HaloMenu.withBack(actions), grown: reduceMotion ? 0 : CACurrentMediaTime())
         leaving = nil
         if top > 0, top >= room { rings[top] = ring } else { rings.append(ring) }   // no room further out: swap in place
         hovered = nil
         refresh()
         announce()
+    }
+
+    static let backID = "halo.back"
+
+    /// An outer ring's actions with a way back to the ring inside added at the end: a back
+    /// arrow, so the pointer alone can step back without Escape.
+    static func withBack(_ actions: [HaloAction]) -> [HaloAction] {
+        guard !actions.contains(where: { $0.id == backID }) else { return actions }
+        return actions + [HaloAction(id: backID, label: "Back", symbol: "arrow.uturn.backward", description: "To the ring inside", keepsOpen: true)]
     }
 
     /// One step back: out of a text box or a confirmation, else off the outermost ring, which
@@ -661,6 +670,7 @@ final class HaloMenu: NSResponder {
             grow(children())
             return
         }
+        if action.id == HaloMenu.backID { stepBack(); return }
         if action.keepsOpen { action.onSelect(); return }
         close()
         action.onSelect()

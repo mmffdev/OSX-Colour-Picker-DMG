@@ -1017,8 +1017,11 @@ func runHaloTests(check: (Bool, String) -> Void) {
           "a faster wheel setting turns the ring in less travel, a slower one in more")
     let letters = HaloSettingsPanel.letters(back: {})
     let ringTwo = letters.first { $0.id == "up0" }?.children?() ?? [], ringThree = ringTwo.first { $0.id == "up1" }?.children?() ?? []
-    check(letters.map { $0.label }.joined() == "ABCDEFGHIUpX" && ringTwo.map { $0.label }.joined() == "JKLMNOPQRUpX" && ringThree.map { $0.label }.joined() == "STUVWXYZX",
-          "the test halo spreads the alphabet over three rings, each with a way out and all but the last with a way up")
+    check(letters.map { $0.label }.joined() == "ABCDEFGHIUpX" && ringTwo.map { $0.label }.joined() == "JKLMNOPQRUp" && ringThree.map { $0.label }.joined() == "STUVWXYZ",
+          "the test halo spreads the alphabet over three rings, all but the last with a way up")
+    let backed = HaloMenu.withBack(ringThree)
+    check(backed.count == ringThree.count + 1 && backed.last?.id == HaloMenu.backID && HaloMenu.withBack(backed).count == backed.count,
+          "every outer ring ends with one way back to the ring inside it")
     check(HaloGeometry.wrap(-1, 6) == 5 && HaloGeometry.wrap(13, 6) == 1 && HaloGeometry.wrap(3, 0) == 0, "positions wrap round the ring in both directions")
     check(abs(HaloGeometry.orbitRadius(344) - 142.54) < 0.001, "glyphs ride midway across the band")
     check(HaloGeometry.targetSize(344, count: 6) == 40 && HaloGeometry.targetSize(344, count: 40) == 24, "glyph targets stay between 24 and 40 points")
