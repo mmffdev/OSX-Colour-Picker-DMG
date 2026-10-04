@@ -1029,6 +1029,27 @@ func runHaloTests(check: (Bool, String) -> Void) {
         check(inks.values.count == 4 && inks.working.last?.how.hasPrefix("Beyond this press") == true,
               "a pick turned into inks says when the press cannot print it")
     }
+    func close(_ a: Double, _ b: Double, _ slack: Double = 0.001) -> Bool { abs(a - b) <= slack }
+    let redXY = GamutMaths.corners(of: .srgb, in: .xy), whiteXY = GamutMaths.xy(RGBSpace.srgb.master(of: [1, 1, 1]))
+    check(close(redXY[0].x, 0.640) && close(redXY[0].y, 0.330) && close(redXY[1].x, 0.300) && close(redXY[1].y, 0.600) && close(redXY[2].x, 0.150) && close(redXY[2].y, 0.060),
+          "on the 1931 map pure red, green and blue sit on the published corners of sRGB")
+    check(close(whiteXY.x, 0.3127) && close(whiteXY.y, 0.3290) && GamutMaths.xy(XYZ(x: 0, y: 0, z: 0)) == GamutMaths.white, "white sits on the D65 white point, and black is put there too")
+    let whiteUV = GamutMaths.uv(GamutMaths.white), round = GamutMaths.xy(fromUV: whiteUV)
+    check(close(whiteUV.x, 0.1978) && close(whiteUV.y, 0.4683) && close(round.x, 0.3127, 1e-9) && close(round.y, 0.3290, 1e-9), "the 1976 map places white where the standard says, and converts back exactly")
+    check(GamutMaths.visible(xy: GamutMaths.white) && !GamutMaths.visible(xy: GamutPoint(x: 0.05, y: 0.05)) && !GamutMaths.visible(xy: GamutPoint(x: 0.7, y: 0.7)),
+          "the white point is inside the horseshoe; places beyond the spectrum are not")
+    let narrow = GamutMaths.slice(lightness: 55) { $0.fits(.srgb) }, wider = GamutMaths.slice(lightness: 55) { $0.fits(.displayP3) }
+    check(narrow.count == GamutMaths.hueSteps && zip(narrow, wider).allSatisfy { hypot($0.x, $0.y) <= hypot($1.x, $1.y) + 0.5 }
+          && zip(narrow, wider).contains { hypot($1.x, $1.y) - hypot($0.x, $0.y) > 10 },
+          "cut at one lightness, Display P3 holds everything sRGB holds and reaches well beyond it in places")
+    let edgeRed = RGBSpace.srgb.master(of: [1, 0, 0]).lab, hueRed = atan2(edgeRed.b, edgeRed.a) * 180 / .pi
+    check(close(GamutMaths.strongest(hue: hueRed, lightness: edgeRed.l) { $0.fits(.srgb) }, hypot(edgeRed.a, edgeRed.b), 1.0),
+          "the edge of sRGB at pure red's hue and lightness is pure red")
+    let widest = GamutMaths.outline(of: .srgb, lightness: nil), cut = GamutMaths.outline(of: .srgb, lightness: 55)
+    check(widest.count == GamutMaths.hueSteps && zip(widest, cut).allSatisfy { hypot($0.x, $0.y) >= hypot($1.x, $1.y) - 6 } && widest.allSatisfy { hypot($0.x, $0.y) > 20 },
+          "a gamut at its widest is never narrower than the same gamut cut at one lightness")
+    let labRed = GamutMaths.point(RGBSpace.srgb.master(of: [1, 0, 0]), in: .lab)
+    check(close(labRed.x, edgeRed.a, 1e-9) && close(labRed.y, edgeRed.b, 1e-9) && GamutMaths.cubeFaces(2).count == 54, "the round map places a colour by its a* and b*")
     check(Prefs.apcaGrade(80).verdict == .pass && Prefs.apcaGrade(62).grade == "Text" && Prefs.apcaGrade(50).verdict == .partial && Prefs.apcaGrade(20).grade == "Fail",
           "an APCA contrast is put in words: body, text, large only, or a fail")
     check(HaloGeometry.wheelStep(speed: 1) == 44 && HaloGeometry.wheelStep(speed: 2) == 22 && HaloGeometry.wheelStep(speed: 0.5) == 88,
@@ -1619,10 +1640,10 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && near(seenGrey[0], 128.0 / 255, 0.004) && near(seenGrey[1], 128.0 / 255, 0.004) && near(seenGrey[2], 128.0 / 255, 0.004)
           && ColourVision.allCases.allSatisfy { $0.seen("#FFFFFF")?.allSatisfy { near($0, 1, 0.002) } == true },
           "colour blind simulation: red loses its redness to someone with no red cones, and grey and white stay as they are for everyone")
-    check(AnalysisKind.offered(for: 5).map { $0.title } == ["Colour Vision", "Contrast Grid", "Separation", "Print Reach", "Tone", "Hue Wheel", "Pairings", "On White, On Black", "Blend", "Bands"]
-          && AnalysisKind.offered(for: 1).map { $0.title } == ["Colour Vision", "Print Reach", "Tone", "Hue Wheel", "On White, On Black"]
+    check(AnalysisKind.offered(for: 5).map { $0.title } == ["Colour Vision", "Contrast Grid", "Separation", "Gamut Map", "Print Reach", "Tone", "Hue Wheel", "Pairings", "On White, On Black", "Blend", "Bands"]
+          && AnalysisKind.offered(for: 1).map { $0.title } == ["Colour Vision", "Gamut Map", "Print Reach", "Tone", "Hue Wheel", "On White, On Black"]
           && near(lightness(of: "#FFFFFF"), 100, 0.01) && near(lightness(of: "#000000"), 0, 0.01) && lightness(of: "#808080") > 50 && lightness(of: vividKey) > 40,
-          "a palette has ten panels, decisions first and looks last; one swatch has the five that mean something for one colour")
+          "a palette has eleven panels, decisions first and looks last; one swatch has the six that mean something for one colour")
     let redGreen = separation("#D03020", "#5A8A20"), blackWhite = separation("#000000", "#FFFFFF"), same = separation("#4F8093", "#4F8093")
     check((redGreen?.seen ?? 0) > 30 && (redGreen?.worst ?? 99) < (redGreen?.seen ?? 0) / 2 && near(blackWhite?.seen ?? 0, 100, 0.5) && near(blackWhite?.worst ?? 0, 100, 0.5)
           && same?.seen == 0 && separation("nonsense", "#FFFFFF") == nil,

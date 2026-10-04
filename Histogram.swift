@@ -396,6 +396,11 @@ extension Prefs {
         lc >= 75 ? ("Body", .pass) : lc >= 60 ? ("Text", .pass) : lc >= 45 ? ("Large", .partial) : ("Fail", .fail)
     }
 
+    /// Which view the gamut map shows: the round Lab view until another is chosen.
+    static var gamutView: GamutView {
+        get { GamutView(rawValue: preferences.integer(forKey: "gamutView")) ?? .lab }
+        set { preferences.set(newValue.rawValue, forKey: "gamutView") }
+    }
     /// Notes are shown until switched off.
     static var paletteNotes: Bool {
         get { preferences.object(forKey: "paletteNotes") == nil ? true : preferences.bool(forKey: "paletteNotes") }

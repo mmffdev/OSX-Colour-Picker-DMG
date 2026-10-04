@@ -61,13 +61,14 @@ enum ColourVision: CaseIterable {
 /// these apart, can they be read, will they print), then the palette's character (tone, hue),
 /// then how it looks put together.
 enum AnalysisKind: CaseIterable {
-    case vision, contrast, separation, print, luminance, hue, combos, lightDark, gradient, list
+    case vision, contrast, separation, gamut, print, luminance, hue, combos, lightDark, gradient, list
 
     var title: String {
         switch self {
         case .vision: return "Colour Vision"
         case .contrast: return "Contrast Grid"
         case .separation: return "Separation"
+        case .gamut: return "Gamut Map"
         case .print: return "Print Reach"
         case .luminance: return "Tone"
         case .hue: return "Hue Wheel"
@@ -83,6 +84,7 @@ enum AnalysisKind: CaseIterable {
         case .vision: return "Each colour as people with the commonest colour vision deficiencies see it"
         case .contrast: return "Each colour as text on every other, with the contrast ratio; a ring marks a pass for body text"
         case .separation: return "How far apart every pair is; orange where some colour blind viewers would struggle to tell them apart"
+        case .gamut: return "Where each colour sits, and which screens and which press can hold it"
         case .print: return "Each colour over what the palette's press gives, with the difference"
         case .luminance: return "Each colour with its hue taken away: how light it looks, as a percentage"
         case .hue: return "Where each colour sits round the hue circle; greys gather in the middle"
@@ -145,11 +147,12 @@ final class AnalysisPlot: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard !keys.isEmpty, bounds.width > 20, bounds.height > 20 else { return }
-        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).addClip()
+        if kind != .gamut { NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).addClip() }
         switch kind {
         case .list: drawList()
         case .contrast: drawContrast()
         case .separation: drawSeparation()
+        case .gamut: GamutChart.draw(keys: keys, view: Prefs.gamutView, in: bounds, detailed: bounds.height > 380)
         case .print: drawPrint()
         case .hue: drawHue()
         case .luminance: drawLuminance()
@@ -404,6 +407,20 @@ private final class AnalysisPanel: NSView {
         let open = symbolButton(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                 tooltip: expanded ? "Back To Every Panel" : "Open \(kind.title) To The Full Page", target: self, action: #selector(expandTapped))
         for v in [title, about, open, plot] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        var before: NSView = open
+        if kind == .gamut {
+            // The gamut map has three views of the same thing; the choice is kept.
+            let views = ToggleBar(labels: GamutView.allCases.map { $0.title }, target: self, action: #selector(viewChosen(_:)))
+            views.selectedSegment = Prefs.gamutView.rawValue
+            views.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(views)
+            NSLayoutConstraint.activate([
+                views.trailingAnchor.constraint(equalTo: open.leadingAnchor, constant: -10),
+                views.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                views.heightAnchor.constraint(equalToConstant: ButtonStyle.smallHeight + 2),
+            ])
+            before = views
+        }
         translatesAutoresizingMaskIntoConstraints = false
         let height = plot.heightAnchor.constraint(equalToConstant: 230)
         height.priority = expanded ? .defaultLow : .required
@@ -412,7 +429,7 @@ private final class AnalysisPanel: NSView {
             title.leadingAnchor.constraint(equalTo: leadingAnchor),
             about.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
             about.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
-            about.trailingAnchor.constraint(lessThanOrEqualTo: open.leadingAnchor, constant: -8),
+            about.trailingAnchor.constraint(lessThanOrEqualTo: before.leadingAnchor, constant: -8),
             open.trailingAnchor.constraint(equalTo: trailingAnchor),
             open.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             plot.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 10),
@@ -424,6 +441,10 @@ private final class AnalysisPanel: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc private func expandTapped() { onExpand?() }
+    @objc private func viewChosen(_ sender: ToggleBar) {
+        Prefs.gamutView = GamutView(rawValue: sender.selectedSegment) ?? .lab
+        plot.needsDisplay = true
+    }
 }
 
 private final class AnalysisPage: NSView {
@@ -450,6 +471,11 @@ final class AnalysisViewController: NSViewController {
         self.keys = keys
         self.onClose = onClose
         super.init(nibName: nil, bundle: nil)
+        // For a trial run: MMFFDEV_COLOUR3_EXPAND names a panel to open to the full page.
+        let env = ProcessInfo.processInfo.environment
+        if env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_EXPAND"] {
+            expanded = AnalysisKind.offered(for: keys.count).first { $0.title == ask }
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
