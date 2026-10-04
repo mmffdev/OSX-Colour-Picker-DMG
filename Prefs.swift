@@ -175,12 +175,22 @@ enum Prefs {
     }
 
     /// Which rows a colour card shows.
-    static var cardRows: [ColourFormat] {
+    static var houseCardRows: [ColourFormat] {
         get {
             guard let saved = d.stringArray(forKey: "cardRows") else { return ColourFormat.defaultCardRows }
             return ColourFormat.cardRows.filter { saved.contains($0.rawValue) }
         }
         set { d.set(newValue.map { $0.rawValue }, forKey: "cardRows"); changed() }
+    }
+
+    /// The rows the palette page is showing for the purpose on show; nil while no purpose is,
+    /// when the cards show the rows chosen in Settings. Set by the palette page, kept nowhere.
+    static var purposeCardRows: [ColourFormat]?
+
+    /// Which rows a colour card shows now: the purpose's on a purpose's tab, else those chosen in Settings.
+    static var cardRows: [ColourFormat] {
+        get { purposeCardRows ?? houseCardRows }
+        set { houseCardRows = newValue }
     }
 
     static var exportFormat: ExportFormat {

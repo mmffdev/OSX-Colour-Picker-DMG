@@ -97,6 +97,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     main.show(.palette(s.id))
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { main.rehearseHalo(choosing: Array(names.dropFirst())) }
                 }
+            case "tabs":
+                // "tabs:<palette>/<purpose,purpose>/<purpose to show>": a palette given purposes, on one purpose's tab.
+                let bits = arg.split(separator: "/").map(String.init)
+                if let s = self.library.library.swatches.first(where: { $0.name == bits.first }) {
+                    for raw in (bits.count > 1 ? bits[1] : "").split(separator: ",") {
+                        if let purpose = Purpose(rawValue: String(raw)) { self.library.setPurpose(purpose, on: true, ofPalette: s.id) }
+                    }
+                    self.library.show(bits.count > 2 ? Purpose(rawValue: bits[2]) : nil, forPalette: s.id)
+                    main.show(.palette(s.id))
+                }
             case "newcolour":
                 if let p = self.library.library.swatches.first(where: { $0.name == arg }) {
                     main.show(.palette(p.id))

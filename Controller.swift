@@ -526,8 +526,45 @@ final class LibraryController: NSObject {
         return house + library.colourProfiles.filter { mine in !house.contains { $0.id == mine.id } }
     }
 
+    /// The profile a palette's page works to: the one for the purpose on show, else the palette's own.
     func profile(forPalette id: UUID?) -> (profile: ColourProfile, origin: ProfileOrigin) {
-        library.profile(forPalette: id, house: houseProfiles, houseDefault: ColourProfiles.houseDefault)
+        if let id = id, let purpose = shownPurpose(for: id) { return (profile(for: purpose, ofPalette: id), .palette) }
+        return library.profile(forPalette: id, house: houseProfiles, houseDefault: ColourProfiles.houseDefault)
+    }
+
+    /// The profile a palette works to for one purpose: the one chosen for it, else the purpose's own.
+    func profile(for purpose: Purpose, ofPalette id: UUID) -> ColourProfile {
+        let chosen = library.swatch(id)?.config(for: purpose)?.profile
+        return chosen.flatMap { want in offeredProfiles.first { $0.id == want } } ?? purpose.starter
+    }
+
+    // MARK: Purposes
+
+    /// The tab each palette's page was left on, by palette: a purpose, or nothing for Overview.
+    private var shownPurposes: [String: String] {
+        get { preferences.dictionary(forKey: "palettePurposeTab") as? [String: String] ?? [:] }
+        set { preferences.set(newValue, forKey: "palettePurposeTab") }
+    }
+
+    /// The purpose a palette's page is showing; nil is Overview. A purpose the palette no longer serves shows Overview.
+    func shownPurpose(for id: UUID) -> Purpose? {
+        guard let purpose = shownPurposes[id.uuidString].flatMap(Purpose.init(rawValue:)),
+              library.swatch(id)?.purposeList.contains(purpose) == true else { return nil }
+        return purpose
+    }
+
+    /// Turns a palette's page to a purpose, or back to Overview.
+    func show(_ purpose: Purpose?, forPalette id: UUID) {
+        var all = shownPurposes
+        all[id.uuidString] = purpose?.rawValue
+        shownPurposes = all
+        refreshPrintCondition()
+        NotificationCenter.default.post(name: .libraryDidChange, object: self)
+    }
+
+    /// The values the cards show for a purpose a palette serves.
+    func setLabels(_ labels: [ColourFormat], for purpose: Purpose, ofPalette id: UUID) {
+        apply("Set \(purpose.title) Labels") { $0.setPurposeSettings(purpose, ofPalette: id) { $0.labels = labels.map { $0.rawValue } } }
     }
 
     func profile(forProject id: UUID) -> (profile: ColourProfile, origin: ProfileOrigin) {
@@ -535,13 +572,20 @@ final class LibraryController: NSObject {
     }
 
     /// Gives a palette a profile of its own; nil goes back to its project's or the house's.
+    /// On a purpose's tab it is that purpose's profile that is set.
     func setProfile(_ profile: ColourProfile?, ofPalette id: UUID) {
+        if let purpose = shownPurpose(for: id) {
+            apply("Set \(purpose.title) Profile") { $0.setProfile(profile, for: purpose, ofPalette: id) }
+            return
+        }
         apply("Set Colour Profile") { $0.setProfile(profile, ofPalette: id) }
     }
 
     /// Puts a purpose on a palette, or takes it off.
     func setPurpose(_ purpose: Purpose, on: Bool, ofPalette id: UUID) {
         apply(on ? "Add Purpose \(purpose.title)" : "Remove Purpose \(purpose.title)") { $0.setPurpose(purpose, on: on, ofPalette: id) }
+        // A purpose just put on is the one to look at.
+        if on { show(purpose, forPalette: id) }
     }
 
     func setProfile(_ profile: ColourProfile?, ofProject id: UUID) {

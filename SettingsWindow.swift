@@ -178,7 +178,7 @@ final class AppearancePanel: SettingsPanel {
     ]}
 
     override func refresh() {
-        let shown = Prefs.cardRows
+        let shown = Prefs.houseCardRows
         for (b, f) in zip(rowChecks, ColourFormat.cardRows) { b.state = shown.contains(f) ? .on : .off }
         names.state = Prefs.showNames ? .on : .off
         contrast.state = Prefs.showContrast ? .on : .off
@@ -187,7 +187,7 @@ final class AppearancePanel: SettingsPanel {
     }
 
     @objc private func changed() {
-        Prefs.cardRows = zip(rowChecks, ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 }
+        Prefs.houseCardRows = zip(rowChecks, ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 }
         Prefs.showNames = names.state == .on
         Prefs.showContrast = contrast.state == .on
         Prefs.showPaletteBars = bars.state == .on

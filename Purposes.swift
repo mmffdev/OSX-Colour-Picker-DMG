@@ -45,6 +45,32 @@ enum Purpose: String, Codable, CaseIterable {
         }
     }
 
+    /// The profile a palette works to for this purpose until it is given another.
+    var starter: ColourProfile {
+        let at: Int
+        switch self {
+        case .web: at = 0
+        case .print: at = 1
+        case .video: at = 2
+        case .threeD: at = 3
+        case .photo: at = 5
+        case .cine: at = 6
+        }
+        return ColourProfiles.starters[at]
+    }
+
+    /// The values a card shows for this purpose until others are chosen.
+    var starterLabels: [ColourFormat] {
+        switch self {
+        case .web: return [.hex, .rgb, .hsl, .p3]
+        case .print: return [.hex, .cmyk, .lab]
+        case .photo: return [.hex, .p3, .adobeRGB, .lab]
+        case .video: return [.hex, .rgb, .rec2020]
+        case .cine: return [.p3, .rec2020, .lab]
+        case .threeD: return [.hex, .rgb, .hsv]
+        }
+    }
+
     /// The extension of its settings file: "colweb", "colprint" and so on.
     var fileExtension: String { "col" + rawValue }
 
@@ -58,6 +84,8 @@ struct PurposeConfig: Codable, Equatable {
     var purpose: Purpose
     /// The colour profile the palette works to for this purpose; nil is the palette's own.
     var profile: UUID? = nil
+    /// The values each card shows for this purpose, by ColourFormat; nil is the purpose's own set.
+    var labels: [String]? = nil
     var removed: Bool? = nil
     /// With the id, this is what a sync goes by.
     var changedAt: Date
@@ -91,6 +119,38 @@ extension Library {
         }
         // Always in the one order, so the same purposes are the same list whichever was chosen first.
         swatches[i].purposes = Purpose.allCases.compactMap { purpose in list.first { $0.purpose == purpose } }
+    }
+
+    /// Changes a palette's settings for a purpose it serves.
+    mutating func setPurposeSettings(_ purpose: Purpose, ofPalette id: UUID, at date: Date = Date(), _ change: (inout PurposeConfig) -> Void) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), var list = swatches[i].purposes,
+              let at = list.firstIndex(where: { $0.purpose == purpose && $0.isLive }) else { return }
+        var changed = list[at]
+        change(&changed)
+        guard changed != list[at] else { return }
+        changed.changedAt = date
+        list[at] = changed
+        swatches[i].purposes = list
+    }
+
+    /// Gives a palette a profile for one purpose; nil goes back to the purpose's own.
+    mutating func setProfile(_ profile: ColourProfile?, for purpose: Purpose, ofPalette id: UUID, at date: Date = Date()) {
+        if let profile = profile { keep(profile: profile) }
+        setPurposeSettings(purpose, ofPalette: id, at: date) { $0.profile = profile?.id }
+    }
+
+    /// What a profile makes of some colours, in a line: how many it holds, and which channels cannot hold the rest.
+    func verdict(on keys: [String], for profile: ColourProfile) -> (holds: Bool, tag: String, detail: String) {
+        let colours = keys.compactMap { definition(of: $0) }
+        guard !colours.isEmpty else { return (true, "No Colours", "Nothing to check yet.") }
+        var failing: [String] = []
+        var out = Set<Int>()
+        for channel in profile.channels {
+            let missed = colours.indices.filter { !Rendering.of(colours[$0], in: channel).inRange }
+            if !missed.isEmpty { failing.append("\(channel.name) cannot hold \(missed.count)"); out.formUnion(missed) }
+        }
+        if failing.isEmpty { return (true, "All \(colours.count) Hold", "Every colour is in range for " + profile.summary + ".") }
+        return (false, "\(out.count) Of \(colours.count) Out Of Range", failing.joined(separator: "  \u{00B7}  "))
     }
 
     /// Two Macs' purposes for one palette, joined: for each purpose, whichever was changed last.

@@ -98,6 +98,79 @@ final class SpectrumView: NSView {
 /// A swatch in a palette's grid: the colour as a plain block, and under it, on the page, its name
 /// and its values, as All Swatches lays its tiles out. Nothing is written over the colour except
 /// the source of a colour that is not a plain sRGB value, and the button for its actions.
+/// The tabs across the top of a palette's page: Overview, then each purpose the palette serves.
+/// Choosing one turns the whole page to that purpose.
+final class PurposeTabs: NSView {
+    /// Handed the purpose chosen; nil for Overview.
+    var onChoose: ((Purpose?) -> Void)?
+    private var bar: ToggleBar?
+    private var purposes: [Purpose] = []
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: ButtonStyle.height + 4).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Shows a tab for each of `purposes`, with `chosen` on; the bar is made again only when the purposes change.
+    func show(_ purposes: [Purpose], chosen: Purpose?) {
+        if bar == nil || purposes != self.purposes {
+            self.purposes = purposes
+            bar?.removeFromSuperview()
+            let made = ToggleBar(labels: ["Overview"] + purposes.map { $0.title }, target: self, action: #selector(chose(_:)))
+            made.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
+            made.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(made)
+            NSLayoutConstraint.activate([
+                made.leadingAnchor.constraint(equalTo: leadingAnchor),
+                made.topAnchor.constraint(equalTo: topAnchor),
+                made.bottomAnchor.constraint(equalTo: bottomAnchor),
+                made.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            ])
+            made.setAccessibilityLabel("What This Palette Is Shown For")
+            bar = made
+        }
+        bar?.selectedSegment = chosen.flatMap { purposes.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+    }
+
+    @objc private func chose(_ sender: ToggleBar) {
+        onChoose?(sender.selectedSegment == 0 ? nil : purposes.indices.contains(sender.selectedSegment - 1) ? purposes[sender.selectedSegment - 1] : nil)
+    }
+}
+
+/// One purpose's verdict on a palette: its name, whether every colour holds, and what does not.
+final class PurposeVerdictRow: NSView {
+    init(_ purpose: Purpose, profile: ColourProfile, verdict: (holds: Bool, tag: String, detail: String)) {
+        super.init(frame: .zero)
+        let icon = NSImageView(image: symbol(purpose.symbol, purpose.title, size: 13))
+        icon.contentTintColor = .secondaryLabelColor
+        let title = NSTextField(labelWithString: purpose.title)
+        title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
+        let tag = GradeTag()
+        tag.show(verdict.tag, verdict.holds ? .pass : .fail)
+        let detail = NSTextField(labelWithString: "\(profile.name)  \u{00B7}  \(verdict.detail)")
+        detail.font = NSFont.systemFont(ofSize: TextSize.caption)
+        detail.textColor = .secondaryLabelColor
+        detail.lineBreakMode = .byTruncatingTail
+        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detail.toolTip = detail.stringValue
+        let row = NSStackView(views: [icon, title, tag, detail])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 22), title.widthAnchor.constraint(greaterThanOrEqualToConstant: 130),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 /// The contrast of white and of black text on a colour: a heading in the columns' own style, then
 /// a row each with the number at reading size and the verdict in a coloured tag, green for a
 /// pass, amber for large text only, red for a fail.
@@ -378,6 +451,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// Under that, while Histogram is on: the choices every swatch's histogram follows.
     private let histogramBar = HistogramBar()
     private let bars = NSStackView()
+    private let tabs = PurposeTabs()
+    /// What each purpose makes of the palette: every purpose on Overview, the one on show on its own tab.
+    private let verdicts = NSStackView()
     private let paletteHeading = sectionHeading("Palette")
     private let swatchesHeading = sectionHeading("Swatches")
     /// Over the spectrum: what can be done with the palette as a whole.
@@ -560,7 +636,15 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         bars.spacing = PageStyle.barGap
         histogramBar.widthAnchor.constraint(equalTo: bars.widthAnchor).isActive = true
         // The page in two parts, each under its heading: the palette as a whole, then its swatches.
-        for v in [header, paletteHeading, spectrum, swatchesHeading, bars, scroll, list, empty] as [NSView] {
+        verdicts.orientation = .vertical
+        verdicts.alignment = .leading
+        verdicts.spacing = 4
+        tabs.onChoose = { [weak self] purpose in
+            guard let self = self, let id = self.paletteID else { return }
+            self.library.show(purpose, forPalette: id)
+            self.reload()
+        }
+        for v in [header, tabs, paletteHeading, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -573,13 +657,19 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
             headerHeight,
-            paletteHeading.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            tabs.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            tabs.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            tabs.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
+            paletteHeading.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 18),
             paletteHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.topAnchor.constraint(equalTo: paletteHeading.bottomAnchor, constant: 10),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
-            swatchesHeading.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 30),
+            verdicts.topAnchor.constraint(equalTo: spectrum.bottomAnchor, constant: 14),
+            verdicts.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            verdicts.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
+            swatchesHeading.topAnchor.constraint(equalTo: verdicts.bottomAnchor, constant: 24),
             swatchesHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             bars.topAnchor.constraint(equalTo: swatchesHeading.bottomAnchor, constant: 10),
             bars.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
@@ -622,6 +712,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     func reload() {
         _ = view
         guard let id = paletteID, let s = library.library.swatch(id) else { return }
+        // The purpose on show turns the page to itself: its profile, and the values its cards show.
+        let purpose = library.shownPurpose(for: id)
+        Prefs.purposeCardRows = purpose.map { p in
+            s.config(for: p)?.labels.map { saved in ColourFormat.cardRows.filter { saved.contains($0.rawValue) } } ?? p.starterLabels
+        }
+        tabs.show(s.purposeList, chosen: purpose)
+        paletteHeading.stringValue = purpose.map { "Palette For \($0.title)" } ?? "Palette"
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
@@ -667,6 +764,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         fillProfiles(for: s)
 
         spectrum.hexes = hexes
+        fillVerdicts(for: s, showing: purpose, keys: all)
 
         // Two views, switched from the title panel's right: cards, or one colour to a row with its notes.
         // The choice is the user's for every palette, so it holds from one palette to the next.
@@ -712,18 +810,37 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         sheet?.finish()
     }
 
+    /// What each purpose makes of the palette. Overview lists every purpose the palette serves; a
+    /// purpose's own tab shows that purpose alone; a palette with no purpose yet says how to give it one.
+    private func fillVerdicts(for s: Swatch, showing purpose: Purpose?, keys: [String]) {
+        verdicts.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let listed = purpose.map { [$0] } ?? s.purposeList
+        for p in listed {
+            let profile = library.profile(for: p, ofPalette: s.id)
+            verdicts.addArrangedSubview(PurposeVerdictRow(p, profile: profile, verdict: library.library.verdict(on: keys, for: profile)))
+        }
+        if listed.isEmpty {
+            let hint = caption("This palette has no purpose yet. Tick what it is for under Purposes, and each gets a tab here with its own values and checks.")
+            hint.textColor = .secondaryLabelColor
+            verdicts.addArrangedSubview(hint)
+        }
+    }
+
     /// The profile menu: first what the palette inherits, then every profile it could have of its own.
+    /// On a purpose's tab the first choice is the purpose's own profile, and the choice made is that purpose's.
     private func fillProfiles(for s: Swatch) {
-        let inherited = s.projectID.map { library.profile(forProject: $0) } ?? library.profile(forPalette: nil)
+        let purpose = library.shownPurpose(for: s.id)
+        let inherited = s.projectID.map { library.profile(forProject: $0) } ?? library.library.profile(forPalette: nil, house: library.houseProfiles, houseDefault: ColourProfiles.houseDefault)
         profile.removeAllItems()
-        profile.addItem(withTitle: (s.projectID == nil ? "House Profile: " : "Project Profile: ") + inherited.profile.name)
+        profile.addItem(withTitle: purpose.map { "Default: \($0.starter.name)" } ?? (s.projectID == nil ? "House Profile: " : "Project Profile: ") + inherited.profile.name)
         profile.menu?.addItem(.separator())
         for p in library.offeredProfiles {
             profile.addItem(withTitle: p.name)
             profile.lastItem?.representedObject = p.id.uuidString
             profile.lastItem?.toolTip = p.summary
         }
-        let own = s.profile.flatMap { id in profile.itemArray.firstIndex { ($0.representedObject as? String) == id.uuidString } }
+        let chosen = purpose.map { s.config(for: $0)?.profile } ?? s.profile
+        let own = chosen.flatMap { id in profile.itemArray.firstIndex { ($0.representedObject as? String) == id.uuidString } }
         profile.selectItem(at: own ?? 0)
         profile.isEnabled = !(header.lock ?? false)
         let using = library.profile(forPalette: s.id).profile
@@ -874,7 +991,17 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         let format = ColourFormat.cardRows[index - 1]
         var rows = Prefs.cardRows
         if rows.contains(format) { rows.removeAll { $0 == format } } else { rows.append(format) }
-        Prefs.cardRows = ColourFormat.cardRows.filter { rows.contains($0) }
+        setCardRows(ColourFormat.cardRows.filter { rows.contains($0) })
+    }
+
+    /// Keeps the rows the cards show: for the purpose on show when there is one, else for every palette.
+    private func setCardRows(_ rows: [ColourFormat]) {
+        if let id = paletteID, let purpose = library.shownPurpose(for: id) {
+            library.setLabels(rows, for: purpose, ofPalette: id)
+            reload()
+        } else {
+            Prefs.cardRows = rows
+        }
     }
 
     /// Lays the cards out afresh for the current width.
@@ -1098,7 +1225,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
     @objc private func labelToggled() {
         Prefs.showNames = labelChecks[0].state == .on
-        Prefs.cardRows = zip(labelChecks.dropFirst(), ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 }
+        setCardRows(zip(labelChecks.dropFirst(), ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 })
     }
 }
 

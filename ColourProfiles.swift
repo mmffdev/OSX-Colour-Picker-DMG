@@ -38,6 +38,8 @@ enum ColourProfiles {
         made("C0100000-0000-4000-8000-000000000003", "Video", [.rec709, .rec2020, .displayP3]),
         made("C0100000-0000-4000-8000-000000000004", "Rendering And Effects", [.acescg, .linearSRGB, .rec709, .srgb]),
         made("C0100000-0000-4000-8000-000000000005", "Every Channel", RGBSpace.allCases, print: true),
+        made("C0100000-0000-4000-8000-000000000006", "Photography", [.adobeRGB, .prophoto, .displayP3, .srgb], print: true),
+        made("C0100000-0000-4000-8000-000000000007", "Cinema And VFX", [.acescg, .dciP3, .p3D65, .rec709]),
     ]
 
     static var url: URL { Catalogues.standard.root.appendingPathComponent("colour-profiles.json") }

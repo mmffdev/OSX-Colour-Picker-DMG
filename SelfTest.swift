@@ -1009,6 +1009,31 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && (try? nestAgain.load().swatch(inA)?.purposeList) == [.print],
           "and when it is next saved its files go into folders of their own, with nothing left nested")
 
+    print("purposes on the page")
+    var tabLib = Library()
+    let tabPalette = tabLib.createSwatch(at: tcat)
+    tabLib.add(["#808080", "#00FF00"], toSwatch: tabPalette, at: tcat)
+    tabLib.setPurpose(.print, on: true, ofPalette: tabPalette, at: tcat)
+    tabLib.setPurpose(.web, on: true, ofPalette: tabPalette, at: tcat)
+    let onScreen = tabLib.verdict(on: ["#808080", "#00FF00"], for: Purpose.web.starter)
+    let inPrint = tabLib.verdict(on: ["#808080", "#00FF00"], for: Purpose.print.starter)
+    check(onScreen.holds && onScreen.tag == "All 2 Hold" && tabLib.verdict(on: [], for: Purpose.web.starter).holds,
+          "a purpose whose profile holds every colour says so")
+    if PressProfiles.space(named: PressProfiles.generic) != nil {
+        check(!inPrint.holds && inPrint.tag == "1 Of 2 Out Of Range" && inPrint.detail.contains("cannot hold 1"), "a purpose says how many colours its channels cannot hold, and which channels")
+    }
+    check(Purpose.allCases.map { $0.starter.name } == ["Screen And Web", "Print", "Photography", "Video", "Cinema And VFX", "Rendering And Effects"]
+          && Purpose.print.starterLabels.contains(.cmyk) && Purpose.threeD.starter.holds(RGBSpace.linearSRGB.rawValue),
+          "each purpose starts with a profile and a set of values that suit it")
+    tabLib.setProfile(ColourProfiles.starters[4], for: .print, ofPalette: tabPalette, at: tcat.addingTimeInterval(1))
+    tabLib.setPurposeSettings(.print, ofPalette: tabPalette, at: tcat.addingTimeInterval(2)) { $0.labels = ["cmyk"] }
+    tabLib.setProfile(ColourProfiles.starters[2], for: .cine, ofPalette: tabPalette, at: tcat)
+    let printSettings = tabLib.swatch(tabPalette)?.config(for: .print)
+    check(printSettings?.profile == ColourProfiles.starters[4].id && printSettings?.labels == ["cmyk"] && printSettings?.changedAt == tcat.addingTimeInterval(2)
+          && tabLib.swatch(tabPalette)?.config(for: .web)?.profile == nil && tabLib.swatch(tabPalette)?.config(for: .cine) == nil
+          && tabLib.profileRecord(ColourProfiles.starters[4].id) != nil && tabLib.swatch(tabPalette)?.profile == nil,
+          "a purpose keeps a profile and a set of values of its own, apart from the palette's and from other purposes'")
+
     print("copy to project")
     var copyLib = Library()
     let tc = Date(timeIntervalSince1970: 1_760_000_000)
@@ -1839,9 +1864,9 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let stockPalette = studio.createSwatch(named: "Stock", hexes: ["#4F8093"], at: t)
     studio.move(webPalette, to: client2, index: 0, at: t); studio.move(printPalette, to: client2, index: 1, at: t)
     let house = ColourProfiles.starters, screenProfile = house[0], printProfile = house[1], videoProfile = house[2]
-    check(house.map { $0.name } == ["Screen And Web", "Print", "Video", "Rendering And Effects", "Every Channel"] && printProfile.print?.press == PressProfiles.generic
-          && house[4].channels.count == RGBSpace.allCases.count + 1 && Set(house.map { $0.id }).count == 5,
-          "five profiles to begin with, each with an id of its own; Print carries a press, Every Channel carries them all")
+    check(house.map { $0.name } == ["Screen And Web", "Print", "Video", "Rendering And Effects", "Every Channel", "Photography", "Cinema And VFX"] && printProfile.print?.press == PressProfiles.generic
+          && house[4].channels.count == RGBSpace.allCases.count + 1 && Set(house.map { $0.id }).count == 7,
+          "seven profiles to begin with, each with an id of its own; Print carries a press, Every Channel carries them all")
     check(studio.profile(forPalette: webPalette, house: house, houseDefault: nil).profile == screenProfile
           && studio.profile(forPalette: webPalette, house: house, houseDefault: videoProfile.id) == (videoProfile, .house),
           "with nothing chosen a palette uses the house default, or the first profile when there is none")
