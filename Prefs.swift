@@ -72,6 +72,12 @@ enum Prefs {
     /// One of the halo's colours as "#RRGGBB"; nil is the theme's own. `part` is "centre.background",
     /// "centre.text", or for ring 1, 2 or 3: "ring1.background", "ring1.text", "ring1.cursorBackground", "ring1.cursorText".
     static func haloColour(_ part: String) -> String? { colour("theme.halo." + part) }
+    /// How readily the mouse wheel turns a halo's ring: 1 is the standard, less is slower, more is faster.
+    static let haloWheelSpeedRange = 0.4...2.0
+    static var haloWheelSpeed: Double {
+        get { (d.object(forKey: "halo.wheelSpeed") as? Double).map { min(max($0, haloWheelSpeedRange.lowerBound), haloWheelSpeedRange.upperBound) } ?? 1 }
+        set { d.set(newValue, forKey: "halo.wheelSpeed"); changed() }
+    }
     static func setHaloColour(_ value: String?, _ part: String) { setColour(value, "theme.halo." + part) }
 
     // MARK: Organisation

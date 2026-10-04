@@ -193,6 +193,10 @@ enum HaloGeometry {
         return nil
     }
 
+    /// How far the wheel has to travel, in points, to turn a ring one place. At the standard
+    /// speed it is 44; a faster setting needs less travel and a slower one more.
+    static func wheelStep(speed: CGFloat) -> CGFloat { 44 / max(speed, 0.1) }
+
     /// The action the dial opens on.
     static func opening(disabled: [Bool], checked: [Bool?], showPositions: Bool) -> Int {
         if showPositions, let at = disabled.indices.first(where: { checked[$0] == true && !disabled[$0] }) { return at }
@@ -662,6 +666,9 @@ final class HaloMenu: NSResponder {
         action.onSelect()
     }
 
+    /// One step back, as Escape: off the outermost ring, or closed when only the first is showing.
+    func back() { if !stepBack() { close() } }
+
     /// Chooses whichever action is under the cursor, as a click on the dial would.
     func chooseSelected() { choose(active(at: selected)) }
 
@@ -687,7 +694,7 @@ final class HaloMenu: NSResponder {
         let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
         // Scrolling down or right turns the ring on; a mouse wheel reports lines, a trackpad points.
         wheelDistance -= (abs(dx) > abs(dy) ? dx : dy) * (event.hasPreciseScrollingDeltas ? 1 : 16)
-        if abs(wheelDistance) >= 32 {
+        if abs(wheelDistance) >= HaloGeometry.wheelStep(speed: CGFloat(Prefs.haloWheelSpeed)) {
             rotate(wheelDistance > 0 ? 1 : -1)
             wheelDistance = 0
         }

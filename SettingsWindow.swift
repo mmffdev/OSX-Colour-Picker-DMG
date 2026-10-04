@@ -73,12 +73,16 @@ class SettingsPanel: NSViewController {
         v.addSubview(grid)
         NSLayoutConstraint.activate([
             grid.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
-            grid.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 28),
-            grid.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -28),
+            grid.centerXAnchor.constraint(equalTo: v.centerXAnchor),
+            grid.leadingAnchor.constraint(greaterThanOrEqualTo: v.leadingAnchor, constant: 28),
             grid.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -24),
+            v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
         ])
         view = v
     }
+
+    /// Every panel is at least this wide, so the window's toolbar shows all the panels' icons.
+    static let minimumWidth: CGFloat = 900
 
     override func viewWillAppear() {
         super.viewWillAppear()
@@ -480,6 +484,83 @@ final class ThemePanel: SettingsPanel {
     private let hoverText = NSColorWell()
     private let activeBackground = NSColorWell()
     private let activeText = NSColorWell()
+    override func rows() -> [[NSView]] {
+        for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] {
+            well.target = self
+            well.action = #selector(changed(_:))
+            well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            well.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        }
+        func pair(_ background: NSColorWell, _ text: NSColorWell) -> NSView {
+            row([background, caption("Background", size: TextSize.caption), text, caption("Text", size: TextSize.caption)])
+        }
+        return [
+            [heading("Sidebar"), blank],
+            [label("Selected Row:"), pair(selectionBackground, selectionText)],
+            [blank, row([button("Reset To Default", #selector(resetSidebar))])],
+            [heading("Buttons"), blank],
+            [label("Hover:"), pair(hoverBackground, hoverText)],
+            [label("Active:"), pair(activeBackground, activeText)],
+            [blank, row([button("Reset To Default", #selector(resetButtons))])],
+            [blank, note("Hover is a button under the pointer; Active is one being pressed, or the choice that is on in a toggle. The defaults are greys taken from the background, so the controls stay quiet beside your colours. They follow the background as it is stepped lighter or darker.")],
+        ]
+    }
+
+    override func refresh() {
+        selectionBackground.color = Theme.sidebarSelectionBackground
+        selectionText.color = Theme.sidebarSelectionText
+        hoverBackground.color = Theme.buttonHoverBackground
+        hoverText.color = Theme.buttonHoverText
+        activeBackground.color = Theme.buttonActiveBackground
+        activeText.color = Theme.buttonActiveText
+    }
+
+    /// Only the well that was changed is kept; the others stay on their defaults.
+    @objc private func changed(_ well: NSColorWell) {
+        let hex = hexOf(well.color)
+        switch well {
+        case selectionBackground: Prefs.sidebarSelectionBackground = hex
+        case selectionText: Prefs.sidebarSelectionText = hex
+        case hoverBackground: Prefs.buttonHoverBackground = hex
+        case hoverText: Prefs.buttonHoverText = hex
+        case activeBackground: Prefs.buttonActiveBackground = hex
+        default: Prefs.buttonActiveText = hex
+        }
+        library.reloadSidebarTheme()
+    }
+
+    @objc private func resetSidebar() {
+        Prefs.sidebarSelectionBackground = nil
+        Prefs.sidebarSelectionText = nil
+        refresh()
+        library.reloadSidebarTheme()
+    }
+
+    @objc private func resetButtons() {
+        Prefs.buttonHoverBackground = nil
+        Prefs.buttonHoverText = nil
+        Prefs.buttonActiveBackground = nil
+        Prefs.buttonActiveText = nil
+        refresh()
+    }
+}
+
+// MARK: Halo
+
+/// A slider that goes back to its starting value on a double click.
+final class ResettingSlider: NSSlider {
+    var resting = 1.0
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 2 else { super.mouseDown(with: event); return }
+        doubleValue = resting
+        sendAction(action, to: target)
+    }
+}
+
+/// The halo: how fast the mouse wheel turns it, its colours, and a halo to try them on.
+final class HaloSettingsPanel: SettingsPanel {
+    private let speed = ResettingSlider(value: 1, minValue: Prefs.haloWheelSpeedRange.lowerBound, maxValue: Prefs.haloWheelSpeedRange.upperBound, target: nil, action: nil)
+    private var tester: HaloMenu?
     /// The halo's wells, each with the name its colour is saved under.
     private var haloWells: [(well: NSColorWell, part: String)] = []
     /// The halo's layers, in the order of their Reset buttons: the name parts each one clears.
@@ -504,69 +585,42 @@ final class ThemePanel: SettingsPanel {
 
     override func rows() -> [[NSView]] {
         haloWells = []
-        var halo: [[NSView]] = [
-            [heading("Halo"), blank],
+        speed.resting = 1
+        speed.target = self
+        speed.action = #selector(speedChanged)
+        speed.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        speed.toolTip = "Double-click to reset"
+        var out: [[NSView]] = [
+            [heading("Scrolling"), blank],
+            [label("Mouse Sensitivity:"), row([caption("Slower", size: TextSize.caption), speed, caption("Faster", size: TextSize.caption)])],
+            [blank, row([button("Test Halo", #selector(test(_:)))])],
+            [blank, note("How far the wheel or trackpad has to move to turn a ring by one place. Double-click the slider to put it back. Test Halo opens a halo of letters: Up grows the next ring, X steps back one ring and, on the first ring, closes it.")],
+            [heading("Colours"), blank],
             [label("Information:"), haloPair("centre.background", "centre.text", reset: 0)],
         ]
         for (n, name) in ["Primary", "Secondary", "Tertiary"].enumerated() {
-            halo.append([label("\(name) Ring:"), haloPair("ring\(n + 1).background", "ring\(n + 1).text", reset: n + 1)])
-            halo.append([label("Highlight Cursor:"), haloPair("ring\(n + 1).cursorBackground", "ring\(n + 1).cursorText")])
+            out.append([label("\(name) Ring:"), haloPair("ring\(n + 1).background", "ring\(n + 1).text", reset: n + 1)])
+            out.append([label("Highlight Cursor:"), haloPair("ring\(n + 1).cursorBackground", "ring\(n + 1).cursorText")])
         }
-        halo.append([blank, note("Information is the circle in the middle of the halo. Primary is the first ring; Secondary and Tertiary are the rings that grow outside it. A ring's Highlight Cursor is the wedge at the top that marks the choice. Unset, the rings are the button colours turned round, and Information and the cursors are the button colours as they are. Reset puts one layer back.")])
-        for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] + haloWells.map({ $0.well }) {
-            well.target = self
-            well.action = #selector(changed(_:))
-            well.widthAnchor.constraint(equalToConstant: 44).isActive = true
-            well.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        out.append([blank, note("Information is the circle in the middle of the halo. Primary is the first ring; Secondary and Tertiary are the rings that grow outside it. A ring's Highlight Cursor is the wedge at the top that marks the choice. Unset, the rings are the button colours turned round, and Information and the cursors are the button colours as they are. Reset puts one layer back.")])
+        for item in haloWells {
+            item.well.target = self
+            item.well.action = #selector(changed(_:))
+            item.well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            item.well.heightAnchor.constraint(equalToConstant: 24).isActive = true
         }
-        func pair(_ background: NSColorWell, _ text: NSColorWell) -> NSView {
-            row([background, caption("Background", size: TextSize.caption), text, caption("Text", size: TextSize.caption)])
-        }
-        return [
-            [heading("Sidebar"), blank],
-            [label("Selected Row:"), pair(selectionBackground, selectionText)],
-            [blank, row([button("Reset To Default", #selector(resetSidebar))])],
-            [heading("Buttons"), blank],
-            [label("Hover:"), pair(hoverBackground, hoverText)],
-            [label("Active:"), pair(activeBackground, activeText)],
-            [blank, row([button("Reset To Default", #selector(resetButtons))])],
-            [blank, note("Hover is a button under the pointer; Active is one being pressed, or the choice that is on in a toggle. The defaults are greys taken from the background, so the controls stay quiet beside your colours. They follow the background as it is stepped lighter or darker.")],
-        ] + halo
+        return out
     }
 
     override func refresh() {
-        selectionBackground.color = Theme.sidebarSelectionBackground
-        selectionText.color = Theme.sidebarSelectionText
-        hoverBackground.color = Theme.buttonHoverBackground
-        hoverText.color = Theme.buttonHoverText
-        activeBackground.color = Theme.buttonActiveBackground
-        activeText.color = Theme.buttonActiveText
+        speed.doubleValue = Prefs.haloWheelSpeed
         for item in haloWells { item.well.color = Theme.halo(item.part) }
     }
 
-    /// Only the well that was changed is kept; the others stay on their defaults.
-    @objc private func changed(_ well: NSColorWell) {
-        let hex = hexOf(well.color)
-        if let halo = haloWells.first(where: { $0.well === well }) {
-            Prefs.setHaloColour(hex, halo.part)
-            return
-        }
-        switch well {
-        case selectionBackground: Prefs.sidebarSelectionBackground = hex
-        case selectionText: Prefs.sidebarSelectionText = hex
-        case hoverBackground: Prefs.buttonHoverBackground = hex
-        case hoverText: Prefs.buttonHoverText = hex
-        case activeBackground: Prefs.buttonActiveBackground = hex
-        default: Prefs.buttonActiveText = hex
-        }
-        library.reloadSidebarTheme()
-    }
+    @objc private func speedChanged() { Prefs.haloWheelSpeed = speed.doubleValue }
 
-    @objc private func resetSidebar() {
-        Prefs.sidebarSelectionBackground = nil
-        Prefs.sidebarSelectionText = nil
-        refresh()
-        library.reloadSidebarTheme()
+    @objc private func changed(_ well: NSColorWell) {
+        if let halo = haloWells.first(where: { $0.well === well }) { Prefs.setHaloColour(hexOf(well.color), halo.part) }
     }
 
     /// Puts one layer of the halo back to its defaults: the centre, or a ring with its cursor.
@@ -576,12 +630,29 @@ final class ThemePanel: SettingsPanel {
         refresh()
     }
 
-    @objc private func resetButtons() {
-        Prefs.buttonHoverBackground = nil
-        Prefs.buttonHoverText = nil
-        Prefs.buttonActiveBackground = nil
-        Prefs.buttonActiveText = nil
-        refresh()
+    /// Opens a halo of letters over the button, three rings deep, to try the wheel and the colours on.
+    @objc private func test(_ sender: NSButton) {
+        let halo = tester ?? HaloMenu(label: "Test Halo", hint: "Scroll to turn, click to choose", actions: [])
+        tester = halo
+        halo.actions = HaloSettingsPanel.letters { [weak halo] in halo?.back() }
+        halo.open(over: sender)
+    }
+
+    /// The alphabet over three rings: A to I, J to R, S to Z. Each ring ends with Up, which grows
+    /// the next ring (the last has none), and X, which steps back a ring or closes the first.
+    static func letters(back: @escaping () -> Void) -> [HaloAction] {
+        let rings = [Array("ABCDEFGHI"), Array("JKLMNOPQR"), Array("STUVWXYZ")]
+        func ring(_ at: Int) -> [HaloAction] {
+            var out = rings[at].map { letter in
+                HaloAction(id: String(letter), label: String(letter), symbol: "\(String(letter).lowercased()).circle", description: "Ring \(at + 1)", keepsOpen: true)
+            }
+            if at + 1 < rings.count {
+                out.append(HaloAction(id: "up\(at)", label: "Up", symbol: "arrow.up", description: "Open ring \(at + 2)", children: { ring(at + 1) }))
+            }
+            out.append(HaloAction(id: "x\(at)", label: "X", symbol: "xmark", description: at == 0 ? "Close the halo" : "Back to ring \(at)", keepsOpen: true, onSelect: back))
+            return out
+        }
+        return ring(0)
     }
 }
 
@@ -860,6 +931,7 @@ final class SettingsWindowController: NSWindowController {
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
             HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
             ThemePanel(library: library, title: "Theme", icon: "paintpalette"),
+            HaloSettingsPanel(library: library, title: "Halo", icon: "circle.circle"),
             PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield"),
         ]
         tabs.tabStyle = .toolbar
