@@ -7,14 +7,16 @@ import Foundation
 // the projects, each a folder of its own files, and each project is the only home of what is in it.
 //
 //     Client Name.colcatalogue                 the index: the projects, the order of things, what was deleted
-//     Unfiled/Unfiled.coldata                  what belongs to no project: global tags, the house's
+//     Unfiled/Config/Unfiled.coldata           what belongs to no project: global tags, the house's
 //                                              profiles, and colours no palette uses
 //     Unfiled/Palettes/Loose.colpalette        palettes that sit in no project
+//     Unfiled/Channels/Loose.colprint          and their purposes
 //
-//     <Projects>/Brand/Config/Brand.colproject the project
-//     <Projects>/Brand/Config/Brand.coldata    its own tags, and the tags and profiles it carries with it
-//     <Projects>/Brand/Config/Brand.colhistory
-//     <Projects>/Brand/Config/Palettes/…       its palettes, each with the colours it uses and its purposes
+//     <Projects>/Brand/Project/Brand.colproject   the project
+//     <Projects>/Brand/Config/Brand.coldata       its own tags, and the tags and profiles it carries with it
+//     <Projects>/Brand/History/Brand.colhistory
+//     <Projects>/Brand/Palettes/…                 its palettes, each with the colours it uses
+//     <Projects>/Brand/Channels/…                 each palette's settings for a purpose
 //
 // In memory the app still works on one Library. Saving splits it into these files; loading joins
 // them. A project whose files cannot be reached (a drive unplugged, a folder moved) stays in the
@@ -85,20 +87,26 @@ enum CatalogueFiles {
     /// project into Unfiled, and the index last, so the index never names what is not yet there.
     /// `remaking` is for turning an earlier one-file catalogue into these files: every project is
     /// written, including any whose folder had gone, because that one file was the only copy.
-    static func write(_ lib: Library, index: URL, master: URL?, remaking: Bool = false, written: inout [UUID: Data]) throws {
+    /// `skipping` names the projects that could not be reached when the catalogue was loaded. All
+    /// that is known of them is their name, so they are left exactly as they are on disk.
+    static func write(_ lib: Library, index: URL, master: URL?, remaking: Bool = false, skipping: Set<UUID> = [], written: inout [UUID: Data]) throws {
         let fm = FileManager.default, e = ColourFiles.encoder()
-        _ = try ProjectFiles.write(lib, library: index, master: master, touchHistory: false, remaking: remaking, written: &written)
+        _ = try ProjectFiles.write(lib, library: index, master: master, touchHistory: false, remaking: remaking, skipping: skipping, written: &written)
 
         let real = Set(lib.projects.map { $0.id })
         let loose = lib.swatches.filter { $0.projectID.map { !real.contains($0) } ?? true }
         let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
         let data = DataDocument(project: nil, colours: lib.colours.filter { !used.contains($0.hex) },
                                 tags: lib.tagInfo.filter { $0.projectID.map { !real.contains($0) } ?? true }, profiles: lib.colourProfiles)
-        let folder = unfiledFolder(beside: index), palettes = folder.appendingPathComponent(ProjectFiles.palettesFolder)
-        try fm.createDirectory(at: palettes, withIntermediateDirectories: true)
-        var documents: [(path: String, data: Data)] = [("\(unfiled).\(ColourFiles.data)", try e.encode(data))]
+        let folder = unfiledFolder(beside: index)
+        for name in [ProjectFiles.configFolder, ProjectFiles.palettesFolder, ProjectFiles.channelsFolder] {
+            try fm.createDirectory(at: folder.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        var documents: [(path: String, data: Data)] = [("\(ProjectFiles.configFolder)/\(unfiled).\(ColourFiles.data)", try e.encode(data))]
         documents += try ProjectFile.paletteDocuments(loose, colours: lib.colours, project: nil)
         try ProjectFiles.put(documents, in: folder)
+        // Where an earlier version kept the same, loose in the folder.
+        try? fm.removeItem(at: folder.appendingPathComponent("\(unfiled).\(ColourFiles.data)"))
 
         let doc = CatalogueDocument(library: lib.version,
                                     projects: lib.projects.map { ProjectRef(id: $0.id, name: $0.name, createdAt: $0.createdAt, folder: $0.folder) },
@@ -111,7 +119,7 @@ enum CatalogueFiles {
 
     /// Loads a catalogue: the index, then every project it lists, then Unfiled, joined into one library.
     static func read(index: URL, master: URL?) throws -> Loaded {
-        let fm = FileManager.default, d = ColourFiles.decoder()
+        let d = ColourFiles.decoder()
         let doc = try d.decode(CatalogueDocument.self, from: Data(contentsOf: index))
         guard doc.format == "colour-catalogue" else { throw CocoaError(.fileReadCorruptFile) }
         var lib = Library()
@@ -125,25 +133,29 @@ enum CatalogueFiles {
             // Where the project should be; the index knows its name and its folder, which is all that takes.
             let stub = Project(id: ref.id, name: ref.name, createdAt: ref.createdAt, folder: ref.folder, fileKnown: true)
             let root = ProjectFiles.root(for: stub, library: index, master: master)
-            let file = [ProjectFiles.configURL(in: root, name: ref.name), ProjectFiles.legacyURL(in: root, name: ref.name)].first { fm.fileExists(atPath: $0.path) }
-            guard let found = file, let whole = try? ProjectFiles.read(found), whole.project.id == ref.id else {
+            guard let found = ProjectFiles.existingFile(in: root, name: ref.name), let whole = try? ProjectFiles.read(found), whole.project.id == ref.id else {
                 lib.projects.append(stub)
                 unavailable.insert(ref.id)
                 continue
             }
-            lib.projects.append(whole.project)
+            // Where the project is, is the catalogue's to say: the project's own file cannot know it has been moved.
+            var project = whole.project
+            project.folder = ref.folder
+            lib.projects.append(project)
             swatches += whole.palettes
             for colour in whole.colours where colours[colour.hex] == nil { colours[colour.hex] = colour }
             tags += whole.tags.filter { $0.projectID == ref.id }
         }
 
         let folder = unfiledFolder(beside: index)
-        if let found = try? Data(contentsOf: folder.appendingPathComponent("\(unfiled).\(ColourFiles.data)")), let data = try? d.decode(DataDocument.self, from: found) {
+        let dataFiles = [folder.appendingPathComponent(ProjectFiles.configFolder), folder].map { $0.appendingPathComponent("\(unfiled).\(ColourFiles.data)") }
+        if let found = dataFiles.lazy.compactMap({ try? Data(contentsOf: $0) }).first, let data = try? d.decode(DataDocument.self, from: found) {
             for colour in data.colours where colours[colour.hex] == nil { colours[colour.hex] = colour }
             tags += data.tags
             lib.colourProfiles = data.profiles
         }
-        let loose = ProjectFiles.palettes(in: folder.appendingPathComponent(ProjectFiles.palettesFolder), project: nil)
+        let looseDir = folder.appendingPathComponent(ProjectFiles.palettesFolder)
+        let loose = ProjectFiles.palettes(in: looseDir, channels: [folder.appendingPathComponent(ProjectFiles.channelsFolder), looseDir], project: nil)
         swatches += loose.palettes
         for colour in loose.colours where colours[colour.hex] == nil { colours[colour.hex] = colour }
 

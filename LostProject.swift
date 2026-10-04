@@ -2,9 +2,10 @@ import AppKit
 
 // ---------- A project whose file is gone ----------
 //
-// The library still holds the project, so nothing is lost but the file. The page says what happened
-// and where the file was expected, and offers the ways out: find it, write it again, or let the
-// project go. Nothing is remade on the app's own initiative.
+// A project's files are the only home of what is in it. When they cannot be reached the catalogue
+// still lists the project, by name, and this page says what happened, where the files were
+// expected, and the ways out: find them, or let the project go. Nothing is remade or written over
+// on the app's own initiative, so the project is whole again as soon as its files are found.
 
 final class LostProjectController: NSViewController {
     private let library: LibraryController
@@ -23,19 +24,18 @@ final class LostProjectController: NSViewController {
         let root = NSView()
         let find = NSButton(title: "Find The File\u{2026}", target: self, action: #selector(findTapped))
         find.keyEquivalent = "\r"
-        let again = NSButton(title: "Write It Again", target: self, action: #selector(againTapped))
         let delete = NSButton(title: "Delete Project\u{2026}", target: self, action: #selector(deleteTapped))
         let close = NSButton(title: "Not Now", target: self, action: #selector(closeTapped))
         close.keyEquivalent = "\u{1b}"
-        for b in [find, again, delete, close] { b.bezelStyle = .rounded; b.controlSize = .large }
+        for b in [find, delete, close] { b.bezelStyle = .rounded; b.controlSize = .large }
         let header = PageHeader(actions: [close])
         header.title.stringValue = project.name
-        header.subtitle.stringValue = "Project file missing"
+        header.subtitle.stringValue = "Project Files Not Found"
 
         let what: String, where_: String
         switch loss {
         case .missing(let expected):
-            what = "The file that holds this project on disk has gone. It was written before, so it has not been made again: it may have been moved, renamed or deleted on purpose."
+            what = "The files that hold this project cannot be found. They may have been moved or renamed. The project is still listed in the catalogue, and nothing has been written in its place."
             where_ = "It was expected at:\n\((expected.path as NSString).abbreviatingWithTildeInPath)"
         case .unavailable(let folder):
             what = "The folder this project is kept under is not there. If it is on a drive or a cloud folder that is not connected, connect it and the project will be found again."
@@ -46,13 +46,13 @@ final class LostProjectController: NSViewController {
         let place = NSTextField(wrappingLabelWithString: where_)
         place.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
         place.textColor = .secondaryLabelColor
-        let keep = NSTextField(wrappingLabelWithString: "Your palettes, swatches, typography and tags are still in the library. Only the file is missing.")
+        let keep = NSTextField(wrappingLabelWithString: "A project\u{2019}s palettes, swatches, typography and tags are kept in its own files, so they are out of reach until the files are found. Nothing has been deleted.")
         keep.font = NSFont.systemFont(ofSize: TextSize.body)
         keep.textColor = .secondaryLabelColor
-        let options = NSTextField(wrappingLabelWithString: "Find The File points the app at the file where it is now; a file on its own is given its folder structure. Write It Again makes a fresh file from the library. Delete Project removes the project from the library as well.")
+        let options = NSTextField(wrappingLabelWithString: "Find The File points the app at the project where it is now: its .colproject file, or the folder holding it. Delete Project takes the project out of the catalogue; its files, wherever they are, are left alone.")
         options.font = NSFont.systemFont(ofSize: TextSize.body)
         options.textColor = .secondaryLabelColor
-        let buttons = NSStackView(views: [find, again, delete])
+        let buttons = NSStackView(views: [find, delete])
         buttons.orientation = .horizontal
         buttons.spacing = 10
         let column = NSStackView(views: [story, place, keep, options, buttons])
@@ -74,7 +74,6 @@ final class LostProjectController: NSViewController {
     }
 
     @objc private func findTapped() { library.relocateProject(project.id) }
-    @objc private func againTapped() { library.rewriteProjectFile(project.id) }
     @objc private func deleteTapped() { library.delete(project: project.id) }
     @objc private func closeTapped() { library.onCover?(nil, false) }
 }

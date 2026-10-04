@@ -1081,7 +1081,7 @@ final class LibraryStore {
 
     private func save(_ lib: Library, remaking: Bool) throws {
         do {
-            try CatalogueFiles.write(lib, index: url, master: projectsFolder, remaking: remaking, written: &written)
+            try CatalogueFiles.write(lib, index: url, master: projectsFolder, remaking: remaking, skipping: unavailable, written: &written)
         } catch let error as StoreError {
             throw error
         } catch {

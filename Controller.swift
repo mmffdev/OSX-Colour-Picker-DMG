@@ -230,8 +230,9 @@ final class LibraryController: NSObject {
 
     func writeProjectFiles() {
         do {
-            let done = try ProjectFiles.write(library, library: store.url, master: ProjectFiles.folder,
-                                              history: Prefs.projectHistory && historyEnabled ? history : nil, written: &projectFilesWritten)
+            let done = try ProjectFiles.write(library, library: store.url, master: store.projectsFolder,
+                                              history: Prefs.projectHistory && historyEnabled ? history : nil,
+                                              skipping: store.unavailable, written: &projectFilesWritten)
             if !done.firstTime.isEmpty {
                 // Remembered without becoming a step: it is bookkeeping, not a change the user made.
                 library = try store.mutate { lib in for id in done.firstTime { lib.markProjectFile(id, known: true) } }
@@ -286,6 +287,8 @@ final class LibraryController: NSObject {
                 let inMaster = root.deletingLastPathComponent().resolvingSymlinksInPath() == under.resolvingSymlinksInPath()
                 let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : root.path
                 self.apply("Find Project File") { $0.setProjectFolder(id, own) }
+                // The project was known only by name while its files were out of reach: read it from where it is now.
+                self.reload()
                 self.projectFilesWritten[id] = nil
                 self.writeProjectFiles()
                 self.flash("\u{201C}\(p.name)\u{201D} found")
@@ -295,15 +298,6 @@ final class LibraryController: NSObject {
             }
         }
         if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
-    }
-
-    /// Writes a lost project's file afresh from the library, because the user asked.
-    func rewriteProjectFile(_ id: UUID) {
-        guard library.project(id) != nil else { return }
-        library = (try? store.mutate { $0.markProjectFile(id, known: false) }) ?? library
-        projectFilesWritten[id] = nil
-        writeProjectFiles()
-        onCover?(nil, false)
     }
 
     /// The page shown for a project whose file is gone.
