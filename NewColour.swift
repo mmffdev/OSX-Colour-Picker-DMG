@@ -43,6 +43,9 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     private let chip = NSView()
     private let readout = NSTextField(wrappingLabelWithString: "")
     private let problem = caption("")
+    private let working = NSTextField(wrappingLabelWithString: "")
+    /// The colour last picked from the screen, while the values on show are still its conversion.
+    private var picked: ColourDefinition?
     private var kind: Kind { Kind.offered.indices.contains(kinds.selectedSegment) ? Kind.offered[kinds.selectedSegment] : .p3 }
 
     /// `palette` names where the colour is going, for the message; `done` is handed the colour to add.
@@ -125,13 +128,16 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         bar.alignment = .centerY
         bar.spacing = PageStyle.barSpacing
 
-        let column = NSStackView(views: [heading, body, kinds, about, values, pressRow, preview, bar])
+        working.isHidden = true
+        working.isSelectable = true
+        let column = NSStackView(views: [heading, body, kinds, about, values, pressRow, preview, working, bar])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 14
         column.setCustomSpacing(8, after: heading)
         column.setCustomSpacing(8, after: kinds)
         column.setCustomSpacing(18, after: preview)
+        column.setCustomSpacing(18, after: working)
         column.translatesAutoresizingMaskIntoConstraints = false
         panel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(panel)
@@ -147,7 +153,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
             chip.heightAnchor.constraint(equalToConstant: 56),
             kinds.heightAnchor.constraint(equalToConstant: ButtonStyle.height),
         ])
-        for full in [heading, body, about, values, preview, bar] as [NSView] { full.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
+        for full in [heading, body, about, values, preview, working, bar] as [NSView] { full.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
         show()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -169,6 +175,12 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         ])
         // After the click that opened the sheet has finished, or the grid takes the focus back.
         DispatchQueue.main.async { [weak self] in if let self = self { self.window?.makeFirstResponder(self.fields[0]) } }
+        // For a trial run: MMFFDEV_COLOUR3_PICK is a hex, or "vivid" for a colour beyond sRGB, taken as if picked from the screen.
+        let env = ProcessInfo.processInfo.environment
+        if env["MMFFDEV_COLOUR3_HOME"] != nil, let ask = env["MMFFDEV_COLOUR3_PICK"] {
+            picked = ask == "vivid" ? ColourDefinition.displayP3([1, 0.1, 0.2]) : ColourDefinition.of(hex: ask)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.convertPick() }
+        }
     }
 
     override var wantsUpdateLayer: Bool { true }
@@ -255,34 +267,120 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         sampler.show { [weak self] colour in
             guard let self = self else { return }
             self.sampler = nil
-            guard let colour = colour, let picked = ColourDefinition.picked(colour), let fill = NewColourSheet.fill(for: picked) else { return }
+            guard let colour = colour, let picked = ColourDefinition.picked(colour) else { return }
             playShutter()
-            self.take(fill.kind, fill.values)
+            self.picked = picked
+            self.convertPick()
         }
     }
 
-    /// What a picked colour is typed in as: its hex when sRGB holds it, as the main picker keeps
-    /// it; otherwise its Display P3 values, 0 to 255, so a vivid colour is kept whole.
-    static func fill(for picked: ColourDefinition) -> (kind: Kind, values: [String])? {
-        if picked.source.space == RGBSpace.srgb.rawValue { return (.hex, [RGBSpace.srgb.text(picked.source.values)]) }
-        guard picked.source.space == RGBSpace.displayP3.rawValue, picked.source.values.count == 3 else { return nil }
-        return (.p3, picked.source.values.map { value in
-            let text = String(format: "%.2f", value * 255)
-            return text.hasSuffix(".00") ? String(text.dropLast(3)) : text
-        })
+    /// A pick turned into values for one kind of colour, with the arithmetic that got there.
+    struct Conversion {
+        /// The kind the values are for: the one asked for, or Display P3 when a hex cannot hold the colour.
+        let kind: Kind
+        let values: [String]
+        /// Each step as what it gives and how: "XYZ D50  0.4310  0.2312  0.0190", "Display P3 matrix…".
+        let working: [(step: String, how: String)]
     }
 
-    /// Shows `kind` with these values typed in.
-    private func take(_ kind: Kind, _ values: [String]) {
-        if let at = Kind.offered.firstIndex(of: kind), kinds.selectedSegment != at {
-            kinds.selectedSegment = at
-            shown = kind
-            preferences.set(kind.rawValue, forKey: "newColourKind")
-            show()
+    /// Converts a picked colour into `kind`, showing the working. A pick is sRGB or Display P3;
+    /// every conversion goes through the master, XYZ under D50. A hex that cannot hold the colour
+    /// becomes Display P3 instead, so nothing is flattened. CMYK goes through the press's profile.
+    static func convert(_ picked: ColourDefinition, to kind: Kind, press: String) -> Conversion? {
+        guard let from = RGBSpace(rawValue: picked.source.space), picked.source.values.count == 3 else { return nil }
+        func n(_ v: [Double], _ places: Int = 4) -> String { v.map { String(format: "%.\(places)f", $0) }.joined(separator: "  ") }
+        func typed(_ v: Double, _ places: Int = 2) -> String {
+            var text = String(format: "%.\(places)f", v)
+            if text.contains(".") { while text.hasSuffix("0") { text.removeLast() }; if text.hasSuffix(".") { text.removeLast() } }
+            return text == "-0" ? "0" : text
         }
-        for (field, value) in zip(fields, values) { field.stringValue = value }
-        valueChanged()
+        let m = picked.master
+        var steps: [(step: String, how: String)] = [
+            ("Picked     \(from.name)  \(n(picked.source.values))" + (from == .srgb ? "  (\(RGBSpace.srgb.text(picked.source.values)))" : ""),
+             "What the screen showed, each value 0 to 1."),
+        ]
+        func toMaster() {
+            steps.append(("Linear     \(n(picked.source.values.map(from.linear)))", "The screen curve undone: ((v + 0.055) \u{00F7} 1.055)^2.4, or v \u{00F7} 12.92 near black."))
+            steps.append(("XYZ D50    \(n([m.x, m.y, m.z]))", "The \(from.name) matrix, then the white moved from D65 to D50 (Bradford). This is the master."))
+        }
+        func rgb(_ space: RGBSpace, _ kind: Kind, curve: String) -> Conversion {
+            if from == space {
+                steps.append(("\(space.name)   \(n(picked.source.values.map { $0 * 255 }, 2))", "Already \(space.name): each value \u{00D7} 255, nothing converted."))
+                return Conversion(kind: kind, values: picked.source.values.map { typed($0 * 255) }, working: steps)
+            }
+            toMaster()
+            let linear = space.linearValues(of: m), encoded = linear.map(space.encoded)
+            steps.append(("Linear     \(n(linear))", "The inverse \(space.name) matrix, from XYZ under its own white."))
+            steps.append(("Encoded    \(n(encoded))", "The \(space.name) curve put on: \(curve)."))
+            steps.append(("\(space.name)   \(n(encoded.map { $0 * 255 }, 2))", "Each value \u{00D7} 255."))
+            return Conversion(kind: kind, values: encoded.map { typed($0 * 255) }, working: steps)
+        }
+        switch kind {
+        case .hex:
+            if from == .srgb {
+                steps.append(("Hex        \(RGBSpace.srgb.text(picked.source.values))", "Already sRGB: each value \u{00D7} 255 in hexadecimal, nothing converted."))
+                return Conversion(kind: .hex, values: [RGBSpace.srgb.text(picked.source.values)], working: steps)
+            }
+            // A pick is only kept as Display P3 when sRGB cannot hold it, so a hex would flatten it.
+            var kept = rgb(.displayP3, .p3, curve: "")
+            let nearest = RGBSpace.srgb.text(RGBSpace.srgb.values(of: m))
+            kept = Conversion(kind: .p3, values: kept.values, working: kept.working + [("No hex     nearest is \(nearest)", "sRGB cannot hold this colour, so it is kept as Display P3 instead.")])
+            return kept
+        case .p3: return rgb(.displayP3, .p3, curve: "1.055 \u{00D7} v^(1 \u{00F7} 2.4) \u{2212} 0.055, or 12.92 \u{00D7} v near black")
+        case .prophoto: return rgb(.prophoto, .prophoto, curve: "v^(1 \u{00F7} 1.8), or 16 \u{00D7} v near black")
+        case .lab:
+            toMaster()
+            let lab = m.lab
+            steps.append(("L*         \(typed(lab.l))", "116 \u{00D7} f(Y \u{00F7} Yn) \u{2212} 16, where f is the cube root and n is the D50 white."))
+            steps.append(("a*         \(typed(lab.a))", "500 \u{00D7} (f(X \u{00F7} Xn) \u{2212} f(Y \u{00F7} Yn))."))
+            steps.append(("b*         \(typed(lab.b))", "200 \u{00D7} (f(Y \u{00F7} Yn) \u{2212} f(Z \u{00F7} Zn))."))
+            return Conversion(kind: .lab, values: [typed(lab.l), typed(lab.a), typed(lab.b)], working: steps)
+        case .cmyk:
+            toMaster()
+            guard let build = PrintBuild.of(m, press: press, intent: .relative) else { return nil }
+            let inks = build.inks.map { ($0 * 100).rounded() }
+            let off = deltaE2000(m.lab, build.printed.lab)
+            steps.append(("CMYK       \(inks.map { typed($0, 0) }.joined(separator: "  "))",
+                          "Through the profile \u{201C}\(press)\u{201D}, relative colorimetric. A profile is a table measured from the press, not a formula."))
+            steps.append(("Prints     \(String(format: "%.1f", off)) \u{0394}E2000 from the pick",
+                          off > Rendering.visible ? "Beyond this press: this is the nearest build it can print, and it will not match the screen."
+                                                             : "Within this press: the build prints as the colour that was picked."))
+            return Conversion(kind: .cmyk, values: inks.map { typed($0, 0) }, working: steps)
+        }
+    }
+
+    /// Turns the pick into the kind on show, types the values in and shows the working.
+    private func convertPick() {
+        guard let picked = picked,
+              let made = NewColourSheet.convert(picked, to: kind, press: press.titleOfSelectedItem ?? PressProfiles.generic) else {
+            if self.picked != nil { problem.stringValue = "The press profile is not on this Mac, so the pick cannot be turned into inks." }
+            return
+        }
+        if let at = Kind.offered.firstIndex(of: made.kind), kinds.selectedSegment != at { kinds.selectedSegment = at }
+        if shown != made.kind {
+            shown = made.kind
+            preferences.set(made.kind.rawValue, forKey: "newColourKind")
+        }
+        show()
+        for (field, value) in zip(fields, made.values) { field.stringValue = value }
+        problem.stringValue = ""
+        update()
+        let text = NSMutableAttributedString()
+        let mono = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .medium), plain = NSFont.systemFont(ofSize: TextSize.caption)
+        for (at, line) in made.working.enumerated() {
+            text.append(NSAttributedString(string: (at == 0 ? "" : "\n") + line.step + "\n", attributes: [.font: mono, .foregroundColor: NSColor.labelColor]))
+            text.append(NSAttributedString(string: line.how, attributes: [.font: plain, .foregroundColor: NSColor.secondaryLabelColor]))
+        }
+        working.attributedStringValue = text
+        working.isHidden = false
         window?.makeFirstResponder(fields[0])
+    }
+
+    /// The values were changed by hand: they are no longer the pick's conversion.
+    private func forgetPick() {
+        picked = nil
+        working.isHidden = true
+        working.stringValue = ""
     }
 
     private var shown = Kind.p3
@@ -290,10 +388,20 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         guard kind != shown else { return }
         shown = kind
         preferences.set(kind.rawValue, forKey: "newColourKind")
-        show()
+        // A pick follows the kind: the same colour, converted again.
+        if picked != nil { convertPick() } else { show() }
     }
-    @objc private func valueChanged() { problem.stringValue = ""; update() }
-    func controlTextDidChange(_ obj: Notification) { valueChanged() }
+    /// The press was changed: a pick on show as inks is converted again for the new press.
+    @objc private func valueChanged() {
+        if picked != nil, kind == .cmyk { convertPick(); return }
+        problem.stringValue = ""
+        update()
+    }
+    func controlTextDidChange(_ obj: Notification) {
+        forgetPick()
+        problem.stringValue = ""
+        update()
+    }
 
     @objc private func confirmTapped() {
         let result = typed

@@ -1013,12 +1013,22 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
-    let plain = ColourDefinition.of(hex: "#4F8093").flatMap { NewColourSheet.fill(for: $0) }
-    let vivid = NewColourSheet.fill(for: ColourDefinition.displayP3([1, 0, 0]))
-    check(plain?.kind == .hex && plain?.values == ["#4F8093"] && vivid?.kind == .p3 && vivid?.values == ["255", "0", "0"],
-          "a colour picked into New Colour is typed in as its hex, or as Display P3 values when sRGB cannot hold it")
-    let again = vivid.flatMap { NewColourSheet.read($0.kind, $0.values, press: "") }?.colour
-    check(again == ColourDefinition.displayP3([1, 0, 0]), "and what is typed in reads back as the colour that was picked")
+    let grey = ColourDefinition.of(hex: "#4F8093")!, red = ColourDefinition.displayP3([1, 0, 0])
+    let asHex = NewColourSheet.convert(grey, to: .hex, press: PressProfiles.generic)
+    let noHex = NewColourSheet.convert(red, to: .hex, press: PressProfiles.generic)
+    check(asHex?.kind == .hex && asHex?.values == ["#4F8093"] && noHex?.kind == .p3 && noHex?.values == ["255", "0", "0"],
+          "a pick turned into a hex stays a hex when sRGB holds it, and becomes Display P3 when it does not")
+    let asLab = NewColourSheet.convert(red, to: .lab, press: PressProfiles.generic)
+    let labBack = asLab.flatMap { NewColourSheet.read($0.kind, $0.values, press: "") }?.colour
+    check(labBack.map { deltaE2000($0.master.lab, red.master.lab) < 0.05 } == true && (asLab?.working.count ?? 0) == 6,
+          "a pick turned into Lab reads back as the same colour, and shows its working step by step")
+    let wide = NewColourSheet.convert(grey, to: .prophoto, press: PressProfiles.generic)
+    let wideBack = wide.flatMap { NewColourSheet.read($0.kind, $0.values, press: "") }?.colour
+    check(wideBack.map { deltaE2000($0.master.lab, grey.master.lab) < 0.05 } == true, "a pick turned into ProPhoto reads back as the same colour")
+    if let inks = NewColourSheet.convert(red, to: .cmyk, press: PressProfiles.generic) {
+        check(inks.values.count == 4 && inks.working.last?.how.hasPrefix("Beyond this press") == true,
+              "a pick turned into inks says when the press cannot print it")
+    }
     check(HaloGeometry.wheelStep(speed: 1) == 44 && HaloGeometry.wheelStep(speed: 2) == 22 && HaloGeometry.wheelStep(speed: 0.5) == 88,
           "a faster wheel setting turns the ring in less travel, a slower one in more")
     let letters = HaloSettingsPanel.letters(back: {})
