@@ -1050,6 +1050,11 @@ func runHaloTests(check: (Bool, String) -> Void) {
           "a gamut at its widest is never narrower than the same gamut cut at one lightness")
     let labRed = GamutMaths.point(RGBSpace.srgb.master(of: [1, 0, 0]), in: .lab)
     check(close(labRed.x, edgeRed.a, 1e-9) && close(labRed.y, edgeRed.b, 1e-9) && GamutMaths.cubeFaces(2).count == 54, "the round map places a colour by its a* and b*")
+    let lin = RGBSpace.linearSRGB.values(of: RGBSpace.srgb.master(of: [146.0 / 255, 209.0 / 255, 0]))
+    check(close(lin[0], RGBSpace.srgb.linear(146.0 / 255), 1e-9) && close(lin[1], RGBSpace.srgb.linear(209.0 / 255), 1e-9) && close(lin[2], 0, 1e-9)
+          && close(lin[0], 0.2874, 0.0005) && close(lin[1], 0.6376, 0.0005) && RGBSpace.linearSRGB.master(of: lin) == RGBSpace.linearSRGB.master(of: lin)
+          && RGBSpace.linearSRGB.text([0.5, 0.25, 1]) == "0.5000, 0.2500, 1.0000" && RGBSpace.linearSRGB.channel == "Rendering",
+          "Linear sRGB is sRGB with its curve taken off: the same colour, written as amounts of light")
     check(Prefs.apcaGrade(80).verdict == .pass && Prefs.apcaGrade(62).grade == "Text" && Prefs.apcaGrade(50).verdict == .partial && Prefs.apcaGrade(20).grade == "Fail",
           "an APCA contrast is put in words: body, text, large only, or a fail")
     check(HaloGeometry.wheelStep(speed: 1) == 44 && HaloGeometry.wheelStep(speed: 2) == 22 && HaloGeometry.wheelStep(speed: 0.5) == 88,

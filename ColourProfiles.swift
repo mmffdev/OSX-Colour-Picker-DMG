@@ -36,7 +36,7 @@ enum ColourProfiles {
         made("C0100000-0000-4000-8000-000000000001", "Screen And Web", [.srgb, .displayP3]),
         made("C0100000-0000-4000-8000-000000000002", "Print", [.srgb], print: true),
         made("C0100000-0000-4000-8000-000000000003", "Video", [.rec709, .rec2020, .displayP3]),
-        made("C0100000-0000-4000-8000-000000000004", "Rendering And Effects", [.acescg, .rec709, .srgb]),
+        made("C0100000-0000-4000-8000-000000000004", "Rendering And Effects", [.acescg, .linearSRGB, .rec709, .srgb]),
         made("C0100000-0000-4000-8000-000000000005", "Every Channel", RGBSpace.allCases, print: true),
     ]
 

@@ -93,7 +93,7 @@ func bradford(from: (x: Double, y: Double), to: (x: Double, y: Double)) -> Matri
 /// A space that mixes its colours from three primaries: where each primary and its white sit, and
 /// how its numbers are encoded.
 enum RGBSpace: String, CaseIterable, Codable {
-    case srgb, displayP3, adobeRGB, prophoto, rec709, rec2020, p3D65, dciP3, acescg
+    case srgb, displayP3, adobeRGB, prophoto, rec709, rec2020, p3D65, dciP3, acescg, linearSRGB
 
     var name: String {
         switch self {
@@ -106,6 +106,7 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .rec709: return "Rec. 709"
         case .rec2020: return "Rec. 2020"
         case .acescg: return "ACEScg"
+        case .linearSRGB: return "Linear sRGB"
         }
     }
 
@@ -121,6 +122,7 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .rec709: return "HD video, gamma 2.4"
         case .rec2020: return "Ultra HD video, gamma 2.4"
         case .acescg: return "Rendering and visual effects; linear, no ceiling"
+        case .linearSRGB: return "3D engines, shaders and textures; sRGB without its curve"
         }
     }
 
@@ -131,14 +133,14 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .prophoto: return "Photo"
         case .p3D65, .dciP3: return "Cinema"
         case .rec709, .rec2020: return "Video"
-        case .acescg: return "Rendering"
+        case .acescg, .linearSRGB: return "Rendering"
         }
     }
 
     private var primaries: (r: (Double, Double), g: (Double, Double), b: (Double, Double), white: (x: Double, y: Double)) {
         let d65 = (x: 0.3127, y: 0.3290)
         switch self {
-        case .srgb, .rec709: return ((0.640, 0.330), (0.300, 0.600), (0.150, 0.060), d65)
+        case .srgb, .rec709, .linearSRGB: return ((0.640, 0.330), (0.300, 0.600), (0.150, 0.060), d65)
         case .displayP3, .p3D65: return ((0.680, 0.320), (0.265, 0.690), (0.150, 0.060), d65)
         // The same primaries under the projector's own white, which is a little greener than daylight.
         case .dciP3: return ((0.680, 0.320), (0.265, 0.690), (0.150, 0.060), (x: 0.314, y: 0.351))
@@ -179,7 +181,7 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .rec709, .rec2020: return sign * pow(a, 2.4)
         case .p3D65, .dciP3: return sign * pow(a, 2.6)
         case .prophoto: return sign * (a < 16.0 / 512 ? a / 16 : pow(a, 1.8))
-        case .acescg: return v
+        case .acescg, .linearSRGB: return v
         }
     }
 
@@ -191,7 +193,7 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .rec709, .rec2020: return sign * pow(a, 1 / 2.4)
         case .p3D65, .dciP3: return sign * pow(a, 1 / 2.6)
         case .prophoto: return sign * (a < 1.0 / 512 ? 16 * a : pow(a, 1 / 1.8))
-        case .acescg: return v
+        case .acescg, .linearSRGB: return v
         }
     }
 
@@ -245,7 +247,7 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .prophoto: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
         case .adobeRGB: return v.map { "\(whole($0, 255))" }.joined(separator: ", ")
         case .rec709, .rec2020: return v.map { "\(RGBSpace.videoCode($0, legal: legal))" }.joined(separator: ", ") + (legal ? "  (10-bit, legal range)" : "  (10-bit, full range)")
-        case .acescg: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
+        case .acescg, .linearSRGB: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
         }
     }
 }
