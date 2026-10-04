@@ -1127,6 +1127,9 @@ final class HaloTriggerView: NSView {
     override func mouseEntered(with event: NSEvent) { hovering = true }
     override func mouseExited(with event: NSEvent) { hovering = false }
     override func mouseDown(with event: NSEvent) {}   // keep the press from reaching whatever is underneath
+    // While the halo is open its own panel has the keyboard, so the window this button is in is not
+    // the key window. Without this, a press here would only bring the window forward and be lost.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress?() }
     }
