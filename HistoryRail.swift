@@ -152,7 +152,11 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
 
 /// A step: a symbol for what it did, its title, then when, where, and which colours came or went,
 /// each with a tiny swatch of itself.
-private final class StepCell: NSTableCellView {
+final class StepCell: NSTableCellView {
+    /// The height of a step, in the rail and wherever else one is shown.
+    static let height: CGFloat = 38
+    /// False where the cell stands on its own, outside the rail's table: it then fills its frame edge to edge.
+    var inRail = true
     private let icon = NSImageView()
     private let title = NSTextField(labelWithString: "")
     private let detail = caption("")
@@ -218,7 +222,10 @@ private final class StepCell: NSTableCellView {
     /// The table sets a cell in from its own edge by a few points. The insets are measured against
     /// the row, so the symbol's ink lands on the title's left edge and the time on the bar's right edge.
     override func layout() {
-        if let rowView = superview {
+        if !inRail {
+            if leading.constant != 0 { leading.constant = 0 }
+            if trailing.constant != 0 { trailing.constant = 0 }
+        } else if let rowView = superview {
             let left = PageStyle.side + StepCell.inkInset - frame.minX
             let right = -(PageStyle.side - (rowView.bounds.maxX - frame.maxX))
             if leading.constant != left { leading.constant = left }
@@ -229,21 +236,31 @@ private final class StepCell: NSTableCellView {
     /// A label's text starts two points inside its frame and a symbol's ink one point inside its image.
     private static let inkInset: CGFloat = 1
 
+    /// A step as it bears on one colour: the same symbol, title and time, with that colour's own
+    /// swatch and what the step did to it.
+    func show(_ step: HistoryStep, colour hex: String, what: String, isPast: Bool = false) {
+        show(step, swatches: [hex], detail: what, isPast: isPast)
+    }
+
     func show(_ step: HistoryStep, change: StepChange, project: String?, isPast: Bool) {
-        icon.image = symbol(stepSymbol(for: step.title), step.title, size: 13)
-        icon.contentTintColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
-        title.stringValue = step.title
-        title.textColor = isPast ? .tertiaryLabelColor : .labelColor
         var parts: [String] = []
         // The colours that came or went, by name: "Scarlet added", "Blaze Orange, Orange removed".
         if !change.added.isEmpty { parts.append(change.added.prefix(2).map(colourName).joined(separator: ", ") + (change.added.count > 2 ? " +\(change.added.count - 2)" : "") + " added") }
         if !change.removed.isEmpty { parts.append(change.removed.prefix(2).map(colourName).joined(separator: ", ") + (change.removed.count > 2 ? " +\(change.removed.count - 2)" : "") + " removed") }
+        if let p = project { parts.append(p) }
+        show(step, swatches: Array((change.added + change.removed).prefix(4)), detail: parts.joined(separator: "  \u{00B7}  "), isPast: isPast)
+    }
+
+    private func show(_ step: HistoryStep, swatches: [String], detail text: String, isPast: Bool) {
+        icon.image = symbol(stepSymbol(for: step.title), step.title, size: 13)
+        icon.contentTintColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
+        title.stringValue = step.title
+        title.textColor = isPast ? .tertiaryLabelColor : .labelColor
         when.stringValue = stepStamp(step.date)
         when.textColor = isPast ? .tertiaryLabelColor : .secondaryLabelColor
-        if let p = project { parts.append(p) }
-        detail.stringValue = parts.joined(separator: "  \u{00B7}  ")
+        detail.stringValue = text
         chips.views.forEach { $0.removeFromSuperview() }
-        for hex in (change.added + change.removed).prefix(4) {
+        for hex in swatches {
             let chip = NSView()
             chip.wantsLayer = true
             chip.layer?.backgroundColor = colorFromHex(hex)?.cgColor

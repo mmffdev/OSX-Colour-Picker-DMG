@@ -184,6 +184,8 @@ final class SwatchRow: NSView {
     private let notesSlot = NSStackView()
     private var slotsWidth: NSLayoutConstraint!
     static let slotGap: CGFloat = 28
+    /// History is a narrow column, like the rail it copies; the other slots share what is left.
+    static let historyWidth: CGFloat = 300
     private var shown: RowPanels?
     private var shownAmong: [String] = []
 
@@ -247,7 +249,13 @@ final class SwatchRow: NSView {
         let body = NSStackView(views: [histogramSlot, channelsPanel, notesSlot, historyPanel])
         body.orientation = .horizontal
         body.alignment = .top
-        body.distribution = .fillEqually
+        body.distribution = .fill
+        historyPanel.widthAnchor.constraint(equalToConstant: SwatchRow.historyWidth).isActive = true
+        for (one, other) in [(histogramSlot, channelsPanel), (channelsPanel, notesSlot), (histogramSlot, notesSlot)] {
+            let same = one.widthAnchor.constraint(equalTo: other.widthAnchor)
+            same.priority = NSLayoutConstraint.Priority(999)
+            same.isActive = true
+        }
         body.spacing = SwatchRow.slotGap
         // As wide as its slots want, up to the row's edge.
         slotsWidth = body.widthAnchor.constraint(equalToConstant: SwatchRow.panelWidth)
@@ -301,8 +309,8 @@ final class SwatchRow: NSView {
         shownAmong = population
         histogramSlot.isHidden = !panels.histogram
         notesSlot.isHidden = !panels.notes
-        let on = CGFloat([panels.histogram, panels.channels, panels.notes, panels.history].filter { $0 }.count)
-        slotsWidth.constant = max(1, on) * SwatchRow.panelWidth + max(0, on - 1) * SwatchRow.slotGap
+        let wide = CGFloat([panels.histogram, panels.channels, panels.notes].filter { $0 }.count), on = wide + (panels.history ? 1 : 0)
+        slotsWidth.constant = wide * SwatchRow.panelWidth + (panels.history ? SwatchRow.historyWidth : 0) + max(0, on - 1) * SwatchRow.slotGap
         if panels.histogram { histogramPanel.show(hex, among: population, type: panels.type, split: panels.split) }
         channelsPanel.isHidden = !panels.channels
         if panels.channels { fillChannels() }
@@ -342,22 +350,16 @@ final class SwatchRow: NSView {
         if steps.isEmpty {
             historyPanel.addArrangedSubview(caption(library.historyEnabled ? "Nothing Has Happened To This Colour Here Since History Began." : "History Is Off For This Library."))
         }
+        // The History rail's own rows: the step's symbol, its title and time, this colour's swatch and what the step did to it.
         let limit = 6
         for step in steps.reversed().prefix(limit) {
-            let what = caption(step.what, size: TextSize.body)
-            what.textColor = .secondaryLabelColor
-            what.lineBreakMode = .byTruncatingTail
-            what.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            what.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-            let when = caption(stepStamp(step.step.date))
-            when.setContentHuggingPriority(.required, for: .horizontal)
-            when.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let line = NSStackView(views: [what, when])
-            line.orientation = .horizontal
-            line.alignment = .firstBaseline
-            line.distribution = .fill
-            historyPanel.addArrangedSubview(line)
-            line.widthAnchor.constraint(equalTo: historyPanel.widthAnchor).isActive = true
+            let cell = StepCell()
+            cell.inRail = false
+            cell.show(step.step, colour: hex, what: step.what)
+            cell.translatesAutoresizingMaskIntoConstraints = false
+            historyPanel.addArrangedSubview(cell)
+            cell.heightAnchor.constraint(equalToConstant: StepCell.height).isActive = true
+            cell.widthAnchor.constraint(equalTo: historyPanel.widthAnchor).isActive = true
         }
         if steps.count > limit { historyPanel.addArrangedSubview(caption("And \(steps.count - limit) Earlier. Click The Notes For All Of It.")) }
     }
