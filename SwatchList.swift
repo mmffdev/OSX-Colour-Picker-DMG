@@ -11,7 +11,7 @@ enum SwatchListStyle {
     static let rowHeight: CGFloat = 132
     static let rowGap: CGFloat = 12
     static let tileWidth: CGFloat = 132
-    static let infoWidth: CGFloat = 210
+    static let infoWidth: CGFloat = 228   // a grid card's narrowest, so the same rows fit
     static let gap: CGFloat = 16
     /// The sheet: its width, its inset from the page's top and bottom, and the padding inside it.
     static let sheetWidth: CGFloat = 560
@@ -209,16 +209,18 @@ final class SwatchRow: NSView {
         tile.toolTip = "Click to copy"
         tile.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(copyTapped)))
 
-        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
+        name.font = NSFont.systemFont(ofSize: 15, weight: .semibold)   // as on a grid card
         name.lineBreakMode = .byTruncatingTail
         values.orientation = .vertical
         values.alignment = .leading
-        values.spacing = 2
+        values.spacing = 0
         // The values are a column like the others, under a heading of their own.
         let info = NSStackView(views: [heading("Meta"), name, values])
         info.orientation = .vertical
         info.alignment = .leading
-        info.spacing = 6
+        info.spacing = 4
+        info.setCustomSpacing(6, after: info.views[0])
+        values.widthAnchor.constraint(equalTo: info.widthAnchor).isActive = true
 
         note.font = NSFont.systemFont(ofSize: TextSize.body)
         note.maximumNumberOfLines = 5
@@ -294,17 +296,34 @@ final class SwatchRow: NSView {
         guard let library = library else { return }
         name.stringValue = library.library.name(of: hex, in: palette)
         values.views.forEach { $0.removeFromSuperview() }
-        // The values ticked under Labels, all of them, as on a card; then the contrast when WCAG is on.
-        valueLines(for: hex, limit: 99, alwaysHex: false).forEach { values.addArrangedSubview($0) }
+        // The very rows a grid card has: each value ticked under Labels, in columns, with its copy mark;
+        // then the contrast when WCAG is on.
+        name.isHidden = !Prefs.showNames
+        for format in Prefs.cardRows {
+            let row = FormatRow(frame: .zero)
+            row.configure(format, hex: hex, ink: .labelColor)
+            row.onCopy = { [weak self] in if let self = self { self.library?.copy(self.hex, as: format) } }
+            row.translatesAutoresizingMaskIntoConstraints = false
+            values.addArrangedSubview(row)
+            NSLayoutConstraint.activate([
+                row.heightAnchor.constraint(equalToConstant: ColourCard.rowHeight),
+                row.widthAnchor.constraint(equalTo: values.widthAnchor),
+            ])
+        }
         if Prefs.showContrast {
             let white = contrastRatio(hex, "#FFFFFF"), black = contrastRatio(hex, "#000000")
-            // White on one line, black on the next, so neither is cut short.
-            for (label, text) in [("WCAG", String(format: "White %.1f %@", white, contrastGrade(white))), ("", String(format: "Black %.1f %@", black, contrastGrade(black)))] {
-                let grade = caption(label.padding(toLength: 8, withPad: " ", startingAt: 0) + text)
-                grade.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
-                grade.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
-                values.addArrangedSubview(grade)
-            }
+            let title = NSTextField(labelWithString: "WCAG Text Contrast")
+            title.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+            title.textColor = NSColor.labelColor.withAlphaComponent(0.62)
+            let grade = NSTextField(labelWithString: String(format: "White %.1f %@  \u{00B7}  Black %.1f %@", white, contrastGrade(white), black, contrastGrade(black)))
+            grade.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
+            grade.textColor = .secondaryLabelColor
+            grade.lineBreakMode = .byTruncatingTail
+            grade.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
+            if let last = values.views.last { values.setCustomSpacing(8, after: last) }
+            values.addArrangedSubview(title)
+            values.setCustomSpacing(2, after: title)
+            values.addArrangedSubview(grade)
         }
         values.isHidden = values.views.isEmpty
         let text = library.library.note(of: hex, in: palette)
