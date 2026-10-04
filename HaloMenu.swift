@@ -370,8 +370,10 @@ final class HaloMenu: NSResponder {
     private func watch(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .keyDown:
-            guard event.keyCode == 53 else { return event }   // Escape closes from anywhere
-            close()
+            guard event.keyCode == 53 else { return event }
+            // Escape steps back one level: from a ring inside another to the ring it came from,
+            // and from the first ring out of the halo altogether.
+            if let back = actions.first(where: { $0.id == "back" && !$0.disabled }) { back.onSelect() } else { close() }
             return nil
         case .scrollWheel:
             let overDial = event.window === panel && dial.isInside(dial.convert(event.locationInWindow, from: nil))
