@@ -31,6 +31,14 @@ final class ContentViewController: NSViewController {
     let overview: OverviewViewController
     private let library: LibraryController
     private let status = caption("")
+    /// Which build this is, at the footer's right: the version and the commit it was made from.
+    private let release = caption(ContentViewController.releaseLine)
+    static var releaseLine: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let commit = info["ColourBuildCommit"] as? String
+        return "Release v\(version)" + (commit.map { "  \($0)" } ?? "")
+    }
     /// The footer: a hairline, then the status line. Placed by the window, full width.
     let footer = NSView()
     static let footerHeight: CGFloat = 26
@@ -72,7 +80,12 @@ final class ContentViewController: NSViewController {
         ])
 
         let line = hairline()
-        for v in [line, status] as [NSView] {
+        release.textColor = .tertiaryLabelColor
+        release.toolTip = "The Version Of The App, And The Commit This Build Was Made From"
+        release.setContentCompressionResistancePriority(.required, for: .horizontal)
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        status.lineBreakMode = .byTruncatingTail
+        for v in [line, status, release] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             footer.addSubview(v)
         }
@@ -81,7 +94,9 @@ final class ContentViewController: NSViewController {
             line.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
             line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             status.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: PageStyle.side),
-            status.trailingAnchor.constraint(lessThanOrEqualTo: footer.trailingAnchor, constant: -PageStyle.side),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: release.leadingAnchor, constant: -16),
+            release.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -PageStyle.side),
+            release.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             status.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
         ])
     }

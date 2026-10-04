@@ -2,6 +2,10 @@
 
 macOS colour picker app (MMFFDev Colour 3). The source is at the repository root; the two earlier apps were removed on 2026-10-02 and live only in git history. Build: `./build.sh` (compiles, runs the self-test, installs); installers: `./make_dmg.sh`, `./make_pkg.sh`.
 
+## Build after every commit
+
+After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.
+
 ## Vector backlog — the only place this repo's work goes
 
 Since 2026-10-02 this repo's work lives in the workspace the local Vector connection actually reaches (Vector's own), under a runway of its own:
