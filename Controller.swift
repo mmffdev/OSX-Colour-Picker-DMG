@@ -134,6 +134,11 @@ final class LibraryController: NSObject {
             library = try store.mutate { lib in
                 var trial = lib
                 body(&trial)
+                // A palette just made is turned to the default purpose straight away: a palette always has one.
+                let had = Set(lib.swatches.map { $0.id })
+                for made in trial.swatches where !had.contains(made.id) && made.purpose == nil && !made.isTypography {
+                    trial.choosePurpose(Prefs.defaultPurpose, ofPalette: made.id)
+                }
                 if let name = lib.lockedProjectChanged(by: trial) { throw LockedProject(name: name) }
                 lib = trial
             }
@@ -540,13 +545,14 @@ final class LibraryController: NSObject {
 
     // MARK: Purposes
 
-    /// The one purpose a palette is turned to; nil is the palette as it is.
-    func shownPurpose(for id: UUID) -> Purpose? { library.swatch(id)?.purpose }
+    /// The one purpose a palette is turned to. A palette always has one: where none has been
+    /// chosen for it, it is the default purpose from Settings. nil only for a palette that is not there.
+    func shownPurpose(for id: UUID) -> Purpose? { library.swatch(id).map { $0.purpose ?? Prefs.defaultPurpose } }
 
-    /// Turns a palette to a purpose, or back to none. The choice is the palette's, kept with its project.
+    /// Turns a palette to a purpose. The choice is the palette's, kept with its project.
     func show(_ purpose: Purpose?, forPalette id: UUID) {
-        guard library.swatch(id)?.purpose != purpose else { return }
-        apply(purpose.map { "Turn To \($0.title)" } ?? "Turn To No Purpose") { $0.choosePurpose(purpose, ofPalette: id) }
+        guard let purpose = purpose, library.swatch(id)?.purpose != purpose else { return }
+        apply("Turn To \(purpose.title)") { $0.choosePurpose(purpose, ofPalette: id) }
         refreshPrintCondition()
     }
 

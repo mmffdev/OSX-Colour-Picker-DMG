@@ -138,11 +138,11 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         star.toolTip = (s.favourite ? "Remove from Favourites" : "Add to Favourites") + " (\u{21E7}F)"
         count.stringValue = "\(s.styles?.count ?? s.entries.count)"   // a Typography palette counts its pairings
         target.isHidden = !isTarget
-        purpose.isHidden = s.purpose == nil
-        if let turned = s.purpose {
-            purpose.image = symbol(turned.symbol, turned.title, size: 11)
-            purpose.toolTip = "Turned To \(turned.title)"
-        }
+        // Every palette of colours is turned to a purpose; one that has not been given one is turned to the default.
+        purpose.isHidden = s.isTypography
+        let turned = s.purpose ?? Prefs.defaultPurpose
+        purpose.image = symbol(turned.symbol, turned.title, size: 11)
+        purpose.toolTip = "Turned To \(turned.title)"
         toolTip = s.tagList.isEmpty ? nil : "Tags: " + s.tagList.joined(separator: ", ")
     }
 
@@ -300,9 +300,9 @@ final class SidebarOutlineView: NSOutlineView {
     /// Shift-F on a row.
     var onFavouriteKey: (() -> Void)?
 
-    // A project's tag bucket, and the tags inside it, sit one step further in, so the bucket's
-    // disclosure arrow lines up under the stars of the palettes above it.
-    private static let bucketInset: CGFloat = 16
+    // Every level is one step in from the one above (RailStyle.step, which rail2 shares). A row
+    // that opens has its arrow at its level and its icon one step on; a row that does not open
+    // starts at its level. So a child's arrow, or its star, sits under its parent's icon.
     /// Bold and in the full text colour: grey headings were hard to read over a dark sidebar.
     static let headingFont = NSFont.systemFont(ofSize: 11, weight: .bold)
 
@@ -321,18 +321,6 @@ final class SidebarOutlineView: NSOutlineView {
         if isItemExpanded(bucket) { animator().collapseItem(bucket) } else { animator().expandItem(bucket) }
     }
 
-    private func isInTagBucket(_ row: Int) -> Bool {
-        guard let node = item(atRow: row) as? SidebarNode else { return false }
-        // A project's Tags and Typography buckets are inset alike, and so is what they hold.
-        func bucket(_ kind: SidebarNode.Kind?) -> Bool {
-            switch kind {
-            case .projectTags?, .projectTypography?, .projectPalettes?, .projectInformation?: return true
-            default: return false
-            }
-        }
-        return bucket(node.kind) || bucket((parent(forItem: node) as? SidebarNode)?.kind)
-    }
-
     /// The space left under each main section, held as empty room at the top of the next heading's row.
     static let sectionGap: CGFloat = 20
 
@@ -341,16 +329,19 @@ final class SidebarOutlineView: NSOutlineView {
 
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         var frame = super.frameOfOutlineCell(atRow: row)
-        if isInTagBucket(row) { frame.origin.x += SidebarOutlineView.bucketInset }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
     }
 
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         var frame = super.frameOfCell(atColumn: column, row: row)
-        if isInTagBucket(row) {
-            frame.origin.x += SidebarOutlineView.bucketInset
-            frame.size.width -= SidebarOutlineView.bucketInset
+        // Where the first row's arrow is drawn is where level 0 starts; each level is a step further in.
+        let first = numberOfRows > 0 ? super.frameOfOutlineCell(atRow: 0) : .zero
+        if first.width > 0 {
+            let start = first.minX + CGFloat(level(forRow: row)) * RailStyle.step
+            let x = isExpandable(item(atRow: row)) ? start + RailStyle.step : start
+            frame.size.width -= x - frame.origin.x
+            frame.origin.x = x
         }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
@@ -409,7 +400,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outline.dataSource = self
         outline.delegate = self
         outline.autoresizesOutlineColumn = false
-        outline.indentationPerLevel = 8
+        outline.indentationPerLevel = RailStyle.step
         outline.registerForDraggedTypes([paletteDragType, projectDragType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         outline.onDeleteKey = { [weak self] in

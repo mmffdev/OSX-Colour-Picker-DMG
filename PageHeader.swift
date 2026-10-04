@@ -65,6 +65,8 @@ final class PageHeader: NSView {
     var striped = false { didSet { needsDisplay = true } }
     /// The padlock before the title, shown for anything in a project: open, or shut when the project is locked.
     private let lockMark = NSImageView()
+    /// A mark of the page's own before the title, such as the purpose a palette's page is turned to. Hidden until given an image.
+    let mark = NSImageView()
     private var titleRow: NSStackView!
     /// The title panel's far right: a page's view switches, sized to sit with the title.
     let trailing = NSStackView()
@@ -103,7 +105,10 @@ final class PageHeader: NSView {
         trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
         title.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let titleRow = NSStackView(views: [lockMark, title, trailing])
+        mark.isHidden = true
+        mark.contentTintColor = .labelColor
+        mark.setContentHuggingPriority(.required, for: .horizontal)
+        let titleRow = NSStackView(views: [lockMark, mark, title, trailing])
         titleRow.distribution = .fill
         self.titleRow = titleRow
         titleRow.orientation = .horizontal

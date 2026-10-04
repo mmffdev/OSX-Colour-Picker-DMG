@@ -19,10 +19,15 @@ enum RailStyle {
     static let row: CGFloat = 28
     static var bucketGap: CGFloat { SidebarOutlineView.sectionGap }
     /// Where things start from the rail's left edge: the disclosure arrow, a heading's text, a row's icon, a row's text.
+    /// One step in: from a row's disclosure arrow to its icon, which is also where the next level
+    /// down begins. Both rails are laid out in these steps, so a child's arrow, or the first thing
+    /// on a child that has no arrow, always sits under its parent's icon.
+    static let step: CGFloat = 12
     static let arrow: CGFloat = 12
-    static let heading: CGFloat = 28
-    static let icon: CGFloat = 36
-    static let text: CGFloat = 60
+    static var heading: CGFloat { arrow + step }
+    /// A bucket's rows have no arrow, so their icon starts one step in, under the heading's first letter.
+    static var icon: CGFloat { arrow + step }
+    static var text: CGFloat { icon + 22 }
     static let trailing: CGFloat = 12
     /// rail1 is a sidebar list, and the system sets its text to the sidebar size chosen in System
     /// Settings (small, medium or large), headings and rows alike, whatever font the app asks

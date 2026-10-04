@@ -82,7 +82,7 @@ class SettingsPanel: NSViewController {
     }
 
     /// Every panel is at least this wide, so the window's toolbar shows all the panels' icons.
-    static let minimumWidth: CGFloat = 900
+    static let minimumWidth: CGFloat = 980
 
     override func viewWillAppear() {
         super.viewWillAppear()
@@ -657,6 +657,36 @@ final class HaloSettingsPanel: SettingsPanel {
     }
 }
 
+// MARK: Projects
+
+/// What a project starts with. For now: the purpose a new palette is turned to.
+final class ProjectsPanel: SettingsPanel {
+    /// One box per purpose, of which exactly one is ticked.
+    private lazy var purposes: [NSButton] = Purpose.allCases.map { check($0.title, #selector(purposeChosen(_:))) }
+
+    override func rows() -> [[NSView]] {
+        for (at, box) in purposes.enumerated() {
+            box.tag = at
+            box.toolTip = Purpose.allCases[at].about
+        }
+        var out: [[NSView]] = [[heading("Default Purpose"), blank]]
+        for (at, box) in purposes.enumerated() { out.append([at == 0 ? label("New Palettes Are For:") : blank, box]) }
+        out.append([blank, note("Every palette is turned to one purpose at a time, which sets the values and the checks its page shows. A new palette starts on the purpose ticked here, and it can be turned to another under Purposes on its page.")])
+        return out
+    }
+
+    override func refresh() {
+        let chosen = Prefs.defaultPurpose
+        for (box, purpose) in zip(purposes, Purpose.allCases) { box.state = purpose == chosen ? .on : .off }
+    }
+
+    /// One is always ticked: a press on the ticked one leaves it ticked, and a press on another moves the tick.
+    @objc private func purposeChosen(_ sender: NSButton) {
+        if Purpose.allCases.indices.contains(sender.tag) { Prefs.defaultPurpose = Purpose.allCases[sender.tag] }
+        refresh()
+    }
+}
+
 // MARK: Organisation
 
 /// Who is using the app: the same fields as the project form's Studio section. Kept as typed, and
@@ -924,13 +954,14 @@ final class SettingsWindowController: NSWindowController {
         panels = [
             GeneralPanel(library: library, title: "General", icon: "gearshape"),
             OrganisationPanel(library: library, title: "Organisation", icon: "building.2"),
-            ColourPanel(library: library, title: "Colour", icon: "dial.medium"),
-            AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
-            ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
-            ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
+            ProjectsPanel(library: library, title: "Projects", icon: "folder"),
+            ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
             HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
+            AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
+            ShortcutsPanel(library: library, title: "Shortcuts", icon: "keyboard"),
+            ColourPanel(library: library, title: "Colour", icon: "dial.medium"),
             ThemePanel(library: library, title: "Theme", icon: "paintpalette"),
             HaloSettingsPanel(library: library, title: "Halo", icon: "circle.circle"),
             PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield"),

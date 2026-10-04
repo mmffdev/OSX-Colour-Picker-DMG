@@ -183,6 +183,12 @@ enum Prefs {
         set { d.set(newValue.map { $0.rawValue }, forKey: "cardRows"); changed() }
     }
 
+    /// The purpose a new palette is turned to, and the one a palette with none is shown as.
+    static var defaultPurpose: Purpose {
+        get { d.string(forKey: "defaultPurpose").flatMap(Purpose.init(rawValue:)) ?? .web }
+        set { d.set(newValue.rawValue, forKey: "defaultPurpose"); changed() }
+    }
+
     /// The rows the palette page is showing for the purpose on show; nil while no purpose is,
     /// when the cards show the rows chosen in Settings. Set by the palette page, kept nowhere.
     static var purposeCardRows: [ColourFormat]?

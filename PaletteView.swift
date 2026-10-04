@@ -415,15 +415,17 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// What each purpose makes of the palette: every purpose on Overview, the one on show on its own tab.
     private let verdicts = NSStackView()
     private let paletteHeading = sectionHeading("Palette")
-    /// The mark of the purpose the page is turned to, in front of its heading; not there when it is turned to none.
-    private let purposeMark = NSImageView()
+    /// Under the title panel, which names the purpose: the palette's own name, with the padlock of its project in front.
+    private let nameLock = NSImageView()
     private let paletteTitle = NSStackView()
+    /// Whether the palette's project is locked; nil for a palette in no project.
+    private var locked: Bool?
     private let swatchesHeading = sectionHeading("Swatches")
     /// Over the spectrum: what can be done with the palette as a whole.
 
 
     private let nameField = NSTextField(labelWithString: "")
-    private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
+    private lazy var header = PageHeader(title: paletteHeading, actions: [browsing, selecting, tagBar])
     private var star: NSButton!
     private var target: NSButton!
     private var tagButton: NSButton!
@@ -602,11 +604,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         verdicts.orientation = .vertical
         verdicts.alignment = .leading
         verdicts.spacing = 4
-        // The palette's heading is as large as the page's title, with the purpose's mark in front of it.
-        paletteHeading.font = PageStyle.titleFont
-        purposeMark.contentTintColor = .labelColor
-        purposeMark.setContentHuggingPriority(.required, for: .horizontal)
-        paletteTitle.setViews([purposeMark, paletteHeading], in: .leading)
+        // The palette's name is as large as the page's title, with its project's padlock in front of it.
+        nameField.font = PageStyle.titleFont
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.cell?.usesSingleLineMode = true
+        nameLock.setContentHuggingPriority(.required, for: .horizontal)
+        paletteTitle.setViews([nameLock, nameField], in: .leading)
         paletteTitle.orientation = .horizontal
         paletteTitle.alignment = .centerY
         paletteTitle.spacing = 10
@@ -682,8 +685,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             s.config(for: p)?.labels.map { saved in ColourFormat.cardRows.filter { saved.contains($0.rawValue) } } ?? p.starterLabels
         }
         paletteHeading.stringValue = purpose.map { "Palette For \($0.title)" } ?? "Palette"
-        purposeMark.isHidden = purpose == nil
-        if let purpose = purpose { purposeMark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
+        header.mark.isHidden = purpose == nil
+        if let purpose = purpose { header.mark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
@@ -717,8 +720,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         let project = s.projectID.flatMap { pid in library.library.project(pid).map { (pid, $0.name) } }
         header.setProject(project?.1) { [weak self] in if let pid = project?.0 { self?.library.onRevealProject?(pid) } }
         header.striped = project != nil
-        header.lock = s.projectID.flatMap { library.library.project($0)?.isLocked }
-        nameField.isEditable = !(header.lock ?? false)
+        locked = s.projectID.flatMap { library.library.project($0)?.isLocked }
+        nameLock.isHidden = locked == nil
+        nameLock.image = symbol(locked == true ? "lock.fill" : "lock.open", locked == true ? "Locked" : "Unlocked", size: 16, weight: .semibold)
+        nameLock.contentTintColor = locked == true ? .systemOrange : .tertiaryLabelColor
+        nameLock.toolTip = locked == true ? "The project is locked: nothing in it can change" : "The project is unlocked"
+        nameField.isEditable = !(locked ?? false)
 
         star.image = symbol(s.favourite ? "star.fill" : "star", "Favourite")
         star.contentTintColor = s.favourite ? .systemYellow : .secondaryLabelColor
@@ -742,7 +749,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         scroll.isHidden = asList
         list.isHidden = !asList
         // WCAG and Labels work on both views: what a card shows, a row's Meta column shows.
-        if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups, panels: RowPanels.chosen) }
+        if asList { list.show(hexes, in: id, locked: locked ?? false, offersNew: offersNew, groups: groups, panels: RowPanels.chosen) }
 
         sizeCards()
         grid.reloadData()
@@ -761,7 +768,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
     private func openSheet(for hex: String, tab: Int) {
         guard let id = paletteID, sheet == nil else { return }
-        let new = SwatchSheet(hex: hex, palette: id, library: library, tab: tab, locked: header.lock ?? false)
+        let new = SwatchSheet(hex: hex, palette: id, library: library, tab: tab, locked: locked ?? false)
         new.onClose = { [weak self] in
             self?.sheet = nil
             self?.view.window?.makeFirstResponder(self?.view)
@@ -807,7 +814,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         let chosen = purpose.map { s.config(for: $0)?.profile } ?? s.profile
         let own = chosen.flatMap { id in profile.itemArray.firstIndex { ($0.representedObject as? String) == id.uuidString } }
         profile.selectItem(at: own ?? 0)
-        profile.isEnabled = !(header.lock ?? false)
+        profile.isEnabled = !(locked ?? false)
         let using = library.profile(forPalette: s.id).profile
         profile.toolTip = "The colour profile this palette is proofed for: \(using.summary)"
     }
@@ -877,8 +884,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             RailRow(label, symbol: i == 0 ? "textformat" : "number", tip: "Show \(label) On Every Swatch", kind: .toggle { [weak self] in self?.railLabelToggled(i) })
         }
         labelsBucket.set(labelRows)
-        // One purpose at a time: choosing one turns the page to it and lets go of the one before;
-        // choosing the one that is on lets go of it, and the page shows the palette as it is.
+        // One purpose at a time, and always one: choosing another turns the page to it and lets go of the one before.
         purposeRows = Purpose.allCases.map { purpose in
             RailRow(purpose.title, symbol: purpose.symbol, tip: purpose.about, kind: .toggle { [weak self] in self?.purposeChosen(purpose) })
         }
@@ -905,14 +911,14 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             RailRow("#" + tag, symbol: "tag", dot: tagColour(library.library.info(forTag: tag)), tip: "Show Everything Tagged \(tag)", kind: .link { [weak self] in self?.library.onShow?(.tag(tag), false) })
         }
         let edit = RailRow(s.tagList.isEmpty ? "Add Tags\u{2026}" : "Edit Tags\u{2026}", symbol: "pencil", tip: "Change This Palette's Tags", kind: .link { [weak self] in self?.tagsTapped() })
-        edit.isEnabled = !(header.lock ?? false)
+        edit.isEnabled = !(locked ?? false)
         tags.append(edit)
         tagsBucket.set(tags)
     }
 
     private func purposeChosen(_ purpose: Purpose) {
         guard let id = paletteID else { return }
-        library.show(library.shownPurpose(for: id) == purpose ? nil : purpose, forPalette: id)
+        library.show(purpose, forPalette: id)
         reload()
     }
 
@@ -990,7 +996,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
     func numberOfSections(in cv: NSCollectionView) -> Int { 1 }
     /// The blank swatch that adds a colour follows the last one, unless the project is locked or a search is narrowing the page.
-    private var offersNew: Bool { !(header.lock ?? false) && search.isEmpty }
+    private var offersNew: Bool { !(locked ?? false) && search.isEmpty }
 
     func collectionView(_ cv: NSCollectionView, numberOfItemsInSection s: Int) -> Int { slots.count }
 
