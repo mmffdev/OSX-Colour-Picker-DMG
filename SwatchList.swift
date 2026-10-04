@@ -11,7 +11,7 @@ enum SwatchListStyle {
     static let rowHeight: CGFloat = 132
     static let rowGap: CGFloat = 12
     static let tileWidth: CGFloat = 132
-    static let infoWidth: CGFloat = 170
+    static let infoWidth: CGFloat = 210
     static let gap: CGFloat = 16
     /// The sheet: its width, its inset from the page's top and bottom, and the padding inside it.
     static let sheetWidth: CGFloat = 560
@@ -25,9 +25,9 @@ private final class FlippedView: NSView {
 }
 
 /// The colour's values, one to a line, labels padded so the values stand in a column.
-private func valueLines(for hex: String, limit: Int) -> [NSTextField] {
+private func valueLines(for hex: String, limit: Int, alwaysHex: Bool = true) -> [NSTextField] {
     var formats = Prefs.cardRows
-    if !formats.contains(.hex) { formats.insert(.hex, at: 0) }
+    if alwaysHex, !formats.contains(.hex) { formats.insert(.hex, at: 0) }
     return formats.prefix(limit).map { format in
         let line = caption(format.label.uppercased().padding(toLength: 8, withPad: " ", startingAt: 0) + format.text(hex, lowercase: Prefs.lowercaseHex))
         line.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
@@ -274,6 +274,7 @@ final class SwatchRow: NSView {
             info.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: s.gap),
             info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             info.widthAnchor.constraint(equalToConstant: s.infoWidth),
+            info.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),   // a long list of values makes the row taller
             body.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
             body.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             slotsWidth,
@@ -293,7 +294,19 @@ final class SwatchRow: NSView {
         guard let library = library else { return }
         name.stringValue = library.library.name(of: hex, in: palette)
         values.views.forEach { $0.removeFromSuperview() }
-        valueLines(for: hex, limit: 4).forEach { values.addArrangedSubview($0) }
+        // The values ticked under Labels, all of them, as on a card; then the contrast when WCAG is on.
+        valueLines(for: hex, limit: 99, alwaysHex: false).forEach { values.addArrangedSubview($0) }
+        if Prefs.showContrast {
+            let white = contrastRatio(hex, "#FFFFFF"), black = contrastRatio(hex, "#000000")
+            // White on one line, black on the next, so neither is cut short.
+            for (label, text) in [("WCAG", String(format: "White %.1f %@", white, contrastGrade(white))), ("", String(format: "Black %.1f %@", black, contrastGrade(black)))] {
+                let grade = caption(label.padding(toLength: 8, withPad: " ", startingAt: 0) + text)
+                grade.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
+                grade.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
+                values.addArrangedSubview(grade)
+            }
+        }
+        values.isHidden = values.views.isEmpty
         let text = library.library.note(of: hex, in: palette)
         note.stringValue = text ?? (locked ? "No Notes." : "No Notes Yet. Click To Write Some.")
         note.textColor = text == nil ? .tertiaryLabelColor : .labelColor

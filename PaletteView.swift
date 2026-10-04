@@ -24,10 +24,10 @@ final class FormatRow: NSView {
             addSubview(v)
         }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.widthAnchor.constraint(equalToConstant: 46),
-            icon.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            icon.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 16),
             values.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
@@ -60,7 +60,7 @@ final class FormatRow: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard hovering else { return }
         ink.withAlphaComponent(0.14).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 1), xRadius: 5, yRadius: 5).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: -4, dy: 1), xRadius: 5, yRadius: 5).fill()
     }
 
     override func mouseEntered(with event: NSEvent) { hovering = true }
@@ -95,14 +95,19 @@ final class SpectrumView: NSView {
     }
 }
 
+/// A swatch in a palette's grid: the colour as a plain block, and under it, on the page, its name
+/// and its values, as All Swatches lays its tiles out. Nothing is written over the colour except
+/// the source of a colour that is not a plain sRGB value, and the button for its actions.
 final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("card")
     /// The narrowest a card gets; they widen to fill the row.
     static let width: CGFloat = 228
+    static let chipHeight: CGFloat = 112
+    static let rowHeight: CGFloat = 22
 
     /// Height for the rows and extras switched on in Settings.
     static var height: CGFloat {
-        68 + CGFloat(Prefs.cardRows.count) * 25 + (Prefs.showContrast ? 46 : 0) + 12
+        chipHeight + 8 + (Prefs.showNames ? 24 : 0) + CGFloat(Prefs.cardRows.count) * rowHeight + (Prefs.showContrast ? 42 : 0) + 4
     }
 
     var onCopyRow: ((ColourFormat) -> Void)?
@@ -110,28 +115,30 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     var onHalo: ((NSView) -> Void)?
     weak var library: LibraryController?
     private(set) var hex = ""
+    private let chip = NSView()
     private let name = NSTextField(labelWithString: "")
     private let code = NSTextField(labelWithString: "")
     private let rows = NSStackView()
     private let contrast = NSTextField(labelWithString: "")
-    private let contrastTitle = NSTextField(labelWithString: "WCAG TEXT CONTRAST")
-    private let ring = CAShapeLayer()
+    private let contrastTitle = NSTextField(labelWithString: "WCAG Text Contrast")
     private let halo = HaloTriggerView()
+    private let below = NSStackView()
 
     override func loadView() {
         let v = NSView()
-        v.wantsLayer = true
-        v.layer?.cornerRadius = 12
-        v.layer?.cornerCurve = .continuous
-        v.layer?.borderWidth = 1
         view = v
+        chip.wantsLayer = true
+        chip.layer?.cornerRadius = 12
+        chip.layer?.cornerCurve = .continuous
+        chip.layer?.borderWidth = 1
 
-        name.font = NSFont.systemFont(ofSize: 17, weight: .bold)
+        name.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
         name.lineBreakMode = .byTruncatingTail
-        code.font = NSFont.monospacedSystemFont(ofSize: TextSize.body, weight: .regular)
+        code.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .medium)
+        code.lineBreakMode = .byTruncatingTail
         contrast.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
         contrast.lineBreakMode = .byTruncatingTail
-        contrastTitle.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .bold)
+        contrastTitle.font = NSFont.systemFont(ofSize: 10, weight: .bold)
         rows.orientation = .vertical
         rows.spacing = 0
         rows.alignment = .leading
@@ -142,28 +149,42 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
             self.onHalo?(self.halo)
         }
 
-        for s in [name, code, rows, contrastTitle, contrast, halo] as [NSView] {
+        // Under the colour, top to bottom: the name, the values, the contrast. Whatever is switched off leaves no gap.
+        let grades = NSStackView(views: [contrastTitle, contrast])
+        grades.orientation = .vertical
+        grades.alignment = .leading
+        grades.spacing = 2
+        below.setViews([name, rows, grades], in: .top)
+        below.orientation = .vertical
+        below.alignment = .leading
+        below.spacing = 4
+        below.setCustomSpacing(8, after: rows)
+
+        for s in [chip, below] as [NSView] {
             s.translatesAutoresizingMaskIntoConstraints = false
             v.addSubview(s)
         }
+        for s in [code, halo] as [NSView] {
+            s.translatesAutoresizingMaskIntoConstraints = false
+            chip.addSubview(s)
+        }
         NSLayoutConstraint.activate([
-            name.topAnchor.constraint(equalTo: v.topAnchor, constant: 14),
-            name.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 14),
-            name.trailingAnchor.constraint(equalTo: halo.leadingAnchor, constant: -8),
-            halo.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -11), // its ring sits 3 points inside its frame
+            chip.topAnchor.constraint(equalTo: v.topAnchor),
+            chip.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            chip.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            chip.heightAnchor.constraint(equalToConstant: ColourCard.chipHeight),
+            halo.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -9), // its ring sits 3 points inside its frame
+            halo.topAnchor.constraint(equalTo: chip.topAnchor, constant: 9),
             halo.widthAnchor.constraint(equalToConstant: 24),
             halo.heightAnchor.constraint(equalToConstant: 24),
-            halo.centerYAnchor.constraint(equalTo: name.centerYAnchor),
-            code.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2),
-            code.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            rows.topAnchor.constraint(equalTo: v.topAnchor, constant: 68),
-            rows.leadingAnchor.constraint(equalTo: v.leadingAnchor),
-            rows.trailingAnchor.constraint(equalTo: v.trailingAnchor),
-            contrast.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            contrast.trailingAnchor.constraint(equalTo: name.trailingAnchor),
-            contrast.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -14),
-            contrastTitle.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            contrastTitle.bottomAnchor.constraint(equalTo: contrast.topAnchor, constant: -3),
+            code.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 12),
+            code.trailingAnchor.constraint(lessThanOrEqualTo: chip.trailingAnchor, constant: -12),
+            code.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -10),
+            below.topAnchor.constraint(equalTo: chip.bottomAnchor, constant: 8),
+            below.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 2),
+            below.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -2),
+            rows.widthAnchor.constraint(equalTo: below.widthAnchor),
+            name.widthAnchor.constraint(lessThanOrEqualTo: below.widthAnchor),
         ])
     }
 
@@ -171,8 +192,8 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
 
     private func outline() {
         let ink = colorFromHex(readableText(on: hex)) ?? .white
-        view.layer?.borderWidth = isSelected ? 3 : 1
-        view.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : ink.withAlphaComponent(0.16)).cgColor
+        chip.layer?.borderWidth = isSelected ? 3 : 1
+        chip.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : ink.withAlphaComponent(0.16)).cgColor
     }
 
     /// The name was edited on the card; blank asks for the standard name back.
@@ -213,39 +234,42 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         self.hex = hex
         shownName = called ?? colourName(hex)
         let ink = colorFromHex(readableText(on: hex)) ?? .white
-        view.layer?.backgroundColor = colorFromHex(hex)?.cgColor
+        chip.layer?.backgroundColor = colorFromHex(hex)?.cgColor
         outline()
 
-        name.stringValue = Prefs.showNames ? shownName : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
-        name.textColor = ink
+        // The title is the colour's name, never its hex: the hex is one of the values below, when ticked.
+        name.stringValue = shownName
+        name.textColor = .labelColor
+        name.isHidden = !Prefs.showNames
         halo.ink = ink
-        // A colour that is not a plain sRGB value says what it is: its P3 values, its build, its Lab.
-        code.stringValue = !Prefs.showNames ? "" : ColourKeys.isKey(hex) ? ColourKeys.label(hex) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
-        code.textColor = ink.withAlphaComponent(0.75)
+        // A colour that is not a plain sRGB value says what it is, on the colour: its P3 values, its build, its Lab.
+        code.stringValue = ColourKeys.isKey(hex) ? ColourKeys.label(hex) : ""
+        code.textColor = ink.withAlphaComponent(0.8)
         let tags = library?.library.colours.first { $0.hex == hex }?.tags ?? []
         view.toolTip = "Click to copy \(Prefs.copyText(hex))" + (tags.isEmpty ? "" : "\nTags: " + tags.joined(separator: ", "))
 
         rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for format in Prefs.cardRows {
             let row = FormatRow(frame: .zero)
-            row.configure(format, hex: hex, ink: ink)
+            row.configure(format, hex: hex, ink: .labelColor)
             row.onCopy = { [weak self] in self?.onCopyRow?(format) }
             row.translatesAutoresizingMaskIntoConstraints = false
             rows.addArrangedSubview(row)
             NSLayoutConstraint.activate([
-                row.heightAnchor.constraint(equalToConstant: 25),
+                row.heightAnchor.constraint(equalToConstant: ColourCard.rowHeight),
                 row.widthAnchor.constraint(equalTo: rows.widthAnchor),
             ])
         }
 
         contrast.isHidden = !Prefs.showContrast
         contrastTitle.isHidden = !Prefs.showContrast
-        contrastTitle.textColor = ink.withAlphaComponent(0.62)
+        contrastTitle.textColor = NSColor.labelColor.withAlphaComponent(0.62)
+        rows.isHidden = Prefs.cardRows.isEmpty
         if Prefs.showContrast {
             let white = contrastRatio(hex, "#FFFFFF"), black = contrastRatio(hex, "#000000")
             contrast.stringValue = String(format: "White %.1f %@  \u{00B7}  Black %.1f %@",
                                           white, contrastGrade(white), black, contrastGrade(black))
-            contrast.textColor = ink.withAlphaComponent(0.7)
+            contrast.textColor = .secondaryLabelColor
             contrast.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
         }
     }
@@ -566,8 +590,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         }
         scroll.isHidden = asList
         list.isHidden = !asList
-        wcag.isHidden = asList   // the card's own extras; a row shows its values always
-        labels.isHidden = asList
+        // WCAG and Labels work on both views: what a card shows, a row's Meta column shows.
         if asList { list.show(hexes, in: id, locked: header.lock ?? false, offersNew: offersNew, groups: groups, panels: RowPanels.chosen) }
 
         sizeCards()
