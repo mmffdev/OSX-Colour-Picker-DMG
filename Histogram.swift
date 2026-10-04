@@ -12,10 +12,10 @@ import AppKit
 /// Every set of values a card can show has a histogram. (Hex is the RGB values written in base 16,
 /// so RGB is its histogram.) The raw values are kept in preferences, so new kinds go at the end.
 enum HistogramType: Int, CaseIterable {
-    case rgb, cmyk, hsl, hsv, p3, adobeRGB, rec2020, lab
+    case rgb, cmyk, hsl, hsv, p3, adobeRGB, rec2020, lab, ycbcr
 
-    /// The order they are offered in: the order of a card's rows.
-    static let offered: [HistogramType] = [.rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab]
+    /// The order they are offered in: the order of a card's rows, then the video signal.
+    static let offered: [HistogramType] = [.rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab, .ycbcr]
 
     var title: String {
         switch self {
@@ -27,6 +27,7 @@ enum HistogramType: Int, CaseIterable {
         case .adobeRGB: return "Adobe"
         case .rec2020: return "BT.2020"
         case .lab: return "L*a*b*"
+        case .ycbcr: return "Y\u{2032}CbCr"
         }
     }
 
@@ -37,6 +38,7 @@ enum HistogramType: Int, CaseIterable {
         case .hsl: return ["Hue", "Saturation", "Lightness"]
         case .hsv: return ["Hue", "Saturation", "Value"]
         case .lab: return ["L*", "a*", "b*"]
+        case .ycbcr: return ["Y\u{2032}", "Cb", "Cr"]
         }
     }
 
@@ -47,6 +49,7 @@ enum HistogramType: Int, CaseIterable {
         case .cmyk: return [0...100, 0...100, 0...100, 0...100]
         case .hsl, .hsv: return [0...360, 0...100, 0...100]
         case .lab: return [0...100, -128...127, -128...127]
+        case .ycbcr: return [0...1023, 0...1023, 0...1023]
         }
     }
 
@@ -57,6 +60,7 @@ enum HistogramType: Int, CaseIterable {
         case .cmyk: return "0 To 100, For \(PrintCondition.current.press ?? PressProfiles.generic)"
         case .hsl, .hsv: return "Hue 0 To 360, The Rest 0 To 100"
         case .lab: return "L* 0 To 100, a* And b* \u{2212}128 To 127"
+        case .ycbcr: return "Rec. 709, 10-Bit Legal Range; 512 Is No Colour"
         }
     }
 
@@ -69,6 +73,8 @@ enum HistogramType: Int, CaseIterable {
         case .hsl, .hsv: return [NSColor(srgbRed: 0.75, green: 0.35, blue: 1, alpha: 1), NSColor(srgbRed: 0.1, green: 0.8, blue: 0.75, alpha: 1), NSColor(white: 0.8, alpha: 1)]
         // Lightness, then the two opponent axes: green to red, blue to yellow.
         case .lab: return [NSColor(white: 0.8, alpha: 1), NSColor(srgbRed: 1, green: 0.35, blue: 0.5, alpha: 1), NSColor(srgbRed: 1, green: 0.75, blue: 0.15, alpha: 1)]
+        // Brightness, then the blue and the red difference.
+        case .ycbcr: return [NSColor(white: 0.8, alpha: 1), blue, red]
         }
     }
 
@@ -80,6 +86,7 @@ enum HistogramType: Int, CaseIterable {
         switch self {
         case .rgb, .p3, .adobeRGB, .rec2020: return 16...235
         case .cmyk: return 3...95
+        case .ycbcr: return 64...940
         case .hsl, .hsv, .lab: return nil
         }
     }
@@ -106,13 +113,17 @@ enum HistogramType: Int, CaseIterable {
         case .adobeRGB: return .adobeRGB
         case .rec2020: return .rec2020
         case .lab: return .lab
-        case .cmyk: return nil
+        case .cmyk, .ycbcr: return nil
         }
     }
 
     /// A colour's channel values on this scale: the very numbers its card shows, or the ink
     /// percentages for the press in force. Lab is rounded to whole numbers.
     func values(of key: String) -> [Int]? {
+        if self == .ycbcr {
+            guard let colour = ColourKeys.definition(of: key) ?? ColourDefinition.of(hex: key) else { return nil }
+            return RGBSpace.rec709.yCbCr(RGBSpace.rec709.values(of: colour.master), legal: true)
+        }
         guard let format = format else { return PrintCondition.inks(of: key) }
         guard ColourValues(key) != nil else { return nil }
         let numbers = format.fields(key).compactMap { Double($0) }.map { Int($0.rounded()) }

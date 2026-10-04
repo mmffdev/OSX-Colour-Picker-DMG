@@ -93,10 +93,13 @@ func bradford(from: (x: Double, y: Double), to: (x: Double, y: Double)) -> Matri
 /// A space that mixes its colours from three primaries: where each primary and its white sit, and
 /// how its numbers are encoded.
 enum RGBSpace: String, CaseIterable, Codable {
-    case srgb, displayP3, adobeRGB, rec709, rec2020, acescg
+    case srgb, displayP3, adobeRGB, prophoto, rec709, rec2020, p3D65, dciP3, acescg
 
     var name: String {
         switch self {
+        case .prophoto: return "ProPhoto RGB"
+        case .p3D65: return "P3-D65"
+        case .dciP3: return "DCI-P3"
         case .srgb: return "sRGB"
         case .displayP3: return "Display P3"
         case .adobeRGB: return "Adobe RGB"
@@ -109,6 +112,9 @@ enum RGBSpace: String, CaseIterable, Codable {
     /// Who uses it, in a line.
     var about: String {
         switch self {
+        case .prophoto: return "Photographers' working space; 16-bit only"
+        case .p3D65: return "Streaming and HDR grading suites, gamma 2.6"
+        case .dciP3: return "Cinema projection, gamma 2.6"
         case .srgb: return "The web and most screens"
         case .displayP3: return "Recent Apple screens; wider reds and greens"
         case .adobeRGB: return "Photography and print preparation"
@@ -122,6 +128,8 @@ enum RGBSpace: String, CaseIterable, Codable {
     var channel: String {
         switch self {
         case .srgb, .displayP3, .adobeRGB: return "Screen"
+        case .prophoto: return "Photo"
+        case .p3D65, .dciP3: return "Cinema"
         case .rec709, .rec2020: return "Video"
         case .acescg: return "Rendering"
         }
@@ -131,7 +139,11 @@ enum RGBSpace: String, CaseIterable, Codable {
         let d65 = (x: 0.3127, y: 0.3290)
         switch self {
         case .srgb, .rec709: return ((0.640, 0.330), (0.300, 0.600), (0.150, 0.060), d65)
-        case .displayP3: return ((0.680, 0.320), (0.265, 0.690), (0.150, 0.060), d65)
+        case .displayP3, .p3D65: return ((0.680, 0.320), (0.265, 0.690), (0.150, 0.060), d65)
+        // The same primaries under the projector's own white, which is a little greener than daylight.
+        case .dciP3: return ((0.680, 0.320), (0.265, 0.690), (0.150, 0.060), (x: 0.314, y: 0.351))
+        // ROMM RGB: its green and blue lie outside real colour, and its white is the master's own D50.
+        case .prophoto: return ((0.7347, 0.2653), (0.1596, 0.8404), (0.0366, 0.0001), (x: 0.34567, y: 0.35850))
         case .adobeRGB: return ((0.640, 0.330), (0.210, 0.710), (0.150, 0.060), d65)
         case .rec2020: return ((0.708, 0.292), (0.170, 0.797), (0.131, 0.046), d65)
         case .acescg: return ((0.713, 0.293), (0.165, 0.830), (0.128, 0.044), (x: 0.32168, y: 0.33767))
@@ -165,6 +177,8 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .srgb, .displayP3: return sign * (a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4))
         case .adobeRGB: return sign * pow(a, 563.0 / 256.0)
         case .rec709, .rec2020: return sign * pow(a, 2.4)
+        case .p3D65, .dciP3: return sign * pow(a, 2.6)
+        case .prophoto: return sign * (a < 16.0 / 512 ? a / 16 : pow(a, 1.8))
         case .acescg: return v
         }
     }
@@ -175,6 +189,8 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .srgb, .displayP3: return sign * (a <= 0.0031308 ? 12.92 * a : 1.055 * pow(a, 1 / 2.4) - 0.055)
         case .adobeRGB: return sign * pow(a, 256.0 / 563.0)
         case .rec709, .rec2020: return sign * pow(a, 1 / 2.4)
+        case .p3D65, .dciP3: return sign * pow(a, 1 / 2.6)
+        case .prophoto: return sign * (a < 1.0 / 512 ? 16 * a : pow(a, 1 / 1.8))
         case .acescg: return v
         }
     }
@@ -204,12 +220,29 @@ enum RGBSpace: String, CaseIterable, Codable {
         return Int((legal ? 64 + held * 876 : held * 1023).rounded())
     }
 
+    /// The luma weights of a video space's red and blue; green takes the rest.
+    private var luma: (r: Double, b: Double) { self == .rec2020 ? (0.2627, 0.0593) : (0.2126, 0.0722) }
+
+    /// A video colour as its signal carries it: brightness, then how far blue and red sit from it.
+    /// 10-bit codes. Legal range is 64 to 940 for brightness and 64 to 960 for the two differences,
+    /// with 512 meaning no colour; full range runs 0 to 1023.
+    func yCbCr(_ v: [Double], legal: Bool) -> [Int] {
+        let c = v.map { min(max($0, 0), 1) }, k = luma
+        let y = k.r * c[0] + (1 - k.r - k.b) * c[1] + k.b * c[2]
+        let cb = (c[2] - y) / (2 * (1 - k.b)), cr = (c[0] - y) / (2 * (1 - k.r))
+        func code(_ x: Double) -> Int { Int(min(max(x, 0), 1023).rounded()) }
+        return legal ? [code(64 + 876 * y), code(512 + 896 * cb), code(512 + 896 * cr)] : [code(1023 * y), code(512 + 1023 * cb), code(512 + 1023 * cr)]
+    }
+
     /// Values as this space's users write them.
     func text(_ v: [Double], legal: Bool = false) -> String {
         func whole(_ x: Double, _ top: Double) -> Int { Int((min(max(x, 0), 1) * top).rounded()) }
         switch self {
         case .srgb: return String(format: "#%02X%02X%02X", whole(v[0], 255), whole(v[1], 255), whole(v[2], 255))
-        case .displayP3: return v.map { String(format: "%.3f", $0) }.joined(separator: ", ")
+        case .displayP3, .p3D65: return v.map { String(format: "%.3f", $0) }.joined(separator: ", ")
+        // Cinema masters are 12-bit; ProPhoto is never 8-bit, so it is written as decimals.
+        case .dciP3: return v.map { "\(whole($0, 4095))" }.joined(separator: ", ") + "  (12-bit)"
+        case .prophoto: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
         case .adobeRGB: return v.map { "\(whole($0, 255))" }.joined(separator: ", ")
         case .rec709, .rec2020: return v.map { "\(RGBSpace.videoCode($0, legal: legal))" }.joined(separator: ", ") + (legal ? "  (10-bit, legal range)" : "  (10-bit, full range)")
         case .acescg: return v.map { String(format: "%.4f", $0) }.joined(separator: ", ")
@@ -496,7 +529,8 @@ struct Rendering: Equatable {
             let held = raw.map { open ? max($0, 0) : min(max($0, 0), 1) }
             let shown = space.master(of: held)
             return Rendering(channel: channel, value: space.text(held, legal: channel.legal ?? false), shown: shown, difference: deltaE2000(master.lab, shown.lab), inRange: within,
-                             detail: within ? space.about : "Outside \(space.name): the nearest it can show")
+                             detail: (space.isVideo ? "Y\u{2032}CbCr " + space.yCbCr(held, legal: channel.legal ?? false).map { "\($0)" }.joined(separator: ", ") + "  \u{00B7}  " : "")
+                                + (within ? space.about : "Outside \(space.name): the nearest it can show"))
         }
         let press = channel.press ?? PressProfiles.generic, intent = channel.intent ?? .relative, blackPoint = channel.blackPoint ?? false
         // A colour given as a build for this very press is delivered as given: the build is the truth, not a round trip through maths.

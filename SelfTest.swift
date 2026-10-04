@@ -1557,7 +1557,7 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && HistogramType.cmyk.warnings(for: [2, 50, 96, 0]) == ["Cyan In White Out", "Yellow In Black"],
           "a channel outside the safe range is named with the zone it is in: black and white out for a screen, dot loss and fill-in for a press")
 
-    check(HistogramType.offered.map { $0.title } == ["RGB", "HSL", "HSV", "CMYK", "P3", "Adobe", "BT.2020", "L*a*b*"] && Set(HistogramType.offered) == Set(HistogramType.allCases)
+    check(HistogramType.offered.map { $0.title } == ["RGB", "HSL", "HSV", "CMYK", "P3", "Adobe", "BT.2020", "L*a*b*", "Y\u{2032}CbCr"] && Set(HistogramType.offered) == Set(HistogramType.allCases)
           && HistogramType.allCases.allSatisfy { $0.channels.count == $0.ranges.count && $0.channels.count == $0.colours.count && $0.values(of: "#4F8093")?.count == $0.channels.count },
           "every set of values a card shows has a histogram, in the order of the card's rows")
     let labSpread = Histogram.counts(of: ["#8E00E9"], as: .lab), hueSpread = Histogram.counts(of: ["#4F8093"], as: .hsl)
@@ -1573,6 +1573,27 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     pickLib.activeSwatchID = pickPalette
     let pickedKey = pickLib.addPick(vivid, at: t)
     check(pickedKey.map { pickLib.hexes(inSwatch: pickPalette, by: .oldest) == [$0] } == true, "a wide pick goes into the active palette like any other")
+
+    print("cinema, photo and video signal")
+    let p3Red = RGBSpace.displayP3.master(of: [1, 0, 0])
+    check(close(RGBSpace.p3D65.master(of: [1, 0, 0]), p3Red.x, p3Red.y, p3Red.z, 0.0005) && close(RGBSpace.dciP3.master(of: [1, 1, 1]), XYZ.d50.x, XYZ.d50.y, XYZ.d50.z, 0.001)
+          && !close(RGBSpace.dciP3.master(of: [1, 0, 0]), p3Red.x, p3Red.y, p3Red.z, 0.002) && near(RGBSpace.p3D65.values(of: RGBSpace.displayP3.master(of: [0.5, 0.5, 0.5]))[0], pow(RGBSpace.displayP3.linear(0.5), 1 / 2.6), 0.0005),
+          "P3-D65 has Display P3's primaries and white with a 2.6 gamma; DCI-P3 has the projector's own white, so its red is not the same red")
+    let proRound = RGBSpace.prophoto.values(of: RGBSpace.prophoto.master(of: [0.2, 0.6, 0.9]))
+    check(near(proRound[0], 0.2, 0.0005) && near(proRound[1], 0.6, 0.0005) && near(proRound[2], 0.9, 0.0005) && RGBSpace.rec2020.master(of: [0, 1, 0]).fits(.prophoto) && near(RGBSpace.prophoto.encoded(0.001), 0.016, 0.0001)
+          && RGBSpace.prophoto.text([0.5, 0.25, 1]) == "0.5000, 0.2500, 1.0000" && RGBSpace.dciP3.text([1, 0.5, 0]) == "4095, 2048, 0  (12-bit)",
+          "ProPhoto goes there and back, holds Rec. 2020's green, has its straight toe near black, and is never written in 8 bits; cinema values are 12-bit")
+    check(RGBSpace.rec709.yCbCr([1, 1, 1], legal: true) == [940, 512, 512] && RGBSpace.rec709.yCbCr([0, 0, 0], legal: true) == [64, 512, 512] && RGBSpace.rec709.yCbCr([1, 0, 0], legal: true) == [250, 409, 960]
+          && RGBSpace.rec709.yCbCr([0, 0, 1], legal: true)[1] == 960 && RGBSpace.rec709.yCbCr([1, 1, 1], legal: false) == [1023, 512, 512] && RGBSpace.rec2020.yCbCr([1, 0, 0], legal: true)[0] == 294,
+          "the video signal: white is 940 with no colour, black 64, and pure red and blue reach 960 in their difference; Rec. 2020 weighs red more heavily")
+    let videoRow = Rendering.of(steel, in: ProfileChannel(space: "rec709", legal: true)), cinemaRow = Rendering.of(steel, in: ProfileChannel(space: "dciP3"))
+    check(videoRow.detail.hasPrefix("Y\u{2032}CbCr ") && videoRow.detail.hasSuffix("HD video, gamma 2.4") && cinemaRow.inRange && (cinemaRow.value ?? "").hasSuffix("(12-bit)") && near(cinemaRow.difference ?? 9, 0, 0.01)
+          && Rendering.of(steel, in: ProfileChannel(space: "prophoto")).inRange && HistogramType.ycbcr.values(of: "#FFFFFF") == [940, 512, 512],
+          "a video row carries its signal values; a colour is delivered to cinema and to ProPhoto without loss")
+    let proTyped = NewColourSheet.read(.prophoto, ["128", "64.5", "255"], press: "")
+    check(proTyped.colour?.source.space == "prophoto" && near(proTyped.colour?.source.values[1] ?? 0, 64.5 / 255, 0.00001) && NewColourSheet.Kind.offered.map { $0.title } == ["Display P3", "ProPhoto", "CMYK", "Lab", "Hex"]
+          && proTyped.colour.map { ColourKeys.isKey(Library().addingColour($0)) } == true,
+          "New Colour takes ProPhoto values, decimals kept, and the colour has a key of its own")
 
     print("colour profiles: palette, project, house")
     var studio = Library()

@@ -117,11 +117,12 @@ extension Library {
         switch grouping {
         case .none: break
         case .source:
-            ranked = ["Hex (sRGB)", "Display P3"]
+            ranked = ["Hex (sRGB)", "Display P3", "ProPhoto RGB"]
             for key in keys {
                 let source = definition(of: key)?.source
                 switch source?.space {
                 case RGBSpace.displayP3.rawValue: put(key, in: "Display P3")
+                case RGBSpace.prophoto.rawValue: put(key, in: "ProPhoto RGB")
                 case "cmyk": put(key, in: "CMYK: " + (source?.press ?? PressProfiles.generic))
                 case "lab": put(key, in: "Lab")
                 case RGBSpace.srgb.rawValue, nil: put(key, in: "Hex (sRGB)")
@@ -168,6 +169,7 @@ extension Library {
             if grouping == .source {
                 if title == "Hex (sRGB)" { start = NewColourStart(kind: NewColourSheet.Kind.hex.rawValue) }
                 else if title == "Display P3" { start = NewColourStart(kind: NewColourSheet.Kind.p3.rawValue) }
+                else if title == "ProPhoto RGB" { start = NewColourStart(kind: NewColourSheet.Kind.prophoto.rawValue) }
                 else if title == "Lab" { start = NewColourStart(kind: NewColourSheet.Kind.lab.rawValue) }
                 else if title.hasPrefix("CMYK: ") { start = NewColourStart(kind: NewColourSheet.Kind.cmyk.rawValue, press: String(title.dropFirst(6))) }
             }

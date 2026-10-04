@@ -8,11 +8,13 @@ import AppKit
 
 final class NewColourSheet: NSView, NSTextFieldDelegate {
     enum Kind: Int, CaseIterable {
-        case p3, cmyk, lab, hex
-        var title: String { ["Display P3", "CMYK", "Lab", "Hex"][rawValue] }
+        case p3, cmyk, lab, hex, prophoto
+        /// The order they are offered in; the raw values are kept in preferences, so new kinds go at the end.
+        static let offered: [Kind] = [.p3, .prophoto, .cmyk, .lab, .hex]
+        var title: String { ["Display P3", "CMYK", "Lab", "Hex", "ProPhoto"][rawValue] }
         var labels: [String] {
             switch self {
-            case .p3: return ["Red", "Green", "Blue"]
+            case .p3, .prophoto: return ["Red", "Green", "Blue"]
             case .cmyk: return ["Cyan", "Magenta", "Yellow", "Black"]
             case .lab: return ["L*", "a*", "b*"]
             case .hex: return ["Hex"]
@@ -21,6 +23,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         var about: String {
             switch self {
             case .p3: return "Each value 0 to 255, in Display P3. A colour beyond sRGB is kept whole."
+            case .prophoto: return "Each value 0 to 255, in ProPhoto RGB; decimals are kept. Wider than any screen."
             case .cmyk: return "Each ink 0 to 100, for the press chosen. The build is kept exactly as typed."
             case .lab: return "L* 0 to 100; a* and b* from \u{2212}128 to 127. Lab under D50, as print uses."
             case .hex: return "An sRGB colour, as #RRGGBB."
@@ -30,7 +33,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
 
     private let panel = NSView()
     private let done: (ColourDefinition) -> Void
-    private lazy var kinds = ToggleBar(labels: Kind.allCases.map { $0.title }, target: self, action: #selector(kindChanged))
+    private lazy var kinds = ToggleBar(labels: Kind.offered.map { $0.title }, target: self, action: #selector(kindChanged))
     private let about = NSTextField(wrappingLabelWithString: "")
     private var fields: [NSTextField] = []
     private var captions: [NSTextField] = []
@@ -40,7 +43,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     private let chip = NSView()
     private let readout = NSTextField(wrappingLabelWithString: "")
     private let problem = caption("")
-    private var kind: Kind { Kind(rawValue: kinds.selectedSegment) ?? .p3 }
+    private var kind: Kind { Kind.offered.indices.contains(kinds.selectedSegment) ? Kind.offered[kinds.selectedSegment] : .p3 }
 
     /// `palette` names where the colour is going, for the message; `done` is handed the colour to add.
     init(palette: String?, press chosen: String, start: NewColourStart? = nil, done: @escaping (ColourDefinition) -> Void) {
@@ -48,7 +51,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         super.init(frame: .zero)
         // Opens on the kind asked for, or the kind used last time.
         let first = start?.kind ?? preferences.integer(forKey: "newColourKind")
-        kinds.selectedSegment = Kind(rawValue: first) != nil ? first : 0
+        kinds.selectedSegment = Kind(rawValue: first).flatMap { Kind.offered.firstIndex(of: $0) } ?? 0
         shown = kind
         let chosen = start?.press ?? chosen
         translatesAutoresizingMaskIntoConstraints = false
@@ -206,6 +209,9 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         case .p3:
             guard numbers.allSatisfy({ $0 >= 0 && $0 <= 255 }) else { return (nil, "Each value is 0 to 255.") }
             return (ColourDefinition.displayP3(numbers.map { $0 / 255 }), "")
+        case .prophoto:
+            guard numbers.allSatisfy({ $0 >= 0 && $0 <= 255 }) else { return (nil, "Each value is 0 to 255.") }
+            return (ColourDefinition.prophoto(numbers.map { $0 / 255 }), "")
         case .cmyk:
             guard numbers.allSatisfy({ $0 >= 0 && $0 <= 100 }) else { return (nil, "Each ink is 0 to 100.") }
             guard let colour = ColourDefinition.cmyk(numbers.map { $0 / 100 }, press: press) else { return (nil, "The press profile \u{201C}\(press)\u{201D} is not on this Mac.") }

@@ -178,6 +178,13 @@ A **colour profile** is a named set of channels: screen, video and rendering spa
 - **Video values in legal range** (64 to 940): a tick per profile, covering Rec. 709 and Rec. 2020. Every video value names its range.
 - **The CMYK row on cards is the build for a real press:** the print condition of the profile the palette uses, or the system's Generic CMYK when the profile has no print channel. Its tooltip names the condition. The design pack names the condition beside each palette. A press profile that is not on the Mac gives a dash, never a made-up build.
 
+### Added 2026-10-04
+
+- **Cinema:** P3-D65 (streaming and HDR grading, gamma 2.6) and DCI-P3 (projection, the theatre's own white, gamma 2.6, written as 12-bit codes).
+- **Photo:** ProPhoto RGB as a channel and as a way to type a colour in. Never written in 8 bits.
+- **The video signal:** Rec. 709 and Rec. 2020 rows carry Y′CbCr beside their RGB codes, in the range the profile asks for. Y′CbCr is a way of writing a video colour, not a space of its own, so it is a readout and a histogram, not a channel.
+- **Palette pages:** grouping and filtering, four switchable columns per swatch in the vertical view (Histogram, Channels, Notes, History), and histograms for every set of values a card shows, with safe zones.
+
 ### What is not built, and why it matters
 
 - **Imports read hex only.** ASE, ACO, GPL and CLR files can carry CMYK, Lab and wide values; the importers still reduce them to sRGB. The identity work makes keeping them possible; it has not been done.

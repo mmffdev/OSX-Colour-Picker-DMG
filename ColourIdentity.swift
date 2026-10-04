@@ -64,6 +64,7 @@ extension ColourDefinition {
         switch source.space {
         case RGBSpace.srgb.rawValue: return RGBSpace.srgb.text(v)
         case RGBSpace.displayP3.rawValue: return "P3 " + RGBSpace.displayP3.text(v)
+        case RGBSpace.prophoto.rawValue: return "ProPhoto " + RGBSpace.prophoto.text(v)
         case "cmyk": return PrintBuild(inks: v, printed: master).text
         case "lab": return "Lab " + v.map { String(format: "%.1f", $0) }.joined(separator: ", ")
         default: return sourceText
@@ -73,6 +74,11 @@ extension ColourDefinition {
     /// A colour given in Display P3, each value 0 to 1.
     static func displayP3(_ values: [Double]) -> ColourDefinition {
         ColourDefinition(source: ColourSource(space: RGBSpace.displayP3.rawValue, values: values), master: RGBSpace.displayP3.master(of: values), kind: .surface)
+    }
+
+    /// A colour given in ProPhoto RGB, each value 0 to 1.
+    static func prophoto(_ values: [Double]) -> ColourDefinition {
+        ColourDefinition(source: ColourSource(space: RGBSpace.prophoto.rawValue, values: values), master: RGBSpace.prophoto.master(of: values), kind: .surface)
     }
 
     /// A colour given as Lab (D50).
@@ -167,4 +173,12 @@ enum PrintCondition {
 extension ColourProfile {
     /// The condition CMYK values are worked out for under this profile.
     var printCondition: ProfileChannel { print ?? PrintCondition.fallback }
+}
+
+extension Library {
+    /// The key a colour would have if added to a copy of this library; for checks.
+    func addingColour(_ definition: ColourDefinition) -> String {
+        var copy = self
+        return copy.addColour(definition) ?? ""
+    }
 }
