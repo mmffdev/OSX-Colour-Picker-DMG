@@ -546,18 +546,23 @@ final class LibraryController: NSObject {
         set { preferences.set(newValue, forKey: "palettePurposeTab") }
     }
 
-    /// The purpose a palette's page is showing; nil is Overview. A purpose the palette no longer serves shows Overview.
+    /// The purpose a palette's page is showing, one at a time; nil is Overview.
     func shownPurpose(for id: UUID) -> Purpose? {
-        guard let purpose = shownPurposes[id.uuidString].flatMap(Purpose.init(rawValue:)),
-              library.swatch(id)?.purposeList.contains(purpose) == true else { return nil }
-        return purpose
+        guard library.swatch(id) != nil else { return nil }
+        return shownPurposes[id.uuidString].flatMap(Purpose.init(rawValue:))
     }
 
-    /// Turns a palette's page to a purpose, or back to Overview.
+    /// Turns a palette's page to a purpose, or back to Overview. A purpose chosen for the first
+    /// time is given its settings, which is what marks the palette as set up for it; a palette
+    /// in a locked project is shown the purpose all the same, with the purpose's own defaults.
     func show(_ purpose: Purpose?, forPalette id: UUID) {
         var all = shownPurposes
         all[id.uuidString] = purpose?.rawValue
         shownPurposes = all
+        if let purpose = purpose, let s = library.swatch(id), !s.purposeList.contains(purpose),
+           !(s.projectID.flatMap { library.project($0)?.isLocked } ?? false) {
+            apply("Set Up For \(purpose.title)") { $0.setPurpose(purpose, on: true, ofPalette: id) }
+        }
         refreshPrintCondition()
         NotificationCenter.default.post(name: .libraryDidChange, object: self)
     }
@@ -583,9 +588,9 @@ final class LibraryController: NSObject {
 
     /// Puts a purpose on a palette, or takes it off.
     func setPurpose(_ purpose: Purpose, on: Bool, ofPalette id: UUID) {
-        apply(on ? "Add Purpose \(purpose.title)" : "Remove Purpose \(purpose.title)") { $0.setPurpose(purpose, on: on, ofPalette: id) }
-        // A purpose just put on is the one to look at.
-        if on { show(purpose, forPalette: id) }
+        apply(on ? "Set Up For \(purpose.title)" : "Remove \(purpose.title) Settings") { $0.setPurpose(purpose, on: on, ofPalette: id) }
+        // A purpose just put on is the one to look at; one taken off while on show gives way to Overview.
+        if on { show(purpose, forPalette: id) } else if shownPurpose(for: id) == purpose { show(nil, forPalette: id) }
     }
 
     func setProfile(_ profile: ColourProfile?, ofProject id: UUID) {
