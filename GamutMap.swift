@@ -255,7 +255,9 @@ enum GamutChart {
     private static func wash(_ view: GamutView, _ domain: Domain, lightness: Double) -> NSImage? {
         let key = "\(view.rawValue):\(Int(lightness)):\(Int(domain.maxX * 100))"
         if let have = washes[key] { return have }
-        let n = 180
+        // Every pixel is coloured, inside the horseshoe or not: the smooth outline cuts the edge, so
+        // the picture's own pixels never show as steps along it.
+        let n = 360
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                          isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
               let data = rep.bitmapData else { return nil }
@@ -265,12 +267,9 @@ enum GamutChart {
                                    y: domain.maxY - (Double(row) + 0.5) / Double(n) * (domain.maxY - domain.minY))
                 var rgb: [Double]?
                 switch view {
-                case .xy: if GamutMaths.visible(xy: p) { rgb = GamutMaths.display(xy: p) }
-                case .uv:
-                    let at = GamutMaths.xy(fromUV: p)
-                    if GamutMaths.visible(xy: at) { rgb = GamutMaths.display(xy: at) }
+                case .xy: rgb = GamutMaths.display(xy: p)
+                case .uv: rgb = GamutMaths.display(xy: GamutMaths.xy(fromUV: p))
                 case .lab:
-                    guard hypot(p.x, p.y) <= domain.maxX else { break }
                     // As strong as sRGB can show at this lightness, in the place's own hue.
                     var low = 0.0, high = 1.0
                     for _ in 0..<7 {
@@ -301,6 +300,23 @@ enum GamutChart {
     private static func path(_ points: [NSPoint]) -> NSBezierPath {
         let path = NSBezierPath()
         for (at, p) in points.enumerated() { if at == 0 { path.move(to: p) } else { path.line(to: p) } }
+        path.close()
+        return path
+    }
+
+    /// A curve through every point, for an edge that is a curve in truth: the spectrum's edge and
+    /// a gamut cut through Lab. `closed` carries the curve round from the last point to the first;
+    /// otherwise the ends are joined by a straight line, as the line of purples is.
+    private static func curve(_ points: [NSPoint], closed: Bool) -> NSBezierPath {
+        let path = NSBezierPath(), n = points.count
+        guard n > 2 else { return Self.path(points) }
+        func at(_ i: Int) -> NSPoint { closed ? points[(i + n) % n] : points[min(max(i, 0), n - 1)] }
+        path.move(to: points[0])
+        for i in 0..<(closed ? n : n - 1) {
+            let p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2)
+            path.curve(to: p2, controlPoint1: NSPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6),
+                       controlPoint2: NSPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6))
+        }
         path.close()
         return path
     }
@@ -347,7 +363,7 @@ enum GamutChart {
         NSBezierPath(roundedRect: chart, xRadius: 8, yRadius: 8).fill()
 
         // The colours themselves, faint, inside the horseshoe or the disc.
-        let edge = view == .lab ? NSBezierPath(ovalIn: chart.insetBy(dx: 1, dy: 1)) : path(GamutMaths.locus(in: view).map(place))
+        let edge = view == .lab ? NSBezierPath(ovalIn: chart.insetBy(dx: 1, dy: 1)) : curve(GamutMaths.locus(in: view).map(place), closed: false)
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: chart, xRadius: 8, yRadius: 8).addClip()
         if let image = wash(view, domain, lightness: lightness ?? 65) {
@@ -426,7 +442,8 @@ enum GamutChart {
 
         // What each screen and the press can hold.
         for line in lines where line.points.count > 2 {
-            let outline = path(line.points.map(place))
+            // A cut through Lab is a curve; a triangle on a horseshoe is straight lines.
+            let outline = view == .lab ? curve(line.points.map(place), closed: true) : path(line.points.map(place))
             outline.lineWidth = line.width
             outline.lineJoinStyle = .round
             if !line.dash.isEmpty { outline.setLineDash(line.dash, count: line.dash.count, phase: 0) }
