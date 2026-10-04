@@ -368,6 +368,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     let contextRail = ContextRail()
     private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatches")
     private let labelsBucket = RailBucket("Labels"), tagsBucket = RailBucket("Tags")
+    private let purposeBucket = RailBucket("Purposes")
+    private var purposeRows: [RailRow] = []
     private let contrastMenu = NSPopUpButton(frame: .zero, pullsDown: false)
     private let groupMenu = NSPopUpButton(frame: .zero, pullsDown: false)
     private let showMenu = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -793,7 +795,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             RailRow(label, symbol: i == 0 ? "textformat" : "number", tip: "Show \(label) On Every Swatch", kind: .toggle { [weak self] in self?.railLabelToggled(i) })
         }
         labelsBucket.set(labelRows)
-        contextRail.set([displayBucket, paletteBucket, swatchBucket, labelsBucket, tagsBucket])
+        // What the palette is for. Each one that is on has settings of its own, kept in a file beside the palette's.
+        purposeRows = Purpose.allCases.map { purpose in
+            RailRow(purpose.title, symbol: purpose.symbol, tip: purpose.about, kind: .toggle { [weak self] in self?.purposeToggled(purpose) })
+        }
+        purposeBucket.set(purposeRows)
+        contextRail.set([purposeBucket, displayBucket, paletteBucket, swatchBucket, labelsBucket, tagsBucket])
     }
 
     /// Brings the rail up to date with the page: what is chosen, what is on, and whether a swatch is selected.
@@ -802,6 +809,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         contrastMenu.selectItem(at: !Prefs.showContrast ? 0 : Prefs.contrastMethod == "apca" ? 2 : 1)
         groupMenu.selectItem(at: PaletteGrouping.allCases.firstIndex(of: Prefs.paletteGrouping) ?? 0)
         showMenu.selectItem(at: PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0)
+        let serves = s.purposeList
+        for (row, purpose) in zip(purposeRows, Purpose.allCases) {
+            row.isOn = serves.contains(purpose)
+            row.isEnabled = !(header.lock ?? false)
+        }
         let asList = Prefs.paletteListView
         for (row, on) in zip(panelRows, [Prefs.paletteNotes && asList, Prefs.paletteHistory, Prefs.paletteChannels, Prefs.histograms]) { row.isOn = on }
         // Always there: these act on the whole page, and a filter that hides every swatch must stay within reach to be undone.
@@ -816,6 +828,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         edit.isEnabled = !(header.lock ?? false)
         tags.append(edit)
         tagsBucket.set(tags)
+    }
+
+    private func purposeToggled(_ purpose: Purpose) {
+        guard let id = paletteID, let s = library.library.swatch(id) else { return }
+        library.setPurpose(purpose, on: !s.purposeList.contains(purpose), ofPalette: id)
+        refreshRail()
     }
 
     @objc private func contrastChosen() {

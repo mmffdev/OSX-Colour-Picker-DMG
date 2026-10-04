@@ -275,7 +275,7 @@ final class LibraryController: NSObject {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [UTType(filenameExtension: ProjectFiles.fileExtension) ?? .data]
+        panel.allowedContentTypes = [ColourFiles.project, ColourFiles.legacyProject].map { UTType(filenameExtension: $0) ?? .data }
         panel.prompt = "Use This"
         panel.message = "Find \u{201C}\(p.name)\u{201D}: its \(ProjectFiles.fileExtension) file, or the folder holding it"
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
@@ -543,6 +543,11 @@ final class LibraryController: NSObject {
     /// Gives a palette a profile of its own; nil goes back to its project's or the house's.
     func setProfile(_ profile: ColourProfile?, ofPalette id: UUID) {
         apply("Set Colour Profile") { $0.setProfile(profile, ofPalette: id) }
+    }
+
+    /// Puts a purpose on a palette, or takes it off.
+    func setPurpose(_ purpose: Purpose, on: Bool, ofPalette id: UUID) {
+        apply(on ? "Add Purpose \(purpose.title)" : "Remove Purpose \(purpose.title)") { $0.setPurpose(purpose, on: on, ofPalette: id) }
     }
 
     func setProfile(_ profile: ColourProfile?, ofProject id: UUID) {

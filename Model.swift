@@ -138,6 +138,8 @@ struct Swatch: Codable, Equatable {
     /// The colour profile this palette works to; nil uses its project's, or the house default.
     var profile: UUID? = nil
     var profileChangedAt: Date? = nil
+    /// What the palette is for, each purpose with its own settings; see Purposes.swift. nil is none chosen.
+    var purposes: [PurposeConfig]? = nil
 
     var isTypography: Bool { styles != nil }
 
@@ -889,11 +891,21 @@ extension Library {
 // ---------- Naming ----------
 
 /// Safe as a single path component: no separators or control characters, trimmed, never empty.
+/// A name made safe to be a file name on a Mac, on Windows and on Linux alike. What none of
+/// them allows becomes a hyphen; a name Windows keeps for itself ("CON", "AUX", "COM1"…) gains an
+/// underscore; and nothing ends in a dot or a space, which Windows drops. The real name is kept
+/// inside the file, so nothing depends on this one being exact.
 func filesystemName(_ raw: String) -> String {
-    let bad = CharacterSet(charactersIn: "/:\\").union(.controlCharacters).union(.newlines)
-    let cleaned = String(String.UnicodeScalarView(raw.unicodeScalars.map { bad.contains($0) ? "-" : $0 }))
+    let bad = CharacterSet(charactersIn: "/:\\*?\"<>|").union(.controlCharacters).union(.newlines)
+    var cleaned = String(String.UnicodeScalarView(raw.unicodeScalars.map { bad.contains($0) ? "-" : $0 }))
+        .precomposedStringWithCanonicalMapping   // one spelling of an accented letter, whichever system wrote it
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(100))
+    cleaned = String(cleaned.prefix(100))
+    while cleaned.hasSuffix(".") || cleaned.hasSuffix(" ") { cleaned.removeLast() }
+    if cleaned.isEmpty { return "Untitled" }
+    let reserved = ["CON", "PRN", "AUX", "NUL"] + (1...9).flatMap { ["COM\($0)", "LPT\($0)"] }
+    let stem = cleaned.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? cleaned
+    return reserved.contains(stem.uppercased()) ? cleaned + "_" : cleaned
 }
 
 /// `name`, or "name 2", "name 3"... — the first not already in `taken` (case-insensitive).

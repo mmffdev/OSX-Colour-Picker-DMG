@@ -808,18 +808,58 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "a project file holds the project's palettes and the colours they use, and nothing from outside it")
     let fileData = try! file.data()
     let back = try! ProjectFile.read(fileData)
-    check(back.palettes.map { $0.name } == ["Brand"] && back.project.name == "Client A" && (try? back.data()) == fileData
-          && ProjectFile.fileName(for: file.project) == "Client A.mmffproject",
-          "a project file reads back as written, to the millisecond, and is named for the project")
+    check(back.palettes.map { $0.name } == ["Brand"] && back.project.name == "Client A" && (try? back.data()) == fileData,
+          "a project reads back as written, to the millisecond")
     let projRoot = root.appendingPathComponent("projects")
     let libURL = projRoot.appendingPathComponent("Main/library.json")
     var written: [UUID: Data] = [:]
     let firstWrite = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
     let again = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    let expected = projRoot.appendingPathComponent("Main/Projects/Client A/Config/Client A.config")
+    let expected = projRoot.appendingPathComponent("Main/Projects/Client A/Config/Client A.colproject")
     check(firstWrite.files.map { $0.path } == [expected.path] && firstWrite.firstTime == [client] && again.files.isEmpty
           && (try? ProjectFiles.read(expected).data()) == fileData,
           "a project is a folder named for it, with its file in Config, under a Projects folder beside the library; written only when it changes")
+    let brandFile = expected.deletingLastPathComponent().appendingPathComponent("Palettes/Brand.colpalette")
+    let brandDoc = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: brandFile))
+    let projectDoc = try? ColourFiles.decoder().decode(ProjectDocument.self, from: Data(contentsOf: expected))
+    check(brandDoc?.palette.name == "Brand" && brandDoc?.project == client && brandDoc?.colours.count == 2 && brandDoc?.format == "colour-palette"
+          && projectDoc?.palettes == [brandSwatch] && projectDoc?.format == "colour-project"
+          && String(data: (try? Data(contentsOf: brandFile)) ?? Data(), encoding: .utf8)?.contains("\"name\" : \"Brand\"") == true,
+          "each palette is a file of its own beside the project's, in plain text anyone can read, and the project lists its palettes in order")
+    // Purposes: a file beside the palette for each one it serves, there exactly while it serves it.
+    var purposeLib = projLib
+    var purposeWritten: [UUID: Data] = [:]
+    let purposeURL = projRoot.appendingPathComponent("Purposes/library.json")
+    purposeLib.setPurpose(.print, on: true, ofPalette: brandSwatch, at: tp)
+    purposeLib.setPurpose(.web, on: true, ofPalette: brandSwatch, at: tp)
+    _ = try! ProjectFiles.write(purposeLib, library: purposeURL, master: nil, written: &purposeWritten)
+    let purposeDir = projRoot.appendingPathComponent("Purposes/Projects/Client A/Config/Palettes")
+    let printSide = purposeDir.appendingPathComponent("Brand.colprint"), webSide = purposeDir.appendingPathComponent("Brand.colweb")
+    let printDoc = try? ColourFiles.decoder().decode(PurposeDocument.self, from: Data(contentsOf: printSide))
+    let wholeBack = try? ProjectFiles.read(projRoot.appendingPathComponent("Purposes/Projects/Client A/Config/Client A.colproject"))
+    check(fm.fileExists(atPath: webSide.path) && printDoc?.palette == brandSwatch && printDoc?.settings.purpose == .print && printDoc?.paletteName == "Brand"
+          && purposeLib.swatch(brandSwatch)?.purposeList == [.web, .print] && wholeBack?.palettes.first?.purposeList == [.web, .print]
+          && (try? wholeBack?.data()) == (try? ProjectFile(project: purposeLib.project(client)!, in: purposeLib).data()),
+          "a palette serves a purpose exactly when that purpose's file sits beside it, and the project reads back with its purposes")
+    purposeLib.setPurpose(.web, on: false, ofPalette: brandSwatch, at: tp.addingTimeInterval(5))
+    _ = purposeLib.renameSwatch(brandSwatch, to: "Brand: 2026?")
+    _ = try! ProjectFiles.write(purposeLib, library: purposeURL, master: nil, written: &purposeWritten)
+    check(!fm.fileExists(atPath: webSide.path) && !fm.fileExists(atPath: printSide.path) && fm.fileExists(atPath: purposeDir.appendingPathComponent("Brand- 2026-.colprint").path)
+          && fm.fileExists(atPath: purposeDir.appendingPathComponent("Brand- 2026-.colpalette").path) && (try? fm.contentsOfDirectory(atPath: purposeDir.path))?.count == 2
+          && purposeLib.swatch(brandSwatch)?.purposeList == [.print] && purposeLib.swatch(brandSwatch)?.purposes?.count == 2,
+          "a purpose taken off loses its file but keeps its settings, and a renamed palette's files take the new name with nothing left behind")
+    let joined = Library.merged(purposeLib.swatch(brandSwatch)?.purposes, [PurposeConfig(id: UUID(), purpose: .web, changedAt: tp.addingTimeInterval(9)), PurposeConfig(id: UUID(), purpose: .cine, changedAt: tp)])
+    check(joined?.filter { $0.isLive }.map { $0.purpose } == [.web, .print, .cine] && Library.merged(nil, nil) == nil,
+          "two Macs' purposes join, each purpose as it was last changed")
+    check(Purpose.allCases.map { $0.fileExtension } == ["colweb", "colprint", "colphoto", "colvideo", "colcine", "col3d"] && Purpose.of(fileExtension: "COLPRINT") == .print,
+          "each purpose has a file extension of its own that says what it is")
+    if let one = SwatchDocument("#FF0000", in: brandSwatch, of: projLib), let oneData = try? one.data() {
+        check((try? SwatchDocument.read(oneData)) == one && one.colour.hex == "#FF0000" && SwatchDocument.fileName("Fire / Red") == "Fire - Red.colswatch"
+              && (try? SwatchDocument.read(fileData)) == nil, "one colour travels as a file of its own, and reads back as it was")
+    } else { check(false, "a palette's colour can be made into a swatch file") }
+    check(filesystemName("Red/Blue 50:50?") == "Red-Blue 50-50-" && filesystemName("aux") == "aux_" && filesystemName("COM1.old") == "COM1.old_"
+          && filesystemName("Final. ") == "Final" && filesystemName("e\u{0301}") == "\u{00E9}" && filesystemName("...") == "Untitled",
+          "a file name is safe on Windows and Linux as well as the Mac: no forbidden characters, no reserved names, no trailing dot")
     projLib.markProjectFile(client, known: true)
     check(ProjectFiles.lost(in: projLib, library: libURL, master: nil).isEmpty, "a project whose file is where it should be is not lost")
     try! fm.removeItem(at: expected.deletingLastPathComponent().deletingLastPathComponent())
@@ -835,8 +875,9 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! fileData.write(to: loose)
     let adopted = try! ProjectFiles.adopt(loose, for: projLib.project(client)!)
     check(adopted.path == projRoot.appendingPathComponent("Found/Client A").path
-          && fm.fileExists(atPath: adopted.appendingPathComponent("Config/Client A.config").path) && !fm.fileExists(atPath: loose.path),
-          "a found file on its own is given its folder structure beside it")
+          && fm.fileExists(atPath: adopted.appendingPathComponent("Config/Client A.colproject").path) && !fm.fileExists(atPath: loose.path)
+          && (try? ProjectFiles.read(adopted.appendingPathComponent("Config/Client A.colproject")).data()) == fileData,
+          "a found file on its own, even one an earlier version wrote in one piece, is given its folder structure beside it and still reads")
     check((try? ProjectFiles.adopt(adopted, for: projLib.project(client)!))?.path == adopted.path
           && (try? ProjectFiles.adopt(adopted.appendingPathComponent("Config"), for: projLib.project(client)!))?.path == adopted.path,
           "the project folder, or its Config folder, is accepted as the file's home")
@@ -855,7 +896,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     _ = projLib.renameProject(client, to: "Client B")
     written[client] = nil
     let renamed = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Config/Client B.config").path]
+    check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Config/Client B.colproject").path]
           && !fm.fileExists(atPath: projRoot.appendingPathComponent("Main/Projects/Client A").path),
           "a renamed project's folder and file take the new name")
 

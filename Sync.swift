@@ -114,6 +114,8 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         let pick = (l?.profileChangedAt ?? .distantPast) >= (r?.profileChangedAt ?? .distantPast) ? l ?? r : r ?? l
         out.swatches[out.swatches.count - 1].profile = pick?.profile
         out.swatches[out.swatches.count - 1].profileChangedAt = pick?.profileChangedAt
+        // What the palette is for: each purpose as it was last changed, on either Mac.
+        out.swatches[out.swatches.count - 1].purposes = Library.merged(l?.purposes, r?.purposes)
     }
 
     // Colours: kept if picked after their last deletion, or still in use by a surviving swatch.
