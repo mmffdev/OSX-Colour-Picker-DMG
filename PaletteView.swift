@@ -415,6 +415,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// What each purpose makes of the palette: every purpose on Overview, the one on show on its own tab.
     private let verdicts = NSStackView()
     private let paletteHeading = sectionHeading("Palette")
+    /// The mark of the purpose the page is turned to, in front of its heading; not there when it is turned to none.
+    private let purposeMark = NSImageView()
+    private let paletteTitle = NSStackView()
     private let swatchesHeading = sectionHeading("Swatches")
     /// Over the spectrum: what can be done with the palette as a whole.
 
@@ -599,7 +602,15 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         verdicts.orientation = .vertical
         verdicts.alignment = .leading
         verdicts.spacing = 4
-        for v in [header, paletteHeading, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
+        // The palette's heading is as large as the page's title, with the purpose's mark in front of it.
+        paletteHeading.font = PageStyle.titleFont
+        purposeMark.contentTintColor = .labelColor
+        purposeMark.setContentHuggingPriority(.required, for: .horizontal)
+        paletteTitle.setViews([purposeMark, paletteHeading], in: .leading)
+        paletteTitle.orientation = .horizontal
+        paletteTitle.alignment = .centerY
+        paletteTitle.spacing = 10
+        for v in [header, paletteTitle, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -612,9 +623,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
             headerHeight,
-            paletteHeading.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
-            paletteHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            spectrum.topAnchor.constraint(equalTo: paletteHeading.bottomAnchor, constant: 10),
+            paletteTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            paletteTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
+            paletteTitle.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -side),
+            spectrum.topAnchor.constraint(equalTo: paletteTitle.bottomAnchor, constant: 30),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
@@ -670,6 +682,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             s.config(for: p)?.labels.map { saved in ColourFormat.cardRows.filter { saved.contains($0.rawValue) } } ?? p.starterLabels
         }
         paletteHeading.stringValue = purpose.map { "Palette For \($0.title)" } ?? "Palette"
+        purposeMark.isHidden = purpose == nil
+        if let purpose = purpose { purposeMark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)

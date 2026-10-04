@@ -58,9 +58,18 @@ struct ProjectDocument: Codable, Equatable {
     var colours: [String]
     /// The order its tags are held in; the tags themselves, and its profiles, are in its .coldata.
     var tagOrder: [TagKey]? = nil
+    /// The purpose each of its palettes is turned to, for those that have ever been turned to one.
+    var turned: [TurnedPalette]? = nil
     /// Written here by an earlier version, before .coldata held them. Still read.
     var tags: [TagInfo]? = nil
     var profiles: [ColourProfile]? = nil
+}
+
+/// The purpose one palette is turned to, as its project's file keeps it; no purpose is the palette as it is.
+struct TurnedPalette: Codable, Equatable {
+    var palette: UUID
+    var purpose: Purpose? = nil
+    var changedAt: Date
 }
 
 /// "Brand.colpalette": one palette and the library's record of each colour it uses.
@@ -175,7 +184,9 @@ struct ProjectFile: Codable, Equatable {
         var out: [(path: String, data: Data)] = []
         _ = names
         let doc = ProjectDocument(project: project, palettes: palettes.map { $0.id }, colours: colours.map { $0.hex },
-                                  tagOrder: tags.map { TagKey(name: $0.name, project: $0.projectID) })
+                                  tagOrder: tags.map { TagKey(name: $0.name, project: $0.projectID) },
+                                  turned: { let all = palettes.compactMap { p in p.purposeChangedAt.map { TurnedPalette(palette: p.id, purpose: p.purpose, changedAt: $0) } }
+                                            return all.isEmpty ? nil : all }())
         out.append(("\(ProjectFiles.projectFolder)/\(base).\(ColourFiles.project)", try e.encode(doc)))
         out.append(("\(ProjectFiles.configFolder)/\(base).\(ColourFiles.data)", try e.encode(DataDocument(project: project.id, tags: tags, profiles: profiles ?? []))))
         if !history.isEmpty {
@@ -198,6 +209,8 @@ struct ProjectFile: Codable, Equatable {
             var plain = palette
             let off = (palette.purposes ?? []).filter { !$0.isLive }
             plain.purposes = off.isEmpty ? nil : off
+            // The purpose a project's palette is turned to is kept in the project's own file.
+            if project != nil { plain.purpose = nil; plain.purposeChangedAt = nil }
             let file = PaletteDocument(project: project, palette: plain, colours: colours.filter { keys.contains($0.hex) })
             out.append(("\(ProjectFiles.palettesFolder)/\(name).\(ColourFiles.palette)", try e.encode(file)))
             for settings in palette.purposes ?? [] where settings.isLive {
@@ -436,6 +449,11 @@ enum ProjectFiles {
         if let order = doc.tagOrder { tags = CatalogueFiles.ordered(tags, by: order) { TagKey(name: $0.name, project: $0.projectID) } }
         var whole = try ProjectFile.read(ColourFiles.encoder().encode(Whole(project: doc.project, palettes: [], colours: [], tags: tags, profiles: profiles)))
         whole.palettes = CatalogueFiles.ordered(held.palettes, by: doc.palettes) { $0.id }.filter { doc.palettes.contains($0.id) }
+        for turned in doc.turned ?? [] {
+            guard let at = whole.palettes.firstIndex(where: { $0.id == turned.palette }) else { continue }
+            whole.palettes[at].purpose = turned.purpose
+            whole.palettes[at].purposeChangedAt = turned.changedAt
+        }
         whole.colours = CatalogueFiles.ordered(held.colours, by: doc.colours) { $0.hex }
         for folder in historyFiles {
             if let found = try? Data(contentsOf: folder.appendingPathComponent(base + "." + ColourFiles.history)),

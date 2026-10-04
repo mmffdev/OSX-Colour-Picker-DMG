@@ -64,7 +64,7 @@ final class SidebarNode: NSObject {
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
 let projectDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.project")
 
-/// A palette row: favourite star, a small strip of its colours, name, pick mark, count, then a gear that opens the palette's menu.
+/// A palette row: favourite star, a small strip of its colours, the mark of the purpose it is turned to, name, pick mark, count, then a gear that opens the palette's menu.
 final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("palette")
 
@@ -78,6 +78,8 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     private let name = NSTextField(labelWithString: "")
     private let count = NSTextField(labelWithString: "")
     private let target = NSImageView()
+    /// The purpose the palette is turned to, as rail2 shows it; not there when it is turned to none.
+    private let purpose = NSImageView()
     private var committed = ""
 
     override init(frame: NSRect) {
@@ -105,7 +107,9 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
 
         star = symbolButton("star", tooltip: "Add to Favourites", target: self, action: #selector(starTapped))
 
-        let stack = NSStackView(views: [star, strip, name, target, count, gear])
+        purpose.contentTintColor = .secondaryLabelColor
+        purpose.setContentHuggingPriority(.required, for: .horizontal)
+        let stack = NSStackView(views: [star, strip, purpose, name, target, count, gear])
         stack.orientation = .horizontal
         stack.spacing = 5
         stack.alignment = .centerY
@@ -134,6 +138,11 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         star.toolTip = (s.favourite ? "Remove from Favourites" : "Add to Favourites") + " (\u{21E7}F)"
         count.stringValue = "\(s.styles?.count ?? s.entries.count)"   // a Typography palette counts its pairings
         target.isHidden = !isTarget
+        purpose.isHidden = s.purpose == nil
+        if let turned = s.purpose {
+            purpose.image = symbol(turned.symbol, turned.title, size: 11)
+            purpose.toolTip = "Turned To \(turned.title)"
+        }
         toolTip = s.tagList.isEmpty ? nil : "Tags: " + s.tagList.joined(separator: ", ")
     }
 

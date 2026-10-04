@@ -540,31 +540,14 @@ final class LibraryController: NSObject {
 
     // MARK: Purposes
 
-    /// The tab each palette's page was left on, by palette: a purpose, or nothing for Overview.
-    private var shownPurposes: [String: String] {
-        get { preferences.dictionary(forKey: "palettePurposeTab") as? [String: String] ?? [:] }
-        set { preferences.set(newValue, forKey: "palettePurposeTab") }
-    }
+    /// The one purpose a palette is turned to; nil is the palette as it is.
+    func shownPurpose(for id: UUID) -> Purpose? { library.swatch(id)?.purpose }
 
-    /// The purpose a palette's page is showing, one at a time; nil is Overview.
-    func shownPurpose(for id: UUID) -> Purpose? {
-        guard library.swatch(id) != nil else { return nil }
-        return shownPurposes[id.uuidString].flatMap(Purpose.init(rawValue:))
-    }
-
-    /// Turns a palette's page to a purpose, or back to Overview. A purpose chosen for the first
-    /// time is given its settings, which is what marks the palette as set up for it; a palette
-    /// in a locked project is shown the purpose all the same, with the purpose's own defaults.
+    /// Turns a palette to a purpose, or back to none. The choice is the palette's, kept with its project.
     func show(_ purpose: Purpose?, forPalette id: UUID) {
-        var all = shownPurposes
-        all[id.uuidString] = purpose?.rawValue
-        shownPurposes = all
-        if let purpose = purpose, let s = library.swatch(id), !s.purposeList.contains(purpose),
-           !(s.projectID.flatMap { library.project($0)?.isLocked } ?? false) {
-            apply("Set Up For \(purpose.title)") { $0.setPurpose(purpose, on: true, ofPalette: id) }
-        }
+        guard library.swatch(id)?.purpose != purpose else { return }
+        apply(purpose.map { "Turn To \($0.title)" } ?? "Turn To No Purpose") { $0.choosePurpose(purpose, ofPalette: id) }
         refreshPrintCondition()
-        NotificationCenter.default.post(name: .libraryDidChange, object: self)
     }
 
     /// The values the cards show for a purpose a palette serves.

@@ -121,6 +121,15 @@ extension Library {
         swatches[i].purposes = Purpose.allCases.compactMap { purpose in list.first { $0.purpose == purpose } }
     }
 
+    /// Turns a palette to one purpose, or to none. A purpose chosen for the first time is given
+    /// its settings, which is what marks the palette as set up for it.
+    mutating func choosePurpose(_ purpose: Purpose?, ofPalette id: UUID, at date: Date = Date()) {
+        guard let i = swatches.firstIndex(where: { $0.id == id }), swatches[i].purpose != purpose else { return }
+        if let purpose = purpose { setPurpose(purpose, on: true, ofPalette: id, at: date) }
+        swatches[i].purpose = purpose
+        swatches[i].purposeChangedAt = date
+    }
+
     /// Changes a palette's settings for a purpose it serves.
     mutating func setPurposeSettings(_ purpose: Purpose, ofPalette id: UUID, at date: Date = Date(), _ change: (inout PurposeConfig) -> Void) {
         guard let i = swatches.firstIndex(where: { $0.id == id }), var list = swatches[i].purposes,

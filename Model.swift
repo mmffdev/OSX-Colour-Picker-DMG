@@ -140,6 +140,9 @@ struct Swatch: Codable, Equatable {
     var profileChangedAt: Date? = nil
     /// What the palette is for, each purpose with its own settings; see Purposes.swift. nil is none chosen.
     var purposes: [PurposeConfig]? = nil
+    /// The one purpose the palette is turned to; nil shows it as it is. Kept in its project's file.
+    var purpose: Purpose? = nil
+    var purposeChangedAt: Date? = nil
 
     var isTypography: Bool { styles != nil }
 

@@ -923,6 +923,10 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     catLib.setPurpose(.web, on: true, ofPalette: inA, at: tcat)
     catLib.setPurpose(.web, on: false, ofPalette: inA, at: tcat.addingTimeInterval(1))
     catLib.setProfile(ColourProfiles.starters[1], ofPalette: inA, at: tcat)
+    catLib.choosePurpose(.print, ofPalette: inA, at: tcat.addingTimeInterval(2))
+    catLib.choosePurpose(.video, ofPalette: looseOne, at: tcat.addingTimeInterval(2))
+    catLib.choosePurpose(.cine, ofPalette: inB, at: tcat.addingTimeInterval(2))
+    catLib.choosePurpose(nil, ofPalette: inB, at: tcat.addingTimeInterval(3))
     catLib.deleteSwatch(catLib.createSwatch(at: tcat), at: tcat.addingTimeInterval(4))
     try! catStore.save(catLib)
     let catBack = try! catStore.load()
@@ -936,6 +940,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && ProjectFiles.folders.allSatisfy { fm.fileExists(atPath: aConfig.appendingPathComponent($0).path) }
           && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Config/Unfiled.coldata").path) && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Palettes/Scratch.colpalette").path),
           "the catalogue's file is the index, named for the catalogue; each project holds its own palettes, and what belongs to no project is in Unfiled")
+    let aProject = try? ColourFiles.decoder().decode(ProjectDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Project/Job A.colproject")))
+    let aPalette = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Palettes/Autumn.colpalette")))
+    let looseFile = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: catDir.appendingPathComponent("Unfiled/Palettes/Scratch.colpalette")))
+    check(aProject?.turned == [TurnedPalette(palette: inA, purpose: .print, changedAt: tcat.addingTimeInterval(2))] && aPalette?.palette.purpose == nil
+          && looseFile?.palette.purpose == .video && catBack.swatch(inA)?.purpose == .print && catBack.swatch(inB)?.purpose == nil
+          && catBack.swatch(inB)?.purposeChangedAt == tcat.addingTimeInterval(3) && catBack.swatch(inB)?.purposeList == [.cine],
+          "the purpose a palette is turned to is kept in its project's file; a palette in no project keeps its own; turning to none is remembered too")
     let unfiledData = try? ColourFiles.decoder().decode(DataDocument.self, from: Data(contentsOf: catDir.appendingPathComponent("Unfiled/Config/Unfiled.coldata")))
     let jobData = try? ColourFiles.decoder().decode(DataDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Config/Job A.coldata")))
     check(unfiledData?.colours.map { $0.hex } == ["#EEEEEE"] && unfiledData?.tags.map { $0.name } == ["brand"] && unfiledData?.profiles.map { $0.id } == [ColourProfiles.starters[1].id]
