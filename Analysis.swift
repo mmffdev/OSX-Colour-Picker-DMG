@@ -80,7 +80,7 @@ enum AnalysisKind: CaseIterable {
         case .vision: return "Each colour as people with the commonest colour vision deficiencies see it"
         case .gradient: return "The colours run into one another, in order"
         case .combos: return "Each colour as a ground with the next colour set on it"
-        case .lightDark: return "Each colour on a light ground and on a dark one"
+        case .lightDark: return "Each colour on pure white and on the deepest black"
         }
     }
 
@@ -144,7 +144,9 @@ final class AnalysisPlot: NSView {
 
     /// The hue circle with a dot for each colour just outside it; a colour too grey to have a hue sits in the middle.
     private func drawHue() {
-        let c = NSPoint(x: bounds.midX, y: bounds.midY), radius = min(bounds.width, bounds.height) / 2 - 30, width: CGFloat = max(10, radius * 0.16)
+        let c = NSPoint(x: bounds.midX, y: bounds.midY), radius = (min(bounds.width, bounds.height) / 2 - 30) * 0.8, width: CGFloat = max(10, radius * 0.16)
+        // The dots grow with the circle, so they are not lost when the panel fills the page.
+        let dotRadius = max(9, radius * 0.045)
         // Red at the top, running clockwise through yellow, green, cyan, blue and magenta.
         func point(_ degrees: Double, _ r: CGFloat) -> NSPoint {
             let a = CGFloat(degrees * .pi / 180)
@@ -166,12 +168,12 @@ final class AnalysisPlot: NSView {
             let dot: NSPoint
             if v.s < 0.05 || v.l < 0.03 || v.l > 0.99 {
                 // No hue to speak of: the greys line up across the middle.
-                dot = NSPoint(x: c.x + CGFloat(grey) * 20 - 10 * CGFloat(max(0, keys.count - 1)).truncatingRemainder(dividingBy: 3), y: c.y)
+                dot = NSPoint(x: c.x + CGFloat(grey) * (dotRadius * 2 + 2) - 10 * CGFloat(max(0, keys.count - 1)).truncatingRemainder(dividingBy: 3), y: c.y)
                 grey += 1
             } else {
-                dot = point(v.h, radius + width / 2 + 12)
+                dot = point(v.h, radius + width / 2 + dotRadius + 4)
             }
-            let shape = NSBezierPath(ovalIn: NSRect(x: dot.x - 9, y: dot.y - 9, width: 18, height: 18))
+            let shape = NSBezierPath(ovalIn: NSRect(x: dot.x - dotRadius, y: dot.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
             fill(key).setFill()
             shape.fill()
             NSColor.labelColor.withAlphaComponent(0.35).setStroke()
@@ -240,8 +242,8 @@ final class AnalysisPlot: NSView {
     /// The colours as squares on a light ground, and the same on a dark one.
     private func drawLightDark() {
         let half = bounds.width / 2
-        let grounds: [(NSRect, NSColor)] = [(NSRect(x: 0, y: 0, width: half, height: bounds.height), NSColor(white: 0.98, alpha: 1)),
-                                            (NSRect(x: half, y: 0, width: half, height: bounds.height), NSColor(white: 0.19, alpha: 1))]
+        let grounds: [(NSRect, NSColor)] = [(NSRect(x: 0, y: 0, width: half, height: bounds.height), NSColor.white),
+                                            (NSRect(x: half, y: 0, width: half, height: bounds.height), NSColor.black)]   // pure white and the deepest black: the two extremes a colour can sit on
         for (ground, colour) in grounds {
             colour.setFill()
             ground.fill()
