@@ -354,6 +354,21 @@ extension Prefs {
         get { preferences.bool(forKey: "paletteHistory") }
         set { preferences.set(newValue, forKey: "paletteHistory") }
     }
+    /// How the contrast on a card is worked out: "wcag" or "apca".
+    static var contrastMethod: String {
+        get { preferences.string(forKey: "contrastMethod") == "apca" ? "apca" : "wcag" }
+        set { preferences.set(newValue, forKey: "contrastMethod") }
+    }
+    /// The contrast lines for a colour: a title, then white and black text on it, by the method chosen.
+    static func contrastLines(for hex: String) -> (title: String, line: String) {
+        let shown = displayHex(hex)
+        if contrastMethod == "apca" {
+            let white = abs(apcaContrast(text: "#FFFFFF", background: shown)), black = abs(apcaContrast(text: "#000000", background: shown))
+            return ("APCA Text Contrast", String(format: "White Lc %.0f  \u{00B7}  Black Lc %.0f", white, black))
+        }
+        let white = contrastRatio(shown, "#FFFFFF"), black = contrastRatio(shown, "#000000")
+        return ("WCAG Text Contrast", String(format: "White %.1f %@  \u{00B7}  Black %.1f %@", white, contrastGrade(white), black, contrastGrade(black)))
+    }
     /// Notes are shown until switched off.
     static var paletteNotes: Bool {
         get { preferences.object(forKey: "paletteNotes") == nil ? true : preferences.bool(forKey: "paletteNotes") }

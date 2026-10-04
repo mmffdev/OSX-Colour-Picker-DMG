@@ -45,6 +45,13 @@ final class SwatchListView: NSView {
     private var palette: UUID?
     /// Opens a colour's sheet: the colour, and whether on Notes (0) or History (1).
     var onOpen: ((String, Int) -> Void)?
+    /// The swatch that is selected, if any; a press on a swatch's colour selects it, and a second press lets it go.
+    private(set) var selected: String?
+    var onSelect: (() -> Void)?
+    func select(_ hex: String?) {
+        selected = hex.flatMap { want in rows.contains { $0.hex == want } ? want : nil }
+        rows.forEach { $0.isSelected = $0.hex == selected }
+    }
     /// A swatch's actions button was pressed: the colour, and the button, so the halo knows its trigger.
     var onHalo: ((String, NSView) -> Void)?
     /// A blank swatch was pressed: the page's one, or a group's own, which says what kind of colour to start.
@@ -102,7 +109,12 @@ final class SwatchListView: NSView {
     /// Shows the colours in order. The same colours as before are refreshed where they stand.
     func show(_ hexes: [String], in palette: UUID, locked: Bool, offersNew: Bool = false, groups: [PaletteGroup] = [], panels: RowPanels = RowPanels()) {
         // What the bar above has switched on is shown on every swatch at once.
-        defer { rows.forEach { $0.show(panels, among: hexes) } }
+        defer {
+            rows.forEach { $0.show(panels, among: hexes) }
+            // The selected swatch stays selected while it is still on the page.
+            if let chosen = selected, !hexes.contains(chosen) { selected = nil }
+            rows.forEach { $0.isSelected = $0.hex == selected }
+        }
         if palette == self.palette, rows.map({ $0.hex }) == hexes, groups == shownGroups, offersNew == shownOffer, !stack.arrangedSubviews.isEmpty || !offersNew {
             rows.forEach { $0.refresh(locked: locked) }
             return
@@ -117,6 +129,11 @@ final class SwatchListView: NSView {
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
             row.onHalo = { [weak self] trigger in self?.onHalo?(hex, trigger) }
+            row.onPress = { [weak self] in
+                guard let self = self else { return }
+                self.select(self.selected == hex ? nil : hex)
+                self.onSelect?()
+            }
             return (hex, row)
         })
         rows = hexes.compactMap { made[$0] }
@@ -195,7 +212,10 @@ final class SwatchRow: NSView {
     /// The actions button was pressed; hands over the button so the halo knows its trigger.
     var onHalo: ((NSView) -> Void)?
     private let halo = HaloTriggerView()
-    private let tile = NSView()
+    private let tile = PressView()
+    /// The swatch's colour was pressed: it becomes the selected swatch.
+    var onPress: (() -> Void)?
+    var isSelected = false { didSet { needsDisplay = true } }
     private let name = NSTextField(labelWithString: "")
     private let values = NSStackView()
     private let note = NSTextField(wrappingLabelWithString: "")
@@ -212,8 +232,9 @@ final class SwatchRow: NSView {
         tile.layer?.cornerRadius = 10
         tile.layer?.cornerCurve = .continuous
         tile.layer?.borderWidth = 1
-        tile.toolTip = "Click to copy"
-        tile.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(copyTapped)))
+        tile.toolTip = "Click To Select This Swatch"
+        // A press handled by the tile itself, not a gesture: a gesture would take the press meant for the actions button on it.
+        tile.onPress = { [weak self] in self?.onPress?() }
         // The same actions button a grid card has, in the same corner.
         halo.toolTip = "Actions"
         halo.ink = colorFromHex(readableText(on: displayHex(hex))) ?? .white
@@ -306,7 +327,8 @@ final class SwatchRow: NSView {
 
     override func updateLayer() {
         super.updateLayer()
-        tile.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+        tile.layer?.borderWidth = isSelected ? 3 : 1
+        tile.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.12)).cgColor
     }
     override var wantsUpdateLayer: Bool { true }
 
@@ -329,11 +351,11 @@ final class SwatchRow: NSView {
             ])
         }
         if Prefs.showContrast {
-            let white = contrastRatio(hex, "#FFFFFF"), black = contrastRatio(hex, "#000000")
-            let title = NSTextField(labelWithString: "WCAG Text Contrast")
+            let lines = Prefs.contrastLines(for: hex)
+            let title = NSTextField(labelWithString: lines.title)
             title.font = NSFont.systemFont(ofSize: 10, weight: .bold)
             title.textColor = NSColor.labelColor.withAlphaComponent(0.62)
-            let grade = NSTextField(labelWithString: String(format: "White %.1f %@  \u{00B7}  Black %.1f %@", white, contrastGrade(white), black, contrastGrade(black)))
+            let grade = NSTextField(labelWithString: lines.line)
             grade.font = NSFont.systemFont(ofSize: TextSize.caption, weight: .medium)
             grade.textColor = .secondaryLabelColor
             grade.lineBreakMode = .byTruncatingTail
@@ -414,8 +436,19 @@ final class SwatchRow: NSView {
         if steps.count > limit { historyPanel.addArrangedSubview(caption("And \(steps.count - limit) Earlier. Click The Notes For All Of It.")) }
     }
 
-    @objc private func copyTapped() { library?.copy(hex) }
     @objc private func editTapped() { onOpen?(0) }
+}
+
+/// A view that reports a press on itself, and leaves a press on anything inside it to that thing.
+final class PressView: NSView {
+    var onPress: (() -> Void)?
+    private var down = false
+    override func mouseDown(with event: NSEvent) { down = true }
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        if down, inside { onPress?() }
+        down = false
+    }
 }
 
 // ---------- The swatch's sheet ----------

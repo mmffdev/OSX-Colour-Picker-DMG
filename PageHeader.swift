@@ -24,6 +24,32 @@ enum PageStyle {
     static var titlePanelHeight: CGFloat { titleCentre * 2 }
 }
 
+/// The title panel every rail begins with: the name, in the page's own title font, on the page's
+/// own title line, with the page's own inset. rail1's reads "Catalogue"; rail2's names the place
+/// its page is. The page and the History rail have the same panel as the top of their header.
+final class TitlePanel: NSView {
+    let title = NSTextField(labelWithString: "")
+
+    init(_ text: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        title.stringValue = text
+        title.font = PageStyle.titleFont
+        title.lineBreakMode = .byTruncatingTail
+        title.cell?.usesSingleLineMode = true
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(title)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: PageStyle.titlePanelHeight),
+            title.centerYAnchor.constraint(equalTo: topAnchor, constant: PageStyle.titleCentre),
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PageStyle.side),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PageStyle.side),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 final class PageHeader: NSView {
     /// The page's name. A page that lets the user rename what it shows passes its own field.
     let title: NSTextField

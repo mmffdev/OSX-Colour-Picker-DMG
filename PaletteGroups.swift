@@ -178,67 +178,6 @@ extension Library {
     }
 }
 
-// ---------- The bar ----------
-
-/// The bar under the spectrum: how the page is grouped, and what it shows.
-final class PaletteViewBar: NSView {
-    var onChange: (() -> Void)?
-    private lazy var grouping = ToggleBar(labels: PaletteGrouping.allCases.map { $0.title }, target: self, action: #selector(groupingChanged))
-    // What every swatch shows beside its values, in the vertical view.
-    private lazy var channels = toolButton("Channels", "dial.medium", "Show Every Swatch's Value And Fidelity In Each Channel Of The Palette's Profile", target: self, action: #selector(panelTapped(_:)))
-    private lazy var history = toolButton("History", "clock.arrow.circlepath", "Show What Happened To Every Swatch In This Palette", target: self, action: #selector(panelTapped(_:)))
-    private lazy var histogram = toolButton("Histogram", "chart.bar.xaxis", "Show Every Swatch's Histogram", target: self, action: #selector(panelTapped(_:)))
-    private lazy var notes = toolButton("Notes", "note.text", "Show Every Swatch's Notes", target: self, action: #selector(panelTapped(_:)))
-    private lazy var filter = ToggleBar(labels: PaletteFilter.allCases.map { $0.title }, target: self, action: #selector(filterChanged))
-
-    init() {
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        grouping.toolTip = "Split The Page Into Groups. Captured As: By How Each Colour Was Given. Range: By Whether Every Channel Of The Profile Can Hold It."
-        filter.toolTip = "Show Only Some Colours. Out Of Range: Those A Channel Of The Profile Cannot Hold."
-        // Left: what every swatch shows. Right: how the page is grouped, then what it shows.
-        let bar = ActionBar(leading: [histogram, channels, notes, history], trailing: [ActionBar.label("Group By"), grouping, ActionBar.label("Show"), filter])
-        bar.setGap(16, after: grouping)
-        addSubview(bar)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: PageStyle.barHeight),
-            bar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bar.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        refresh()
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    func refresh() {
-        grouping.selectedSegment = PaletteGrouping.allCases.firstIndex(of: Prefs.paletteGrouping) ?? 0
-        filter.selectedSegment = PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0
-        for (button, on) in [(channels, Prefs.paletteChannels), (history, Prefs.paletteHistory), (histogram, Prefs.histograms), (notes, Prefs.paletteNotes && Prefs.paletteListView)] {
-            button.state = on ? .on : .off
-            button.needsDisplay = true
-        }
-    }
-
-    @objc private func panelTapped(_ sender: NSButton) {
-        if sender === channels { Prefs.paletteChannels.toggle() }
-        else if sender === history { Prefs.paletteHistory.toggle() }
-        else if sender === notes { Prefs.paletteNotes = !(Prefs.paletteNotes && Prefs.paletteListView) }
-        else { Prefs.histograms.toggle() }
-        // These sit beside each swatch's values, which only the vertical view has.
-        if Prefs.paletteChannels || Prefs.paletteHistory || Prefs.histograms || sender === notes { Prefs.paletteListView = true }
-        onChange?()
-    }
-
-    @objc private func groupingChanged() {
-        Prefs.paletteGrouping = PaletteGrouping.allCases[min(max(grouping.selectedSegment, 0), PaletteGrouping.allCases.count - 1)]
-        onChange?()
-    }
-    @objc private func filterChanged() {
-        Prefs.paletteFilter = PaletteFilter.allCases[min(max(filter.selectedSegment, 0), PaletteFilter.allCases.count - 1)]
-        onChange?()
-    }
-}
-
 /// A group's title over its colours, in the grid.
 final class GroupHeaderView: NSView, NSCollectionViewElement {
     static let kind = "groupHeader"

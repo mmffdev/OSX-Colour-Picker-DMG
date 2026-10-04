@@ -266,11 +266,11 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         contrastTitle.textColor = NSColor.labelColor.withAlphaComponent(0.62)
         rows.isHidden = Prefs.cardRows.isEmpty
         if Prefs.showContrast {
-            let white = contrastRatio(hex, "#FFFFFF"), black = contrastRatio(hex, "#000000")
-            contrast.stringValue = String(format: "White %.1f %@  \u{00B7}  Black %.1f %@",
-                                          white, contrastGrade(white), black, contrastGrade(black))
+            let lines = Prefs.contrastLines(for: hex)
+            contrastTitle.stringValue = lines.title
+            contrast.stringValue = lines.line
             contrast.textColor = .secondaryLabelColor
-            contrast.toolTip = "Contrast ratio of white and of black text on this colour, with its WCAG grade"
+            contrast.toolTip = "The contrast of white and of black text on this colour"
         }
     }
 }
@@ -292,14 +292,22 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var slots: [PaletteSlot] = []
     private var slotCounts: [Int] = []
     /// Under the spectrum: how the page is grouped and what it shows.
-    private let viewBar = PaletteViewBar()
+    // rail2 for this page: how the page is displayed, the palette as a whole, the selected swatch, labels and tags.
+    let contextRail = ContextRail()
+    private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatch")
+    private let labelsBucket = RailBucket("Labels"), tagsBucket = RailBucket("Tags")
+    private let contrastMenu = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let groupMenu = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let showMenu = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var panelRows: [RailRow] = []
+    private var labelRows: [RailRow] = []
     /// Under that, while Histogram is on: the choices every swatch's histogram follows.
     private let histogramBar = HistogramBar()
     private let bars = NSStackView()
     private let paletteHeading = sectionHeading("Palette")
     private let swatchesHeading = sectionHeading("Swatches")
     /// Over the spectrum: what can be done with the palette as a whole.
-    private var paletteBar: ActionBar!
+
 
     private let nameField = NSTextField(labelWithString: "")
     private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
@@ -427,7 +435,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         profile.target = self
         profile.action = #selector(profileChanged)
-        browsing.setViews([newColour, tagButton, star, target, copyAll, wcag, labels, profile, sort], in: .leading)
+        // The contrast, the profile, the order and the labels are on rail2 now.
+        browsing.setViews([newColour, tagButton, star, target, copyAll], in: .leading)
         browsing.spacing = 12
 
         sizeCards()
@@ -440,13 +449,10 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         grid.register(ColourCard.self, forItemWithIdentifier: ColourCard.identifier)
         grid.register(AddCard.self, forItemWithIdentifier: AddCard.identifier)
         grid.register(GroupHeaderView.self, forSupplementaryViewOfKind: GridLayout.headerKind, withIdentifier: GroupHeaderView.identifier)
-        viewBar.onChange = { [weak self] in
-            self?.reload()
-            self?.grid.deselectAll(nil)
-            self?.updateHeader()
-        }
+        buildRail()
+        list.onSelect = { [weak self] in self?.refreshRail() }
         list.onAdd = { [weak self] start in self?.library.startColour(start) }
-        grid.onClick = { [weak self] ip in self?.clicked(ip) }
+        // A press on a swatch selects it; it no longer copies. The copy marks, the actions button and Copy still do.
         grid.onDelete = { [weak self] in self?.removeSelected() }
         grid.onCopy = { [weak self] in self?.copySelected() }
         grid.onFavourite = { [weak self] in self?.starTapped() }
@@ -474,14 +480,13 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         list.onHalo = { [weak self] hex, trigger in self?.openHalo(for: hex, from: trigger) }
         header.trailing.isHidden = true
         histogramBar.onChange = { [weak self] in self?.reload() }
-        bars.setViews([viewBar, histogramBar], in: .top)
+        bars.setViews([histogramBar], in: .top)
         bars.orientation = .vertical
         bars.alignment = .leading
         bars.spacing = PageStyle.barGap
-        for bar in [viewBar, histogramBar] { bar.widthAnchor.constraint(equalTo: bars.widthAnchor).isActive = true }
+        histogramBar.widthAnchor.constraint(equalTo: bars.widthAnchor).isActive = true
         // The page in two parts, each under its heading: the palette as a whole, then its swatches.
-        paletteBar = ActionBar(leading: [toolButton("Analysis", "chart.pie", "The Whole Palette Looked At Seven Ways: Hue, Lightness, Colour Blind Simulation, Gradient, Combos, Light And Dark", target: self, action: #selector(analysisTapped))])
-        for v in [header, paletteHeading, paletteBar, spectrum, swatchesHeading, bars, scroll, list, empty] as [NSView] {
+        for v in [header, paletteHeading, spectrum, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -496,10 +501,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             headerHeight,
             paletteHeading.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
             paletteHeading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            paletteBar.topAnchor.constraint(equalTo: paletteHeading.bottomAnchor, constant: 10),
-            paletteBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            paletteBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
-            spectrum.topAnchor.constraint(equalTo: paletteBar.bottomAnchor, constant: 12),
+            spectrum.topAnchor.constraint(equalTo: paletteHeading.bottomAnchor, constant: 10),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
@@ -508,7 +510,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             bars.topAnchor.constraint(equalTo: swatchesHeading.bottomAnchor, constant: 10),
             bars.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             bars.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
-            scroll.topAnchor.constraint(equalTo: bars.bottomAnchor, constant: 30),
+            scroll.topAnchor.constraint(equalTo: bars.bottomAnchor, constant: 14),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -558,7 +560,6 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         groups = library.library.groups(of: hexes, by: Prefs.paletteGrouping, profile: proofing)
         if !groups.isEmpty { hexes = groups.flatMap { $0.keys } }
         (slots, slotCounts) = PaletteSlot.page(hexes, groups: groups, offersNew: !(s.projectID.flatMap { library.library.project($0)?.isLocked } ?? false) && search.isEmpty)
-        viewBar.refresh()
         histogramBar.refresh()
         histogramBar.isHidden = !(Prefs.histograms && Prefs.paletteListView)
 
@@ -615,6 +616,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             : !all.isEmpty ? "No Swatches Here Are \u{201C}\(Prefs.paletteFilter.title)\u{201D}."
             : "No swatches yet.\n" + (Shortcuts.display(for: "togglePicking").map { "Press \($0) to pick" } ?? "Pick")
                 + " colours into this palette, or drop an image on the window."
+        refreshRail()
     }
 
     /// The swatch's sheet, while one is up: notes and history for one colour, centred on this page.
@@ -665,9 +667,124 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     @objc private func showList() { setList(true) }
     private func setList(_ on: Bool) {
         guard Prefs.paletteListView != on else { return }
+        let chosen = selectedKey
         Prefs.paletteListView = on
         if !on { Prefs.histograms = false; Prefs.paletteChannels = false; Prefs.paletteHistory = false }   // the grid has nowhere to put them
         reload()
+        select(chosen)
+    }
+
+    // MARK: rail2
+
+    /// The swatch that is selected, in whichever view is showing; the first, when the grid has several.
+    private var selectedKey: String? { Prefs.paletteListView ? list.selected : selected().first }
+
+    /// Selects a swatch in whichever view is showing, so a selection survives a change of view.
+    private func select(_ key: String?) {
+        if Prefs.paletteListView {
+            list.select(key)
+        } else {
+            grid.deselectAll(nil)
+            if let key = key, let i = slots.firstIndex(of: .colour(key)) { grid.selectItems(at: [IndexPath(item: i, section: 0)], scrollPosition: []) }
+            updateHeader()
+        }
+        refreshRail()
+    }
+
+    private func menu(_ popup: NSPopUpButton, _ titles: [String], _ action: Selector) {
+        popup.addItems(withTitles: titles)
+        popup.target = self
+        popup.action = action
+    }
+
+    /// Builds this page's context rail: buckets of choices, switches and links, open to begin with.
+    private func buildRail() {
+        menu(contrastMenu, ["Off", "WCAG 2", "APCA"], #selector(contrastChosen))
+        menu(groupMenu, PaletteGrouping.allCases.map { $0.title }, #selector(groupChosen))
+        menu(showMenu, PaletteFilter.allCases.map { $0.title }, #selector(showChosen))
+        displayBucket.set([
+            RailRow("Contrast", symbol: "circle.lefthalf.filled", tip: "The Contrast Shown On Every Swatch: Off, WCAG 2, Or APCA", kind: .choice(contrastMenu)),
+            RailRow("Profile", symbol: "dial.medium", tip: "The Colour Profile This Palette Is Proofed For", kind: .choice(profile)),
+            RailRow("Order", symbol: "arrow.up.arrow.down", tip: "The Order The Swatches Are Shown In", kind: .choice(sort)),
+        ])
+        paletteBucket.set([
+            RailRow("Palette Analysis", symbol: "chart.pie", tip: "The Whole Palette Looked At Ten Ways: Colour Vision, Contrast, Separation, Print Reach And More", kind: .link { [weak self] in self?.analysisTapped() }),
+        ])
+        let panels: [(String, String, String)] = [("Notes", "note.text", "Show Every Swatch's Notes"), ("History", "clock.arrow.circlepath", "Show What Happened To Every Swatch"),
+                                                  ("Channels", "dial.medium", "Show Every Swatch's Value And Fidelity In Each Channel"), ("Histogram", "chart.bar.xaxis", "Show Every Swatch's Histogram")]
+        panelRows = panels.enumerated().map { i, panel in RailRow(panel.0, symbol: panel.1, tip: panel.2, kind: .toggle { [weak self] in self?.panelToggled(i) }) }
+        swatchBucket.set([
+            RailRow("Group By", symbol: "rectangle.3.group", tip: "Split The Page Into Groups", kind: .choice(groupMenu)),
+            RailRow("Display", symbol: "line.3.horizontal.decrease.circle", tip: "Show Only Some Colours", kind: .choice(showMenu)),
+        ] + panelRows)
+        labelRows = (["Name"] + ColourFormat.cardRows.map { $0.label }).enumerated().map { i, label in
+            RailRow(label, symbol: i == 0 ? "textformat" : "number", tip: "Show \(label) On Every Swatch", kind: .toggle { [weak self] in self?.railLabelToggled(i) })
+        }
+        labelsBucket.set(labelRows)
+        contextRail.set([displayBucket, paletteBucket, swatchBucket, labelsBucket, tagsBucket])
+    }
+
+    /// Brings the rail up to date with the page: what is chosen, what is on, and whether a swatch is selected.
+    private func refreshRail() {
+        guard isViewLoaded, let id = paletteID, let s = library.library.swatch(id) else { return }
+        contrastMenu.selectItem(at: !Prefs.showContrast ? 0 : Prefs.contrastMethod == "apca" ? 2 : 1)
+        groupMenu.selectItem(at: PaletteGrouping.allCases.firstIndex(of: Prefs.paletteGrouping) ?? 0)
+        showMenu.selectItem(at: PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0)
+        let asList = Prefs.paletteListView
+        for (row, on) in zip(panelRows, [Prefs.paletteNotes && asList, Prefs.paletteHistory, Prefs.paletteChannels, Prefs.histograms]) { row.isOn = on }
+        // The Swatch bucket is there only while a swatch is selected.
+        swatchBucket.isHidden = selectedKey == nil
+        let shown = Prefs.cardRows
+        for (i, row) in labelRows.enumerated() { row.isOn = i == 0 ? Prefs.showNames : shown.contains(ColourFormat.cardRows[i - 1]) }
+        // The palette's own tags, as rail1 lists tags: a press shows everything with that tag.
+        var tags: [NSView] = s.tagList.map { tag in
+            RailRow("#" + tag, symbol: "tag", dot: tagColour(library.library.info(forTag: tag)), tip: "Show Everything Tagged \(tag)", kind: .link { [weak self] in self?.library.onShow?(.tag(tag), false) })
+        }
+        let edit = RailRow(s.tagList.isEmpty ? "Add Tags\u{2026}" : "Edit Tags\u{2026}", symbol: "pencil", tip: "Change This Palette's Tags", kind: .link { [weak self] in self?.tagsTapped() })
+        edit.isEnabled = !(header.lock ?? false)
+        tags.append(edit)
+        tagsBucket.set(tags)
+    }
+
+    @objc private func contrastChosen() {
+        let choice = contrastMenu.indexOfSelectedItem
+        if choice > 0 { Prefs.contrastMethod = choice == 2 ? "apca" : "wcag" }
+        Prefs.showContrast = choice > 0
+        reload()
+    }
+    @objc private func groupChosen() {
+        let chosen = selectedKey
+        Prefs.paletteGrouping = PaletteGrouping.allCases[min(max(groupMenu.indexOfSelectedItem, 0), PaletteGrouping.allCases.count - 1)]
+        reload()
+        select(chosen)
+    }
+    @objc private func showChosen() {
+        let chosen = selectedKey
+        Prefs.paletteFilter = PaletteFilter.allCases[min(max(showMenu.indexOfSelectedItem, 0), PaletteFilter.allCases.count - 1)]
+        reload()
+        select(chosen)
+    }
+
+    /// Notes, History, Channels, Histogram: columns beside every swatch, which only the vertical view has.
+    private func panelToggled(_ index: Int) {
+        let chosen = selectedKey
+        switch index {
+        case 0: Prefs.paletteNotes = !(Prefs.paletteNotes && Prefs.paletteListView)
+        case 1: Prefs.paletteHistory.toggle()
+        case 2: Prefs.paletteChannels.toggle()
+        default: Prefs.histograms.toggle()
+        }
+        if Prefs.paletteChannels || Prefs.paletteHistory || Prefs.histograms || index == 0 { Prefs.paletteListView = true }
+        reload()
+        select(chosen)
+    }
+
+    private func railLabelToggled(_ index: Int) {
+        if index == 0 { Prefs.showNames.toggle(); return }
+        let format = ColourFormat.cardRows[index - 1]
+        var rows = Prefs.cardRows
+        if rows.contains(format) { rows.removeAll { $0 == format } } else { rows.append(format) }
+        Prefs.cardRows = ColourFormat.cardRows.filter { rows.contains($0) }
     }
 
     /// Lays the cards out afresh for the current width.
@@ -832,8 +949,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
     // MARK: Several swatches selected
 
-    func collectionView(_ cv: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { updateHeader() }
-    func collectionView(_ cv: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { updateHeader() }
+    func collectionView(_ cv: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { updateHeader(); refreshRail() }
+    func collectionView(_ cv: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { updateHeader(); refreshRail() }
 
     /// With two or more swatches selected the name gives way to a count and the bar to actions on them.
     private func updateHeader() {

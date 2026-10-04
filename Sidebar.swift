@@ -432,11 +432,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         self.scroll = scroll
         NotificationCenter.default.addObserver(self, selector: #selector(themeChanged), name: .themeDidChange, object: nil)
         // Under the full-width toolbar, with a flat background of its own; the first row sits on the pages' title line.
+        // rail1 begins with its title panel, as every rail and the page do.
         let root = SidebarBackdrop()
+        let title = TitlePanel("Catalogue")
+        root.addSubview(title)
         root.addSubview(scroll)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: PageStyle.titleCentre - 14),
+            title.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            title.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            title.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: title.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),

@@ -179,6 +179,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private var startWidthsKnown = true
     private var historyItem: NSSplitViewItem!
     private var sideItem: NSSplitViewItem!
+    /// rail2, the context rail: right of rail1, showing whatever rail the page has, closed when it has none.
+    private var contextItem: NSSplitViewItem!
+    private let contextRail = ContextRailController()
     private lazy var historyRail = HistoryRailController(library: library)
     private(set) var selection: Selection = .all
     private weak var pickItem: NSToolbarItem?
@@ -229,6 +232,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         side.minimumThickness = 236 // room for a palette name, its count and star
         side.canCollapse = true
         side.holdingPriority = .defaultLow + 2   // the page takes up a change in the window's width, not the sidebar
+        contextItem = NSSplitViewItem(viewController: contextRail)
+        contextItem.minimumThickness = 220
+        contextItem.canCollapse = true
+        contextItem.isCollapsed = true
+        contextItem.holdingPriority = .defaultLow + 2
         let main = NSSplitViewItem(viewController: content)
         main.minimumThickness = 420
         builderItem = NSSplitViewItem(viewController: builder)
@@ -241,6 +249,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         historyItem.canCollapse = true
         historyItem.holdingPriority = .defaultLow + 1
         split.addSplitViewItem(side)
+        split.addSplitViewItem(contextItem)
         split.addSplitViewItem(main)
         split.addSplitViewItem(builderItem)
         split.addSplitViewItem(historyItem)
@@ -266,7 +275,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // The window takes its saved place first, so the panes' saved widths are laid into a window of the right size.
         restoreFrame()
         startWidthsKnown = preferences.object(forKey: MainWindowController.splitKey) != nil
-        split.splitView.autosaveName = "MMFFDevColour3Split"
+        split.splitView.autosaveName = "MMFFDevColour3Split2"   // a new name with rail2: widths saved for three panes do not fit four
         builderItem.isCollapsed = true // the rail belongs to the builder; never restore it open
         historyItem.isCollapsed = !Prefs.historyRailShown
         win.center()
@@ -388,6 +397,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         if s == .contrast, selection != .contrast { content.contrast.arrive(fromLab: selection == .lab) }
         selection = s
         library.current = s
+        // rail2 is there for a page that has one: for now, a palette's.
+        var rail: NSView?
+        if case .palette(let id) = s, library.library.swatch(id)?.isTypography != true { rail = content.palette.contextRail }
+        contextRail.show(rail)
+        let opening = rail != nil && contextItem.isCollapsed
+        contextItem.isCollapsed = rail == nil
+        if opening, contextItem.viewController.view.frame.width < contextItem.minimumThickness + 1 {
+            DispatchQueue.main.async { [weak self] in if let self = self { self.setWidth(MainWindowController.contextStartWidth, of: self.contextItem) } }
+        }
         switch s {
         case .all: preferences.set("all", forKey: "lastPage")
         case .tag(let t): preferences.set("tag:" + t, forKey: "lastPage")
@@ -487,7 +505,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     /// widths are whatever they were left at; nothing is fixed but the minimums.
     static let sidebarStartWidth: CGFloat = 260
     static let railStartWidth: CGFloat = 320
-    private static let splitKey = "NSSplitView Subview Frames MMFFDevColour3Split"
+    private static let splitKey = "NSSplitView Subview Frames MMFFDevColour3Split2"
+    static let contextStartWidth: CGFloat = 250
 
     private func applyStartWidths() {
         split.splitView.layoutSubtreeIfNeeded()
@@ -503,6 +522,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         let width = max(item.minimumThickness, min(wanted, view.bounds.width - 420 - 240))
         if index == 0 { view.setPosition(width, ofDividerAt: 0); return }
         let pane = view.arrangedSubviews[index]
+        // rail2 sits on the left, so it is its right-hand divider that moves.
+        if item === contextItem { view.setPosition(pane.frame.minX + width, ofDividerAt: index); return }
         // The divider that moves is the one against the nearest open pane to the left: a collapsed
         // pane in between has no width to give, so its own divider cannot move.
         var divider = index - 1
@@ -519,6 +540,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     /// A notch on the inner edge of each side pane: drag to resize, double-click for the starting width.
     private func addGrips() {
         for (item, edge, start) in [(sideItem!, PaneGrip.Edge.trailing, MainWindowController.sidebarStartWidth),
+                                    (contextItem!, .trailing, MainWindowController.contextStartWidth),
                                     (builderItem!, .leading, MainWindowController.railStartWidth),
                                     (historyItem!, .leading, MainWindowController.railStartWidth)] {
             let grip = PaneGrip(edge: edge)
