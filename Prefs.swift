@@ -69,6 +69,11 @@ enum Prefs {
     static var buttonActiveBackground: String? { get { colour("theme.button.activeBackground") } set { setColour(newValue, "theme.button.activeBackground") } }
     static var buttonActiveText: String? { get { colour("theme.button.activeText") } set { setColour(newValue, "theme.button.activeText") } }
 
+    /// One of the halo's colours as "#RRGGBB"; nil is the theme's own. `part` is "centre.background",
+    /// "centre.text", or for ring 1, 2 or 3: "ring1.background", "ring1.text", "ring1.cursorBackground", "ring1.cursorText".
+    static func haloColour(_ part: String) -> String? { colour("theme.halo." + part) }
+    static func setHaloColour(_ value: String?, _ part: String) { setColour(value, "theme.halo." + part) }
+
     // MARK: Organisation
 
     /// The organisation using the app, as the project form's Studio fields: field key to value.

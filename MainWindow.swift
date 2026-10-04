@@ -608,6 +608,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         if case .palette = selection { content.palette.rehearseLabels() } else { content.all.rehearseLabels() }
     }
 
+    func rehearseHalo(choosing ids: [String]) { content.palette.rehearseHalo(choosing: ids) }
+
     func rehearseSearch(_ text: String) {
         focusSearch()
         searchBox.stringValue = text

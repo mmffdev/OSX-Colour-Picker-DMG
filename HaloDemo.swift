@@ -21,7 +21,15 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
                        edit: ("Trinidad", "Trinidad", "Return saves \u{00B7} Empty resets", { [weak self] in self?.status.stringValue = "Renamed to \($0)" })),
             HaloAction(id: "star", label: "Favourite", symbol: "star", checked: true, onSelect: say("Favourite")),
             HaloAction(id: "export", label: "Export", symbol: "square.and.arrow.up", description: "Nothing to export yet", disabled: true, onSelect: say("Export")),
-            HaloAction(id: "move", label: "Move to palette", symbol: "folder", onSelect: say("Move")),
+            HaloAction(id: "move", label: "Move to palette", symbol: "folder", description: "Choose a palette", children: {
+                ["Brand", "Web", "Print", "Packaging", "Archive"].map { name in
+                    HaloAction(id: name, label: name, symbol: "folder", description: "Move to this palette", onSelect: say("Moved to \(name)"))
+                } + [HaloAction(id: "new", label: "New palette", symbol: "plus", description: "Choose a kind", children: {
+                    ["Blank", "Tints", "Shades", "Triad"].map { kind in
+                        HaloAction(id: kind, label: kind, symbol: "square.grid.2x2", onSelect: say("New \(kind) palette"))
+                    }
+                })]
+            }),
             HaloAction(id: "delete", label: "Delete", symbol: "trash", confirmation: ("Slide to delete", "Arrow keys slide, Return confirms"), onSelect: say("Deleted")),
         ])
 
@@ -57,7 +65,8 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
         card.configure(hex: "#DD7157")
         card.onHalo = { [weak self] trigger in
             guard let self = self else { return }
-            if swatch.isOpen { swatch.chooseSelected() } else { swatch.open(centredIn: self.window.contentView!, trigger: trigger) }
+            _ = self
+            swatch.open(over: trigger)
         }
         self.card = card
         card.view.translatesAutoresizingMaskIntoConstraints = false
@@ -73,10 +82,13 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
             column.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 24),
         ])
         window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
         let arguments = CommandLine.arguments
+        // Taking pictures: stay behind whatever is in use.
+        if arguments.contains("--snapshot") { window.orderBack(nil) } else {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
         if let at = arguments.firstIndex(of: "--snapshot"), at + 1 < arguments.count {
             snapshot(into: URL(fileURLWithPath: arguments[at + 1]), row.views)
         }
@@ -111,6 +123,19 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
                 _ = items?.first { $0.accessibilityLabel() == "Rename" }?.accessibilityPerformPress()
             }
         }))
+        // The rings that grow outside the first: opened over the card's own button, then one and two levels out.
+        func press(_ labels: [String], after delay: TimeInterval = 0.4) {
+            guard let label = labels.first else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                let dial = self?.window.childWindows?.first?.contentView
+                let items = dial?.accessibilityChildren() as? [NSAccessibilityElement]
+                _ = items?.first { $0.accessibilityLabel() == label }?.accessibilityPerformPress()
+                press(Array(labels.dropFirst()), after: 0.3)
+            }
+        }
+        shots.append(("ring2", { [weak self] in self?.card?.pressHalo(); press(["Move to palette"]) }))
+        shots.append(("ring3", { [weak self] in self?.card?.pressHalo(); press(["Move to palette", "New palette"]) }))
+        shots.append(("ring2-growing", { [weak self] in self?.card?.pressHalo(); press(["Move to palette"], after: 1.12) }))
         func next(_ at: Int) {
             guard at < shots.count else { NSApp.terminate(nil); return }
             shots[at].prepare()

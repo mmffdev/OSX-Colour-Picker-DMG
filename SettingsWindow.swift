@@ -480,9 +480,40 @@ final class ThemePanel: SettingsPanel {
     private let hoverText = NSColorWell()
     private let activeBackground = NSColorWell()
     private let activeText = NSColorWell()
+    /// The halo's wells, each with the name its colour is saved under.
+    private var haloWells: [(well: NSColorWell, part: String)] = []
+    /// The halo's layers, in the order of their Reset buttons: the name parts each one clears.
+    private let haloLayers = [["centre.background", "centre.text"]] + (1...3).map { n in
+        ["background", "text", "cursorBackground", "cursorText"].map { "ring\(n).\($0)" }
+    }
+
+    private func haloPair(_ background: String, _ text: String, reset layer: Int? = nil) -> NSView {
+        let wells = [background, text].map { part -> NSColorWell in
+            let well = NSColorWell()
+            haloWells.append((well, part))
+            return well
+        }
+        var views: [NSView] = [wells[0], caption("Background", size: TextSize.caption), wells[1], caption("Text", size: TextSize.caption)]
+        if let layer = layer {
+            let reset = button("Reset", #selector(resetHalo(_:)))
+            reset.tag = layer
+            views.append(reset)
+        }
+        return row(views)
+    }
 
     override func rows() -> [[NSView]] {
-        for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] {
+        haloWells = []
+        var halo: [[NSView]] = [
+            [heading("Halo"), blank],
+            [label("Information:"), haloPair("centre.background", "centre.text", reset: 0)],
+        ]
+        for (n, name) in ["Primary", "Secondary", "Tertiary"].enumerated() {
+            halo.append([label("\(name) Ring:"), haloPair("ring\(n + 1).background", "ring\(n + 1).text", reset: n + 1)])
+            halo.append([label("Highlight Cursor:"), haloPair("ring\(n + 1).cursorBackground", "ring\(n + 1).cursorText")])
+        }
+        halo.append([blank, note("Information is the circle in the middle of the halo. Primary is the first ring; Secondary and Tertiary are the rings that grow outside it. A ring's Highlight Cursor is the wedge at the top that marks the choice. Unset, the rings are the button colours turned round, and Information and the cursors are the button colours as they are. Reset puts one layer back.")])
+        for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] + haloWells.map({ $0.well }) {
             well.target = self
             well.action = #selector(changed(_:))
             well.widthAnchor.constraint(equalToConstant: 44).isActive = true
@@ -500,7 +531,7 @@ final class ThemePanel: SettingsPanel {
             [label("Active:"), pair(activeBackground, activeText)],
             [blank, row([button("Reset To Default", #selector(resetButtons))])],
             [blank, note("Hover is a button under the pointer; Active is one being pressed, or the choice that is on in a toggle. The defaults are greys taken from the background, so the controls stay quiet beside your colours. They follow the background as it is stepped lighter or darker.")],
-        ]
+        ] + halo
     }
 
     override func refresh() {
@@ -510,11 +541,16 @@ final class ThemePanel: SettingsPanel {
         hoverText.color = Theme.buttonHoverText
         activeBackground.color = Theme.buttonActiveBackground
         activeText.color = Theme.buttonActiveText
+        for item in haloWells { item.well.color = Theme.halo(item.part) }
     }
 
     /// Only the well that was changed is kept; the others stay on their defaults.
     @objc private func changed(_ well: NSColorWell) {
         let hex = hexOf(well.color)
+        if let halo = haloWells.first(where: { $0.well === well }) {
+            Prefs.setHaloColour(hex, halo.part)
+            return
+        }
         switch well {
         case selectionBackground: Prefs.sidebarSelectionBackground = hex
         case selectionText: Prefs.sidebarSelectionText = hex
@@ -531,6 +567,13 @@ final class ThemePanel: SettingsPanel {
         Prefs.sidebarSelectionText = nil
         refresh()
         library.reloadSidebarTheme()
+    }
+
+    /// Puts one layer of the halo back to its defaults: the centre, or a ring with its cursor.
+    @objc private func resetHalo(_ sender: NSButton) {
+        guard haloLayers.indices.contains(sender.tag) else { return }
+        for part in haloLayers[sender.tag] { Prefs.setHaloColour(nil, part) }
+        refresh()
     }
 
     @objc private func resetButtons() {

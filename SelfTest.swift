@@ -995,6 +995,24 @@ func runHaloTests(check: (Bool, String) -> Void) {
     check(corner == CGRect(x: 1088, y: 8, width: 344, height: 344), "near a screen edge the dial stays 8 points inside it")
     let small = HaloGeometry.frame(below: CGRect(x: 100, y: 100, width: 20, height: 20), in: CGRect(x: 0, y: 0, width: 300, height: 260))
     check(small.width == 244 && small.height == 244 && small.minY == 8, "on a small screen the dial shrinks to fit")
+    let over = HaloGeometry.frame(over: CGPoint(x: 700, y: 450), reach: 116, in: screen)
+    check(over == CGRect(x: 528, y: 278, width: 344, height: 344), "a halo opened over its button has its centre on the button")
+    let edge = HaloGeometry.frame(over: CGPoint(x: 1430, y: 890), reach: 116, in: screen)
+    check(edge.midX == 1440 - 172 - 116 - 8 && edge.midY == 900 - 172 - 116 - 8, "near a screen edge it moves in far enough for its outer rings too")
+    let tight = HaloGeometry.frame(over: CGPoint(x: 10, y: 10), reach: 116, in: CGRect(x: 0, y: 0, width: 500, height: 500))
+    check(tight.minX == 8 && tight.minY == 8 && tight.width == 344, "on a screen too small for the outer rings the dial itself stays in")
+    let second = HaloGeometry.band(of: 1, diameter: 344), third = HaloGeometry.band(of: 2, diameter: 344)
+    check(second.near == 174 && second.far == 230 && third.near == 232 && third.far == 288 && HaloGeometry.reach(rings: 2) == 116,
+          "each outer ring is a band of its own, a hair clear of the ring inside it")
+    check(HaloGeometry.orbit(of: 0, diameter: 344) == HaloGeometry.orbitRadius(344) && HaloGeometry.orbit(of: 1, diameter: 344) == 202,
+          "an outer ring's glyphs ride the middle of its band")
+    check(HaloGeometry.level(at: 150, rings: 3, diameter: 344) == 0 && HaloGeometry.level(at: 200, rings: 3, diameter: 344) == 1
+          && HaloGeometry.level(at: 260, rings: 3, diameter: 344) == 2 && HaloGeometry.level(at: 50, rings: 3, diameter: 344) == nil
+          && HaloGeometry.level(at: 200, rings: 1, diameter: 344) == nil, "a press is placed on the ring it lands on, and on no ring in the centre")
+    check(HaloGeometry.halfWedge(of: 1, diameter: 344, count: 2) < HaloGeometry.halfWedge(of: 0, diameter: 344, count: 2)
+          && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
+    check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
+          && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
     check(HaloGeometry.wrap(-1, 6) == 5 && HaloGeometry.wrap(13, 6) == 1 && HaloGeometry.wrap(3, 0) == 0, "positions wrap round the ring in both directions")
     check(abs(HaloGeometry.orbitRadius(344) - 142.54) < 0.001, "glyphs ride midway across the band")
     check(HaloGeometry.targetSize(344, count: 6) == 40 && HaloGeometry.targetSize(344, count: 40) == 24, "glyph targets stay between 24 and 40 points")

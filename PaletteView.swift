@@ -115,6 +115,8 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     var onHalo: ((NSView) -> Void)?
     weak var library: LibraryController?
     private(set) var hex = ""
+    /// As a press on the halo button.
+    func pressHalo() { onHalo?(halo) }
     private let chip = NSView()
     private let name = NSTextField(labelWithString: "")
     private let code = NSTextField(labelWithString: "")
@@ -839,14 +841,22 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         return card
     }
 
-    /// Opens the swatch's actions as a halo in the middle of the page. A second press on the
-    /// same button, with the halo still open, chooses whatever is under the wedge.
+    /// For a trial run: opens the first swatch's halo from its own button, then chooses each of
+    /// `ids` in turn, so a ring grown outside the first can be looked at.
+    func rehearseHalo(choosing ids: [String]) {
+        guard !Prefs.paletteListView, let card = grid.item(at: IndexPath(item: 0, section: 0)) as? ColourCard else { return }
+        card.pressHalo()
+        for (at, id) in ids.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 + 0.35 * Double(at)) { [weak self] in self?.halo.choose(id: id) }
+        }
+    }
+
+    /// Opens the swatch's actions as a halo with its centre on the button that was pressed.
     private func openHalo(for hex: String, from trigger: NSView) {
-        if halo.isOpen, haloHex == hex { halo.chooseSelected(); return }
         haloHex = hex
         halo.caption = Prefs.showNames ? library.library.name(of: hex, in: paletteID) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
-        halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags) { [weak self] in self?.halo.actions = $0 }
-        halo.open(centredIn: Prefs.paletteListView ? list : (grid.enclosingScrollView ?? view), trigger: trigger)
+        halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags)
+        halo.open(over: trigger)
     }
 
     private func clicked(_ ip: IndexPath) {
@@ -1048,15 +1058,10 @@ enum SwatchMenu {
     }
 
     /// The same actions as a ring for the halo, for one swatch. The menu's submenus become rings
-    /// of their own, each with a way back; `show` swaps a ring into the open halo.
-    static func ring(for hex: String, in palette: UUID?, library: LibraryController, editTags: (([String]) -> Void)? = nil,
-                     show: @escaping ([HaloAction]) -> Void) -> [HaloAction] {
+    /// of their own, grown outside the first; Escape steps back from one.
+    static func ring(for hex: String, in palette: UUID?, library: LibraryController, editTags: (([String]) -> Void)? = nil) -> [HaloAction] {
         func group(_ id: String, _ label: String, _ symbol: String, _ description: String, _ inner: @escaping () -> [HaloAction]) -> HaloAction {
-            HaloAction(id: id, label: label, symbol: symbol, description: description, keepsOpen: true) {
-                show(inner() + [HaloAction(id: "back", label: "Back", symbol: "arrow.uturn.backward", description: label, keepsOpen: true) {
-                    show(ring(for: hex, in: palette, library: library, editTags: editTags, show: show))
-                }])
-            }
+            HaloAction(id: id, label: label, symbol: symbol, description: description, children: inner)
         }
         func dot(_ colour: NSColor) -> NSImage {
             NSImage(size: NSSize(width: 20, height: 20), flipped: false) { rect in

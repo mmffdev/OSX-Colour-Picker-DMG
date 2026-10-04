@@ -25,6 +25,8 @@ struct HaloAction {
     var keepsOpen = false
     /// Set to make the action open a text box in the centre; Return hands back what was typed.
     var edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil
+    /// Set to make the action grow a ring of its own outside the one it sits on, holding these.
+    var children: (() -> [HaloAction])? = nil
     var onSelect: () -> Void = {}
 }
 
@@ -32,22 +34,60 @@ extension HaloAction {
     init(id: String, label: String, symbol name: String, description: String? = nil, disabled: Bool = false,
          checked: Bool? = nil, confirmation: (label: String, keyboardHint: String)? = nil, keepsOpen: Bool = false,
          edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil,
-         onSelect: @escaping () -> Void = {}) {
+         children: (() -> [HaloAction])? = nil, onSelect: @escaping () -> Void = {}) {
         self.init(id: id, label: label, icon: NSImage(systemSymbolName: name, accessibilityDescription: label) ?? NSImage(),
-                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, edit: edit, onSelect: onSelect)
+                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, edit: edit, children: children, onSelect: onSelect)
     }
 }
 
+/// One ring's colours: the band and what is drawn on it, and the cursor, which is the wedge at
+/// twelve o'clock that marks the choice, and what is drawn inside it.
+struct HaloRingColours {
+    var band: NSColor, bandInk: NSColor, cursor: NSColor, cursorInk: NSColor
+}
+
 struct HaloPalette {
-    var band: NSColor, bandInk: NSColor, centre: NSColor, wedgeInk: NSColor, centreInk: NSColor
+    /// The circle in the middle, where the halo says what is under the cursor.
+    var centre: NSColor, centreInk: NSColor
+    /// The first ring, then the rings that grow outside it. A ring past the last uses the last.
+    var rings: [HaloRingColours]
+
+    func ring(_ level: Int) -> HaloRingColours { rings[min(max(level, 0), rings.count - 1)] }
 
     /// Platform's own colours: a pale band around a dark centre.
-    static let platform = HaloPalette(
-        band: NSColor(srgbRed: 0xEC / 255, green: 0xF0 / 255, blue: 0xF5 / 255, alpha: 1),
-        bandInk: NSColor(srgbRed: 0x22 / 255, green: 0x2A / 255, blue: 0x37 / 255, alpha: 1),
-        centre: NSColor(srgbRed: 0x22 / 255, green: 0x2A / 255, blue: 0x37 / 255, alpha: 1),
-        wedgeInk: NSColor(srgbRed: 0xEC / 255, green: 0xF0 / 255, blue: 0xF5 / 255, alpha: 1),
-        centreInk: NSColor(srgbRed: 0xEC / 255, green: 0xF0 / 255, blue: 0xF5 / 255, alpha: 1))
+    static let platform: HaloPalette = {
+        let pale = NSColor(srgbRed: 0xEC / 255, green: 0xF0 / 255, blue: 0xF5 / 255, alpha: 1)
+        let dark = NSColor(srgbRed: 0x22 / 255, green: 0x2A / 255, blue: 0x37 / 255, alpha: 1)
+        return HaloPalette(centre: dark, centreInk: pale, rings: [HaloRingColours(band: pale, bandInk: dark, cursor: dark, cursorInk: pale)])
+    }()
+
+    /// The colours set in Settings, under Theme. Unset, the centre and the cursors are the
+    /// buttons' own colours and the rings are those colours turned round.
+    static var theme: HaloPalette {
+        HaloPalette(centre: Theme.halo("centre.background"), centreInk: Theme.halo("centre.text"),
+                    rings: (1...3).map { n in
+                        HaloRingColours(band: Theme.halo("ring\(n).background"), bandInk: Theme.halo("ring\(n).text"),
+                                        cursor: Theme.halo("ring\(n).cursorBackground"), cursorInk: Theme.halo("ring\(n).cursorText"))
+                    })
+    }
+}
+
+extension Theme {
+    /// One of the halo's colours by the name Settings saves it under: "centre.background",
+    /// "ring2.cursorText" and so on.
+    static func halo(_ part: String) -> NSColor {
+        if let set = Prefs.haloColour(part).flatMap(colorFromHex) { return set }
+        return (haloDefault(part).usingColorSpace(.sRGB) ?? haloDefault(part))
+    }
+
+    static func haloDefault(_ part: String) -> NSColor { haloDefaultIsText(part) ? text : buttonRest }
+
+    /// Whether a part's default is the buttons' text colour; otherwise it is their background.
+    /// A ring is the button turned round, so its background is the text colour and its text the background.
+    static func haloDefaultIsText(_ part: String) -> Bool {
+        let reversed = part.hasPrefix("ring") && !part.contains("cursor")
+        return part.hasSuffix("ext") != reversed
+    }
 }
 
 /// The dial's arithmetic, kept apart from the drawing so the self-test can reach it.
@@ -69,13 +109,56 @@ enum HaloGeometry {
                       width: d, height: d)
     }
 
-    /// The same dial centred on a part of the screen instead of hung under a trigger.
-    static func frame(centredOn area: CGRect, in visible: CGRect) -> CGRect {
+    /// The dial with its centre on `point`, moved only as far as it takes to keep it, and the
+    /// `reach` of any rings that can grow outside it, 8 points inside the screen.
+    static func frame(over point: CGPoint, reach: CGFloat, in visible: CGRect) -> CGRect {
         let d = max(1, min(fullDiameter, visible.width - 16, visible.height - 16))
-        func clamp(_ n: CGFloat, _ low: CGFloat, _ high: CGFloat) -> CGFloat { min(max(n, low), high) }
-        return CGRect(x: clamp(area.midX - d / 2, visible.minX + 8, visible.maxX - d - 8),
-                      y: clamp(area.midY - d / 2, visible.minY + 8, visible.maxY - d - 8),
-                      width: d, height: d)
+        func place(_ c: CGFloat, _ low: CGFloat, _ high: CGFloat) -> CGFloat {
+            let whole = d / 2 + reach + 8
+            let clear = high - low >= whole * 2 ? whole : d / 2 + 8   // no room for the outer rings: keep the dial itself in
+            return min(max(c, low + clear), high - clear)
+        }
+        return CGRect(x: place(point.x, visible.minX, visible.maxX) - d / 2, y: place(point.y, visible.minY, visible.maxY) - d / 2, width: d, height: d)
+    }
+
+    // A ring grown outside the first is a band of its own, a hair clear of the ring inside it.
+    static let ringBand: CGFloat = 56
+    static let ringGap: CGFloat = 2
+    /// The most rings a halo makes room for outside its first.
+    static let outerRings = 3
+
+    /// How far `rings` outer rings reach past the dial's edge.
+    static func reach(rings: Int) -> CGFloat { CGFloat(max(rings, 0)) * (ringBand + ringGap) }
+
+    /// The inner and outer edge of a ring, from the dial's centre. Level 0 is the dial's own band.
+    static func band(of level: Int, diameter: CGFloat) -> (near: CGFloat, far: CGFloat) {
+        guard level > 0 else { return (centreRadius(diameter) + 3, diameter / 2) }
+        let near = diameter / 2 + ringGap + CGFloat(level - 1) * (ringBand + ringGap)
+        return (near, near + ringBand)
+    }
+
+    /// The circle a ring's glyphs ride.
+    static func orbit(of level: Int, diameter: CGFloat) -> CGFloat {
+        let band = band(of: level, diameter: diameter)
+        return level > 0 ? (band.near + band.far) / 2 : orbitRadius(diameter)
+    }
+
+    static func target(of level: Int, diameter: CGFloat, count: Int) -> CGFloat {
+        guard level > 0 else { return targetSize(diameter, count: count) }
+        return max(24, min(40, 2 * .pi * orbit(of: level, diameter: diameter) / CGFloat(max(count, 1)) - 6))
+    }
+
+    /// Half the cursor wedge's angle, in radians. An outer ring's wedge is as wide as its glyph
+    /// and a little more, and never wider than one place on the ring.
+    static func halfWedge(of level: Int, diameter: CGFloat, count: Int) -> CGFloat {
+        guard level > 0 else { return sector(count: count) * .pi / 360 }
+        let wide = (target(of: level, diameter: diameter, count: count) / 2 + 8) / orbit(of: level, diameter: diameter)
+        return min(wide, .pi / CGFloat(max(count, 1)))
+    }
+
+    /// Which ring a distance from the centre falls on; nil in the centre disc or in a gap.
+    static func level(at radius: CGFloat, rings: Int, diameter: CGFloat) -> Int? {
+        (0..<rings).first { radius > band(of: $0, diameter: diameter).near && radius <= band(of: $0, diameter: diameter).far }
     }
 
     /// The centre disc's radius; a 3 point ink ring sits just outside it.
@@ -122,8 +205,39 @@ enum HaloGeometry {
     }
 }
 
+/// One ring of actions and how far it has turned.
+fileprivate struct HaloRing {
+    var actions: [HaloAction]
+    /// Counts every place the ring has turned, so it never unwinds the long way round.
+    var index = 0
+    var turnFrom: CGFloat = 0
+    var turnStart: CFTimeInterval = 0
+    /// When the ring began to grow; 0 for one that is simply there.
+    var grown: CFTimeInterval = 0
+}
+
 final class HaloMenu: NSResponder {
-    var actions: [HaloAction] { didSet { actionsChanged(from: oldValue.map { $0.id }) } }
+    /// The first ring's actions. An action with `children` grows a ring of its own outside.
+    var actions: [HaloAction] {
+        get { rings[0].actions }
+        set {
+            if rings.count == 1, newValue.map({ $0.id }) == rings[0].actions.map({ $0.id }) {
+                rings[0].actions = newValue
+            } else {   // a different ring: start it from its own opening place
+                rings = [ring(of: newValue)]
+                leaving = nil
+            }
+            if confirmationID != nil && confirming == nil { confirmationID = nil }
+            hovered = nil
+            refresh()
+        }
+    }
+    /// The first ring, then each ring grown outside it. The last is the one being worked.
+    fileprivate var rings: [HaloRing]
+    /// A ring that has been stepped back from, while it shrinks away.
+    fileprivate var leaving: (ring: HaloRing, start: CFTimeInterval)?
+    /// How many rings these actions can grow, which is how much room the panel leaves.
+    private var room = 0
     /// Names the menu, and fills the centre when there are no actions.
     var label: String
     var caption: String?
@@ -133,23 +247,21 @@ final class HaloMenu: NSResponder {
     var metadata: [(label: String, value: String)] = []
     /// Shows a row of initials in the centre, and opens on the ticked action.
     var showPositions = false
-    var palette = HaloPalette.platform
+    /// Colours of its own; nil follows Settings, Theme, Halo.
+    var palette: HaloPalette?
+    fileprivate var colours: HaloPalette { palette ?? .theme }
     var onOpenChange: ((Bool) -> Void)?
     var isOpen: Bool { phase == .opening || phase == .open }
 
     fileprivate enum Phase { case closed, opening, open, closing }
     fileprivate var phase = Phase.closed
     private var phaseStart: CFTimeInterval = 0
-    /// Counts every place the ring has turned, so it never unwinds the long way round.
-    fileprivate var index = 0
-    private var turnFrom: CGFloat = 0
-    private var turnStart: CFTimeInterval = 0
     fileprivate var hovered: String?
     fileprivate var confirmationID: String?
     /// The action whose text box is open in the centre.
     fileprivate var editingID: String?
     /// A confirmation or a text box has the centre; the ring waits.
-    private var busy: Bool { confirmationID != nil || editingID != nil }
+    fileprivate var busy: Bool { confirmationID != nil || editingID != nil }
     fileprivate var confirmStart: CFTimeInterval = 0
     fileprivate var progress: CGFloat = 0
     fileprivate var keyboardFocus = false
@@ -177,7 +289,7 @@ final class HaloMenu: NSResponder {
         self.caption = caption
         self.hint = hint
         self.closeLabel = closeLabel
-        self.actions = actions
+        rings = [HaloRing(actions: actions)]
         super.init()
         dial.halo = self
         panel.isOpaque = false
@@ -249,15 +361,22 @@ final class HaloMenu: NSResponder {
         present(HaloGeometry.frame(below: onScreen, in: visible), over: host, anchor: view, rect: rect, sticky: false, focus: focus)
     }
 
-    /// Opens in the middle of the visible part of `view`, holding the keyboard and the scroll wheel
-    /// until something is chosen, Escape is pressed, or a click lands anywhere else. A click on
-    /// `trigger` is left for the trigger to handle.
-    func open(centredIn view: NSView, trigger: NSView? = nil) {
-        guard let host = view.window else { return }
+    /// Opens with its centre on `trigger`, holding the keyboard and the scroll wheel until
+    /// something is chosen, Escape is pressed at the first ring, or a click lands anywhere else.
+    func open(over trigger: NSView) {
+        guard let host = trigger.window else { return }
         if isOpen { close() }
-        let onScreen = host.convertToScreen(view.convert(view.visibleRect, to: nil))
+        let onScreen = host.convertToScreen(trigger.convert(trigger.bounds, to: nil))
         let visible = (host.screen ?? NSScreen.main)?.visibleFrame ?? onScreen
-        present(HaloGeometry.frame(centredOn: onScreen, in: visible), over: host, anchor: trigger, rect: nil, sticky: true, focus: true)
+        let reach = HaloGeometry.reach(rings: depth(of: actions, limit: HaloGeometry.outerRings))
+        present(HaloGeometry.frame(over: CGPoint(x: onScreen.midX, y: onScreen.midY), reach: reach, in: visible),
+                over: host, anchor: trigger, rect: nil, sticky: true, focus: true)
+    }
+
+    /// How many rings deep these actions go beyond their own.
+    private func depth(of actions: [HaloAction], limit: Int) -> Int {
+        guard limit > 0 else { return 0 }
+        return actions.compactMap { $0.children }.map { 1 + depth(of: $0(), limit: limit - 1) }.max() ?? 0
     }
 
     private func present(_ frame: CGRect, over host: NSWindow, anchor view: NSView?, rect: NSRect?, sticky: Bool, focus: Bool) {
@@ -271,12 +390,13 @@ final class HaloMenu: NSResponder {
         progress = 0
         closeFocused = false
         keyboardFocus = false
-        index = HaloGeometry.opening(disabled: actions.map { $0.disabled }, checked: actions.map { $0.checked }, showPositions: showPositions)
-        turnFrom = CGFloat(index)
-        turnStart = 0
+        rings = [ring(of: actions)]
+        leaving = nil
         wheelDistance = 0
 
-        panel.setFrame(frame.insetBy(dx: -HaloDialView.margin, dy: -HaloDialView.margin), display: false)
+        room = depth(of: actions, limit: HaloGeometry.outerRings)
+        dial.pad = HaloDialView.margin + HaloGeometry.reach(rings: room)
+        panel.setFrame(frame.insetBy(dx: -dial.pad, dy: -dial.pad), display: false)
         panel.ignoresMouseEvents = false
         host.addChildWindow(panel, ordered: .above)
         addWatchers()
@@ -310,6 +430,8 @@ final class HaloMenu: NSResponder {
     private func finishClose() {
         phase = .closed
         confirmationID = nil
+        rings = [rings[0]]
+        leaving = nil
         ticker?.invalidate()
         ticker = nil
         panel.parent?.removeChildWindow(panel)
@@ -371,9 +493,9 @@ final class HaloMenu: NSResponder {
         switch event.type {
         case .keyDown:
             guard event.keyCode == 53 else { return event }
-            // Escape steps back one level: from a ring inside another to the ring it came from,
-            // and from the first ring out of the halo altogether.
-            if let back = actions.first(where: { $0.id == "back" && !$0.disabled }) { back.onSelect() } else { close() }
+            // Escape steps back one level: out of a text box or a confirmation, then from an outer
+            // ring to the ring inside it, and from the first ring out of the halo altogether.
+            if !stepBack() { close() }
             return nil
         case .scrollWheel:
             let overDial = event.window === panel && dial.isInside(dial.convert(event.locationInWindow, from: nil))
@@ -390,46 +512,127 @@ final class HaloMenu: NSResponder {
     // ---------- Turning and choosing ----------
 
     fileprivate var ready: Bool { phase == .open }
-    fileprivate var selected: Int { HaloGeometry.wrap(index, actions.count) }
+    /// The outermost ring: the one the pointer, the wheel and the keys work.
+    fileprivate var top: Int { rings.count - 1 }
+    fileprivate var live: [HaloAction] { rings[top].actions }
+    fileprivate var selected: Int { selected(in: rings[top]) }
+    fileprivate func selected(in ring: HaloRing) -> Int { HaloGeometry.wrap(ring.index, ring.actions.count) }
     fileprivate var confirming: HaloAction? {
         guard let id = confirmationID else { return nil }
-        return actions.first { $0.id == id && !$0.disabled && $0.confirmation != nil }
+        return live.first { $0.id == id && !$0.disabled && $0.confirmation != nil }
     }
     fileprivate var editing: HaloAction? {
         guard let id = editingID else { return nil }
-        return actions.first { $0.id == id && $0.edit != nil }
+        return live.first { $0.id == id && $0.edit != nil }
     }
     /// The action the centre is describing.
     fileprivate var active: HaloAction? {
-        confirming ?? editing ?? actions.first { $0.id == hovered } ?? (actions.isEmpty ? nil : actions[selected])
+        confirming ?? editing ?? live.first { $0.id == hovered } ?? (live.isEmpty ? nil : live[selected])
     }
 
-    /// How far the ring has turned right now, part-way between places while it is moving.
-    fileprivate var turn: CGFloat {
-        let t = min(max(CGFloat(CACurrentMediaTime() - turnStart) / 0.14, 0), 1)
-        return turnFrom + (CGFloat(index) - turnFrom) * (1 - (1 - t) * (1 - t))
+    /// A ring of these actions, turned to its opening place.
+    private func ring(of actions: [HaloAction], grown: CFTimeInterval = 0) -> HaloRing {
+        let at = HaloGeometry.opening(disabled: actions.map { $0.disabled }, checked: actions.map { $0.checked }, showPositions: showPositions)
+        return HaloRing(actions: actions, index: at, turnFrom: CGFloat(at), turnStart: 0, grown: grown)
+    }
+
+    /// How far a ring has turned right now, part-way between places while it is moving.
+    fileprivate func turn(of ring: HaloRing) -> CGFloat {
+        let t = min(max(CGFloat(CACurrentMediaTime() - ring.turnStart) / 0.14, 0), 1)
+        return ring.turnFrom + (CGFloat(ring.index) - ring.turnFrom) * (1 - (1 - t) * (1 - t))
     }
 
     private func turnTo(_ next: Int) {
-        turnFrom = reduceMotion ? CGFloat(next) : turn
-        turnStart = CACurrentMediaTime()
-        index = next
+        rings[top].turnFrom = reduceMotion ? CGFloat(next) : turn(of: rings[top])
+        rings[top].turnStart = CACurrentMediaTime()
+        rings[top].index = next
         hovered = nil
         refresh()
     }
 
+    /// Brings the action at `place` on the working ring under the cursor.
+    private func turn(toPlace place: Int) { turnTo(rings[top].index + place - selected) }
+
     fileprivate func rotate(_ direction: Int) {
         guard ready, !busy,
-              let step = HaloGeometry.step(from: selected, direction: direction, disabled: actions.map({ $0.disabled })) else { return }
-        turnTo(index + step)
+              let step = HaloGeometry.step(from: selected, direction: direction, disabled: live.map({ $0.disabled })) else { return }
+        turnTo(rings[top].index + step)
         announce()
     }
+
+    // MARK: Rings outside the first
+
+    /// How much of an outer ring's width is showing, 0 to 1, while it grows.
+    fileprivate func growth(of level: Int) -> CGFloat {
+        guard level > 0, rings.indices.contains(level) else { return 1 }
+        let t = min(max(CGFloat(CACurrentMediaTime() - rings[level].grown) / 0.18, 0), 1)
+        return 1 - (1 - t) * (1 - t)
+    }
+
+    /// The same for the ring that is shrinking away.
+    fileprivate var leavingSize: CGFloat {
+        guard let leaving = leaving else { return 0 }
+        let t = min(max(CGFloat(CACurrentMediaTime() - leaving.start) / 0.14, 0), 1)
+        return 1 - t * t
+    }
+
+    /// How far a ring's glyphs are faded because a ring outside it has the work, 0 to 0.7.
+    /// The action that grew the outer ring is never faded.
+    fileprivate func dim(of level: Int) -> CGFloat {
+        if level < top { return 0.7 * (level + 1 == top ? growth(of: top) : 1) }
+        return level == top && leaving != nil ? 0.7 * leavingSize : 0
+    }
+
+    /// Grows a ring of `actions` outside the working ring and hands it the pointer, wheel and keys.
+    private func grow(_ actions: [HaloAction]) {
+        guard !actions.isEmpty else { return }
+        let ring = ring(of: actions, grown: reduceMotion ? 0 : CACurrentMediaTime())
+        leaving = nil
+        if top > 0, top >= room { rings[top] = ring } else { rings.append(ring) }   // no room further out: swap in place
+        hovered = nil
+        refresh()
+        announce()
+    }
+
+    /// One step back: out of a text box or a confirmation, else off the outermost ring, which
+    /// shrinks away. False when there is nothing to step back from but the halo itself.
+    @discardableResult fileprivate func stepBack() -> Bool {
+        if editingID != nil {
+            dial.endEditing()
+            editingID = nil
+            takeKeyboard()
+            refresh()
+            return true
+        }
+        if confirmationID != nil {
+            confirmationID = nil
+            progress = 0
+            dial.endDrag()
+            refresh()
+            return true
+        }
+        guard rings.count > 1 else { return false }
+        let ring = rings.removeLast()
+        leaving = reduceMotion ? nil : (ring, CACurrentMediaTime())
+        hovered = nil
+        refresh()
+        announce()
+        return true
+    }
+
+    /// Steps back until `level` is the working ring.
+    fileprivate func stepBack(to level: Int) {
+        while top > max(level, 0) { stepBack() }
+    }
+
+    /// The actions on a ring, for a press that lands on a ring inside the working one.
+    fileprivate func actions(on level: Int) -> [HaloAction] { rings.indices.contains(level) ? rings[level].actions : [] }
 
     fileprivate func choose(_ action: HaloAction?) {
         guard ready, !busy, let action = action, !action.disabled else { return }
         if action.edit != nil {
             clearExit()
-            if let at = actions.firstIndex(where: { $0.id == action.id }) { turnTo(index + at - selected) }
+            if let at = live.firstIndex(where: { $0.id == action.id }) { turn(toPlace: at) }
             editingID = action.id
             closeFocused = false
             panel.makeKey()
@@ -439,7 +642,7 @@ final class HaloMenu: NSResponder {
         }
         if action.confirmation != nil {
             clearExit()
-            if let at = actions.firstIndex(where: { $0.id == action.id }) { turnTo(index + at - selected) }
+            if let at = live.firstIndex(where: { $0.id == action.id }) { turn(toPlace: at) }
             confirmationID = action.id
             confirmStart = CACurrentMediaTime()
             progress = 0
@@ -448,29 +651,27 @@ final class HaloMenu: NSResponder {
             refresh()
             return
         }
+        if let children = action.children {
+            clearExit()
+            if let at = live.firstIndex(where: { $0.id == action.id }) { turn(toPlace: at) }
+            grow(children())
+            return
+        }
         if action.keepsOpen { action.onSelect(); return }
         close()
         action.onSelect()
     }
 
-    /// Chooses whichever action is under the wedge, as a click on the dial would.
+    /// Chooses whichever action is under the cursor, as a click on the dial would.
     func chooseSelected() { choose(active(at: selected)) }
+
+    /// Chooses an action on the working ring by its id, as a click on it would.
+    func choose(id: String) { choose(live.first { $0.id == id }) }
 
     fileprivate func confirm() {
         guard ready, let action = confirming else { return }
         close()
         action.onSelect()
-    }
-
-    private func actionsChanged(from oldIDs: [String]) {
-        if confirmationID != nil && confirming == nil { confirmationID = nil }
-        hovered = nil
-        if isOpen, oldIDs != actions.map({ $0.id }) {   // a different ring: start it from its own opening place
-            index = HaloGeometry.opening(disabled: actions.map { $0.disabled }, checked: actions.map { $0.checked }, showPositions: showPositions)
-            turnFrom = CGFloat(index)
-            turnStart = 0
-        }
-        refresh()
     }
 
     private func announce() {
@@ -525,15 +726,15 @@ final class HaloMenu: NSResponder {
         }
         if press { choose(active(at: selected)) }
         else if home || end {
-            let open = actions.indices.filter { !actions[$0].disabled }
-            if let at = home ? open.first : open.last { turnTo(index + at - selected); announce() }
+            let open = live.indices.filter { !live[$0].disabled }
+            if let at = home ? open.first : open.last { turn(toPlace: at); announce() }
         }
         else { rotate(right || down ? 1 : -1) }
         return true
     }
 
     fileprivate func active(at position: Int) -> HaloAction? {
-        actions.indices.contains(position) ? actions[position] : nil
+        live.indices.contains(position) ? live[position] : nil
     }
 
     // ---------- Animation ----------
@@ -559,8 +760,10 @@ final class HaloMenu: NSResponder {
         let now = CACurrentMediaTime()
         if phase == .opening, now - phaseStart >= 0.2 { phase = .open }
         if phase == .closing, now - phaseStart >= 0.2 { finishClose(); return }
+        if let leaving = leaving, now - leaving.start >= 0.14 { self.leaving = nil }
         dial.needsDisplay = true
-        let moving = phase == .opening || phase == .closing || now - turnStart < 0.14 || (confirming != nil && !reduceMotion)
+        let moving = phase == .opening || phase == .closing || leaving != nil || (confirming != nil && !reduceMotion)
+            || rings.contains { now - $0.turnStart < 0.14 || now - $0.grown < 0.2 }
         if moving && ticker == nil {
             let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.refresh() }
             RunLoop.main.add(timer, forMode: .common)
@@ -588,6 +791,8 @@ private final class HaloAccessibilityElement: NSAccessibilityElement {
 private final class HaloDialView: NSView, NSTextFieldDelegate {
     /// Room around the dial for its shadow.
     static let margin: CGFloat = 40
+    /// Room around the dial in this panel: the margin, and any rings that can grow outside it.
+    var pad: CGFloat = HaloDialView.margin
     weak var halo: HaloMenu?
     private var grab: CGFloat?
     private var pressedInside = false
@@ -605,29 +810,41 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
 
     // ---------- Measurements ----------
 
-    private var circle: CGRect { bounds.insetBy(dx: HaloDialView.margin, dy: HaloDialView.margin) }
+    private var circle: CGRect { bounds.insetBy(dx: pad, dy: pad) }
     private var diameter: CGFloat { circle.width }
     private var centre: CGPoint { CGPoint(x: circle.midX, y: circle.midY) }
     private var compact: Bool { diameter < HaloGeometry.compactBelow }
-    private var targetSize: CGFloat { HaloGeometry.targetSize(diameter, count: halo?.actions.count ?? 0) }
+    private func targetSize(_ level: Int, _ ring: HaloRing) -> CGFloat {
+        HaloGeometry.target(of: level, diameter: diameter, count: ring.actions.count)
+    }
 
-    func isInside(_ p: CGPoint) -> Bool { hypot(p.x - centre.x, p.y - centre.y) <= diameter / 2 }
+    private func distance(_ p: CGPoint) -> CGFloat { hypot(p.x - centre.x, p.y - centre.y) }
+
+    /// Inside the dial, out to the edge of its outermost ring.
+    func isInside(_ p: CGPoint) -> Bool {
+        distance(p) <= HaloGeometry.band(of: halo?.top ?? 0, diameter: diameter).far
+    }
 
     /// A slice of the dial given as fractions of its diameter, the way the web version lays it out.
     private func part(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
         CGRect(x: circle.minX + x * diameter, y: circle.minY + y * diameter, width: w * diameter, height: h * diameter)
     }
 
-    private func position(of at: Int) -> CGPoint {
+    private func position(of at: Int, in ring: HaloRing, level: Int) -> CGPoint {
         guard let menu = halo else { return centre }
-        let o = HaloGeometry.offset(of: at, count: menu.actions.count, turn: menu.turn, radius: HaloGeometry.orbitRadius(diameter))
+        let o = HaloGeometry.offset(of: at, count: ring.actions.count, turn: menu.turn(of: ring), radius: HaloGeometry.orbit(of: level, diameter: diameter))
         return CGPoint(x: centre.x + o.x, y: centre.y + o.y)
     }
 
-    private func action(at p: CGPoint) -> Int? {
-        guard let menu = halo else { return nil }
-        return menu.actions.indices.first { hypot(p.x - position(of: $0).x, p.y - position(of: $0).y) <= targetSize / 2 }
+    /// The action under a point on one ring.
+    private func action(at p: CGPoint, on level: Int) -> Int? {
+        guard let menu = halo, menu.rings.indices.contains(level) else { return nil }
+        let ring = menu.rings[level], size = targetSize(level, ring)
+        return ring.actions.indices.first { hypot(p.x - position(of: $0, in: ring, level: level).x, p.y - position(of: $0, in: ring, level: level).y) <= size / 2 }
     }
+
+    /// The action under a point on the working ring.
+    private func action(at p: CGPoint) -> Int? { action(at: p, on: halo?.top ?? 0) }
 
     private var closeFrame: CGRect {
         CGRect(x: centre.x - 18, y: circle.maxY - (compact ? 0.17 : 0.19) * diameter - 36, width: 36, height: 36)
@@ -646,7 +863,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         let p = point(event), inside = isInside(p)
         if inside { menu.clearExit() } else { menu.leave() }
         (inside ? NSCursor.pointingHand : NSCursor.arrow).set()
-        let over = inside && menu.confirmationID == nil && menu.editingID == nil ? action(at: p).map { menu.actions[$0].id } : nil
+        let over = inside && menu.confirmationID == nil && menu.editingID == nil ? action(at: p).map { menu.live[$0].id } : nil
         if over != menu.hovered {
             menu.hovered = over
             needsDisplay = true
@@ -688,7 +905,13 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         let p = point(event)
         guard pressedInside, isInside(p) else { return }
         if closeFrame.contains(p) { if menu.ready { menu.close() } }
-        else if let at = action(at: p) { menu.choose(menu.actions[at]) }
+        else if !menu.busy, let level = HaloGeometry.level(at: distance(p), rings: menu.top, diameter: diameter) {
+            // A press on a ring inside the working one steps back to it, and chooses what was pressed.
+            let pressed = action(at: p, on: level).map { menu.actions(on: level)[$0] }
+            menu.stepBack(to: level)
+            if let pressed = pressed, pressed.id != menu.live[menu.selected].id || pressed.children == nil { menu.choose(pressed) }
+        }
+        else if let at = action(at: p) { menu.choose(menu.live[at]) }
         else if !track.insetBy(dx: -8, dy: -8).contains(p) || menu.confirming == nil { menu.choose(menu.active(at: menu.selected)) }
     }
 
@@ -711,8 +934,8 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         field.isBezeled = false
         field.focusRingType = .none
         field.drawsBackground = true
-        field.backgroundColor = menu.palette.band
-        field.textColor = menu.palette.bandInk
+        field.backgroundColor = menu.colours.ring(0).band
+        field.textColor = menu.colours.ring(0).bandInk
         field.appearance = NSAppearance(named: .aqua)   // a pale box: dark text and a light selection, whatever the app's look
         field.wantsLayer = true
         field.layer?.cornerRadius = 5
@@ -721,7 +944,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         addSubview(field)
         editor = field
         window?.makeFirstResponder(field)
-        (field.currentEditor() as? NSTextView)?.insertionPointColor = menu.palette.bandInk
+        (field.currentEditor() as? NSTextView)?.insertionPointColor = menu.colours.ring(0).bandInk
     }
 
     func endEditing() {
@@ -743,12 +966,11 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let menu = halo, let ctx = NSGraphicsContext.current?.cgContext, diameter > 0 else { return }
-        let stage = menu.stage(), colours = menu.palette
+        let stage = menu.stage(), colours = menu.colours, first = colours.ring(0)
         let outer = diameter / 2, inner = HaloGeometry.centreRadius(diameter)
-        let half = HaloGeometry.sector(count: menu.actions.count) * .pi / 360
 
         func disc(_ radius: CGFloat) -> CGRect { CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2) }
-        func slice(from near: CGFloat, to far: CGFloat) -> CGPath {
+        func slice(from near: CGFloat, to far: CGFloat, half: CGFloat) -> CGPath {
             let path = CGMutablePath()
             path.addArc(center: .zero, radius: far, startAngle: -.pi / 2 - half, endAngle: -.pi / 2 + half, clockwise: false)
             path.addArc(center: .zero, radius: near, startAngle: -.pi / 2 + half, endAngle: -.pi / 2 - half, clockwise: true)
@@ -763,17 +985,40 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             body()
             ctx.restoreGState()
         }
+        func half(_ level: Int, _ ring: HaloRing) -> CGFloat {
+            HaloGeometry.halfWedge(of: level, diameter: diameter, count: ring.actions.count)
+        }
+
+        // Every ring showing, the first one first: its level, its actions and how much of its width has grown.
+        var shown = menu.rings.enumerated().map { (level: $0.offset, ring: $0.element, size: menu.growth(of: $0.offset)) }
+        if let leaving = menu.leaving { shown.append((level: menu.rings.count, ring: leaving.ring, size: menu.leavingSize)) }
 
         scaled(stage.band) {
+            // Rings grown outside the first, the outermost first so each lies on the one beyond it.
+            for item in shown.dropFirst().reversed() {
+                let band = HaloGeometry.band(of: item.level, diameter: diameter), far = band.near + (band.far - band.near) * item.size
+                guard far > band.near else { continue }
+                let ring = colours.ring(item.level)
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: NSColor.black.withAlphaComponent(0.33).cgColor)
+                ctx.addEllipse(in: disc(far))
+                ctx.addEllipse(in: disc(band.near))
+                ctx.setFillColor(ring.band.cgColor)
+                ctx.fillPath(using: .evenOdd)
+                ctx.restoreGState()
+                ctx.addPath(slice(from: band.near, to: far, half: half(item.level, item.ring)))
+                ctx.setFillColor(ring.cursor.cgColor)
+                ctx.fillPath()
+            }
             ctx.saveGState()
             ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: NSColor.black.withAlphaComponent(0.33).cgColor)
             ctx.addEllipse(in: disc(outer))
             ctx.addEllipse(in: disc(inner + 3))
-            ctx.setFillColor(colours.band.cgColor)
+            ctx.setFillColor(first.band.cgColor)
             ctx.fillPath(using: .evenOdd)
             ctx.restoreGState()
-            ctx.addPath(slice(from: inner + 3, to: outer))
-            ctx.setFillColor(colours.centre.cgColor)
+            ctx.addPath(slice(from: inner + 3, to: outer, half: half(0, menu.rings[0])))
+            ctx.setFillColor(first.cursor.cgColor)
             ctx.fillPath()
         }
         scaled(stage.fill) {
@@ -788,35 +1033,44 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         ctx.setAlpha(stage.content)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
 
-        // The ring is drawn twice: band ink outside the wedge, wedge ink inside it, so a glyph
-        // changes colour as it crosses the wedge's edge.
-        var wedge = CGAffineTransform(translationX: centre.x, y: centre.y)
-        let inWedge = slice(from: 0, to: outer + 1).copy(using: &wedge) ?? CGMutablePath()
-        for inside in [false, true] {
-            ctx.saveGState()
-            if inside {
-                ctx.addPath(inWedge)
-                ctx.clip()
-            } else {
-                ctx.addRect(bounds)
-                ctx.addPath(inWedge)
-                ctx.clip(using: .evenOdd)
-            }
-            let ink = inside ? colours.wedgeInk : colours.bandInk
-            for (at, action) in menu.actions.enumerated() {
-                let p = position(of: at)
-                glyph(action.icon, in: CGRect(x: p.x - 10, y: p.y - 10, width: 20, height: 20), ink: ink, alpha: action.disabled ? 0.45 : 1, ctx)
-                if action.checked == true {
-                    ctx.setFillColor(ink.withAlphaComponent(action.disabled ? 0.45 : 1).cgColor)
-                    ctx.fillEllipse(in: CGRect(x: p.x - 2.5, y: p.y + targetSize / 2 - 7, width: 5, height: 5))
+        // Each ring is drawn twice: band ink outside its cursor, cursor ink inside it, so a glyph
+        // changes colour as it crosses the cursor's edge. A ring with another outside it fades
+        // all but the action that grew that ring, so the eye goes to the ring being worked.
+        for item in shown {
+            let level = item.level, ring = item.ring
+            let fade = level == 0 ? 1 : min(max((item.size - 0.6) / 0.4, 0), 1)   // an outer ring's glyphs arrive once it has nearly grown
+            guard fade > 0 else { continue }
+            let band = HaloGeometry.band(of: level, diameter: diameter), inks = colours.ring(level)
+            let dim = menu.dim(of: level), chosen = menu.selected(in: ring), size = targetSize(level, ring)
+            var move = CGAffineTransform(translationX: centre.x, y: centre.y)
+            let cursor = slice(from: level == 0 ? 0 : band.near - 1, to: band.far + 1, half: half(level, ring)).copy(using: &move) ?? CGMutablePath()
+            for inside in [false, true] {
+                ctx.saveGState()
+                if inside {
+                    ctx.addPath(cursor)
+                    ctx.clip()
+                } else {
+                    ctx.addRect(bounds)
+                    ctx.addPath(cursor)
+                    ctx.clip(using: .evenOdd)
                 }
+                let ink = inside ? inks.cursorInk : inks.bandInk
+                for (at, action) in ring.actions.enumerated() {
+                    let p = position(of: at, in: ring, level: level)
+                    let alpha = (action.disabled ? 0.45 : 1) * fade * (at == chosen ? 1 : 1 - dim)
+                    glyph(action.icon, in: CGRect(x: p.x - 10, y: p.y - 10, width: 20, height: 20), ink: ink, alpha: alpha, ctx)
+                    if action.checked == true {
+                        ctx.setFillColor(ink.withAlphaComponent(alpha).cgColor)
+                        ctx.fillEllipse(in: CGRect(x: p.x - 2.5, y: p.y + size / 2 - 7, width: 5, height: 5))
+                    }
+                }
+                ctx.restoreGState()
             }
-            ctx.restoreGState()
         }
         let showsFocus = menu.keyboardFocus && window?.isKeyWindow == true
-        if showsFocus, !menu.closeFocused, menu.confirming == nil, !menu.actions.isEmpty {
-            let p = position(of: menu.selected), size = targetSize
-            ctx.setFillColor(colours.wedgeInk.cgColor)
+        if showsFocus, !menu.closeFocused, menu.confirming == nil, !menu.live.isEmpty {
+            let ring = menu.rings[menu.top], p = position(of: menu.selected, in: ring, level: menu.top), size = targetSize(menu.top, ring)
+            ctx.setFillColor(colours.ring(menu.top).cursorInk.cgColor)
             ctx.fill(CGRect(x: p.x - size / 4, y: p.y + size / 2 - 5, width: size / 2, height: 2))
         }
 
@@ -888,7 +1142,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
     }
 
     private func drawCentre(_ menu: HaloMenu, _ ctx: CGContext) {
-        let ink = menu.palette.centreInk, active = menu.active
+        let ink = menu.colours.centreInk, active = menu.active
         let gap: CGFloat = compact ? 4 : 6
         let title = text(active?.label ?? menu.label, size: compact ? 13 : 16, weight: .semibold, colour: ink, lines: 2)
 
@@ -938,12 +1192,12 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             return
         }
         if let caption = menu.caption { pieces.insert(text(caption, size: compact ? 10 : 12, colour: ink, opacity: 0.8), at: 0) }
-        guard menu.showPositions, !menu.actions.isEmpty else {
+        guard menu.showPositions, !menu.live.isEmpty else {
             stack(pieces, in: box, gap: gap, ctx)
             return
         }
         // A row of initials under the text, the one under the wedge filled in.
-        let perRow = max(1, Int((box.width + 4) / 28)), count = menu.actions.count
+        let perRow = max(1, Int((box.width + 4) / 28)), count = menu.live.count
         let rows = (count + perRow - 1) / perRow
         let squares = CGFloat(rows) * 24 + CGFloat(rows - 1) * 4
         let words = pieces.map { height($0, width: box.width) }.reduce(0, +) + gap * CGFloat(pieces.count - 1)
@@ -951,7 +1205,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         stack(pieces, in: CGRect(x: box.minX, y: top, width: box.width, height: words), gap: gap, fromTop: true, ctx)
         ctx.saveGState()
         ctx.clip(to: box)
-        for (at, action) in menu.actions.enumerated() {
+        for (at, action) in menu.live.enumerated() {
             let row = at / perRow, inRow = min(perRow, count - row * perRow)
             let x = box.midX - (CGFloat(inRow) * 28 - 4) / 2 + CGFloat(at % perRow) * 28
             let square = CGRect(x: x, y: top + words + gap + CGFloat(row) * 28, width: 24, height: 24)
@@ -959,7 +1213,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             ctx.setFillColor(ink.cgColor)
             ctx.setStrokeColor(ink.cgColor)
             if on { ctx.fill(square) } else { ctx.stroke(square.insetBy(dx: 0.5, dy: 0.5), width: 1) }
-            let initial = text(String(action.label.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased(), size: 12, colour: on ? menu.palette.centre : ink)
+            let initial = text(String(action.label.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased(), size: 12, colour: on ? menu.colours.centre : ink)
             stack([initial], in: square, gap: 0, ctx)
         }
         ctx.restoreGState()
@@ -972,7 +1226,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
     }
 
     private func drawMetadata(_ menu: HaloMenu, in box: CGRect, _ ctx: CGContext) {
-        let ink = menu.palette.centreInk, size: CGFloat = compact ? 10 : 11
+        let ink = menu.colours.centreInk, size: CGFloat = compact ? 10 : 11
         var y = box.minY + (compact ? 4 : 6)
         ctx.saveGState()
         ctx.clip(to: box)
@@ -990,7 +1244,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
     /// The slide-to-confirm bar: a band-coloured track with chevrons drifting towards the far end
     /// and a black thumb. It bounces in when it appears.
     private func drawSlider(_ menu: HaloMenu, _ ctx: CGContext) {
-        let colours = menu.palette, still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let colours = menu.colours, band = colours.ring(0).band, still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let elapsed = CGFloat(CACurrentMediaTime() - menu.confirmStart)
         let entered = still ? 1 : min(elapsed / 0.44, 1), eased = 1 - pow(1 - entered, 4)
         let scale = eased < 0.65 ? 0.8 + 0.24 * eased / 0.65 : 1.04 - 0.04 * (eased - 0.65) / 0.35
@@ -1002,7 +1256,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         ctx.translateBy(x: -track.midX, y: -track.midY)
 
         ctx.addPath(CGPath(roundedRect: track, cornerWidth: 5, cornerHeight: 5, transform: nil))
-        ctx.setFillColor(colours.band.cgColor)
+        ctx.setFillColor(band.cgColor)
         ctx.fillPath()
 
         let inside = track.insetBy(dx: 2, dy: 2)
@@ -1010,7 +1264,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         ctx.addPath(CGPath(roundedRect: inside, cornerWidth: 3, cornerHeight: 3, transform: nil))
         ctx.clip()
         let drift = still ? 0 : elapsed.truncatingRemainder(dividingBy: 1.3) / 1.3 * 20
-        ctx.setFillColor((colours.band.blended(withFraction: 0.5, of: .black) ?? .gray).cgColor)
+        ctx.setFillColor((band.blended(withFraction: 0.5, of: .black) ?? .gray).cgColor)
         for at in 0..<8 {
             let x = inside.minX - 20 + drift + CGFloat(at) * 20, y = inside.minY
             ctx.move(to: CGPoint(x: x, y: y))
@@ -1072,14 +1326,15 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             slider.press = { [weak halo = menu] in if halo?.progress == 1 { halo?.confirm() } }
             children.append(slider)
         } else {
-            for (at, action) in menu.actions.enumerated() {
-                let p = position(of: at), size = targetSize
+            let ring = menu.rings[menu.top], size = targetSize(menu.top, ring)
+            for (at, action) in ring.actions.enumerated() {
+                let p = position(of: at, in: ring, level: menu.top)
                 let item = element(.menuItem, action.label, CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size, height: size))
                 item.setAccessibilityHelp(action.description)
                 item.setAccessibilityEnabled(!action.disabled)
                 item.setAccessibilitySelected(at == menu.selected)
                 let id = action.id
-                item.press = { [weak halo = menu] in halo?.choose(halo?.actions.first { $0.id == id }) }
+                item.press = { [weak halo = menu] in halo?.choose(id: id) }
                 children.append(item)
             }
         }
