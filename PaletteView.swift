@@ -609,7 +609,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         nameField.lineBreakMode = .byTruncatingTail
         nameField.cell?.usesSingleLineMode = true
         nameLock.setContentHuggingPriority(.required, for: .horizontal)
+        // The name takes the whole width left by the padlock, so it shows whatever length it was when the page was laid out.
         paletteTitle.setViews([nameLock, nameField], in: .leading)
+        paletteTitle.distribution = .fill
+        nameField.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         paletteTitle.orientation = .horizontal
         paletteTitle.alignment = .centerY
         paletteTitle.spacing = 10
@@ -628,7 +632,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             headerHeight,
             paletteTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
             paletteTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            paletteTitle.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -side),
+            paletteTitle.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.topAnchor.constraint(equalTo: paletteTitle.bottomAnchor, constant: 30),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
