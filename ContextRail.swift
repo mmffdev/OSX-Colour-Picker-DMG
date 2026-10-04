@@ -24,7 +24,22 @@ enum RailStyle {
     static let icon: CGFloat = 36
     static let text: CGFloat = 60
     static let trailing: CGFloat = 12
-    static var bodyFont: NSFont { NSFont.systemFont(ofSize: NSFont.systemFontSize) }
+    /// rail1 is a sidebar list, and the system sets its text to the sidebar size chosen in System
+    /// Settings (small, medium or large), headings and rows alike, whatever font the app asks
+    /// for. rail2 is drawn by the app, so it reads the same setting and uses the same size, and
+    /// the two rails always match.
+    static var textSize: CGFloat {
+        let probe = NSTableView()
+        probe.rowSizeStyle = .default
+        switch probe.effectiveRowSizeStyle {
+        case .small: return 11
+        case .large: return 15
+        default: return 13
+        }
+    }
+    static var bodyFont: NSFont { NSFont.systemFont(ofSize: textSize) }
+    /// A bucket's heading: the size and weight rail1's headings are shown in.
+    static var headingFont: NSFont { NSFont.systemFont(ofSize: textSize) }
 }
 
 /// One row of a bucket: an icon, a title, and on the right whatever the kind of row needs.
@@ -155,7 +170,7 @@ final class RailBucket: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heading.stringValue = title
-        heading.font = SidebarOutlineView.headingFont
+        heading.font = RailStyle.headingFont
         heading.textColor = .labelColor
         arrow.contentTintColor = .secondaryLabelColor
         rows.orientation = .vertical
