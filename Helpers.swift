@@ -283,6 +283,29 @@ enum Theme {
     }
 }
 
+/// A press anywhere outside the box being typed in finishes the typing and lets go of the box,
+/// in every window. AppKit on its own keeps a text box in focus until another control takes it,
+/// so a press on empty space left the box live, with its ring and its selection.
+enum ClickAway {
+    private static var monitor: Any?
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            guard let window = event.window, let editor = window.firstResponder as? NSTextView else { return event }
+            // What is being typed in: the box itself, where the window's shared editor is standing in for one.
+            let box: NSView? = editor.isFieldEditor ? editor.delegate as? NSView : editor
+            var under = window.contentView?.superview?.hitTest(event.locationInWindow)
+            while let view = under {
+                if view === editor || view === box { return event }   // a press inside it places the caret, as ever
+                under = view.superview
+            }
+            window.makeFirstResponder(nil)
+            return event
+        }
+    }
+}
+
 /// The app's scroller: a thin bar with no lane behind it, faint until the pointer is on it, so
 /// it never draws the eye from the colours. It is a grey taken from the text colour, so it
 /// follows the background from white to black.

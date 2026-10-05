@@ -343,6 +343,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         toolbar.autosavesConfiguration = true
         toolbar.displayMode = .iconAndLabel
         win.toolbar = toolbar
+        ClickAway.install()
         // Always there on opening: the page alone hides it, and a quit from there must not leave it hidden.
         toolbar.isVisible = true
         NotificationCenter.default.addObserver(self, selector: #selector(leavePageFullScreen), name: NSApplication.willTerminateNotification, object: nil)
