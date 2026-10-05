@@ -64,10 +64,15 @@ final class SidebarNode: NSObject {
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
 let projectDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.project")
 
-/// A palette row: favourite star, a small strip of its colours, the mark of the purpose it is turned to, name, pick mark, then its count.
+/// A palette row, on two lines: the favourite star, the mark of the purpose it is turned to, the name, the pick mark and the count;
+/// then, under them and on the star's left edge, a strip of its colours.
 /// Under the pointer the count gives its place to a gear that opens the palette's menu, so the name keeps the width of both.
 final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("palette")
+    /// The row's height on its two lines, and the strip's size and its step in from the star's frame to the star itself.
+    static let height: CGFloat = 44
+    static let stripWidth: CGFloat = 72
+    static let stripInset: CGFloat = 3
 
     var onRename: ((String) -> Void)?
     /// The gear was pressed; hands over the button so the menu can open under it.
@@ -129,18 +134,22 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         // The count and the gear share the row's last column: one or the other shows.
         let tail = NSView()
         for v in [count, gear!] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; tail.addSubview(v) }
-        let stack = NSStackView(views: [star, strip, purpose, name, target, tail])
+        let stack = NSStackView(views: [star, purpose, name, target, tail])
         stack.orientation = .horizontal
         stack.spacing = 5
         stack.alignment = .centerY
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(strip)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarOutlineView.trailingPad),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            strip.widthAnchor.constraint(equalToConstant: 24),
-            strip.heightAnchor.constraint(equalToConstant: 12),
+            stack.centerYAnchor.constraint(equalTo: topAnchor, constant: 14),
+            strip.leadingAnchor.constraint(equalTo: star.leadingAnchor, constant: PaletteCell.stripInset),
+            strip.topAnchor.constraint(equalTo: topAnchor, constant: 28),
+            strip.widthAnchor.constraint(equalToConstant: PaletteCell.stripWidth),
+            strip.heightAnchor.constraint(equalToConstant: 8),
             // The gear is the right-hand column every row shares; the project row's padlock sits on it.
             tail.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
             tail.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
@@ -898,6 +907,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
     // Each main heading after the first carries the gap that separates it from the section above.
     func outlineView(_ o: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        if let node = item as? SidebarNode, node.paletteID != nil { return PaletteCell.height }
         guard let node = item as? SidebarNode, node.isGroup, node !== roots.first else { return 28 }
         return 28 + SidebarOutlineView.sectionGap
     }
