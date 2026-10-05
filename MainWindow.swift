@@ -244,16 +244,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // A plain pane, not a system sidebar: the toolbar runs the full width above it, and it has no chrome of its own.
         let side = NSSplitViewItem(viewController: sidebar)
         sideItem = side
-        side.minimumThickness = 236 // room for a palette name, its count and star
+        side.minimumThickness = 200 // room for a palette name, its count and star
         side.canCollapse = true
         side.holdingPriority = .defaultLow + 2   // the page takes up a change in the window's width, not the sidebar
         contextItem = NSSplitViewItem(viewController: contextRail)
-        contextItem.minimumThickness = 220
+        contextItem.minimumThickness = 200
         contextItem.canCollapse = true
         contextItem.isCollapsed = true
         contextItem.holdingPriority = .defaultLow + 2
         let main = NSSplitViewItem(viewController: content)
-        main.minimumThickness = 420
+        main.minimumThickness = MainWindowController.pageMinimumWidth
         builderItem = NSSplitViewItem(viewController: builder)
         builderItem.minimumThickness = 230
         builderItem.canCollapse = true
@@ -518,10 +518,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     /// The side panes' widths on a first run, before the user has dragged them. After that the
     /// widths are whatever they were left at; nothing is fixed but the minimums.
-    static let sidebarStartWidth: CGFloat = 260
-    static let railStartWidth: CGFloat = 320
+    /// Two rails at these widths leave a 1440-point laptop screen 1000 for the page.
+    static let sidebarStartWidth: CGFloat = 220
+    static let railStartWidth: CGFloat = 260
+    /// The page's narrowest: the rails give way before the page does.
+    static let pageMinimumWidth: CGFloat = 560
     private static let splitKey = "NSSplitView Subview Frames MMFFDevColour3Split2"
-    static let contextStartWidth: CGFloat = 250
+    static let contextStartWidth: CGFloat = 220
 
     private func applyStartWidths() {
         split.splitView.layoutSubtreeIfNeeded()
@@ -534,7 +537,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     private func setWidth(_ wanted: CGFloat, of item: NSSplitViewItem) {
         let view = split.splitView
         guard let index = split.splitViewItems.firstIndex(of: item), view.arrangedSubviews.indices.contains(index) else { return }
-        let width = max(item.minimumThickness, min(wanted, view.bounds.width - 420 - 240))
+        let width = max(item.minimumThickness, min(wanted, view.bounds.width - MainWindowController.pageMinimumWidth - 240))
         if index == 0 { view.setPosition(width, ofDividerAt: 0); return }
         let pane = view.arrangedSubviews[index]
         // rail2 sits on the left, so it is its right-hand divider that moves.

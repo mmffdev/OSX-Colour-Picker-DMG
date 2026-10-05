@@ -64,7 +64,8 @@ final class SidebarNode: NSObject {
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
 let projectDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.project")
 
-/// A palette row: favourite star, a small strip of its colours, the mark of the purpose it is turned to, name, pick mark, count, then a gear that opens the palette's menu.
+/// A palette row: favourite star, a small strip of its colours, the mark of the purpose it is turned to, name, pick mark, then its count.
+/// Under the pointer the count gives its place to a gear that opens the palette's menu, so the name keeps the width of both.
 final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     static let identifier = NSUserInterfaceItemIdentifier("palette")
 
@@ -81,6 +82,20 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
     /// The purpose the palette is turned to, as rail2 shows it; not there when it is turned to none.
     private let purpose = NSImageView()
     private var committed = ""
+    private var gear: NSButton!
+    private var tracking: NSTrackingArea?
+    private var hovering = false { didSet { count.isHidden = hovering; gear.isHidden = !hovering } }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func prepareForReuse() { super.prepareForReuse(); hovering = false }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -101,7 +116,9 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         target.image = symbol("eyedropper", "Picks go here", size: 10)
         target.contentTintColor = .controlAccentColor
         target.toolTip = "New picks are added to this palette"
-        let gear = symbolButton("gearshape", tooltip: "Palette actions", target: self, action: #selector(gearTapped(_:)))
+        gear = symbolButton("gearshape", tooltip: "Palette actions", target: self, action: #selector(gearTapped(_:)))
+        gear.isHidden = true
+        count.alignment = .right
         gear.image = symbol("gearshape", "Palette actions", size: 11)
         gear.contentTintColor = .tertiaryLabelColor
 
@@ -109,22 +126,28 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
 
         purpose.contentTintColor = .secondaryLabelColor
         purpose.setContentHuggingPriority(.required, for: .horizontal)
-        let stack = NSStackView(views: [star, strip, purpose, name, target, count, gear])
+        // The count and the gear share the row's last column: one or the other shows.
+        let tail = NSView()
+        for v in [count, gear!] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; tail.addSubview(v) }
+        let stack = NSStackView(views: [star, strip, purpose, name, target, tail])
         stack.orientation = .horizontal
         stack.spacing = 5
         stack.alignment = .centerY
-        stack.setCustomSpacing(8, after: count)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarOutlineView.trailingPad),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            strip.widthAnchor.constraint(equalToConstant: 36),
+            strip.widthAnchor.constraint(equalToConstant: 24),
             strip.heightAnchor.constraint(equalToConstant: 12),
             // The gear is the right-hand column every row shares; the project row's padlock sits on it.
-            gear.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
-            gear.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            tail.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            tail.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            gear.centerXAnchor.constraint(equalTo: tail.centerXAnchor),
+            gear.centerYAnchor.constraint(equalTo: tail.centerYAnchor),
+            count.trailingAnchor.constraint(equalTo: tail.trailingAnchor),
+            count.centerYAnchor.constraint(equalTo: tail.centerYAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
