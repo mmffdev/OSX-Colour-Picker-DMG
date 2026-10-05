@@ -1199,6 +1199,15 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
+    let schema = SchemaTrial.start, schemaOne = SchemaTrial.addingChild(to: schema.id, in: schema)
+    let schemaTwo = SchemaTrial.addingSibling(after: schemaOne.added ?? UUID(), in: schemaOne.tree)
+    let schemaThree = SchemaTrial.addingChild(to: schemaTwo.added ?? UUID(), in: schemaTwo.tree)
+    check(SchemaTrial.rows(of: schemaThree.tree).map { $0.level } == [1, 2, 2, 3] && SchemaTrial.rows(of: schemaThree.tree).map { $0.node.name } == ["Project", "Palettes", "Typography", "Palettes"]
+          && SchemaTrial.addingSibling(after: schema.id, in: schema).added == nil, "a schema nests groups to any depth, each new one taking the first name its level has free, and the main group has no siblings")
+    check(SchemaTrial.rows(of: SchemaTrial.removing(schemaTwo.added ?? UUID(), from: schemaThree.tree)).count == 2 && SchemaTrial.removing(schema.id, from: schemaThree.tree) == schemaThree.tree
+          && SchemaTrial.changing(schemaThree.added ?? UUID(), in: schemaThree.tree) { $0.name = "Trees" }.children[1].children[0].name == "Trees"
+          && SchemaTrial.title(forLevel: 1) == "Level 1: Primary Group" && SchemaTrial.title(forLevel: 2) == "Level 2: Secondary Group",
+          "removing a schema group takes what is inside it and never the main group, and a group is renamed wherever it sits")
     check(Theme.next(after: nil) == 0 && Theme.next(after: 0) == 1 && Theme.next(after: 1) == 2 && Theme.next(after: 2) == 3 && Theme.next(after: 3) == nil
           && Theme.lights == ["#242424", "#000000", "#FFFFFF", "#F2F2F2"] && !Theme.takesLightText(on: Theme.light),
           "L turns the background charcoal, then black, then white, then off-white with dark text, then back to the theme")

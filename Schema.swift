@@ -1,0 +1,334 @@
+import AppKit
+
+// ---------- Settings ▸ Schema: a trial ----------
+//
+// How a catalogue is laid out, as the user names it: what the main group is called (Project,
+// Client, Brand…), and the groups nested inside it, as deep as they like. This is a trial of the
+// idea only. The tree built here is kept between openings so it can be lived with, but nothing
+// else in the app reads it: rail1 still shows projects as it always has.
+
+/// One group in the schema: what it is called, what it is for, and the groups inside it.
+struct SchemaNode: Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var about = ""
+    var children: [SchemaNode] = []
+}
+
+enum SchemaTrial {
+    /// Names offered for the main group, and for the groups inside it.
+    static let primaryNames = ["Project", "Client", "Customer", "Group", "Brand", "Campaign", "Job", "Production", "Title", "Account"]
+    static let nestedNames = ["Palettes", "Typography", "Assets", "Characters", "Environments", "Props", "Vehicles", "Textures", "Materials",
+                              "Interface", "Icons", "Logos", "Photography", "Illustration", "Video", "Print", "Packaging", "Social", "Web",
+                              "Deliverables", "References"]
+
+    static func names(forLevel level: Int) -> [String] { level == 1 ? primaryNames : nestedNames }
+
+    /// "Level 1: Primary Group", "Level 2: Secondary Group", and so on down.
+    static func title(forLevel level: Int) -> String {
+        let words = ["Primary", "Secondary", "Tertiary", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth"]
+        return "Level \(level): " + (words.indices.contains(level - 1) ? words[level - 1] + " Group" : "Group")
+    }
+
+    static var start: SchemaNode { SchemaNode(name: "Project") }
+
+    /// The tree as it was left; a lone Project until one is built.
+    static var saved: SchemaNode {
+        get { preferences.data(forKey: "schema.trial").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start }
+        set { if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.trial") } }
+    }
+
+    /// Every group, top to bottom as the map shows it, with its level: the main group is 1.
+    static func rows(of root: SchemaNode) -> [(node: SchemaNode, level: Int)] {
+        func walk(_ n: SchemaNode, _ level: Int) -> [(node: SchemaNode, level: Int)] { [(n, level)] + n.children.flatMap { walk($0, level + 1) } }
+        return walk(root, 1)
+    }
+
+    /// Changes the group with this id, wherever it is.
+    static func changing(_ id: UUID, in root: SchemaNode, _ change: (inout SchemaNode) -> Void) -> SchemaNode {
+        var out = root
+        if out.id == id { change(&out); return out }
+        out.children = out.children.map { changing(id, in: $0, change) }
+        return out
+    }
+
+    /// A name for a new group among these: the first on offer that none of them has taken.
+    static func freshName(level: Int, among taken: [SchemaNode]) -> String {
+        let used = Set(taken.map { $0.name })
+        return names(forLevel: level).first { !used.contains($0) } ?? "New Group"
+    }
+
+    /// Adds a group inside the one with this id, last. Returns the tree and the new group's id.
+    static func addingChild(to id: UUID, in root: SchemaNode) -> (tree: SchemaNode, added: UUID?) {
+        guard let level = rows(of: root).first(where: { $0.node.id == id })?.level else { return (root, nil) }
+        var made: UUID?
+        let tree = changing(id, in: root) { parent in
+            let node = SchemaNode(name: freshName(level: level + 1, among: parent.children))
+            made = node.id
+            parent.children.append(node)
+        }
+        return (tree, made)
+    }
+
+    /// Adds a group straight after the one with this id, at its level. The main group has no siblings.
+    static func addingSibling(after id: UUID, in root: SchemaNode) -> (tree: SchemaNode, added: UUID?) {
+        var made: UUID?
+        func walk(_ n: SchemaNode, _ level: Int) -> SchemaNode {
+            var out = n
+            if let at = out.children.firstIndex(where: { $0.id == id }) {
+                let node = SchemaNode(name: freshName(level: level + 1, among: out.children))
+                made = node.id
+                out.children.insert(node, at: at + 1)
+                return out
+            }
+            out.children = out.children.map { walk($0, level + 1) }
+            return out
+        }
+        return (walk(root, 1), made)
+    }
+
+    /// Takes a group out, with everything inside it. The main group stays.
+    static func removing(_ id: UUID, from root: SchemaNode) -> SchemaNode {
+        var out = root
+        out.children = out.children.filter { $0.id != id }.map { removing(id, from: $0) }
+        return out
+    }
+}
+
+/// One group on the map: its level, its name, and, while it is selected or under the pointer, what can be done with it.
+private final class SchemaRowView: HoverView {
+    var onSelect: (() -> Void)?, onChild: (() -> Void)?, onSibling: (() -> Void)?, onRemove: (() -> Void)?
+    private let isSelected: Bool
+    private let actions = NSStackView()
+    private var over = false { didSet { actions.isHidden = !(over || isSelected); needsDisplay = true } }
+
+    init(_ node: SchemaNode, level: Int, selected: Bool) {
+        isSelected = selected
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let badge = NSTextField(labelWithString: "\(level)")
+        badge.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.caption, weight: .semibold)
+        badge.textColor = .secondaryLabelColor
+        badge.alignment = .center
+        badge.toolTip = SchemaTrial.title(forLevel: level)
+        let name = NSTextField(labelWithString: node.name.isEmpty ? "Unnamed" : node.name)
+        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: level == 1 ? .semibold : .regular)
+        name.textColor = node.name.isEmpty ? .tertiaryLabelColor : .labelColor
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        func action(_ symbolName: String, _ tip: String, _ selector: Selector) -> NSButton {
+            let b = symbolButton(symbolName, tooltip: tip, target: self, action: selector)
+            b.image = symbol(symbolName, tip, size: 12)
+            b.contentTintColor = .secondaryLabelColor
+            return b
+        }
+        var buttons = [action("arrow.turn.down.right", "Add A Group Inside This One", #selector(childTapped))]
+        if level > 1 {
+            buttons.append(action("plus", "Add The Next Group At This Level", #selector(siblingTapped)))
+            buttons.append(action("trash", "Remove This Group And Everything Inside It", #selector(removeTapped)))
+        }
+        actions.setViews(buttons, in: .trailing)
+        actions.spacing = 10
+        actions.isHidden = !selected
+        for v in [badge, name, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        let indent = 10 + CGFloat(level - 1) * 20
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent),
+            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: 18),
+            name.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 8),
+            name.centerYAnchor.constraint(equalTo: centerYAnchor),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -8),
+            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            actions.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        onHover = { [weak self] on in self?.over = on }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func childTapped() { onChild?() }
+    @objc private func siblingTapped() { onSibling?() }
+    @objc private func removeTapped() { onRemove?() }
+    override func mouseDown(with event: NSEvent) { onSelect?() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isSelected || over else { return }
+        NSColor.labelColor.withAlphaComponent(isSelected ? 0.10 : 0.05).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 6, yRadius: 6).fill()
+    }
+}
+
+/// The Schema panel: the map of groups on the left, and on the right the level, name and description of the one that is selected.
+final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
+    private var root = SchemaTrial.saved
+    private var selected: UUID?
+    private let map = NSStackView()
+    private let addNext = NSButton(title: "", target: nil, action: nil)
+    private let levelTitle = NSTextField(labelWithString: "")
+    private let namePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let customName = NSTextField()
+    private let about = NSTextField()
+    /// The row holding the box for a name of the user's own; it takes no room while a listed name is chosen.
+    private var customRow: NSGridRow!
+
+    private func caption(_ text: String) -> NSTextField {
+        let l = NSTextField(labelWithString: text)
+        l.textColor = .secondaryLabelColor
+        l.alignment = .right
+        return l
+    }
+
+    override func loadView() {
+        selected = root.id
+        // Left: the map.
+        let mapTitle = NSTextField(labelWithString: "Structure")
+        mapTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        map.orientation = .vertical
+        map.alignment = .leading
+        map.spacing = 2
+        addNext.bezelStyle = .rounded
+        addNext.target = self
+        addNext.action = #selector(addNextTapped)
+        let left = NSView(), right = NSView(), divider = NSBox()
+        divider.boxType = .separator
+        for v in [mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
+
+        // Right: the selected group.
+        levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        namePopup.target = self
+        namePopup.action = #selector(nameChosen)
+        customName.placeholderString = "Type A Name"
+        customName.delegate = self
+        about.placeholderString = "What This Group Holds"
+        about.delegate = self
+        about.usesSingleLineMode = false
+        about.cell?.wraps = true
+        about.cell?.isScrollable = false
+        let hint = NSTextField(wrappingLabelWithString: "A trial of the idea. What is built here is kept so it can be lived with, but the catalogue does not use it yet: the sidebar still shows projects as before.")
+        hint.textColor = .secondaryLabelColor
+        hint.preferredMaxLayoutWidth = 360
+        let grid = NSGridView(views: [
+            [caption("Name:"), namePopup],
+            [NSGridCell.emptyContentView, customName],
+            [caption("Description:"), about],
+            [NSGridCell.emptyContentView, hint],
+        ])
+        grid.rowSpacing = 10
+        grid.columnSpacing = 10
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 0).width = 90
+        grid.column(at: 1).width = 360
+        grid.row(at: 2).yPlacement = .top
+        customRow = grid.row(at: 1)
+        for v in [levelTitle, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
+
+        let v = NSView()
+        for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
+        NSLayoutConstraint.activate([
+            v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
+            v.heightAnchor.constraint(equalToConstant: 470),
+            left.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
+            left.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -22),
+            left.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 36),
+            left.widthAnchor.constraint(equalToConstant: 400),
+            divider.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 24),
+            divider.topAnchor.constraint(equalTo: left.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: left.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            right.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 28),
+            right.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -36),
+            right.topAnchor.constraint(equalTo: left.topAnchor),
+            right.bottomAnchor.constraint(equalTo: left.bottomAnchor),
+
+            mapTitle.topAnchor.constraint(equalTo: left.topAnchor),
+            mapTitle.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
+            map.topAnchor.constraint(equalTo: mapTitle.bottomAnchor, constant: 12),
+            map.leadingAnchor.constraint(equalTo: left.leadingAnchor),
+            map.trailingAnchor.constraint(equalTo: left.trailingAnchor),
+            // Under the last group on the map, at its right.
+            addNext.topAnchor.constraint(equalTo: map.bottomAnchor, constant: 12),
+            addNext.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -8),
+
+            levelTitle.topAnchor.constraint(equalTo: right.topAnchor),
+            levelTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            grid.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 16),
+            grid.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            about.heightAnchor.constraint(equalToConstant: 64),
+        ])
+        view = v
+        show()
+    }
+
+    private var current: (node: SchemaNode, level: Int)? { SchemaTrial.rows(of: root).first { $0.node.id == selected } }
+
+    /// Draws the map and the selected group's details afresh.
+    private func show(focusName: Bool = false) {
+        if current == nil { selected = root.id }
+        map.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (node, level) in SchemaTrial.rows(of: root) {
+            let row = SchemaRowView(node, level: level, selected: node.id == selected)
+            row.onSelect = { [weak self] in self?.selected = node.id; self?.show() }
+            row.onChild = { [weak self] in self?.add(child: true, at: node.id) }
+            row.onSibling = { [weak self] in self?.add(child: false, at: node.id) }
+            row.onRemove = { [weak self] in
+                guard let self = self else { return }
+                self.root = SchemaTrial.removing(node.id, from: self.root)
+                self.keep()
+                self.show()
+            }
+            map.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: map.widthAnchor).isActive = true
+        }
+        guard let (node, level) = current else { return }
+        addNext.title = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2))" : "Add Next Level \(level) Group"
+        levelTitle.stringValue = SchemaTrial.title(forLevel: level)
+        let names = SchemaTrial.names(forLevel: level)
+        namePopup.removeAllItems()
+        namePopup.addItems(withTitles: ["Custom Name\u{2026}"] + names)
+        namePopup.menu?.insertItem(.separator(), at: 1)
+        // A name of the user's own shows the box to type it in; a name from the list hides it.
+        let custom = !names.contains(node.name)
+        if custom { namePopup.selectItem(at: 0) } else { namePopup.selectItem(withTitle: node.name) }
+        customRow.isHidden = !custom
+        if customName.currentEditor() == nil { customName.stringValue = custom ? node.name : "" }
+        if about.currentEditor() == nil { about.stringValue = node.about }
+        if focusName, custom { view.window?.makeFirstResponder(customName) }
+    }
+
+    private func keep() { SchemaTrial.saved = root }
+
+    private func add(child: Bool, at id: UUID) {
+        let result = child ? SchemaTrial.addingChild(to: id, in: root) : SchemaTrial.addingSibling(after: id, in: root)
+        root = result.tree
+        if let made = result.added { selected = made }
+        keep()
+        view.window?.makeFirstResponder(nil)
+        show()
+    }
+
+    /// Under the map: the next group at the selected one's level, or the first inside the main group.
+    @objc private func addNextTapped() {
+        guard let (node, level) = current else { return }
+        add(child: level == 1, at: node.id)
+    }
+
+    @objc private func nameChosen() {
+        guard let id = selected else { return }
+        let custom = namePopup.indexOfSelectedItem == 0, title = namePopup.titleOfSelectedItem ?? ""
+        // Choosing Custom empties the name, ready to be typed.
+        root = SchemaTrial.changing(id, in: root) { $0.name = custom ? "" : title }
+        keep()
+        view.window?.makeFirstResponder(nil)
+        show(focusName: custom)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let id = selected, let field = obj.object as? NSTextField else { return }
+        root = SchemaTrial.changing(id, in: root) { node in
+            if field === customName { node.name = field.stringValue } else { node.about = field.stringValue }
+        }
+        keep()
+        show()
+    }
+}

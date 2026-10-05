@@ -150,7 +150,7 @@ class SettingsPanel: NSViewController {
     }
 
     /// Every panel is at least this wide, so the window's toolbar shows all the panels' icons.
-    static let minimumWidth: CGFloat = 980
+    static let minimumWidth: CGFloat = 1040
 
     override func viewWillAppear() {
         super.viewWillAppear()
@@ -1069,6 +1069,7 @@ final class SettingsWindowController: NSWindowController {
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
             ProjectsPanel(library: library, title: "Projects", icon: "folder"),
+            SchemaPanel(library: library, title: "Schema", icon: "list.bullet.indent"),
             ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
             HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
             AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
