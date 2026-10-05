@@ -60,6 +60,26 @@ enum SchemaTrial {
         }
     }
 
+    // A project follows the schema above, the default, until it is given a stack of its own. Its own
+    // is kept here by the project's id. (Kept with the app's settings for now, not in the project's
+    // file: it does not travel with the project to another Mac yet.)
+    static var own: [String: SchemaNode] {
+        get { preferences.data(forKey: "schema.projects").flatMap { try? JSONDecoder().decode([String: SchemaNode].self, from: $0) } ?? [:] }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.projects") }
+            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
+        }
+    }
+    static func hasOwn(_ project: UUID) -> Bool { own[project.uuidString] != nil }
+    /// The stack a project shows: its own, or the default.
+    static func schema(for project: UUID) -> SchemaNode { own[project.uuidString] ?? saved }
+    /// Gives a project a stack of its own, or, with nil, puts it back on the default.
+    static func setSchema(_ tree: SchemaNode?, for project: UUID) {
+        var all = own
+        all[project.uuidString] = tree
+        own = all
+    }
+
     /// Which of the app's own groups a group directly inside the main one is: the role it was given,
     /// or, for one added by name, the role of that name.
     static func role(of node: SchemaNode) -> SchemaRole? { node.role ?? SchemaRole.allCases.first { $0.title == node.name } }
@@ -140,7 +160,8 @@ private final class SchemaRowView: HoverView {
     private let actions = NSStackView()
     private var over = false { didSet { actions.isHidden = !(over || isSelected); needsDisplay = true } }
 
-    init(_ node: SchemaNode, level: Int, selected: Bool) {
+    /// `shown` is the name the row carries; `holds`, when given, says what is inside the group, such as "3 Palettes".
+    init(_ node: SchemaNode, level: Int, selected: Bool, shown: String? = nil, holds: String? = nil) {
         isSelected = selected
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -149,9 +170,14 @@ private final class SchemaRowView: HoverView {
         badge.textColor = .secondaryLabelColor
         badge.alignment = .center
         badge.toolTip = SchemaTrial.title(forLevel: level)
-        let name = NSTextField(labelWithString: node.name.isEmpty ? "Unnamed" : node.name)
+        let text = shown ?? node.name
+        let name = NSTextField(labelWithString: text.isEmpty ? "Unnamed" : text)
+        let held = NSTextField(labelWithString: holds ?? "")
+        held.font = NSFont.systemFont(ofSize: TextSize.caption)
+        held.textColor = .secondaryLabelColor
+        held.setContentCompressionResistancePriority(.required, for: .horizontal)
         name.font = NSFont.systemFont(ofSize: TextSize.body, weight: level == 1 ? .semibold : .regular)
-        name.textColor = node.name.isEmpty ? .tertiaryLabelColor : .labelColor
+        name.textColor = text.isEmpty ? .tertiaryLabelColor : .labelColor
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         func action(_ symbolName: String, _ tip: String, _ selector: Selector) -> NSButton {
@@ -168,7 +194,7 @@ private final class SchemaRowView: HoverView {
         actions.setViews(buttons, in: .trailing)
         actions.spacing = 10
         actions.isHidden = !selected
-        for v in [badge, name, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        for v in [badge, name, held, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let indent = 10 + CGFloat(level - 1) * 20
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 30),
@@ -177,7 +203,9 @@ private final class SchemaRowView: HoverView {
             badge.widthAnchor.constraint(equalToConstant: 18),
             name.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 8),
             name.centerYAnchor.constraint(equalTo: centerYAnchor),
-            name.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -8),
+            held.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 8),
+            held.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
+            held.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -8),
             actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             actions.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -241,10 +269,25 @@ private final class SchemaFlipped: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// The Schema panel: the map of groups on the left, and on the right the level, name and description of the one that is selected.
+/// The Schema panel. At its head, which stack is being shown: the default, or one project's. Under
+/// that, the map of groups on the left, and on the right the level, name and description of the
+/// one that is selected, or, when a group that holds things is being removed, what to do with them.
 final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
+    /// The project whose stack is showing; nil is the default.
+    private var stack: UUID?
     private var root = SchemaTrial.saved
     private var selected: UUID?
+    /// A group that holds things and has been asked to go: the right pane asks what becomes of them.
+    private var removing: UUID?
+    private var creating = false
+
+    private let stackPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let stackNote = NSTextField(wrappingLabelWithString: "")
+    private let resetButton = NSButton(title: "Use Default", target: nil, action: nil)
+    private let newName = NSTextField()
+    private let createButton = NSButton(title: "Create", target: nil, action: nil)
+    private let cancelCreate = NSButton(title: "Cancel", target: nil, action: nil)
+    private let newRow = NSStackView()
     private let map = NSStackView()
     private let addNext = NSButton(title: "", target: nil, action: nil)
     private let levelTitle = NSTextField(labelWithString: "")
@@ -253,20 +296,48 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let namesScroll = FittedScrollView()
     private let customName = NSTextField()
     private let about = NSTextField()
+    private let hint = NSTextField(wrappingLabelWithString: "")
     /// The rows holding the box for a name of the user's own and its label; they take no room while a listed name is chosen.
     private var customRow: NSGridRow!
     private var customHead: NSGridRow!
     private var shownLevel = 0
+    private let detail = NSView()
+    private let removal = NSStackView()
+
+    private var lib: Library { library.library }
+    private var primary: String { SchemaTrial.primaryName }
 
     private func caption(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
         l.textColor = .secondaryLabelColor
-        l.alignment = .right
         return l
+    }
+    private func push(_ title: String, _ action: Selector) -> NSButton {
+        let b = NSButton(title: title, target: self, action: action)
+        b.bezelStyle = .rounded
+        return b
     }
 
     override func loadView() {
         selected = root.id
+        // The head: which stack, and making a new one.
+        stackPopup.target = self
+        stackPopup.action = #selector(stackChosen)
+        stackNote.textColor = .secondaryLabelColor
+        stackNote.preferredMaxLayoutWidth = 400
+        for (b, action) in [(resetButton, #selector(resetTapped)), (createButton, #selector(createTapped)), (cancelCreate, #selector(cancelCreateTapped))] {
+            b.bezelStyle = .rounded
+            b.target = self
+            b.action = action
+        }
+        newName.delegate = self
+        newName.target = self
+        newName.action = #selector(createTapped)
+        newRow.setViews([newName, createButton, cancelCreate], in: .leading)
+        newRow.spacing = 8
+        let head = NSStackView(views: [caption("Stack"), stackPopup, resetButton])
+        head.spacing = 8
+
         // Left: the map.
         let mapTitle = NSTextField(labelWithString: "Structure")
         mapTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -276,14 +347,17 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.bezelStyle = .rounded
         addNext.target = self
         addNext.action = #selector(addNextTapped)
+        let top = NSStackView(views: [head, stackNote, newRow])
+        top.orientation = .vertical
+        top.alignment = .leading
+        top.spacing = 8
         let left = NSView(), right = NSView(), divider = NSBox()
         divider.boxType = .separator
-        for v in [mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
+        for v in [top, mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
 
         // Right: the selected group.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         let namesTitle = caption("Name")
-        namesTitle.alignment = .left
         names.orientation = .vertical
         names.alignment = .leading
         names.spacing = 1
@@ -310,30 +384,30 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         about.usesSingleLineMode = false
         about.cell?.wraps = true
         about.cell?.isScrollable = false
-        let hint = NSTextField(wrappingLabelWithString: "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, shown in every project and holding nothing. Removing a group hides it and loses nothing.")
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 250
-        let customTitle = caption("Custom Name"), aboutTitle = caption("Description")
-        customTitle.alignment = .left
-        aboutTitle.alignment = .left
-        let grid = NSGridView(views: [[customTitle], [customName], [aboutTitle], [about], [hint]])
+        let grid = NSGridView(views: [[caption("Custom Name")], [customName], [caption("Description")], [about], [hint]])
         grid.rowSpacing = 6
         grid.column(at: 0).width = 250
         grid.row(at: 2).topPadding = 10
         grid.row(at: 4).topPadding = 10
         customRow = grid.row(at: 1)
         customHead = grid.row(at: 0)
-        for v in [levelTitle, namesTitle, column, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
+        for v in [namesTitle, column, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; detail.addSubview(v) }
+        removal.orientation = .vertical
+        removal.alignment = .leading
+        removal.spacing = 12
+        for v in [levelTitle, detail, removal] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
 
         let v = NSView()
         for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
         NSLayoutConstraint.activate([
             v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
-            v.heightAnchor.constraint(equalToConstant: 470),
+            v.heightAnchor.constraint(equalToConstant: 560),
             left.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
             left.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -22),
             left.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 36),
-            left.widthAnchor.constraint(equalToConstant: 400),
+            left.widthAnchor.constraint(equalToConstant: 420),
             divider.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 24),
             divider.topAnchor.constraint(equalTo: left.topAnchor),
             divider.bottomAnchor.constraint(equalTo: left.bottomAnchor),
@@ -343,9 +417,14 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             right.topAnchor.constraint(equalTo: left.topAnchor),
             right.bottomAnchor.constraint(equalTo: left.bottomAnchor),
 
-            mapTitle.topAnchor.constraint(equalTo: left.topAnchor),
+            top.topAnchor.constraint(equalTo: left.topAnchor),
+            top.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
+            top.trailingAnchor.constraint(lessThanOrEqualTo: left.trailingAnchor),
+            stackPopup.widthAnchor.constraint(equalToConstant: 220),
+            newName.widthAnchor.constraint(equalToConstant: 220),
+            mapTitle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 20),
             mapTitle.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            map.topAnchor.constraint(equalTo: mapTitle.bottomAnchor, constant: 12),
+            map.topAnchor.constraint(equalTo: mapTitle.bottomAnchor, constant: 10),
             map.leadingAnchor.constraint(equalTo: left.leadingAnchor),
             map.trailingAnchor.constraint(equalTo: left.trailingAnchor),
             // Under the last group on the map, at its right.
@@ -354,13 +433,20 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
             levelTitle.topAnchor.constraint(equalTo: right.topAnchor),
             levelTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            detail.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
+            detail.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            detail.trailingAnchor.constraint(equalTo: right.trailingAnchor),
+            detail.bottomAnchor.constraint(equalTo: right.bottomAnchor),
+            removal.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
+            removal.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            removal.trailingAnchor.constraint(lessThanOrEqualTo: right.trailingAnchor),
             // The names: a column the height of the pane, scrolling inside itself.
-            namesTitle.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
-            namesTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            namesTitle.topAnchor.constraint(equalTo: detail.topAnchor),
+            namesTitle.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
             column.topAnchor.constraint(equalTo: namesTitle.bottomAnchor, constant: 6),
-            column.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            column.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
             column.widthAnchor.constraint(equalToConstant: 220),
-            column.bottomAnchor.constraint(equalTo: right.bottomAnchor),
+            column.bottomAnchor.constraint(equalTo: detail.bottomAnchor),
             namesScroll.topAnchor.constraint(equalTo: column.topAnchor, constant: 4),
             namesScroll.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: -4),
             namesScroll.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 2),
@@ -381,40 +467,129 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         show()
     }
 
+    /// For a trial run: "<project name>" shows that project's stack, and "<project name>/<group name>" presses the bin on one of its groups.
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard !rehearsed, let ask = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_SCHEMA"] else { return }
+        rehearsed = true
+        let parts = ask.split(separator: "/", maxSplits: 1).map(String.init)
+        guard let project = lib.orderedProjects.first(where: { $0.name == parts[0] }) else { return }
+        stack = project.id
+        load()
+        selected = root.id
+        if parts.count > 1, let row = SchemaTrial.rows(of: root).first(where: { $0.node.name == parts[1] }) { remove(row.node, level: row.level) } else { show() }
+    }
+    private var rehearsed = false
+
+    override func refresh() {
+        guard isViewLoaded else { return }
+        // A project that has gone takes its stack off the panel.
+        if let id = stack, lib.project(id) == nil { stack = nil }
+        load()
+        show()
+    }
+
+    /// Reads the stack that is showing from where it is kept.
+    private func load() { root = stack.map { SchemaTrial.schema(for: $0) } ?? SchemaTrial.saved }
+
     private var current: (node: SchemaNode, level: Int)? { SchemaTrial.rows(of: root).first { $0.node.id == selected } }
 
-    /// Draws the map and the selected group's details afresh.
+    // MARK: What a group holds
+
+    /// The projects a group on this stack stands in: the one whose stack it is, or every project that follows the default.
+    private var projects: [UUID] { stack.map { [$0] } ?? lib.orderedProjects.map { $0.id }.filter { !SchemaTrial.hasOwn($0) } }
+
+    private func palettes(_ role: SchemaRole, in project: UUID) -> [UUID] {
+        lib.palettes(in: project).filter { $0.isTypography == (role == .typography) }.map { $0.id }
+    }
+    private func tags(in project: UUID) -> [String] { lib.allTags.filter { lib.project(ofTag: $0) == project } }
+
+    /// How many things one of the app's own groups holds, across `projects`. Information holds the Overview page, which is the project's own, and counts as nothing to lose.
+    private func count(_ node: SchemaNode, level: Int) -> Int {
+        guard level == 2, let role = SchemaTrial.role(of: node) else { return 0 }
+        switch role {
+        case .information: return 0
+        case .palettes, .typography: return projects.reduce(0) { $0 + palettes(role, in: $1).count }
+        case .tags: return projects.reduce(0) { $0 + tags(in: $1).count }
+        }
+    }
+    private func noun(_ role: SchemaRole?, _ n: Int) -> String {
+        switch role {
+        case .typography?: return n == 1 ? "Typography Palette" : "Typography Palettes"
+        case .tags?: return n == 1 ? "Tag" : "Tags"
+        default: return n == 1 ? "Palette" : "Palettes"
+        }
+    }
+
+    // MARK: Showing
+
+    /// Draws the head, the map and the right pane afresh.
     private func show(focusName: Bool = false) {
         if current == nil { selected = root.id }
+        if let going = removing, !SchemaTrial.rows(of: root).contains(where: { $0.node.id == going }) { removing = nil }
+
+        // The head.
+        stackPopup.removeAllItems()
+        stackPopup.addItem(withTitle: "Default")
+        stackPopup.menu?.addItem(.separator())
+        for p in lib.orderedProjects {
+            stackPopup.addItem(withTitle: p.name)
+            stackPopup.lastItem?.representedObject = p.id
+            stackPopup.lastItem?.image = symbol(SchemaTrial.hasOwn(p.id) ? "square.stack.3d.up.fill" : "square.stack.3d.up", "", size: 11)
+        }
+        stackPopup.menu?.addItem(.separator())
+        stackPopup.addItem(withTitle: "New \(primary)\u{2026}")
+        stackPopup.lastItem?.tag = -1
+        if let id = stack, let at = stackPopup.itemArray.firstIndex(where: { $0.representedObject as? UUID == id }) { stackPopup.selectItem(at: at) } else { stackPopup.selectItem(at: 0) }
+        let own = stack.map { SchemaTrial.hasOwn($0) } ?? false
+        resetButton.isHidden = !own
+        let following = lib.orderedProjects.filter { !SchemaTrial.hasOwn($0.id) }.count
+        stackNote.stringValue = stack == nil ? "What Every \(primary) Follows Unless It Has A Stack Of Its Own. \(following) Of \(lib.orderedProjects.count) Follow It."
+            : own ? "This \(primary) Has A Stack Of Its Own." : "This \(primary) Follows Default. Change Anything Here And It Gets A Stack Of Its Own."
+        newRow.isHidden = !creating
+        newName.placeholderString = "Name The New \(primary)"
+
+        // The map.
         map.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let projectName = stack.flatMap { lib.project($0)?.name }
         for (node, level) in SchemaTrial.rows(of: root) {
-            let row = SchemaRowView(node, level: level, selected: node.id == selected)
-            row.onSelect = { [weak self] in self?.selected = node.id; self?.show() }
+            let n = count(node, level: level)
+            let row = SchemaRowView(node, level: level, selected: node.id == selected, shown: level == 1 ? projectName : nil,
+                                    holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil)
+            row.onSelect = { [weak self] in self?.removing = nil; self?.selected = node.id; self?.show() }
             row.onChild = { [weak self] in self?.add(child: true, at: node.id) }
             row.onSibling = { [weak self] in self?.add(child: false, at: node.id) }
-            row.onRemove = { [weak self] in
-                guard let self = self else { return }
-                self.root = SchemaTrial.removing(node.id, from: self.root)
-                self.keep()
-                self.show()
-            }
+            row.onRemove = { [weak self] in self?.remove(node, level: level) }
             map.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: map.widthAnchor).isActive = true
         }
         guard let (node, level) = current else { return }
         addNext.title = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2))" : "Add Next Level \(level) Group"
         levelTitle.stringValue = SchemaTrial.title(forLevel: level)
-        let offered = SchemaTrial.names(forLevel: level)
+
+        // The right pane: what to do with a group's contents, or the group's own details.
+        let asking = removing == node.id
+        removal.isHidden = !asking
+        detail.isHidden = asking
+        if asking { showRemoval(node, level: level); return }
+
+        // On a project's stack the main group is the project itself, which is named on its own page.
+        let named = level == 1 && stack != nil
+        let offered = named ? [] : SchemaTrial.names(forLevel: level)
         // A name of the user's own shows the box to type it in; a name from the list hides it.
-        let custom = !offered.contains(node.name)
+        let custom = !named && !offered.contains(node.name)
         names.arrangedSubviews.forEach { $0.removeFromSuperview() }
         func add(_ row: SchemaNameRow, _ choose: @escaping () -> Void) {
             row.onChoose = choose
             names.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: names.widthAnchor).isActive = true
         }
-        add(SchemaNameRow("Custom Name\u{2026}", chosen: custom, quiet: true)) { [weak self] in self?.choose(name: nil) }
-        for name in offered { add(SchemaNameRow(name, chosen: !custom && name == node.name)) { [weak self] in self?.choose(name: name) } }
+        if named {
+            add(SchemaNameRow(projectName ?? "", chosen: true)) {}
+        } else {
+            add(SchemaNameRow("Custom Name\u{2026}", chosen: custom, quiet: true)) { [weak self] in self?.choose(name: nil) }
+            for name in offered { add(SchemaNameRow(name, chosen: !custom && name == node.name)) { [weak self] in self?.choose(name: name) } }
+        }
         // A different group's level starts its column at the top.
         if level != shownLevel {
             shownLevel = level
@@ -425,17 +600,101 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         customHead.isHidden = !custom
         if customName.currentEditor() == nil { customName.stringValue = custom ? node.name : "" }
         if about.currentEditor() == nil { about.stringValue = node.about }
+        hint.stringValue = named ? "This stack is the \(primary) \(projectName ?? "") itself. What a \(primary) is called is set on the Default stack."
+            : "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, holding nothing."
         if focusName, custom { view.window?.makeFirstResponder(customName) }
     }
 
-    private func keep() { SchemaTrial.saved = root }
+    /// A group that holds things has been asked to go: say what it holds, and offer to keep them under a new name, or to delete them.
+    private func showRemoval(_ node: SchemaNode, level: Int) {
+        removal.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let role = SchemaTrial.role(of: node), n = count(node, level: level), things = "\(n) \(noun(role, n))"
+        let title = NSTextField(labelWithString: "\(node.name) Holds \(things)")
+        title.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        func words(_ text: String) -> NSTextField {
+            let l = NSTextField(wrappingLabelWithString: text)
+            l.textColor = .secondaryLabelColor
+            l.preferredMaxLayoutWidth = 440
+            return l
+        }
+        removal.addArrangedSubview(title)
+        if let project = stack {
+            let name = lib.project(project)?.name ?? ""
+            removal.addArrangedSubview(words("A group that holds things cannot simply go: they would still be in \(name), with nowhere to show. Keep them and give the group another name, or delete them and remove the group."))
+            removal.addArrangedSubview(push("Keep The \(noun(role, n)) And Rename The Group", #selector(keepAndRename)))
+            let delete = push("Delete The \(things) And Remove The Group", #selector(deleteAndRemove))
+            delete.hasDestructiveAction = true
+            delete.contentTintColor = .systemRed
+            removal.addArrangedSubview(delete)
+            if lib.project(project)?.isLocked == true {
+                delete.isEnabled = false
+                removal.addArrangedSubview(words("\(name) is locked, so nothing in it can be deleted. Unlock it in the sidebar first."))
+            } else {
+                removal.addArrangedSubview(words(role == .tags ? "Deleting a tag takes it off everything that carries it." : "Deleting a palette leaves its colours in All Swatches, and the deletion is recorded as a step in History."))
+            }
+        } else {
+            removal.addArrangedSubview(words("These are spread over the \(projects.count) that follow Default. On Default the group can be renamed, and they stay where they are. To delete them, choose each \(primary) under Stack and remove the group there."))
+            removal.addArrangedSubview(push("Keep The \(noun(role, n)) And Rename The Group", #selector(keepAndRename)))
+        }
+        removal.addArrangedSubview(push("Cancel", #selector(cancelRemoval)))
+    }
+
+    // MARK: Changing
+
+    /// Keeps the stack that is showing. A project that was following the default gets a stack of its own the first time anything on it is changed.
+    private func keep() {
+        if let id = stack { SchemaTrial.setSchema(root, for: id) } else { SchemaTrial.saved = root }
+    }
 
     private func add(child: Bool, at id: UUID) {
+        removing = nil
         let result = child ? SchemaTrial.addingChild(to: id, in: root) : SchemaTrial.addingSibling(after: id, in: root)
         root = result.tree
         if let made = result.added { selected = made }
         keep()
         view.window?.makeFirstResponder(nil)
+        show()
+    }
+
+    /// The bin on a group: gone at once when it holds nothing; asked about when it holds something.
+    private func remove(_ node: SchemaNode, level: Int) {
+        guard count(node, level: level) == 0 else {
+            removing = node.id
+            selected = node.id
+            show()
+            return
+        }
+        root = SchemaTrial.removing(node.id, from: root)
+        keep()
+        show()
+    }
+
+    @objc private func cancelRemoval() { removing = nil; show() }
+
+    /// Keeps what the group holds: the group stays, and its name is ready to be changed.
+    @objc private func keepAndRename() {
+        removing = nil
+        guard let id = selected else { return }
+        root = SchemaTrial.changing(id, in: root) { $0.role = SchemaTrial.role(of: $0); $0.name = "" }   // it keeps its part, whatever it is called next
+        keep()
+        show(focusName: true)
+    }
+
+    /// Deletes what the group holds in this project, then takes the group off its stack.
+    @objc private func deleteAndRemove() {
+        guard let project = stack, let (node, _) = current, let role = SchemaTrial.role(of: node) else { return }
+        switch role {
+        case .palettes, .typography:
+            let ids = palettes(role, in: project)
+            library.apply(role == .typography ? "Delete Typography Palettes" : "Delete Palettes") { lib in ids.forEach { lib.deleteSwatch($0) } }
+        case .tags: library.deleteTags(tags(in: project))
+        case .information: break
+        }
+        removing = nil
+        // Only if they have really gone: a locked project refuses the change.
+        guard count(node, level: 2) == 0 else { show(); return }
+        root = SchemaTrial.removing(node.id, from: root)
+        keep()
         show()
     }
 
@@ -452,14 +711,70 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             view.window?.makeFirstResponder(customName)   // already a name of the user's own: go to it, and keep it
             return
         }
-        root = SchemaTrial.changing(id, in: root) { $0.name = name ?? "" }
+        // One of the app's own groups keeps its part under its new name.
+        root = SchemaTrial.changing(id, in: root) { $0.role = SchemaTrial.role(of: $0); $0.name = name ?? "" }
         keep()
         view.window?.makeFirstResponder(nil)
         show(focusName: name == nil)
     }
 
+    // MARK: Stacks
+
+    @objc private func stackChosen() {
+        removing = nil
+        view.window?.makeFirstResponder(nil)
+        if stackPopup.selectedItem?.tag == -1 {
+            creating = true
+            show()
+            view.window?.makeFirstResponder(newName)
+            return
+        }
+        creating = false
+        stack = stackPopup.selectedItem?.representedObject as? UUID
+        load()
+        selected = root.id
+        show()
+    }
+
+    /// Puts a project back on the default, letting go of its own stack.
+    @objc private func resetTapped() {
+        guard let id = stack else { return }
+        SchemaTrial.setSchema(nil, for: id)
+        removing = nil
+        load()
+        selected = root.id
+        show()
+    }
+
+    @objc private func cancelCreateTapped() {
+        creating = false
+        newName.stringValue = ""
+        show()
+    }
+
+    /// Makes a new project, as New Project does, and gives it a stack of its own to shape, starting as the default.
+    @objc private func createTapped() {
+        let name = newName.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard creating, ProjectField.problem(name: name, values: [:]) == nil else { NSSound.beep(); return }
+        var made: UUID?
+        library.apply("New Project") { lib in
+            let id = lib.createProject(named: name)
+            let organisation = ProjectField.tidy(Prefs.organisation)
+            if !organisation.isEmpty { lib.setProjectDetails(id, organisation) }
+            made = id
+        }
+        guard let id = made, lib.project(id) != nil else { NSSound.beep(); return }
+        SchemaTrial.setSchema(SchemaTrial.saved, for: id)
+        creating = false
+        newName.stringValue = ""
+        stack = id
+        load()
+        selected = root.id
+        show()
+    }
+
     func controlTextDidChange(_ obj: Notification) {
-        guard let id = selected, let field = obj.object as? NSTextField else { return }
+        guard let id = selected, let field = obj.object as? NSTextField, field === customName || field === about else { return }
         root = SchemaTrial.changing(id, in: root) { node in
             if field === customName { node.name = field.stringValue } else { node.about = field.stringValue }
         }

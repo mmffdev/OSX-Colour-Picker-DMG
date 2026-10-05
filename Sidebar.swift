@@ -488,8 +488,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// The schema's label-only groups as they stand in each project, kept so they stay open or shut across a reload.
     private var schemaNodes: [String: SidebarNode] = [:]
     /// What each schema group is called, for the cell that shows it, and what the app's own groups have been named.
-    private var schemaNames: [UUID: String] = [:]
-    private var roleNames: [SchemaRole: String] = [:]
+    private var schemaNames: [String: String] = [:]
+    private var roleNames: [UUID: [SchemaRole: String]] = [:]
 
     // rail1 closed: a narrow strip of icons. The pages open from it; a bucket's icon opens the rail on that bucket.
     static let compactWidth: CGFloat = 56
@@ -753,6 +753,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc private func schemaChanged() { reload() }
 
+    /// What one of the app's own groups is called in a project: the name its stack gives it.
+    private func named(_ role: SchemaRole, in project: UUID) -> String {
+        roleNames[project]?[role].flatMap { $0.isEmpty ? nil : $0 } ?? role.title
+    }
+
     @objc private func themeChanged() {
         scroll.backgroundColor = Theme.background
         outline.backgroundColor = Theme.background
@@ -773,10 +778,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let lib = library.library
         favourites.children = library.favourites.map { SidebarNode(.palette($0.id)) }
         var projects: [SidebarNode] = [], buckets: [SidebarNode] = []
-        let schema = SchemaTrial.saved
-        schemaNames = Dictionary(SchemaTrial.rows(of: schema).map { ($0.node.id, $0.node.name) }, uniquingKeysWith: { first, _ in first })
-        roleNames = Dictionary(schema.children.compactMap { group in SchemaTrial.role(of: group).map { ($0, group.name) } }, uniquingKeysWith: { first, _ in first })
+        schemaNames = [:]
+        roleNames = [:]
         for p in lib.orderedProjects {
+            // Each project shows its own stack, or the default.
+            let schema = SchemaTrial.schema(for: p.id)
+            for row in SchemaTrial.rows(of: schema) { schemaNames[p.id.uuidString + row.node.id.uuidString] = row.node.name }
+            roleNames[p.id] = Dictionary(schema.children.compactMap { group in SchemaTrial.role(of: group).map { ($0, group.name) } }, uniquingKeysWith: { first, _ in first })
             let node = projectNodes[p.id] ?? SidebarNode(.project(p.id))
             projectNodes[p.id] = node
             let held = lib.palettes(in: p.id)
@@ -1002,20 +1010,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
         case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Your stock of palettes. A project takes a copy, so these never change with a project"
-        case .schemaGroup(_, let group):
-            cell.textField?.stringValue = schemaNames[group].flatMap { $0.isEmpty ? nil : $0 } ?? "Unnamed"
+        case .schemaGroup(let project, let group):
+            cell.textField?.stringValue = schemaNames[project.uuidString + group.uuidString].flatMap { $0.isEmpty ? nil : $0 } ?? "Unnamed"
             cell.imageView?.image = symbol("square.dashed", "Group", size: 11)
             cell.imageView?.contentTintColor = .tertiaryLabelColor
             cell.toolTip = "A Group From Settings \u{25B8} Schema. It Is A Label For Now, And Holds Nothing Yet."
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
-        case .projectPalettes:
-            cell.textField?.stringValue = roleNames[.palettes] ?? "Palettes"
+        case .projectPalettes(let project):
+            cell.textField?.stringValue = named(.palettes, in: project)
             cell.imageView?.image = symbol("swatchpalette", "Project palettes", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Palettes that belong to this project"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
-        case .projectInformation:
-            cell.textField?.stringValue = roleNames[.information] ?? "Information"
+        case .projectInformation(let project):
+            cell.textField?.stringValue = named(.information, in: project)
             cell.imageView?.image = symbol("info.circle", "Project information", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "What this project is: its pages of information"
@@ -1026,14 +1034,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "The project at a glance"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
-        case .projectTypography:
-            cell.textField?.stringValue = roleNames[.typography] ?? "Typography"
+        case .projectTypography(let project):
+            cell.textField?.stringValue = named(.typography, in: project)
             cell.imageView?.image = symbol("textformat", "Project typography", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Typography palettes that belong to this project"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
-        case .projectTags:
-            cell.textField?.stringValue = roleNames[.tags] ?? "Tags"
+        case .projectTags(let project):
+            cell.textField?.stringValue = named(.tags, in: project)
             cell.imageView?.image = symbol("tag", "Project tags", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Tags that belong to this project"
