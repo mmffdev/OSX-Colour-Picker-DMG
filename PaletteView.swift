@@ -147,7 +147,7 @@ final class ContrastReadout: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         title.font = SidebarOutlineView.headingFont
-        title.textColor = .labelColor
+        title.textColor = RailStyle.headingColour
         title.lineBreakMode = .byTruncatingTail
         title.translatesAutoresizingMaskIntoConstraints = false
         addSubview(title)

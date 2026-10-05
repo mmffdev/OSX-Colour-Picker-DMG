@@ -418,7 +418,7 @@ final class SwatchRow: NSView {
     private func heading(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
         l.font = SidebarOutlineView.headingFont
-        l.textColor = .labelColor
+        l.textColor = RailStyle.headingColour
         l.lineBreakMode = .byTruncatingTail
         return l
     }

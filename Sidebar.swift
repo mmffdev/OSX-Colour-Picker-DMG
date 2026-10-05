@@ -192,6 +192,8 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
 
 /// A row with a plus button: a project (new palette inside it) or the Projects heading (new project).
 final class ProjectHeaderCell: NSTableCellView {
+    /// The cell sets its own text: as a heading it is the rails' small grey, which the list would otherwise resize.
+    override var rowSizeStyle: NSTableView.RowSizeStyle { get { .custom } set {} }
     static let identifier = NSUserInterfaceItemIdentifier("project")
     var onAdd: (() -> Void)?
     private let title = NSTextField(labelWithString: "")
@@ -255,8 +257,8 @@ final class ProjectHeaderCell: NSTableCellView {
             lock.toolTip = locked ? "Locked: nothing in the project can change. Click to unlock" : "Lock the project so nothing in it can change"
         }
         add.isHidden = locked == true
-        title.font = heading ? SidebarOutlineView.headingFont : NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        title.textColor = .labelColor
+        title.font = heading ? SidebarOutlineView.headingFont : RailStyle.bodyFont
+        title.textColor = heading ? RailStyle.headingColour : .labelColor
         folder.isHidden = heading
         add.toolTip = tooltip
         add.setAccessibilityLabel(tooltip)
@@ -315,6 +317,11 @@ final class ThemedRowView: NSTableRowView {
     }
 }
 
+/// A cell whose text the list does not resize to the system's sidebar size.
+final class HeadingCellView: NSTableCellView {
+    override var rowSizeStyle: NSTableView.RowSizeStyle { get { .custom } set {} }
+}
+
 final class SidebarOutlineView: NSOutlineView {
     /// The right-hand column of icons (gears, padlocks) is this wide and this far from the edge on every row.
     static let trailingIcon: CGFloat = 16
@@ -326,8 +333,35 @@ final class SidebarOutlineView: NSOutlineView {
     // Every level is one step in from the one above (RailStyle.step, which rail2 shares). A row
     // that opens has its arrow at its level and its icon one step on; a row that does not open
     // starts at its level. So a child's arrow, or its star, sits under its parent's icon.
-    /// Bold and in the full text colour: grey headings were hard to read over a dark sidebar.
-    static let headingFont = NSFont.systemFont(ofSize: 11, weight: .bold)
+    /// A heading, here and over every column on the pages: the rails' own, small, semibold and grey.
+    static var headingFont: NSFont { RailStyle.headingFont }
+
+    // A main heading's arrow is at the row's far right, and shows only while the pointer is on the row.
+    private var hoveredRow = -1 { didSet { if hoveredRow != oldValue { showArrows() } } }
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseMoved(with event: NSEvent) { hoveredRow = row(at: convert(event.locationInWindow, from: nil)) }
+    override func mouseExited(with event: NSEvent) { hoveredRow = -1 }
+    override func layout() { super.layout(); showArrows() }
+
+    private func showArrows() {
+        let rows = self.rows(in: visibleRect)
+        guard rows.length > 0 else { return }
+        for row in rows.location..<(rows.location + rows.length) {
+            guard let view = rowView(atRow: row, makeIfNecessary: false) else { continue }
+            let main = level(forRow: row) == 0
+            for button in view.subviews where button is NSButton && (button.identifier == NSOutlineView.disclosureButtonIdentifier || button.identifier == NSOutlineView.showHideButtonIdentifier) {
+                button.alphaValue = !main || row == hoveredRow ? 1 : 0
+            }
+        }
+    }
 
     // A click anywhere on a row that opens and closes does so, not only one on its arrow. A drag
     // still drags, and the arrow and the plus button keep their own clicks.
@@ -352,6 +386,7 @@ final class SidebarOutlineView: NSOutlineView {
 
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         var frame = super.frameOfOutlineCell(atRow: row)
+        if level(forRow: row) == 0 { frame.origin.x = visibleRect.maxX - SidebarOutlineView.trailingPad - frame.width - 2 }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
     }
@@ -361,10 +396,12 @@ final class SidebarOutlineView: NSOutlineView {
         // Where the first row's arrow is drawn is where level 0 starts; each level is a step further in.
         let first = numberOfRows > 0 ? super.frameOfOutlineCell(atRow: 0) : .zero
         if first.width > 0 {
-            let start = first.minX + CGFloat(level(forRow: row)) * RailStyle.step
-            let x = isExpandable(item(atRow: row)) ? start + RailStyle.step : start
+            let start = first.minX + CGFloat(level(forRow: row)) * RailStyle.step, main = level(forRow: row) == 0
+            // A main heading starts on the rail's own edge, its arrow being at the far right; what it holds sits one step in.
+            let x = isExpandable(item(atRow: row)) && !main ? start + RailStyle.step : start
             frame.size.width -= x - frame.origin.x
             frame.origin.x = x
+            if main { frame.size.width -= first.width + 6 }
         }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
@@ -777,7 +814,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let cell = o.makeView(withIdentifier: id, owner: self) as? NSTableCellView ?? plainCell(id, icon: !node.isGroup)
         if node.isGroup {
             cell.textField?.font = SidebarOutlineView.headingFont
-            cell.textField?.textColor = .labelColor
+            cell.textField?.textColor = RailStyle.headingColour
         }
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
@@ -850,7 +887,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func plainCell(_ id: NSUserInterfaceItemIdentifier, icon: Bool) -> NSTableCellView {
-        let cell = NSTableCellView()
+        // A heading keeps the font it is given: a sidebar list otherwise sets every cell's text to the system's sidebar size.
+        let cell = icon ? NSTableCellView() : HeadingCellView()
         cell.identifier = id
         let text = NSTextField(labelWithString: "")
         text.lineBreakMode = .byTruncatingTail

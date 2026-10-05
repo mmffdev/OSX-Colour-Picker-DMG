@@ -43,8 +43,24 @@ enum RailStyle {
         }
     }
     static var bodyFont: NSFont { NSFont.systemFont(ofSize: textSize) }
-    /// A bucket's heading: the size and weight rail1's headings are shown in.
-    static var headingFont: NSFont { NSFont.systemFont(ofSize: textSize) }
+    /// A bucket's heading, in every rail: small, semibold and grey, as the Mac's own sidebars head their sections.
+    static var headingFont: NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
+    static var headingColour: NSColor { .secondaryLabelColor }
+}
+
+/// A view that says when the pointer comes onto it and leaves it.
+final class HoverView: NSView {
+    var onHover: ((Bool) -> Void)?
+    private var tracking: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
 }
 
 /// One row of a bucket: an icon, a title, and on the right whatever the kind of row needs.
@@ -166,12 +182,13 @@ final class RailRow: NSView {
     override func mouseDown(with event: NSEvent) {}
 }
 
-/// A bucket: a heading that opens and closes it, then its rows. Open to begin with.
+/// A bucket: a heading that opens and closes it, then its rows. Open to begin with. Its arrow is at
+/// the heading's far right and shows only while the pointer is on the heading.
 final class RailBucket: NSView {
     private let arrow = NSImageView()
     private let heading = NSTextField(labelWithString: "")
     private let rows = NSStackView()
-    private let head = NSView()
+    private let head = HoverView()
     private(set) var isOpen = true
 
     init(_ title: String) {
@@ -179,8 +196,10 @@ final class RailBucket: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         heading.stringValue = title
         heading.font = RailStyle.headingFont
-        heading.textColor = .labelColor
+        heading.textColor = RailStyle.headingColour
         arrow.contentTintColor = .secondaryLabelColor
+        arrow.isHidden = true
+        head.onHover = { [weak self] over in self?.arrow.isHidden = !over }
         rows.orientation = .vertical
         rows.alignment = .leading
         rows.spacing = 0
@@ -192,10 +211,10 @@ final class RailBucket: NSView {
             head.leadingAnchor.constraint(equalTo: leadingAnchor),
             head.trailingAnchor.constraint(equalTo: trailingAnchor),
             head.heightAnchor.constraint(equalToConstant: RailStyle.row),
-            arrow.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: RailStyle.arrow),
+            arrow.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -RailStyle.trailing),
             arrow.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             arrow.widthAnchor.constraint(equalToConstant: 12),
-            heading.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: RailStyle.heading),
+            heading.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: RailStyle.arrow),
             heading.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             rows.topAnchor.constraint(equalTo: head.bottomAnchor),
             rows.leadingAnchor.constraint(equalTo: leadingAnchor),
