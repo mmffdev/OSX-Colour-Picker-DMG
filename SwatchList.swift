@@ -52,7 +52,7 @@ final class SwatchListView: NSView {
         selected = hex.flatMap { want in rows.contains { $0.hex == want } ? want : nil }
         rows.forEach { $0.isSelected = $0.hex == selected }
     }
-    /// A swatch's actions button was pressed: the colour, and the button, so the halo knows its trigger.
+    /// A swatch's colour was pressed: the colour, and its tile, which the halo opens over.
     var onHalo: ((String, NSView) -> Void)?
     /// A blank swatch was pressed: the page's one, or a group's own, which says what kind of colour to start.
     var onAdd: ((NewColourStart?) -> Void)?
@@ -129,10 +129,10 @@ final class SwatchListView: NSView {
             let row = SwatchRow(hex: hex, palette: palette, library: library)
             row.onOpen = { [weak self] tab in self?.onOpen?(hex, tab) }
             row.onHalo = { [weak self] trigger in self?.onHalo?(hex, trigger) }
+            // A press on the colour selects the swatch and opens its actions over it.
             row.onPress = { [weak self] in
                 guard let self = self else { return }
-                self.select(self.selected == hex ? nil : hex)
-                self.onSelect?()
+                if self.selected != hex { self.select(hex); self.onSelect?() }
             }
             return (hex, row)
         })
@@ -209,9 +209,8 @@ final class SwatchRow: NSView {
     private var shown: RowPanels?
     private var shownAmong: [String] = []
 
-    /// The actions button was pressed; hands over the button so the halo knows its trigger.
+    /// The colour was pressed; hands over the tile, which the halo opens over.
     var onHalo: ((NSView) -> Void)?
-    private let halo = HaloTriggerView()
     private let tile = PressView()
     /// The swatch's colour was pressed: it becomes the selected swatch.
     var onPress: (() -> Void)?
@@ -232,21 +231,9 @@ final class SwatchRow: NSView {
         tile.layer?.cornerRadius = 10
         tile.layer?.cornerCurve = .continuous
         tile.layer?.borderWidth = 1
-        tile.toolTip = "Click To Select This Swatch"
-        // A press handled by the tile itself, not a gesture: a gesture would take the press meant for the actions button on it.
-        tile.onPress = { [weak self] in self?.onPress?() }
+        tile.toolTip = "Click For This Swatch's Actions"
+        tile.onPress = { [weak self] in if let self = self { self.onPress?(); self.onHalo?(self.tile) } }
         // The same actions button a grid card has, in the same corner.
-        halo.toolTip = "Actions"
-        halo.ink = colorFromHex(readableText(on: displayHex(hex))) ?? .white
-        halo.onPress = { [weak self] in if let self = self { self.onHalo?(self.halo) } }
-        halo.translatesAutoresizingMaskIntoConstraints = false
-        tile.addSubview(halo)
-        NSLayoutConstraint.activate([
-            halo.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -9),
-            halo.topAnchor.constraint(equalTo: tile.topAnchor, constant: 9),
-            halo.widthAnchor.constraint(equalToConstant: 24),
-            halo.heightAnchor.constraint(equalToConstant: 24),
-        ])
 
         name.font = NSFont.systemFont(ofSize: 15, weight: .semibold)   // as on a grid card
         name.lineBreakMode = .byTruncatingTail

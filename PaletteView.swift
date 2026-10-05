@@ -229,18 +229,19 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
     }
 
     var onCopyRow: ((ColourFormat) -> Void)?
-    /// The halo button was pressed; hands over the button so the halo knows its trigger.
+    /// The colour was pressed; hands over the colour's own block, which the halo opens over.
     var onHalo: ((NSView) -> Void)?
     weak var library: LibraryController?
     private(set) var hex = ""
-    /// As a press on the halo button.
-    func pressHalo() { onHalo?(halo) }
+    /// As a press on the colour.
+    func pressHalo() { onHalo?(chip) }
+    /// Whether a click landed on the colour itself, not on the name or the values under it.
+    func isOverChip(_ event: NSEvent) -> Bool { chip.bounds.contains(chip.convert(event.locationInWindow, from: nil)) }
     private let chip = NSView()
     private let name = NSTextField(labelWithString: "")
     private let code = NSTextField(labelWithString: "")
     private let rows = NSStackView()
     private let contrast = ContrastReadout()
-    private let halo = HaloTriggerView()
     private let below = NSStackView()
 
     override func loadView() {
@@ -259,12 +260,6 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         rows.spacing = 0
         rows.alignment = .leading
 
-        halo.toolTip = "Actions"
-        halo.onPress = { [weak self] in
-            guard let self = self else { return }
-            self.onHalo?(self.halo)
-        }
-
         // Under the colour, top to bottom: the name, the values, the contrast. Whatever is switched off leaves no gap.
         below.setViews([name, rows, contrast], in: .top)
         below.orientation = .vertical
@@ -276,19 +271,13 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
             s.translatesAutoresizingMaskIntoConstraints = false
             v.addSubview(s)
         }
-        for s in [code, halo] as [NSView] {
-            s.translatesAutoresizingMaskIntoConstraints = false
-            chip.addSubview(s)
-        }
+        code.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(code)
         NSLayoutConstraint.activate([
             chip.topAnchor.constraint(equalTo: v.topAnchor),
             chip.leadingAnchor.constraint(equalTo: v.leadingAnchor),
             chip.trailingAnchor.constraint(equalTo: v.trailingAnchor),
             chip.heightAnchor.constraint(equalToConstant: ColourCard.chipHeight),
-            halo.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -9), // its ring sits 3 points inside its frame
-            halo.topAnchor.constraint(equalTo: chip.topAnchor, constant: 9),
-            halo.widthAnchor.constraint(equalToConstant: 24),
-            halo.heightAnchor.constraint(equalToConstant: 24),
             code.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 12),
             code.trailingAnchor.constraint(lessThanOrEqualTo: chip.trailingAnchor, constant: -12),
             code.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -10),
@@ -353,12 +342,11 @@ final class ColourCard: NSCollectionViewItem, NSTextFieldDelegate {
         name.stringValue = shownName
         name.textColor = .labelColor
         name.isHidden = !Prefs.showNames
-        halo.ink = ink
         // A colour that is not a plain sRGB value says what it is, on the colour: its P3 values, its build, its Lab.
         code.stringValue = ColourKeys.isKey(hex) ? ColourKeys.label(hex) : ""
         code.textColor = ink.withAlphaComponent(0.8)
         let tags = library?.library.colours.first { $0.hex == hex }?.tags ?? []
-        view.toolTip = "Click to copy \(Prefs.copyText(hex))" + (tags.isEmpty ? "" : "\nTags: " + tags.joined(separator: ", "))
+        chip.toolTip = "Click For This Swatch's Actions" + (tags.isEmpty ? "" : "\nTags: " + tags.joined(separator: ", "))
 
         rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for format in Prefs.cardRows {
@@ -567,7 +555,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         buildRail()
         list.onSelect = { [weak self] in self?.refreshRail() }
         list.onAdd = { [weak self] start in self?.library.startColour(start) }
-        // A press on a swatch selects it; it no longer copies. The copy marks, the actions button and Copy still do.
+        // A plain press on a swatch's colour selects it and opens its actions over it: the whole colour is the
+        // halo's trigger. The copy marks beside the values still copy. A press that ends off the colour, as a drag does, opens nothing.
+        grid.onClick = { [weak self] ip in
+            guard let self = self, let card = self.grid.item(at: ip) as? ColourCard, let event = NSApp.currentEvent, card.isOverChip(event) else { return }
+            card.pressHalo()
+        }
         grid.onDelete = { [weak self] in self?.removeSelected() }
         grid.onCopy = { [weak self] in self?.copySelected() }
         grid.onFavourite = { [weak self] in self?.starTapped() }
@@ -1045,11 +1038,6 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         halo.caption = Prefs.showNames ? library.library.name(of: hex, in: paletteID) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags)
         halo.open(over: trigger)
-    }
-
-    private func clicked(_ ip: IndexPath) {
-        guard slots.indices.contains(ip.item), let hex = slots[ip.item].key else { return }
-        library.copy(hex)
     }
 
     private func selected() -> [String] {
