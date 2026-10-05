@@ -42,8 +42,12 @@ final class FormatRow: NSView {
     func configure(_ format: ColourFormat, hex: String, ink: NSColor) {
         self.ink = ink
         label.stringValue = format.label
-        label.textColor = ink.withAlphaComponent(0.62)
-        icon.contentTintColor = ink.withAlphaComponent(0.7)
+        // The ink itself, faded by the view: a colour with its alpha changed is fixed as it stood for the
+        // theme of that moment, and the labels then stayed white when the background was turned light.
+        label.textColor = ink
+        label.alphaValue = 0.62
+        icon.contentTintColor = ink
+        icon.alphaValue = 0.7
         toolTip = "Copy \(format.label)  \(format.text(hex, lowercase: Prefs.lowercaseHex))" + (format == .cmyk ? "\nThe build for \(PrintCondition.name())" : "")
         setAccessibilityLabel(toolTip)
 

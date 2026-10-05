@@ -633,6 +633,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             if firstRun { self.applyStartWidths() }
             self.frameSettled = true
             // For a trial run: the page alone, in the window as it stands.
+            // For a trial run: the theme changed while the window is up, as the footer's switch does.
+            if let to = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_THEME_AFTER"].flatMap(ThemeMode.init(rawValue:)) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { Theme.choose(to) }
+            }
             if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_PAGE_ALONE"] != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.showPageAlone(fullScreen: false) }
             }
