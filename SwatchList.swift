@@ -8,9 +8,10 @@ import AppKit
 // the project's file too for a project's. Any palette can be seen this way.
 
 enum SwatchListStyle {
-    static let rowHeight: CGFloat = 132
-    static let rowGap: CGFloat = 12
-    static let tileWidth: CGFloat = 132
+    /// A row is one line: the colour, its name, and its values at the right, with a hairline under it.
+    static let rowHeight: CGFloat = 74
+    static let rowGap: CGFloat = 0
+    static let tileWidth: CGFloat = 44
     static let infoWidth: CGFloat = 228   // a grid card's narrowest, so the same rows fit
     static let gap: CGFloat = 16
     /// The sheet: its width, its inset from the page's top and bottom, and the padding inside it.
@@ -59,18 +60,24 @@ final class SwatchListView: NSView {
     private var addRows: [NSView] = []
     private var shownOffer = false
 
-    /// A row holding one blank swatch, the size of the swatch tiles above it.
+    /// A row holding one blank swatch, the size of the swatch tiles above it, and what it does in words.
     private func addRow(_ start: NewColourStart?) -> NSView {
-        let row = NSView(), tile = AddSwatchTile(radius: 10)
+        let row = NSView(), tile = AddSwatchTile(radius: 5), title = caption("Add Colour", size: TextSize.body), rule = hairline()
         tile.onPress = { [weak self] in self?.onAdd?(start) }
-        for v in [row, tile] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        row.addSubview(tile)
+        for v in [tile, title, rule] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; row.addSubview(v) }
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let s = SwatchListStyle.self
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: SwatchListStyle.rowHeight),
+            row.heightAnchor.constraint(equalToConstant: s.rowHeight),
             tile.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            tile.topAnchor.constraint(equalTo: row.topAnchor),
-            tile.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-            tile.widthAnchor.constraint(equalToConstant: SwatchListStyle.tileWidth),
+            tile.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            tile.widthAnchor.constraint(equalToConstant: s.tileWidth),
+            tile.heightAnchor.constraint(equalToConstant: s.tileWidth),
+            title.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 12),
+            title.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            rule.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            rule.bottomAnchor.constraint(equalTo: row.bottomAnchor),
         ])
         return row
     }
@@ -203,6 +210,10 @@ final class SwatchRow: NSView {
     private let histogramSlot = NSStackView()
     private let notesSlot = NSStackView()
     private var slotsWidth: NSLayoutConstraint!
+    /// The slots, under the row's one line when any is switched on; and the room kept under them.
+    private let body = NSStackView()
+    private var bodyBottom: NSLayoutConstraint!
+    private var hasNote = false
     static let slotGap: CGFloat = 28
     /// History is a narrow column, like the rail it copies; the other slots share what is left.
     static let historyWidth: CGFloat = 300
@@ -228,25 +239,22 @@ final class SwatchRow: NSView {
 
         tile.wantsLayer = true
         tile.layer?.backgroundColor = colorFromHex(hex)?.cgColor
-        tile.layer?.cornerRadius = 10
+        wantsLayer = true
+        tile.layer?.cornerRadius = 5
         tile.layer?.cornerCurve = .continuous
         tile.layer?.borderWidth = 1
         tile.toolTip = "Click For This Swatch's Actions"
         tile.onPress = { [weak self] in if let self = self { self.onPress?(); self.onHalo?(self.tile) } }
         // The same actions button a grid card has, in the same corner.
 
-        name.font = NSFont.systemFont(ofSize: 15, weight: .semibold)   // as on a grid card
+        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: .medium)
         name.lineBreakMode = .byTruncatingTail
-        values.orientation = .vertical
-        values.alignment = .leading
-        values.spacing = 0
-        // The values are a column like the others, under a heading of their own.
-        let info = NSStackView(views: [heading("Meta"), name, values])
-        info.orientation = .vertical
-        info.alignment = .leading
-        info.spacing = 4
-        info.setCustomSpacing(6, after: info.views[0])
-        values.widthAnchor.constraint(equalTo: info.widthAnchor).isActive = true
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The values ticked under Labels, side by side at the row's right, each copied by a press.
+        values.orientation = .horizontal
+        values.alignment = .centerY
+        values.spacing = 26
+        values.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         note.font = NSFont.systemFont(ofSize: TextSize.body)
         note.maximumNumberOfLines = 5
@@ -258,7 +266,7 @@ final class SwatchRow: NSView {
 
         // The name is a way in too, for when the notes are switched off.
         name.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(editTapped)))
-        name.toolTip = "Click For This Colour's Notes, Channels And History"
+        name.toolTip = "Click To Write Notes On This Colour, And See Its Channels And History"
 
         histogramSlot.setViews([heading("Histogram"), histogramPanel], in: .top)
         notesSlot.setViews([heading("Notes"), note], in: .top)
@@ -272,9 +280,9 @@ final class SwatchRow: NSView {
         historyPanel.spacing = 3
         histogramPanel.widthAnchor.constraint(equalTo: histogramSlot.widthAnchor).isActive = true
         note.widthAnchor.constraint(equalTo: notesSlot.widthAnchor).isActive = true
-        // Beside the values: the four slots in a row, sharing the width between those that are on.
-        // The row grows to the tallest of them and the swatches below move down; the tile keeps its size.
-        let body = NSStackView(views: [histogramSlot, channelsPanel, notesSlot, historyPanel])
+        // Under the line, from the name's left edge: the four slots in a row, sharing the width between
+        // those that are on. The row grows to the tallest of them and the swatches below move down.
+        body.setViews([histogramSlot, channelsPanel, notesSlot, historyPanel], in: .leading)
         body.orientation = .horizontal
         body.alignment = .top
         body.distribution = .fill
@@ -288,34 +296,41 @@ final class SwatchRow: NSView {
         // As wide as its slots want, up to the row's edge.
         slotsWidth = body.widthAnchor.constraint(equalToConstant: SwatchRow.panelWidth)
         slotsWidth.priority = .defaultHigh
-        for v in [tile, info, body] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        let s = SwatchListStyle.self
+        let rule = hairline()
+        for v in [tile, name, values, body, rule] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        let s = SwatchListStyle.self, middle = s.rowHeight / 2
         let least = heightAnchor.constraint(equalToConstant: s.rowHeight)
         least.priority = .defaultLow
+        bodyBottom = body.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         NSLayoutConstraint.activate([
             least,
             heightAnchor.constraint(greaterThanOrEqualToConstant: s.rowHeight),
             tile.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tile.topAnchor.constraint(equalTo: topAnchor),
-            tile.heightAnchor.constraint(equalToConstant: s.rowHeight),
+            tile.centerYAnchor.constraint(equalTo: topAnchor, constant: middle),
+            tile.heightAnchor.constraint(equalToConstant: s.tileWidth),
             tile.widthAnchor.constraint(equalToConstant: s.tileWidth),
-            info.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: s.gap),
-            info.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            info.widthAnchor.constraint(equalToConstant: s.infoWidth),
-            info.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),   // a long list of values makes the row taller
-            body.leadingAnchor.constraint(equalTo: info.trailingAnchor, constant: s.gap),
+            name.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 12),
+            name.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
+            values.trailingAnchor.constraint(equalTo: trailingAnchor),
+            values.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
+            values.leadingAnchor.constraint(greaterThanOrEqualTo: name.trailingAnchor, constant: 16),
+            body.leadingAnchor.constraint(equalTo: name.leadingAnchor),
             body.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             slotsWidth,
-            body.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            body.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            body.topAnchor.constraint(equalTo: topAnchor, constant: s.rowHeight - 8),
+            bodyBottom,
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func updateLayer() {
         super.updateLayer()
-        tile.layer?.borderWidth = isSelected ? 3 : 1
-        tile.layer?.borderColor = (isSelected ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.12)).cgColor
+        // The selected swatch is its whole row, tinted; the colour keeps a fine edge so a pale one shows on a pale page.
+        layer?.backgroundColor = isSelected ? NSColor.labelColor.withAlphaComponent(0.06).cgColor : NSColor.clear.cgColor
+        tile.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
     }
     override var wantsUpdateLayer: Bool { true }
 
@@ -323,28 +338,55 @@ final class SwatchRow: NSView {
         guard let library = library else { return }
         name.stringValue = library.library.name(of: hex, in: palette)
         values.views.forEach { $0.removeFromSuperview() }
-        // The very rows a grid card has: each value ticked under Labels, in columns, with its copy mark;
-        // then the contrast when WCAG is on.
+        // Each value ticked under Labels, in the order it is ticked; then the contrast when it is on.
         name.isHidden = !Prefs.showNames
-        for format in Prefs.cardRows {
-            let row = FormatRow(frame: .zero)
-            row.configure(format, hex: hex, ink: .labelColor)
-            row.onCopy = { [weak self] in if let self = self { self.library?.copy(self.hex, as: format) } }
-            row.translatesAutoresizingMaskIntoConstraints = false
-            values.addArrangedSubview(row)
+        func mono(_ text: String) -> NSTextField {
+            let l = NSTextField(labelWithString: text)
+            l.font = NSFont.monospacedSystemFont(ofSize: TextSize.body, weight: .regular)
+            return l
+        }
+        func item(_ views: [NSView], tip: String, press: (() -> Void)?) -> NSView {
+            let inner = NSStackView(views: views)
+            inner.orientation = .horizontal
+            inner.alignment = .centerY
+            inner.spacing = 7
+            let box = PressView()
+            box.onPress = press
+            box.toolTip = tip
+            for v in [box, inner] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+            box.addSubview(inner)
             NSLayoutConstraint.activate([
-                row.heightAnchor.constraint(equalToConstant: ColourCard.rowHeight),
-                row.widthAnchor.constraint(equalTo: values.widthAnchor),
+                inner.topAnchor.constraint(equalTo: box.topAnchor), inner.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+                inner.leadingAnchor.constraint(equalTo: box.leadingAnchor), inner.trailingAnchor.constraint(equalTo: box.trailingAnchor),
             ])
+            return box
+        }
+        for format in Prefs.cardRows {
+            let text = format.text(hex, lowercase: Prefs.lowercaseHex)
+            let shown: [NSView] = format == .hex ? [mono(text)] : [caption(format.label), mono(format.fields(hex, lowercase: Prefs.lowercaseHex).map { String(repeating: " ", count: max(0, 3 - $0.count)) + $0 }.joined(separator: " "))]
+            values.addArrangedSubview(item(shown, tip: "Click To Copy \(format.label)  \(text)") { [weak self] in
+                if let self = self { self.library?.copy(self.hex, as: format) }
+            })
         }
         if Prefs.showContrast {
-            let contrast = ContrastReadout()
-            contrast.show(hex)
-            if let last = values.views.last { values.setCustomSpacing(8, after: last) }
-            values.addArrangedSubview(contrast)
+            for row in Prefs.contrast(for: hex).rows {
+                // Fixed widths, so the figures and their grades stand in columns down the page.
+                let tag = GradeTag(), figure = mono(row.value), slot = NSView()
+                tag.show(row.grade, row.verdict)
+                figure.alignment = .right
+                figure.widthAnchor.constraint(equalToConstant: 44).isActive = true
+                tag.translatesAutoresizingMaskIntoConstraints = false
+                slot.addSubview(tag)
+                NSLayoutConstraint.activate([
+                    slot.widthAnchor.constraint(equalToConstant: 66), slot.heightAnchor.constraint(equalToConstant: 18),
+                    tag.leadingAnchor.constraint(equalTo: slot.leadingAnchor), tag.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
+                ])
+                values.addArrangedSubview(item([caption(row.name), figure, slot], tip: "\(row.name) Text On This Colour", press: nil))
+            }
         }
         values.isHidden = values.views.isEmpty
         let text = library.library.note(of: hex, in: palette)
+        hasNote = text != nil
         note.stringValue = text ?? (locked ? "No Notes." : "No Notes Yet. Click To Write Some.")
         note.textColor = text == nil ? .tertiaryLabelColor : .labelColor
         note.toolTip = locked ? "Click To Read This Colour's Notes, Channels And History" : "Click To Write Notes On This Colour, And See Its Channels And History"
@@ -358,8 +400,12 @@ final class SwatchRow: NSView {
         shown = panels
         shownAmong = population
         histogramSlot.isHidden = !panels.histogram
-        notesSlot.isHidden = !panels.notes
-        let wide = CGFloat([panels.histogram, panels.channels, panels.notes].filter { $0 }.count), on = wide + (panels.history ? 1 : 0)
+        // A colour with no notes shows no empty Notes slot: its name is the way in to write some.
+        let notes = panels.notes && hasNote
+        notesSlot.isHidden = !notes
+        let wide = CGFloat([panels.histogram, panels.channels, notes].filter { $0 }.count), on = wide + (panels.history ? 1 : 0)
+        body.isHidden = on == 0
+        bodyBottom.constant = on == 0 ? 0 : -18
         slotsWidth.constant = wide * SwatchRow.panelWidth + (panels.history ? SwatchRow.historyWidth : 0) + max(0, on - 1) * SwatchRow.slotGap
         if panels.histogram { histogramPanel.show(hex, among: population, type: panels.type, split: panels.split) }
         channelsPanel.isHidden = !panels.channels
