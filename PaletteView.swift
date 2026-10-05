@@ -405,10 +405,6 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var purposeRows: [RailRow] = []
     /// What each purpose makes of the palette: every purpose on Overview, the one on show on its own tab.
     private let verdicts = NSStackView()
-    private let paletteHeading = sectionHeading("Palette")
-    /// Under the options bar: what kind of palette it is, with the mark of the purpose it is turned to in front.
-    private let purposeMark = NSImageView()
-    private let paletteTitle = NSStackView()
     /// Whether the palette's project is locked; nil for a palette in no project.
     private var locked: Bool?
     private let swatchesHeading = sectionHeading("Swatches")
@@ -601,15 +597,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         verdicts.alignment = .leading
         verdicts.spacing = 4
         // The palette's name is as large as the page's title, with its project's padlock in front of it.
-        // The palette's name is the page's title. Under the options: what kind of palette it is, with the purpose's mark.
-        paletteHeading.font = PageStyle.titleFont
-        purposeMark.contentTintColor = .labelColor
-        purposeMark.setContentHuggingPriority(.required, for: .horizontal)
-        paletteTitle.setViews([purposeMark, paletteHeading], in: .leading)
-        paletteTitle.orientation = .horizontal
-        paletteTitle.alignment = .centerY
-        paletteTitle.spacing = 10
-        for v in [header, optionsBar, paletteTitle, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
+        for v in [header, optionsBar, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -626,10 +614,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             optionsBar.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
             optionsBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side - 8),
             optionsBar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -side),
-            paletteTitle.topAnchor.constraint(equalTo: optionsBar.bottomAnchor, constant: 14),
-            paletteTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
-            paletteTitle.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
-            spectrum.topAnchor.constraint(equalTo: paletteTitle.bottomAnchor, constant: 30),
+            spectrum.topAnchor.constraint(equalTo: optionsBar.bottomAnchor, constant: 18),
             spectrum.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             spectrum.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.heightAnchor.constraint(equalToConstant: 50),
@@ -684,9 +669,12 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         Prefs.purposeCardRows = purpose.map { p in
             s.config(for: p)?.labels.map { saved in ColourFormat.cardRows.filter { saved.contains($0.rawValue) } } ?? p.starterLabels
         }
-        paletteHeading.stringValue = purpose.map { "Palette For \($0.title)" } ?? "Palette"
-        purposeMark.isHidden = purpose == nil
-        if let purpose = purpose { purposeMark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
+        // The mark of the purpose the page is turned to stands in front of the palette's name.
+        header.mark.isHidden = purpose == nil
+        if let purpose = purpose {
+            header.mark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold)
+            header.mark.toolTip = "Turned To \(purpose.title)"
+        }
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
