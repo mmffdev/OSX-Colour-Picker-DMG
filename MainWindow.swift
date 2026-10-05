@@ -36,12 +36,16 @@ final class ContentViewController: NSViewController {
     /// The footer's switch between light and dark.
     private lazy var themeSwitch = symbolButton("moon", tooltip: "", target: self, action: #selector(themeTapped))
 
+    /// Beside the switch: the background that is on, as its sRGB hex and its red, green and blue.
+    private let themeValue = caption("")
+
     @objc private func themeTapped() { Theme.toggle() }
     @objc private func showThemeSwitch() {
         let dark = Theme.isDark
         themeSwitch.image = symbol(dark ? "sun.max" : "moon", dark ? "Light" : "Dark", size: 12)
         themeSwitch.contentTintColor = .secondaryLabelColor
-        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Turns The Background Charcoal, Then Black, Then White, Then Back; Shift-L Shows The Page Alone, Full Screen."
+        themeValue.stringValue = Theme.backgroundNumbers
+        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Turns The Background Charcoal, Then Black, Then White, Then Off-White, Then Back; Shift-L Shows The Page Alone, Full Screen."
     }
     static var releaseLine: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -95,7 +99,11 @@ final class ContentViewController: NSViewController {
         release.setContentCompressionResistancePriority(.required, for: .horizontal)
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.lineBreakMode = .byTruncatingTail
-        for v in [line, status, themeSwitch, release] as [NSView] {
+        themeValue.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
+        themeValue.textColor = .tertiaryLabelColor
+        themeValue.toolTip = "The Background Now Showing, In sRGB: Its Hex, Then Red, Green And Blue"
+        themeValue.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for v in [line, status, themeSwitch, themeValue, release] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             footer.addSubview(v)
         }
@@ -107,7 +115,9 @@ final class ContentViewController: NSViewController {
             line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             status.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: PageStyle.side),
             status.trailingAnchor.constraint(lessThanOrEqualTo: themeSwitch.leadingAnchor, constant: -16),
-            themeSwitch.trailingAnchor.constraint(equalTo: release.leadingAnchor, constant: -12),
+            themeSwitch.trailingAnchor.constraint(equalTo: themeValue.leadingAnchor, constant: -6),
+            themeValue.trailingAnchor.constraint(equalTo: release.leadingAnchor, constant: -16),
+            themeValue.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             themeSwitch.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             release.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -PageStyle.side),
             release.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
@@ -670,7 +680,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     @objc private func projectFilesChanged() { sidebar.reload() }
     @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
-    /// L: charcoal, then black, then white, then the theme again.
+    /// L: charcoal, then black, then white, then off-white, then the theme again.
     @objc func stepBackground() { Theme.cycle() }
 
     // MARK: The page alone, full screen

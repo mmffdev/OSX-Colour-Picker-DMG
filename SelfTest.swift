@@ -1199,8 +1199,9 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
-    check(Theme.next(after: nil) == 0 && Theme.next(after: 0) == 1 && Theme.next(after: 1) == 2 && Theme.next(after: 2) == nil
-          && Theme.lights == ["#242424", "#000000", "#FFFFFF"], "L turns the background charcoal, then black, then white, then back to the theme")
+    check(Theme.next(after: nil) == 0 && Theme.next(after: 0) == 1 && Theme.next(after: 1) == 2 && Theme.next(after: 2) == 3 && Theme.next(after: 3) == nil
+          && Theme.lights == ["#242424", "#000000", "#FFFFFF", "#F2F2F2"] && !Theme.takesLightText(on: Theme.light),
+          "L turns the background charcoal, then black, then white, then off-white with dark text, then back to the theme")
     check(Theme.light == "#F2F2F2" && colorFromHex(Theme.light) != nil, "light is a neutral off-white, not pure white")
     check(Theme.takesLightText(on: "#000000") && !Theme.takesLightText(on: "#FFFFFF") && !Theme.takesLightText(on: "#808080")
           && Theme.takesLightText(on: "#404040") && Theme.takesLightText(on: "#7A0019") && !Theme.takesLightText(on: "#F5C542"),
