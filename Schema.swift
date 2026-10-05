@@ -383,7 +383,9 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     private let collectionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let stackPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let stackNote = NSTextField(wrappingLabelWithString: "")
+    /// Over each column, a few lines on where the user is and what can be done there.
+    private let leftHelp = NSTextField(wrappingLabelWithString: "")
+    private let rightHelp = NSTextField(wrappingLabelWithString: "")
     private let resetButton = NSButton(title: "Use Default", target: nil, action: nil)
     private let newName = NSTextField()
     private let createButton = NSButton(title: "Create", target: nil, action: nil)
@@ -398,7 +400,6 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let namesScroll = FittedScrollView()
     private let customName = NSTextField()
     private let about = NSTextField()
-    private let hint = NSTextField(wrappingLabelWithString: "")
     private var customRow: NSGridRow!, customHead: NSGridRow!, aboutRow: NSGridRow!, aboutHead: NSGridRow!
     private var shownList: [String] = []
     private let detail = NSView()
@@ -435,8 +436,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         collectionPopup.action = #selector(collectionChosen)
         stackPopup.target = self
         stackPopup.action = #selector(stackChosen)
-        stackNote.textColor = .secondaryLabelColor
-        stackNote.preferredMaxLayoutWidth = 400
+        for help in [leftHelp, rightHelp] {
+            help.textColor = .secondaryLabelColor
+            help.preferredMaxLayoutWidth = 420
+        }
         for (b, action) in [(resetButton, #selector(resetTapped)), (createButton, #selector(createTapped)), (cancelCreate, #selector(cancelCreateTapped))] {
             b.bezelStyle = .rounded
             b.target = self
@@ -464,13 +467,15 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.bezelStyle = .rounded
         addNext.target = self
         addNext.action = #selector(addNextTapped)
-        let top = NSStackView(views: [heads, stackNote])
+        // Each column is a title, its words, then its controls, on one line across both.
+        let top = NSStackView(views: [mapTitle, leftHelp, heads])
         top.orientation = .vertical
         top.alignment = .leading
-        top.spacing = 16   // room for the words to breathe under the controls
+        top.spacing = 18
+        top.setCustomSpacing(10, after: mapTitle)
         let left = NSView(), right = NSView(), divider = NSBox()
         divider.boxType = .separator
-        for v in [top, mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
+        for v in [top, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
 
         // Right: the selected row.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -501,13 +506,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         about.usesSingleLineMode = false
         about.cell?.wraps = true
         about.cell?.isScrollable = false
-        hint.textColor = .secondaryLabelColor
-        hint.preferredMaxLayoutWidth = 250
-        let grid = NSGridView(views: [[caption("Custom Name")], [customName], [caption("Description")], [about], [hint]])
+        let grid = NSGridView(views: [[caption("Custom Name")], [customName], [caption("Description")], [about]])
         grid.rowSpacing = 6
         grid.column(at: 0).width = 250
         grid.row(at: 2).topPadding = 10
-        grid.row(at: 4).topPadding = 18
         customHead = grid.row(at: 0)
         customRow = grid.row(at: 1)
         aboutHead = grid.row(at: 2)
@@ -516,7 +518,11 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         removal.orientation = .vertical
         removal.alignment = .leading
         removal.spacing = 16
-        for v in [levelTitle, detail, removal] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
+        let topRight = NSStackView(views: [levelTitle, rightHelp])
+        topRight.orientation = .vertical
+        topRight.alignment = .leading
+        topRight.spacing = 10
+        for v in [topRight, detail, removal] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
 
         let v = NSView()
         for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
@@ -526,7 +532,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             left.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
             left.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -22),
             left.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 36),
-            left.widthAnchor.constraint(equalToConstant: 420),
+            left.widthAnchor.constraint(equalToConstant: 440),
             divider.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 24),
             divider.topAnchor.constraint(equalTo: left.topAnchor),
             divider.bottomAnchor.constraint(equalTo: left.bottomAnchor),
@@ -542,22 +548,21 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             collectionPopup.widthAnchor.constraint(equalToConstant: 220),
             stackPopup.widthAnchor.constraint(equalToConstant: 220),
             newName.widthAnchor.constraint(equalToConstant: 220),
-            mapTitle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 26),
-            mapTitle.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
-            map.topAnchor.constraint(equalTo: mapTitle.bottomAnchor, constant: 10),
+            map.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 22),
             map.leadingAnchor.constraint(equalTo: left.leadingAnchor),
             map.trailingAnchor.constraint(equalTo: left.trailingAnchor),
             // Under the last group on the map, at its right.
             addNext.topAnchor.constraint(equalTo: map.bottomAnchor, constant: 12),
             addNext.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -8),
 
-            levelTitle.topAnchor.constraint(equalTo: right.topAnchor),
-            levelTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
-            detail.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
+            topRight.topAnchor.constraint(equalTo: right.topAnchor),
+            topRight.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            topRight.trailingAnchor.constraint(lessThanOrEqualTo: right.trailingAnchor),
+            detail.topAnchor.constraint(equalTo: topRight.bottomAnchor, constant: 22),
             detail.leadingAnchor.constraint(equalTo: right.leadingAnchor),
             detail.trailingAnchor.constraint(equalTo: right.trailingAnchor),
             detail.bottomAnchor.constraint(equalTo: right.bottomAnchor),
-            removal.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
+            removal.topAnchor.constraint(equalTo: topRight.bottomAnchor, constant: 22),
             removal.leadingAnchor.constraint(equalTo: right.leadingAnchor),
             removal.trailingAnchor.constraint(lessThanOrEqualTo: right.trailingAnchor),
             // The names: a column the height of the pane, scrolling inside itself.
@@ -694,8 +699,19 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         let own = stack.map { SchemaTrial.hasOwn($0) } ?? false
         resetButton.isHidden = !own
         let following = inside.filter { !SchemaTrial.hasOwn($0.id) }.count
-        stackNote.stringValue = stack == nil ? "What every member of this collection follows, unless it has a stack of its own. \(following) of \(inside.count) follow it."
-            : own ? "This member has a stack of its own." : "This member follows Default. Change anything here and it gets a stack of its own."
+        let heading = here.name.isEmpty ? "this collection" : here.name
+        let others = all.filter { $0.id != here.id }.map { $0.name }
+        var words = "You are in the \(heading) collection"
+        if let project = stack.flatMap({ lib.project($0) }) {
+            words += ", on \(project.name)'s own stack. " + (own ? "It has a stack of its own, and follows nothing: what is built below is its alone. Use Default puts it back with the others."
+                                                               : "It follows Default. Change anything below and it takes a stack of its own, leaving the others as they are.")
+        } else {
+            words += ". Below is its Default stack: the structure every member of \(heading) follows unless it has a stack of its own. \(following) of \(inside.count) follow it."
+        }
+        words += "\n\nEach collection has a tree of its own, so one can be laid out for client work and another, such as In House, for your own. "
+        words += others.isEmpty ? "To make another, choose New Collection under Collection." : "You also have \(others.joined(separator: ", ")). Choose one under Collection, or New Collection to make another."
+        words += " To shape one member differently from the rest, choose it under Stack."
+        leftHelp.stringValue = words
         makingRows.forEach { $0.isHidden = making == .nothing }
         newName.placeholderString = making == .collection ? "Name The New Collection" : "Name The New Member"
 
@@ -747,6 +763,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         // The right pane: what to do with a group's contents, or the row's own details.
         if case .node(let node, let level) = what, removing == node.id {
             levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
+            rightHelp.stringValue = "You are removing a group from \(heading) that holds things. Say what becomes of them first."
             removal.isHidden = false
             detail.isHidden = true
             showRemoval(node, level: level)
@@ -757,24 +774,28 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
         // What the row is called now, the names on offer for it, what is said about it, and a word of help.
         var name = "", offered: [String] = [], said: String? = nil, help = "", fixed = false
+        let memberWord = member.lowercased(), members = SchemaTrial.plural(member).lowercased()
         switch what {
         case .collection:
             levelTitle.stringValue = SchemaTrial.title(forLevel: 0)
             name = here.name; offered = SchemaTrial.collectionNames; said = here.about
-            help = "A collection is a heading in the sidebar, with its own members and its own default stack."
+            help = "You are editing the \(heading) collection itself: its name, which heads it in the sidebar, and a line on what it is for. "
+                + (here.folderName == nil ? "Its \(members) sit straight under the heading. The arrow on its row adds a level between, to group them."
+                                          : "Its \(members) are grouped under a level between, named on the next row.")
         case .tier:
             levelTitle.stringValue = SchemaTrial.title(forLevel: 1)
             name = here.folderName ?? ""; offered = SchemaTrial.folderNames
-            help = "What the members of this collection are grouped under. Each one is made in the sidebar, with the plus beside the collection's heading, and holds its own members."
+            help = "You are editing the level that groups the \(members) of \(heading). Name what one of them is. Each one is made in the sidebar, with the plus beside \(heading), and the \(members) are made inside it with the plus on its own row."
         case .member(let project):
             levelTitle.stringValue = SchemaTrial.title(forLevel: 1 + offset)
             name = lib.project(project)?.name ?? ""; fixed = true; said = root.about
-            help = "This is the member itself. Type over its name to rename it, and press Return. What a member is called is set on the Default stack."
+            help = "You are editing \(name), one \(memberWord) in \(heading). Type over its name and press Return to rename it. The groups below are its own, and the sidebar shows them under it."
         case .node(let node, let level):
             levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
             name = node.name; offered = SchemaTrial.names(forLevel: level); said = node.about
-            help = level == 1 ? "What a member of this collection is called. Each one has its own files."
-                : "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, holding nothing."
+            help = level == 1 ? "You are editing what a \(memberWord) of \(heading) is called. Every \(memberWord) is a project of the app's, with files of its own; the sidebar makes one with the plus."
+                : level == 2 ? "You are editing a group inside each \(memberWord) of \(heading): the sidebar shows it under every one. Information, Palettes, Typography and Tags hold what they always have, whatever they are called. Any other group is a label for now, holding nothing."
+                : "You are editing a group \(level - 1) levels inside each \(memberWord) of \(heading). Groups this deep are labels for now: they show in the sidebar and hold nothing yet."
         }
         // A name of the user's own shows the box to type it in; a name from the list hides it. A member's name is always typed.
         let custom = fixed || !offered.contains(name)
@@ -803,7 +824,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         aboutHead.isHidden = said == nil
         if customName.currentEditor() == nil { customName.stringValue = custom ? name : "" }
         if about.currentEditor() == nil { about.stringValue = said ?? "" }
-        hint.stringValue = help
+        rightHelp.stringValue = help
         if focusName, custom { view.window?.makeFirstResponder(customName) }
     }
 
