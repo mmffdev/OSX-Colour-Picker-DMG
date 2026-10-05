@@ -401,6 +401,77 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var projectNodes: [UUID: SidebarNode] = [:]
     private var roots: [SidebarNode] = []
     private var selection: Selection = .all
+
+    // rail1 closed: a narrow strip of icons. The pages open from it; a bucket's icon opens the rail on that bucket.
+    static let compactWidth: CGFloat = 56
+    /// Narrower than this, the rail is the strip of icons; from here up, the tree.
+    static let compactBelow: CGFloat = 140
+    /// Asks the window to open the rail to its full width.
+    var onWantsFull: (() -> Void)?
+    private let titlePanel = TitlePanel("Catalogue")
+    private let strip = NSStackView()
+    private var stripButtons: [NSButton] = []
+    private(set) var isCompact = false
+    /// What the strip holds, top to bottom: a page it opens, or a bucket it opens the rail on. nil is a gap.
+    private lazy var stripItems: [(symbol: String, title: String, page: Selection?, bucket: SidebarNode?)?] = [
+        ("sidebar.leading", "Open The Catalogue", nil, nil), nil,
+        ("square.grid.3x3.fill", "All Swatches", .all, nil),
+        (NSImage(systemSymbolName: "flask.fill", accessibilityDescription: nil) != nil ? "flask.fill" : "testtube.2", "Colour Lab", .lab, nil),
+        ("circle.lefthalf.filled", "Contrast", .contrast, nil), nil,
+        ("star", "Favourites", nil, favourites), ("folder", "Projects", nil, projectsGroup),
+        ("swatchpalette", "Palettes", nil, loose), ("textformat", "Typography", nil, typography), ("tag", "Tags", nil, tags),
+    ]
+
+    private func buildStrip() {
+        strip.orientation = .vertical
+        strip.alignment = .centerX
+        strip.spacing = 6
+        for (at, entry) in stripItems.enumerated() {
+            guard let entry = entry else {
+                if let last = strip.arrangedSubviews.last { strip.setCustomSpacing(18, after: last) }
+                continue
+            }
+            let b = symbolButton(entry.symbol, tooltip: entry.title, target: self, action: #selector(stripTapped(_:)))
+            b.image = symbol(entry.symbol, entry.title, size: 15)
+            b.tag = at
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            strip.addArrangedSubview(b)
+            stripButtons.append(b)
+        }
+        strip.isHidden = true
+        tintStrip()
+    }
+
+    /// The page that is showing stands out on the strip.
+    private func tintStrip() {
+        for b in stripButtons {
+            guard stripItems.indices.contains(b.tag), let entry = stripItems[b.tag] else { continue }
+            b.contentTintColor = entry.page != nil && entry.page == selection ? .labelColor : .secondaryLabelColor
+        }
+    }
+
+    @objc private func stripTapped(_ sender: NSButton) {
+        guard stripItems.indices.contains(sender.tag), let entry = stripItems[sender.tag] else { return }
+        if let page = entry.page { onSelect?(page); return }
+        onWantsFull?()
+        // Opened on a bucket: the bucket open, and brought to the top of what shows.
+        guard let bucket = entry.bucket else { return }
+        outline.expandItem(bucket)
+        let row = outline.row(forItem: bucket)
+        if row >= 0 { outline.scrollRowToVisible(min(outline.numberOfRows - 1, row + 8)); outline.scrollRowToVisible(row) }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let compact = view.bounds.width < SidebarViewController.compactBelow
+        guard compact != isCompact else { return }
+        isCompact = compact
+        titlePanel.isHidden = compact
+        scroll.isHidden = compact
+        strip.isHidden = !compact
+    }
     private var settingSelection = false
 
     init(library: LibraryController) {
@@ -457,11 +528,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         // Under the full-width toolbar, with a flat background of its own; the first row sits on the pages' title line.
         // rail1 begins with its title panel, as every rail and the page do.
         let root = SidebarBackdrop()
-        let title = TitlePanel("Catalogue")
+        let title = titlePanel
+        buildStrip()
         root.addSubview(title)
         root.addSubview(scroll)
+        root.addSubview(strip)
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        // The strip is centred on the rail's closed width, so it stays put while the rail opens and shuts around it.
         NSLayoutConstraint.activate([
+            strip.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 12),
+            strip.centerXAnchor.constraint(equalTo: root.leadingAnchor, constant: SidebarViewController.compactWidth / 2),
             title.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             title.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             title.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -576,6 +653,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// Highlights the row for `selection` without reporting it back as a user choice.
     func select(_ new: Selection) {
         selection = new
+        tintStrip()
         settingSelection = true
         defer { settingSelection = false }
         if let current = outline.item(atRow: outline.selectedRow) as? SidebarNode, stands(current, for: new) { return }

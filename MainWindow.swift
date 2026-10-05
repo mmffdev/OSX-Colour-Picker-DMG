@@ -268,7 +268,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // A plain pane, not a system sidebar: the toolbar runs the full width above it, and it has no chrome of its own.
         let side = NSSplitViewItem(viewController: sidebar)
         sideItem = side
-        side.minimumThickness = 200 // room for a palette name, its count and star
+        side.minimumThickness = SidebarViewController.compactWidth   // closed, rail1 is a strip of icons; from 140 up it is the tree
         side.canCollapse = true
         side.holdingPriority = .defaultLow + 2   // the page takes up a change in the window's width, not the sidebar
         contextItem = NSSplitViewItem(viewController: contextRail)
@@ -343,6 +343,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         toolbar.autosavesConfiguration = true
         toolbar.displayMode = .iconAndLabel
         win.toolbar = toolbar
+        // Always there on opening: the page alone hides it, and a quit from there must not leave it hidden.
+        toolbar.isVisible = true
+        NotificationCenter.default.addObserver(self, selector: #selector(leavePageFullScreen), name: NSApplication.willTerminateNotification, object: nil)
 
         // Read before the library loads: loading shows the first page, which would be saved over this.
         let lastPage = preferences.string(forKey: "lastPage")
@@ -364,6 +367,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     private func wire() {
         sidebar.onSelect = { [weak self] s in self?.show(s) }
+        sidebar.onWantsFull = { [weak self] in self?.setSidebar(compact: false) }
         sidebar.onExport = { [weak self] id in self?.library.export(self?.library.exportPalettes(for: .palette(id)) ?? []) }
         sidebar.onColourPanel = { [weak self] id in self?.library.addToColourPanel(self?.library.exportPalettes(for: .palette(id)) ?? []) }
         sidebar.onAdobe = { [weak self] send in
@@ -632,6 +636,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             self.restoreFrame()
             if firstRun { self.applyStartWidths() }
             self.frameSettled = true
+            // Nothing is being typed on opening: the palette's name does not start out selected for editing.
+            if self.window?.firstResponder is NSText { self.window?.makeFirstResponder(nil) }
+            // For a trial run: rail1 shut to its strip, then opened again.
+            if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_RAIL"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.setSidebar(compact: true) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 7.5) { self.setSidebar(compact: false) }
+            }
             // For a trial run: the page alone, in the window as it stands.
             // For a trial run: the theme changed while the window is up, as the footer's switch does.
             if let to = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_THEME_AFTER"].flatMap(ThemeMode.init(rawValue:)) {
@@ -765,7 +776,31 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     // MARK: Menu and toolbar actions
 
-    @objc func toggleSidebarPane() { sideItem.animator().isCollapsed.toggle() }
+    /// rail1 opens to its tree or shuts to its strip of icons; it is never hidden outright.
+    @objc func toggleSidebarPane() {
+        if sideItem.isCollapsed { sideItem.animator().isCollapsed = false; return }
+        setSidebar(compact: !sidebar.isCompact)
+    }
+
+    /// Slides rail1 shut to its strip of icons, or open to the width it last had as a tree.
+    func setSidebar(compact: Bool) {
+        let view = split.splitView, now = sidebar.view.frame.width
+        if now >= SidebarViewController.compactBelow { preferences.set(Double(now), forKey: "sidebarOpenWidth") }
+        let saved = CGFloat(preferences.double(forKey: "sidebarOpenWidth"))
+        let open = saved >= SidebarViewController.compactBelow ? saved : MainWindowController.sidebarStartWidth
+        let to = compact ? SidebarViewController.compactWidth : min(open, view.bounds.width - MainWindowController.pageMinimumWidth - 240)
+        // A split view's divider does not animate by itself: it is walked there, eased at both ends.
+        slide?.invalidate()
+        let from = now, began = Date(), length = 0.26
+        slide = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
+            let t = min(1, Date().timeIntervalSince(began) / length)
+            let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+            view.setPosition(from + (to - from) * CGFloat(eased), ofDividerAt: 0)
+            if t >= 1 { timer.invalidate(); self?.slide = nil }
+        }
+        if let slide = slide { RunLoop.main.add(slide, forMode: .common) }
+    }
+    private var slide: Timer?
 
     @objc func toggleHistory() {
         historyItem.animator().isCollapsed.toggle()
