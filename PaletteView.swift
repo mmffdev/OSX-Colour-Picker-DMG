@@ -102,14 +102,11 @@ final class SpectrumView: NSView {
 /// A swatch in a palette's grid: the colour as a plain block, and under it, on the page, its name
 /// and its values, as All Swatches lays its tiles out. Nothing is written over the colour except
 /// the source of a colour that is not a plain sRGB value, and the button for its actions.
-/// One purpose's verdict on a palette: its name, whether every colour holds, and what does not.
+/// One purpose's verdict on a palette: whether every colour holds, and what does not. The purpose
+/// itself is not named here: the options bar above already says which one the page is turned to.
 final class PurposeVerdictRow: NSView {
     init(_ purpose: Purpose, profile: ColourProfile, verdict: (holds: Bool, tag: String, detail: String)) {
         super.init(frame: .zero)
-        let icon = NSImageView(image: symbol(purpose.symbol, purpose.title, size: 13))
-        icon.contentTintColor = .secondaryLabelColor
-        let title = NSTextField(labelWithString: purpose.title)
-        title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
         let tag = GradeTag()
         tag.show(verdict.tag, verdict.holds ? .pass : .fail)
         let detail = NSTextField(labelWithString: "\(profile.name)  \u{00B7}  \(verdict.detail)")
@@ -118,7 +115,7 @@ final class PurposeVerdictRow: NSView {
         detail.lineBreakMode = .byTruncatingTail
         detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detail.toolTip = detail.stringValue
-        let row = NSStackView(views: [icon, title, tag, detail])
+        let row = NSStackView(views: [tag, detail])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -128,7 +125,7 @@ final class PurposeVerdictRow: NSView {
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: 22), title.widthAnchor.constraint(greaterThanOrEqualToConstant: 130),
+            heightAnchor.constraint(equalToConstant: 22),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -409,8 +406,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     /// What each purpose makes of the palette: every purpose on Overview, the one on show on its own tab.
     private let verdicts = NSStackView()
     private let paletteHeading = sectionHeading("Palette")
-    /// Under the title panel, which names the purpose: the palette's own name, with the padlock of its project in front.
-    private let nameLock = NSImageView()
+    /// Under the options bar: what kind of palette it is, with the mark of the purpose it is turned to in front.
+    private let purposeMark = NSImageView()
     private let paletteTitle = NSStackView()
     /// Whether the palette's project is locked; nil for a palette in no project.
     private var locked: Bool?
@@ -419,7 +416,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
 
     private let nameField = NSTextField(labelWithString: "")
-    private lazy var header = PageHeader(title: paletteHeading, actions: [browsing, selecting, tagBar])
+    private lazy var header = PageHeader(title: nameField, actions: [browsing, selecting, tagBar])
     private var star: NSButton!
     private var target: NSButton!
     private var tagButton: NSButton!
@@ -604,15 +601,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         verdicts.alignment = .leading
         verdicts.spacing = 4
         // The palette's name is as large as the page's title, with its project's padlock in front of it.
-        nameField.font = PageStyle.titleFont
-        nameField.lineBreakMode = .byTruncatingTail
-        nameField.cell?.usesSingleLineMode = true
-        nameLock.setContentHuggingPriority(.required, for: .horizontal)
-        // The name takes the whole width left by the padlock, so it shows whatever length it was when the page was laid out.
-        paletteTitle.setViews([nameLock, nameField], in: .leading)
-        paletteTitle.distribution = .fill
-        nameField.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The palette's name is the page's title. Under the options: what kind of palette it is, with the purpose's mark.
+        paletteHeading.font = PageStyle.titleFont
+        purposeMark.contentTintColor = .labelColor
+        purposeMark.setContentHuggingPriority(.required, for: .horizontal)
+        paletteTitle.setViews([purposeMark, paletteHeading], in: .leading)
         paletteTitle.orientation = .horizontal
         paletteTitle.alignment = .centerY
         paletteTitle.spacing = 10
@@ -692,8 +685,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             s.config(for: p)?.labels.map { saved in ColourFormat.cardRows.filter { saved.contains($0.rawValue) } } ?? p.starterLabels
         }
         paletteHeading.stringValue = purpose.map { "Palette For \($0.title)" } ?? "Palette"
-        header.mark.isHidden = purpose == nil
-        if let purpose = purpose { header.mark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
+        purposeMark.isHidden = purpose == nil
+        if let purpose = purpose { purposeMark.image = symbol(purpose.symbol, purpose.title, size: PageHeader.titleSymbol, weight: .semibold) }
         let all = library.hexes(in: id)
         hexes = search.isEmpty ? all : all.filter {
             $0.lowercased().contains(search) || colourName($0).lowercased().contains(search)
@@ -728,10 +721,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         header.setProject(project?.1) { [weak self] in if let pid = project?.0 { self?.library.onRevealProject?(pid) } }
         header.striped = project != nil
         locked = s.projectID.flatMap { library.library.project($0)?.isLocked }
-        nameLock.isHidden = locked == nil
-        nameLock.image = symbol(locked == true ? "lock.fill" : "lock.open", locked == true ? "Locked" : "Unlocked", size: 16, weight: .semibold)
-        nameLock.contentTintColor = locked == true ? .systemOrange : .tertiaryLabelColor
-        nameLock.toolTip = locked == true ? "The project is locked: nothing in it can change" : "The project is unlocked"
+        header.lock = locked
         nameField.isEditable = !(locked ?? false)
 
         star.image = symbol(s.favourite ? "star.fill" : "star", "Favourite")
