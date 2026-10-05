@@ -152,9 +152,9 @@ enum Prefs {
         set { d.set(newValue, forKey: "showPaletteBars"); changed() }
     }
 
-    /// Scrolling past the end of a palette moves to the next one.
+    /// Scrolling past the end of a palette moves to the next one. Off until chosen: it moves the selection in rail1 and refills rail2, which reads as the rails scrolling by themselves.
     static var wheelChangesPalette: Bool {
-        get { bool("wheelChangesPalette", true) }
+        get { bool("wheelChangesPalette", false) }
         set { d.set(newValue, forKey: "wheelChangesPalette") }
     }
 
