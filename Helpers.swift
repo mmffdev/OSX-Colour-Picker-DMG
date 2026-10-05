@@ -131,9 +131,11 @@ func identityColour(_ id: UUID) -> NSColor {
 // ---------- Theme ----------
 //
 // Light or dark: as the Mac is set, or one or the other whatever the Mac says, or a background
-// of the user's own choosing. Light is white, #FFFFFF. Over any of them L puts the lights out:
-// black, then white, then the theme again. Everything that draws a background reads
-// Theme.background; text and borders follow the light or dark appearance the background implies.
+// of the user's own choosing. Light is an off-white, #F2F2F2: strictly neutral, so it tints nothing
+// a colour is judged against, and without the glare of pure white. Over any of them L steps the
+// background: charcoal, then true black, then true white, then the theme again. Everything that
+// draws a background reads Theme.background; text and borders follow the light or dark appearance
+// the background implies.
 
 enum ThemeMode: String, CaseIterable {
     case system, light, dark, custom
@@ -151,13 +153,17 @@ extension Notification.Name {
 }
 
 enum Theme {
-    /// What L walks through, over the theme: black, then white.
-    static let lights = ["#000000", "#FFFFFF"]
+    /// The light theme's background: an off-white, the same red, green and blue, so it is neutral.
+    static let light = "#F2F2F2"
 
-    /// The background L has put on, as a place in `lights`; nil is the theme itself.
+    /// What L walks through, over the theme: charcoal, then true black, then true white.
+    static let lights = ["#242424", "#000000", "#FFFFFF"]
+
+    /// The background L has put on, as a place in `lights`; nil is the theme itself. The key is new
+    /// with charcoal, so a place saved when the list was black and white is not read as another colour.
     static var lightsOut: Int? {
-        get { let v = preferences.integer(forKey: "theme.lights"); return preferences.object(forKey: "theme.lights") == nil || !lights.indices.contains(v) ? nil : v }
-        set { preferences.set(newValue ?? -1, forKey: "theme.lights") }
+        get { let v = preferences.integer(forKey: "theme.step"); return preferences.object(forKey: "theme.step") == nil || !lights.indices.contains(v) ? nil : v }
+        set { preferences.set(newValue ?? -1, forKey: "theme.step") }
     }
 
     /// Light, dark, whichever the Mac is set to, or the user's own colours.
@@ -177,11 +183,11 @@ enum Theme {
         set { preferences.set(newValue.rawValue, forKey: "theme.text") }
     }
 
-    /// The background as a hex where it is a fixed colour: L's black or white, or the user's own. nil is the theme's own light or dark.
+    /// The background as a hex where it is a fixed colour: one of L's steps, or the user's own. nil is the theme's own light or dark.
     static var fixedBackground: String? { lightsOut.map { lights[$0] } ?? (mode == .custom ? customBackground : nil) }
 
-    /// White in light, and the Mac's own dark window colour in dark, unless a fixed colour is on.
-    static var background: NSColor { fixedBackground.flatMap(colorFromHex) ?? (isDark ? .windowBackgroundColor : .white) }
+    /// The off-white in light, and the Mac's own dark window colour in dark, unless a fixed colour is on.
+    static var background: NSColor { fixedBackground.flatMap(colorFromHex) ?? (isDark ? .windowBackgroundColor : colorFromHex(light) ?? .white) }
 
     /// Whether white text reads better than black on a colour.
     static func takesLightText(on hex: String) -> Bool { contrastRatio(hex, "#FFFFFF") > contrastRatio(hex, "#000000") }
@@ -201,7 +207,7 @@ enum Theme {
         }
     }
 
-    /// The step after this one as L walks them: from the theme to black, then white, then the theme again.
+    /// The step after this one as L walks them: from the theme to charcoal, black, white, then the theme again.
     static func next(after place: Int?) -> Int? {
         guard let p = place else { return 0 }
         return p + 1 < lights.count ? p + 1 : nil
@@ -213,7 +219,7 @@ enum Theme {
         NotificationCenter.default.post(name: .themeDidChange, object: nil)
     }
 
-    /// Chooses light, dark, the Mac's own or the user's colours, and lets go of L's black or white.
+    /// Chooses light, dark, the Mac's own or the user's colours, and lets go of L's step.
     static func choose(_ chosen: ThemeMode) {
         mode = chosen
         lightsOut = nil

@@ -41,7 +41,7 @@ final class ContentViewController: NSViewController {
         let dark = Theme.isDark
         themeSwitch.image = symbol(dark ? "sun.max" : "moon", dark ? "Light" : "Dark", size: 12)
         themeSwitch.contentTintColor = .secondaryLabelColor
-        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Turns The Background Black, Then White, Then Back; Shift-L Shows The Page Alone, Full Screen."
+        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Turns The Background Charcoal, Then Black, Then White, Then Back; Shift-L Shows The Page Alone, Full Screen."
     }
     static var releaseLine: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -670,7 +670,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     @objc private func projectFilesChanged() { sidebar.reload() }
     @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
-    /// L: black, then white, then the theme again.
+    /// L: charcoal, then black, then white, then the theme again.
     @objc func stepBackground() { Theme.cycle() }
 
     // MARK: The page alone, full screen

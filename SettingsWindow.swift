@@ -525,7 +525,7 @@ final class ThemePanel: SettingsPanel {
             [blank, modes[3]],
             [label("My Background:"), row([ownBackground])],
             [label("My Text:"), ownText],
-            [blank, note("Match The Mac follows System Settings; Light and Dark hold whatever the Mac says. Light is white. My Own Colours puts your background on every page, with black or white text: Automatic takes whichever reads better on it. The button at the foot of the window switches between light and dark. Press L to turn the background black, then white, then back to the theme, and Shift-L to show the page alone, full screen.")],
+            [blank, note("Match The Mac follows System Settings; Light and Dark hold whatever the Mac says. Light is an off-white, a neutral grey just below white. My Own Colours puts your background on every page, with black or white text: Automatic takes whichever reads better on it. The button at the foot of the window switches between light and dark. Press L to turn the background charcoal, then black, then white, then back to the theme, and Shift-L to show the page alone, full screen.")],
             [heading("Sidebar"), blank],
             [label("Selected Row:"), pair(selectionBackground, selectionText)],
             [blank, row([button("Reset To Default", #selector(resetSidebar))])],
