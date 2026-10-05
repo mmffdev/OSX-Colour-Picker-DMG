@@ -51,12 +51,23 @@ class SettingsPanel: NSViewController {
     var labelWidth: CGFloat { 170 }
 
     func rows() -> [[NSView]] { [] }
+    /// Rows under every section of the panel, whichever is showing.
+    func footerRows() -> [[NSView]] { [] }
     func refresh() {}
 
-    override func loadView() {
-        let grid = NSGridView(views: rows())
+    // A panel with more than one heading is shown a section at a time: a bar of the headings at the
+    // top, and under it the rows of the one that is chosen. So no panel is taller than its tallest
+    // section, and none runs off the foot of the screen.
+    private var sectionBar: ToggleBar?
+    private var sectionGrids: [NSView] = []
+    private var sectionKey: String { "settingsSection." + (title ?? "") }
+
+    private func grid(_ rows: [[NSView]]) -> NSGridView {
+        let grid = NSGridView(views: rows)
         grid.rowSpacing = 9
         grid.columnSpacing = 10
+        // A panel that is one view across, as Permissions is, has no columns to set.
+        guard grid.numberOfColumns > 1 else { return grid }
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 0).width = labelWidth
         grid.column(at: 1).width = 400
@@ -68,17 +79,74 @@ class SettingsPanel: NSViewController {
             grid.cell(atColumnIndex: 0, rowIndex: r).xPlacement = .leading
             grid.mergeCells(inHorizontalRange: NSRange(location: 0, length: 2), verticalRange: NSRange(location: r, length: 1))
         }
-        grid.translatesAutoresizingMaskIntoConstraints = false
+        return grid
+    }
+
+    /// A heading row: a label on the left and nothing on the right.
+    private func headingTitle(_ row: [NSView]) -> String? {
+        guard row.count == 2, row[1] === blank, row[0] !== blank, let label = row[0] as? NSTextField, !label.stringValue.isEmpty else { return nil }
+        return label.stringValue
+    }
+
+    override func loadView() {
+        let all = rows()
+        // The rows under each heading; rows before the first heading go with the first.
+        var sections: [(title: String, rows: [[NSView]])] = []
+        for row in all {
+            if let title = headingTitle(row) { sections.append((title, [])) }
+            else if sections.isEmpty { sections.append(("", [row])) }
+            else { sections[sections.count - 1].rows.append(row) }
+        }
+        let body = NSStackView()
+        body.orientation = .vertical
+        body.alignment = .centerX
+        body.spacing = 20
+        if sections.count > 1 {
+            // Each word of a heading starts with a capital on the bar.
+            let titles = sections.map { $0.title.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") }
+            let bar = ToggleBar(labels: titles, target: self, action: #selector(sectionChosen))
+            bar.selectedSegment = min(max(0, preferences.integer(forKey: sectionKey)), sections.count - 1)
+            sectionBar = bar
+            sectionGrids = sections.map { grid($0.rows) }
+            body.addArrangedSubview(bar)
+            sectionGrids.forEach { body.addArrangedSubview($0) }
+            for (at, one) in sectionGrids.enumerated() { one.isHidden = at != bar.selectedSegment }
+        } else {
+            body.addArrangedSubview(grid(all))
+        }
+        let foot = footerRows()
+        if !foot.isEmpty { body.addArrangedSubview(grid(foot)) }
+        body.translatesAutoresizingMaskIntoConstraints = false
         let v = NSView()
-        v.addSubview(grid)
+        v.addSubview(body)
         NSLayoutConstraint.activate([
-            grid.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
-            grid.centerXAnchor.constraint(equalTo: v.centerXAnchor),
-            grid.leadingAnchor.constraint(greaterThanOrEqualTo: v.leadingAnchor, constant: 28),
-            grid.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -24),
+            body.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
+            body.centerXAnchor.constraint(equalTo: v.centerXAnchor),
+            body.leadingAnchor.constraint(greaterThanOrEqualTo: v.leadingAnchor, constant: 28),
+            body.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -24),
             v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
         ])
         view = v
+    }
+
+    @objc private func sectionChosen() {
+        guard let bar = sectionBar else { return }
+        preferences.set(bar.selectedSegment, forKey: sectionKey)
+        for (at, one) in sectionGrids.enumerated() { one.isHidden = at != bar.selectedSegment }
+        view.layoutSubtreeIfNeeded()
+        resizeWindow()
+    }
+
+    /// The window takes the height of the section now showing, its top edge staying where it is.
+    private func resizeWindow() {
+        let size = view.fittingSize
+        preferredContentSize = size
+        guard let window = view.window, let content = window.contentView else { return }
+        var frame = window.frame
+        let change = size.height - content.frame.height
+        frame.origin.y -= change
+        frame.size.height += change
+        window.setFrame(frame, display: true, animate: true)
     }
 
     /// Every panel is at least this wide, so the window's toolbar shows all the panels' icons.
@@ -437,8 +505,14 @@ final class ShortcutsPanel: SettingsPanel {
 
     override func rows() -> [[NSView]] {
         message.textColor = .systemRed
-        var rows: [[NSView]] = [[heading("Keyboard shortcuts"), blank]]
+        // A section to each menu, so the list is never longer than the longest menu.
+        var rows: [[NSView]] = []
+        var menu = ""
         for (at, command) in Shortcuts.commands.enumerated() {
+            if command.menu != menu {
+                menu = command.menu
+                rows.append([heading(menu), blank])
+            }
             let field = ShortcutField(frame: .zero)
             field.onRecord = { [weak self] shortcut, keyCode in self?.record(shortcut, keyCode, at: at) }
             let clear = symbolButton("xmark.circle", tooltip: "Remove this shortcut", target: self, action: #selector(clear(_:)))
@@ -447,7 +521,11 @@ final class ShortcutsPanel: SettingsPanel {
             ids.append(command.id)
             rows.append([label(command.title + ":"), row([field, clear])])
         }
-        return rows + [
+        return rows
+    }
+
+    override func footerRows() -> [[NSView]] {
+        [
             [blank, message],
             [blank, button("Restore Defaults", #selector(restore))],
             [blank, note("Click a shortcut, then type the new one. Shortcuts that macOS or the Edit menu already use, such as \u{2318}C for Copy, cannot be taken.")],

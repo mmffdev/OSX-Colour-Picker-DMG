@@ -115,6 +115,8 @@ enum Shortcuts {
 
     struct Command {
         let id: String, title: String
+        /// The menu the command is in, as the menu bar names it; the app's own menu is "App".
+        let menu: String
         fileprivate let item: NSMenuItem
         var shortcut: Shortcut? { Shortcuts.shortcut(of: item) }
     }
@@ -124,19 +126,20 @@ enum Shortcuts {
     }
 
     /// Top-level menu items with an action, split into the app's own and the standard ones.
-    private static func items(fixed: Bool) -> [(id: String, item: NSMenuItem)] {
+    private static func items(fixed: Bool) -> [(id: String, item: NSMenuItem, menu: String)] {
         var seen = Set<String>()
-        return (bar?.items ?? []).flatMap { $0.submenu?.items ?? [] }.compactMap { item in
+        let tops = bar?.items ?? []
+        return tops.enumerated().flatMap { at, top in (top.submenu?.items ?? []).map { (at == 0 ? "App" : top.submenu?.title ?? top.title, $0) } }.compactMap { menu, item in
             guard let action = item.action, !item.hasSubmenu else { return nil }
             let id = NSStringFromSelector(action)
             guard own.contains(id), seen.insert(id).inserted else { return nil }
-            return fixedActions.contains(id) == fixed ? (id, item) : nil
+            return fixedActions.contains(id) == fixed ? (id, item, menu) : nil
         }
     }
 
     /// The commands that can be given a shortcut, in menu order.
     static var commands: [Command] {
-        items(fixed: false).map { Command(id: $0.id, title: $0.item.title.replacingOccurrences(of: "\u{2026}", with: ""), item: $0.item) }
+        items(fixed: false).map { Command(id: $0.id, title: $0.item.title.replacingOccurrences(of: "\u{2026}", with: ""), menu: $0.menu, item: $0.item) }
     }
 
     /// How a command's shortcut is written right now, for text that tells the user what to press.
