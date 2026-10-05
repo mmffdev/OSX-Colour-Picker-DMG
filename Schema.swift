@@ -20,7 +20,7 @@ enum SchemaTrial {
     static let primaryNames = ["Project", "Client", "Customer", "Group", "Brand", "Campaign", "Job", "Production", "Title", "Account"]
     static let nestedNames = ["Palettes", "Typography", "Assets", "Characters", "Environments", "Props", "Vehicles", "Textures", "Materials",
                               "Interface", "Icons", "Logos", "Photography", "Illustration", "Video", "Print", "Packaging", "Social", "Web",
-                              "Deliverables", "References"]
+                              "Deliverables", "References", "Scope", "Documents", "Information"]
 
     static func names(forLevel level: Int) -> [String] { level == 1 ? primaryNames : nestedNames }
 
@@ -159,6 +159,50 @@ private final class SchemaRowView: HoverView {
     }
 }
 
+/// One name in the column of names on offer: ticked when it is the selected group's.
+private final class SchemaNameRow: HoverView {
+    var onChoose: (() -> Void)?
+    private let chosen: Bool
+    private var over = false { didSet { needsDisplay = true } }
+
+    init(_ text: String, chosen: Bool, quiet: Bool = false) {
+        self.chosen = chosen
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let title = NSTextField(labelWithString: text)
+        title.font = NSFont.systemFont(ofSize: TextSize.body, weight: chosen ? .semibold : .regular)
+        title.textColor = quiet && !chosen ? .secondaryLabelColor : .labelColor
+        title.lineBreakMode = .byTruncatingTail
+        let tick = NSImageView(image: symbol("checkmark", "Chosen", size: 11, weight: .semibold))
+        tick.contentTintColor = .labelColor
+        tick.isHidden = !chosen
+        for v in [title, tick] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 26),
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: tick.leadingAnchor, constant: -6),
+            tick.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            tick.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        onHover = { [weak self] on in self?.over = on }
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel(text)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) { onChoose?() }
+    override func draw(_ dirtyRect: NSRect) {
+        guard chosen || over else { return }
+        NSColor.labelColor.withAlphaComponent(chosen ? 0.10 : 0.05).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 6, yRadius: 6).fill()
+    }
+}
+
+private final class SchemaFlipped: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// The Schema panel: the map of groups on the left, and on the right the level, name and description of the one that is selected.
 final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private var root = SchemaTrial.saved
@@ -166,11 +210,15 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let map = NSStackView()
     private let addNext = NSButton(title: "", target: nil, action: nil)
     private let levelTitle = NSTextField(labelWithString: "")
-    private let namePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// The names on offer, as a column that scrolls inside the pane: Custom Name first, then the list for the level.
+    private let names = NSStackView()
+    private let namesScroll = FittedScrollView()
     private let customName = NSTextField()
     private let about = NSTextField()
-    /// The row holding the box for a name of the user's own; it takes no room while a listed name is chosen.
+    /// The rows holding the box for a name of the user's own and its label; they take no room while a listed name is chosen.
     private var customRow: NSGridRow!
+    private var customHead: NSGridRow!
+    private var shownLevel = 0
 
     private func caption(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
@@ -196,8 +244,27 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
         // Right: the selected group.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        namePopup.target = self
-        namePopup.action = #selector(nameChosen)
+        let namesTitle = caption("Name")
+        namesTitle.alignment = .left
+        names.orientation = .vertical
+        names.alignment = .leading
+        names.spacing = 1
+        let page = SchemaFlipped()
+        for v in [names, page] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        page.addSubview(names)
+        namesScroll.documentView = page
+        namesScroll.hasVerticalScroller = true
+        namesScroll.autohidesScrollers = true
+        namesScroll.drawsBackground = false
+        let column = NSBox()
+        column.boxType = .custom
+        column.cornerRadius = 8
+        column.borderWidth = 1
+        column.borderColor = .separatorColor
+        column.fillColor = .clear
+        column.contentViewMargins = .zero
+        namesScroll.translatesAutoresizingMaskIntoConstraints = false
+        column.addSubview(namesScroll)
         customName.placeholderString = "Type A Name"
         customName.delegate = self
         about.placeholderString = "What This Group Holds"
@@ -207,21 +274,18 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         about.cell?.isScrollable = false
         let hint = NSTextField(wrappingLabelWithString: "A trial of the idea. What is built here is kept so it can be lived with, but the catalogue does not use it yet: the sidebar still shows projects as before.")
         hint.textColor = .secondaryLabelColor
-        hint.preferredMaxLayoutWidth = 360
-        let grid = NSGridView(views: [
-            [caption("Name:"), namePopup],
-            [NSGridCell.emptyContentView, customName],
-            [caption("Description:"), about],
-            [NSGridCell.emptyContentView, hint],
-        ])
-        grid.rowSpacing = 10
-        grid.columnSpacing = 10
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 0).width = 90
-        grid.column(at: 1).width = 360
-        grid.row(at: 2).yPlacement = .top
+        hint.preferredMaxLayoutWidth = 250
+        let customTitle = caption("Custom Name"), aboutTitle = caption("Description")
+        customTitle.alignment = .left
+        aboutTitle.alignment = .left
+        let grid = NSGridView(views: [[customTitle], [customName], [aboutTitle], [about], [hint]])
+        grid.rowSpacing = 6
+        grid.column(at: 0).width = 250
+        grid.row(at: 2).topPadding = 10
+        grid.row(at: 4).topPadding = 10
         customRow = grid.row(at: 1)
-        for v in [levelTitle, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
+        customHead = grid.row(at: 0)
+        for v in [levelTitle, namesTitle, column, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
 
         let v = NSView()
         for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
@@ -252,8 +316,27 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
             levelTitle.topAnchor.constraint(equalTo: right.topAnchor),
             levelTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
-            grid.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 16),
-            grid.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            // The names: a column the height of the pane, scrolling inside itself.
+            namesTitle.topAnchor.constraint(equalTo: levelTitle.bottomAnchor, constant: 14),
+            namesTitle.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            column.topAnchor.constraint(equalTo: namesTitle.bottomAnchor, constant: 6),
+            column.leadingAnchor.constraint(equalTo: right.leadingAnchor),
+            column.widthAnchor.constraint(equalToConstant: 220),
+            column.bottomAnchor.constraint(equalTo: right.bottomAnchor),
+            namesScroll.topAnchor.constraint(equalTo: column.topAnchor, constant: 4),
+            namesScroll.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: -4),
+            namesScroll.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 2),
+            namesScroll.trailingAnchor.constraint(equalTo: column.trailingAnchor, constant: -2),
+            page.topAnchor.constraint(equalTo: namesScroll.contentView.topAnchor),
+            page.leadingAnchor.constraint(equalTo: namesScroll.contentView.leadingAnchor),
+            page.widthAnchor.constraint(equalTo: namesScroll.contentView.widthAnchor),
+            names.topAnchor.constraint(equalTo: page.topAnchor),
+            names.leadingAnchor.constraint(equalTo: page.leadingAnchor),
+            names.trailingAnchor.constraint(equalTo: page.trailingAnchor),
+            names.bottomAnchor.constraint(equalTo: page.bottomAnchor),
+            // Beside the column: the name typed by hand when Custom is chosen, and the description.
+            grid.topAnchor.constraint(equalTo: namesTitle.topAnchor),
+            grid.leadingAnchor.constraint(equalTo: column.trailingAnchor, constant: 24),
             about.heightAnchor.constraint(equalToConstant: 64),
         ])
         view = v
@@ -283,14 +366,25 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         guard let (node, level) = current else { return }
         addNext.title = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2))" : "Add Next Level \(level) Group"
         levelTitle.stringValue = SchemaTrial.title(forLevel: level)
-        let names = SchemaTrial.names(forLevel: level)
-        namePopup.removeAllItems()
-        namePopup.addItems(withTitles: ["Custom Name\u{2026}"] + names)
-        namePopup.menu?.insertItem(.separator(), at: 1)
+        let offered = SchemaTrial.names(forLevel: level)
         // A name of the user's own shows the box to type it in; a name from the list hides it.
-        let custom = !names.contains(node.name)
-        if custom { namePopup.selectItem(at: 0) } else { namePopup.selectItem(withTitle: node.name) }
+        let custom = !offered.contains(node.name)
+        names.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        func add(_ row: SchemaNameRow, _ choose: @escaping () -> Void) {
+            row.onChoose = choose
+            names.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: names.widthAnchor).isActive = true
+        }
+        add(SchemaNameRow("Custom Name\u{2026}", chosen: custom, quiet: true)) { [weak self] in self?.choose(name: nil) }
+        for name in offered { add(SchemaNameRow(name, chosen: !custom && name == node.name)) { [weak self] in self?.choose(name: name) } }
+        // A different group's level starts its column at the top.
+        if level != shownLevel {
+            shownLevel = level
+            namesScroll.contentView.scroll(to: .zero)
+            namesScroll.reflectScrolledClipView(namesScroll.contentView)
+        }
         customRow.isHidden = !custom
+        customHead.isHidden = !custom
         if customName.currentEditor() == nil { customName.stringValue = custom ? node.name : "" }
         if about.currentEditor() == nil { about.stringValue = node.about }
         if focusName, custom { view.window?.makeFirstResponder(customName) }
@@ -313,14 +407,17 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         add(child: level == 1, at: node.id)
     }
 
-    @objc private func nameChosen() {
+    /// A name from the column, or nil for Custom, which empties the name ready to be typed.
+    private func choose(name: String?) {
         guard let id = selected else { return }
-        let custom = namePopup.indexOfSelectedItem == 0, title = namePopup.titleOfSelectedItem ?? ""
-        // Choosing Custom empties the name, ready to be typed.
-        root = SchemaTrial.changing(id, in: root) { $0.name = custom ? "" : title }
+        if name == nil, let now = current, !SchemaTrial.names(forLevel: now.level).contains(now.node.name) {
+            view.window?.makeFirstResponder(customName)   // already a name of the user's own: go to it, and keep it
+            return
+        }
+        root = SchemaTrial.changing(id, in: root) { $0.name = name ?? "" }
         keep()
         view.window?.makeFirstResponder(nil)
-        show(focusName: custom)
+        show(focusName: name == nil)
     }
 
     func controlTextDidChange(_ obj: Notification) {
