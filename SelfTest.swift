@@ -1199,6 +1199,12 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
+    check(Theme.next(after: nil) == 4 && Theme.next(after: 4) == 3 && Theme.next(after: 1) == 0 && Theme.next(after: 0) == nil
+          && Theme.levels[4] == "#000000" && Theme.levels[0] == "#FFFFFF", "L steps the background from the theme to black, up in quarters to white, then back to the theme")
+    check(Theme.levels.indices.allSatisfy { l in
+        let ink = Theme.takesLightText(level: l) ? "#FFFFFF" : "#000000", other = Theme.takesLightText(level: l) ? "#000000" : "#FFFFFF"
+        return contrastRatio(Theme.levels[l], ink) >= 4.5 && contrastRatio(Theme.levels[l], ink) >= contrastRatio(Theme.levels[l], other)
+    }, "on every stepped background the text is the one of black and white that reads better, and at 4.5 to 1 or more")
     let grey = ColourDefinition.of(hex: "#4F8093")!, red = ColourDefinition.displayP3([1, 0, 0])
     let asHex = NewColourSheet.convert(grey, to: .hex, press: PressProfiles.generic)
     let noHex = NewColourSheet.convert(red, to: .hex, press: PressProfiles.generic)

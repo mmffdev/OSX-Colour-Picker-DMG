@@ -11,7 +11,7 @@ extension Theme {
     /// The background as plain red, green and blue, whichever step is showing.
     private static var base: NSColor {
         if let l = level, let c = colorFromHex(levels[l]) { return c }
-        return colorFromHex(isDark ? "#1E1E1E" : "#ECECEC") ?? .gray
+        return colorFromHex(isDark ? "#1E1E1E" : "#FFFFFF") ?? .gray
     }
     /// A grey part of the way from the background towards the text colour.
     static func grey(_ fraction: CGFloat) -> NSColor { base.blended(withFraction: fraction, of: isDark ? .white : .black) ?? base }

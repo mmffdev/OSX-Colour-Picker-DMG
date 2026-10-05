@@ -33,6 +33,16 @@ final class ContentViewController: NSViewController {
     private let status = caption("")
     /// Which build this is, at the footer's right: the version and the commit it was made from.
     private let release = caption(ContentViewController.releaseLine)
+    /// The footer's switch between light and dark.
+    private lazy var themeSwitch = symbolButton("moon", tooltip: "", target: self, action: #selector(themeTapped))
+
+    @objc private func themeTapped() { Theme.toggle() }
+    @objc private func showThemeSwitch() {
+        let dark = Theme.isDark
+        themeSwitch.image = symbol(dark ? "sun.max" : "moon", dark ? "Light" : "Dark", size: 12)
+        themeSwitch.contentTintColor = .secondaryLabelColor
+        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Steps The Background From Black To White; Shift-L Shows The Page Alone, Full Screen."
+    }
     static var releaseLine: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
@@ -85,16 +95,20 @@ final class ContentViewController: NSViewController {
         release.setContentCompressionResistancePriority(.required, for: .horizontal)
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.lineBreakMode = .byTruncatingTail
-        for v in [line, status, release] as [NSView] {
+        for v in [line, status, themeSwitch, release] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             footer.addSubview(v)
         }
+        showThemeSwitch()
+        NotificationCenter.default.addObserver(self, selector: #selector(showThemeSwitch), name: .themeDidChange, object: nil)
         NSLayoutConstraint.activate([
             line.topAnchor.constraint(equalTo: footer.topAnchor),
             line.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
             line.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             status.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: PageStyle.side),
-            status.trailingAnchor.constraint(lessThanOrEqualTo: release.leadingAnchor, constant: -16),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: themeSwitch.leadingAnchor, constant: -16),
+            themeSwitch.trailingAnchor.constraint(equalTo: release.leadingAnchor, constant: -12),
+            themeSwitch.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             release.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -PageStyle.side),
             release.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             status.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
@@ -283,9 +297,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             footer.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
-            footer.heightAnchor.constraint(equalToConstant: ContentViewController.footerHeight),
+        ])
+        footerHeight = footer.heightAnchor.constraint(equalToConstant: ContentViewController.footerHeight)
+        footerHeight.isActive = true
+        // The way back from the page alone, full screen: top centre, clear of every page's own title and actions.
+        leavePage.isHidden = true
+        leavePage.translatesAutoresizingMaskIntoConstraints = false
+        root.view.addSubview(leavePage)
+        NSLayoutConstraint.activate([
+            leavePage.topAnchor.constraint(equalTo: root.view.topAnchor, constant: 8),
+            leavePage.centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
         ])
         win.contentViewController = root
+        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            return self.plainKey(event) ? nil : event
+        }
         win.setContentSize(NSSize(width: 1080, height: 700))
         // The window takes its saved place first, so the panes' saved widths are laid into a window of the right size.
         restoreFrame()
@@ -417,7 +444,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         if case .palette(let id) = s, library.library.swatch(id)?.isTypography != true { rail = content.palette.contextRail }
         contextRail.show(rail)
         let opening = rail != nil && contextItem.isCollapsed
-        contextItem.isCollapsed = rail == nil
+        contextItem.isCollapsed = rail == nil || pageAlone != nil
+        if pageAlone != nil { pageAlone?.context = rail == nil }
         if opening, contextItem.viewController.view.frame.width < contextItem.minimumThickness + 1 {
             DispatchQueue.main.async { [weak self] in if let self = self { self.setWidth(MainWindowController.contextStartWidth, of: self.contextItem) } }
         }
@@ -594,6 +622,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             self.restoreFrame()
             if firstRun { self.applyStartWidths() }
             self.frameSettled = true
+            // For a trial run: the page alone, in the window as it stands.
+            if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_PAGE_ALONE"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.showPageAlone(fullScreen: false) }
+            }
         }
     }
 
@@ -639,6 +671,60 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     @objc private func projectFilesChanged() { sidebar.reload() }
     @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
     @objc func lighterBackground() { Theme.step(-1) }
+    /// L: the background's next step, from black to white and back to the theme.
+    @objc func stepBackground() { Theme.cycle() }
+
+    // MARK: The page alone, full screen
+
+    /// What was showing before the page was given the whole screen; nil while the window is as usual.
+    private var pageAlone: (side: Bool, context: Bool, history: Bool, builder: Bool, toolbar: Bool, wasFullScreen: Bool)?
+    private var footerHeight: NSLayoutConstraint!
+    private var keys: Any?
+    private lazy var leavePage: NSButton = ThemedButton(title: "Leave Full Screen", image: symbol("xmark", "Leave", size: 11, weight: .semibold),
+                                                        target: self, action: #selector(leavePageFullScreen))
+
+    /// L and Shift-L, pressed with nothing else held while nothing is being typed; Esc leaves the page alone.
+    private func plainKey(_ event: NSEvent) -> Bool {
+        guard let win = window, event.window === win, win.attachedSheet == nil,
+              event.modifierFlags.intersection([.command, .control, .option, .function]).isEmpty,
+              !(win.firstResponder is NSText) else { return false }
+        if event.keyCode == 53, pageAlone != nil { leavePageFullScreen(); return true }
+        guard event.charactersIgnoringModifiers?.lowercased() == "l" else { return false }
+        if event.modifierFlags.contains(.shift) { pageFullScreen() } else { stepBackground() }
+        return true
+    }
+
+    /// Shift-L: the page takes the whole screen, over the toolbar, the rails and the footer. Pressed
+    /// again there, it steps the background as L does.
+    @objc func pageFullScreen() { showPageAlone(fullScreen: true) }
+
+    /// `fullScreen` is false only for a trial run, which shows the page alone in the window as it stands.
+    func showPageAlone(fullScreen: Bool) {
+        guard let win = window else { return }
+        guard pageAlone == nil else { Theme.cycle(); return }
+        pageAlone = (sideItem.isCollapsed, contextItem.isCollapsed, historyItem.isCollapsed, builderItem.isCollapsed,
+                     win.toolbar?.isVisible ?? true, win.styleMask.contains(.fullScreen))
+        for item in [sideItem, contextItem, historyItem, builderItem] { item?.isCollapsed = true }
+        win.toolbar?.isVisible = false
+        content.footer.isHidden = true
+        footerHeight.constant = 0
+        leavePage.isHidden = false
+        if fullScreen, !win.styleMask.contains(.fullScreen) { win.toggleFullScreen(nil) }
+    }
+
+    @objc func leavePageFullScreen() {
+        guard let win = window, let was = pageAlone else { return }
+        pageAlone = nil
+        leavePage.isHidden = true
+        content.footer.isHidden = false
+        footerHeight.constant = ContentViewController.footerHeight
+        win.toolbar?.isVisible = was.toolbar
+        sideItem.isCollapsed = was.side
+        contextItem.isCollapsed = was.context
+        historyItem.isCollapsed = was.history
+        builderItem.isCollapsed = was.builder
+        if !was.wasFullScreen, win.styleMask.contains(.fullScreen) { win.toggleFullScreen(nil) }
+    }
     @objc func darkerBackground() { Theme.step(1) }
 
     @objc private func libraryChanged() {

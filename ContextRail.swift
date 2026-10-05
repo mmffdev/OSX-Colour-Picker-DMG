@@ -130,7 +130,10 @@ final class RailRow: NSView {
         var strength: CGFloat = 1
         if case .toggle = kind, !isOn { strength = 0.6 }
         if !isEnabled { strength = 0.35 }
-        title.textColor = NSColor.labelColor.withAlphaComponent(strength)
+        // The text colour itself, faded by the view: a colour with its alpha changed is fixed as it was
+        // for the theme of that moment, and would stay white on a background turned white.
+        title.textColor = .labelColor
+        title.alphaValue = strength
         icon.alphaValue = isEnabled ? 1 : 0.4
         if case .choice(let menu) = kind { menu.isEnabled = isEnabled }
         needsDisplay = true

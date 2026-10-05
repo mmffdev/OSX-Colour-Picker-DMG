@@ -130,9 +130,16 @@ func identityColour(_ id: UUID) -> NSColor {
 
 // ---------- Theme ----------
 //
-// The app's background: the system's own, or one of five greys from white to black in quarter
-// steps. Everything that draws a background reads Theme.background; text, scrollers and borders
-// follow the light or dark appearance the step implies.
+// Light or dark: as the Mac is set, or one or the other whatever the Mac says. Light is white,
+// #FFFFFF. Over that, the background can be stepped through five greys from black to white in
+// quarter steps (L), as Lightroom's Lights Out does; the step after white is the theme again.
+// Everything that draws a background reads Theme.background; text and borders follow the light
+// or dark appearance the background implies.
+
+enum ThemeMode: String, CaseIterable {
+    case system, light, dark
+    var title: String { self == .system ? "Match The Mac" : self == .light ? "Light" : "Dark" }
+}
 
 extension Notification.Name {
     static let themeDidChange = Notification.Name("themeDidChange")
@@ -147,15 +154,58 @@ enum Theme {
         set { preferences.set(newValue ?? -1, forKey: "theme.level") }
     }
 
-    static var background: NSColor { level.flatMap { colorFromHex(levels[$0]) } ?? .windowBackgroundColor }
+    /// Light, dark, or whichever the Mac is set to.
+    static var mode: ThemeMode {
+        get { preferences.string(forKey: "theme.mode").flatMap(ThemeMode.init(rawValue:)) ?? .system }
+        set { preferences.set(newValue.rawValue, forKey: "theme.mode") }
+    }
 
-    /// Dark text on the two light steps; light text from mid grey down.
-    static var appearance: NSAppearance? { level.flatMap { NSAppearance(named: $0 >= 2 ? .darkAqua : .aqua) } }
+    /// A stepped grey when one is on; otherwise white in light, and the Mac's own dark window colour in dark.
+    static var background: NSColor { level.flatMap { colorFromHex(levels[$0]) } ?? (isDark ? .windowBackgroundColor : .white) }
+
+    /// Whether a stepped background takes light text. White, 75% and mid grey take black, which
+    /// reads at 5.3 to 1 on mid grey where white manages 3.9; 25% and black take white.
+    static func takesLightText(level: Int) -> Bool { level >= 3 }
+
+    static var appearance: NSAppearance? {
+        if let l = level { return NSAppearance(named: takesLightText(level: l) ? .darkAqua : .aqua) }
+        switch mode {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
 
     static var isDark: Bool {
-        if let l = level { return l >= 2 }
-        return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        if let l = level { return takesLightText(level: l) }
+        switch mode {
+        case .light: return false
+        case .dark: return true
+        case .system: return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
     }
+
+    /// The step after this one as L walks them: from the theme to black, up through the greys to white, then the theme again.
+    static func next(after level: Int?) -> Int? {
+        guard let l = level else { return levels.count - 1 }
+        return l == 0 ? nil : l - 1
+    }
+
+    /// L: the next background.
+    static func cycle() {
+        level = next(after: level)
+        NotificationCenter.default.post(name: .themeDidChange, object: nil)
+    }
+
+    /// Chooses light, dark or the Mac's own, and lets go of any stepped background.
+    static func choose(_ chosen: ThemeMode) {
+        mode = chosen
+        level = nil
+        NotificationCenter.default.post(name: .themeDidChange, object: nil)
+    }
+
+    /// The footer's switch: dark when it is light, light when it is dark.
+    static func toggle() { choose(isDark ? .light : .dark) }
 
     /// Scroller knobs that show against the background.
     static var knobStyle: NSScroller.KnobStyle { isDark ? .light : .dark }
@@ -170,8 +220,11 @@ enum Theme {
     static func apply(to window: NSWindow) {
         window.backgroundColor = background
         window.appearance = appearance
+        // The toolbar is the background too, whichever step is showing, with a hairline under it.
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .line
         func walk(_ v: NSView) {
-            if let s = v as? NSScrollView { s.scrollerKnobStyle = knobStyle; s.autohidesScrollers = true }
+            if let s = v as? NSScrollView { s.scrollerKnobStyle = knobStyle; s.autohidesScrollers = true; QuietScroller.install(in: s) }
             v.subviews.forEach(walk)
         }
         if let content = window.contentView { walk(content); content.needsDisplay = true }
@@ -202,12 +255,67 @@ enum Theme {
     }
 }
 
+/// The app's scroller: a thin bar with no lane behind it, faint until the pointer is on it, so
+/// it never draws the eye from the colours. It is a grey taken from the text colour, so it
+/// follows the background from white to black.
+final class QuietScroller: NSScroller {
+    static let lane: CGFloat = 9
+    static let bar: CGFloat = 4
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var tracking: NSTrackingArea?
+
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+    override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { lane }
+
+    /// Gives a scroll view these scrollers, once.
+    static func install(in scroll: NSScrollView) {
+        if scroll.hasVerticalScroller, !(scroll.verticalScroller is QuietScroller) {
+            let s = QuietScroller()
+            s.scrollerStyle = scroll.scrollerStyle
+            scroll.verticalScroller = s
+        }
+        if scroll.hasHorizontalScroller, !(scroll.horizontalScroller is QuietScroller) {
+            let s = QuietScroller()
+            s.scrollerStyle = scroll.scrollerStyle
+            scroll.horizontalScroller = s
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { super.mouseEntered(with: event); hovering = true }
+    override func mouseExited(with event: NSEvent) { super.mouseExited(with: event); hovering = false }
+
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
+
+    override func drawKnob() {
+        let knob = rect(for: .knob)
+        guard knob.width > 0, knob.height > 0 else { return }
+        let bar = QuietScroller.bar + (hovering ? 2 : 0)
+        let upright = bounds.height >= bounds.width
+        let r = upright ? NSRect(x: knob.maxX - bar - 2, y: knob.minY + 2, width: bar, height: max(bar, knob.height - 4))
+                        : NSRect(x: knob.minX + 2, y: knob.maxY - bar - 2, width: max(bar, knob.width - 4), height: bar)
+        NSColor.labelColor.withAlphaComponent(hovering ? 0.38 : 0.16).setFill()
+        NSBezierPath(roundedRect: r, xRadius: bar / 2, yRadius: bar / 2).fill()
+    }
+}
+
 /// A scroll view that lets go of a flick once the pointer has left it. macOS keeps sending a
 /// flick's momentum to the view where it began, so the sidebar would go on scrolling while the
 /// mouse was already over the page; this drops those events instead.
 /// A scroll view that does not move, or bounce, when everything in it is already on show. Every
 /// page's scroll view is one of these: a page that fits stays still under the wheel.
 class FittedScrollView: NSScrollView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        QuietScroller.install(in: self)
+    }
+
     /// Whether the whole document is on show, with nothing to scroll to.
     var fits: Bool {
         guard let document = documentView else { return true }
