@@ -130,15 +130,20 @@ func identityColour(_ id: UUID) -> NSColor {
 
 // ---------- Theme ----------
 //
-// Light or dark: as the Mac is set, or one or the other whatever the Mac says. Light is white,
-// #FFFFFF. Over that, the background can be stepped through five greys from black to white in
-// quarter steps (L), as Lightroom's Lights Out does; the step after white is the theme again.
-// Everything that draws a background reads Theme.background; text and borders follow the light
-// or dark appearance the background implies.
+// Light or dark: as the Mac is set, or one or the other whatever the Mac says, or a background
+// of the user's own choosing. Light is white, #FFFFFF. Over any of them L puts the lights out:
+// black, then white, then the theme again. Everything that draws a background reads
+// Theme.background; text and borders follow the light or dark appearance the background implies.
 
 enum ThemeMode: String, CaseIterable {
-    case system, light, dark
-    var title: String { self == .system ? "Match The Mac" : self == .light ? "Light" : "Dark" }
+    case system, light, dark, custom
+    var title: String { self == .system ? "Match The Mac" : self == .light ? "Light" : self == .dark ? "Dark" : "My Own Colours" }
+}
+
+/// The text on a background of the user's own: whichever of black and white reads better, or one of them by choice.
+enum ThemeText: String, CaseIterable {
+    case automatic, black, white
+    var title: String { self == .automatic ? "Automatic" : self == .black ? "Black" : "White" }
 }
 
 extension Notification.Name {
@@ -146,61 +151,72 @@ extension Notification.Name {
 }
 
 enum Theme {
-    static let levels = ["#FFFFFF", "#BFBFBF", "#808080", "#404040", "#000000"]
+    /// What L walks through, over the theme: black, then white.
+    static let lights = ["#000000", "#FFFFFF"]
 
-    /// nil is the system's own background.
-    static var level: Int? {
-        get { let v = preferences.integer(forKey: "theme.level"); return preferences.object(forKey: "theme.level") == nil || v < 0 ? nil : min(v, levels.count - 1) }
-        set { preferences.set(newValue ?? -1, forKey: "theme.level") }
+    /// The background L has put on, as a place in `lights`; nil is the theme itself.
+    static var lightsOut: Int? {
+        get { let v = preferences.integer(forKey: "theme.lights"); return preferences.object(forKey: "theme.lights") == nil || !lights.indices.contains(v) ? nil : v }
+        set { preferences.set(newValue ?? -1, forKey: "theme.lights") }
     }
 
-    /// Light, dark, or whichever the Mac is set to.
+    /// Light, dark, whichever the Mac is set to, or the user's own colours.
     static var mode: ThemeMode {
         get { preferences.string(forKey: "theme.mode").flatMap(ThemeMode.init(rawValue:)) ?? .system }
         set { preferences.set(newValue.rawValue, forKey: "theme.mode") }
     }
 
-    /// A stepped grey when one is on; otherwise white in light, and the Mac's own dark window colour in dark.
-    static var background: NSColor { level.flatMap { colorFromHex(levels[$0]) } ?? (isDark ? .windowBackgroundColor : .white) }
+    /// The user's own background, for My Own Colours; a mid grey until one is chosen.
+    static var customBackground: String {
+        get { preferences.string(forKey: "theme.background").flatMap { colorFromHex($0) == nil ? nil : $0 } ?? "#808080" }
+        set { preferences.set(newValue, forKey: "theme.background") }
+    }
 
-    /// Whether a stepped background takes light text. White, 75% and mid grey take black, which
-    /// reads at 5.3 to 1 on mid grey where white manages 3.9; 25% and black take white.
-    static func takesLightText(level: Int) -> Bool { level >= 3 }
+    static var customText: ThemeText {
+        get { preferences.string(forKey: "theme.text").flatMap(ThemeText.init(rawValue:)) ?? .automatic }
+        set { preferences.set(newValue.rawValue, forKey: "theme.text") }
+    }
+
+    /// The background as a hex where it is a fixed colour: L's black or white, or the user's own. nil is the theme's own light or dark.
+    static var fixedBackground: String? { lightsOut.map { lights[$0] } ?? (mode == .custom ? customBackground : nil) }
+
+    /// White in light, and the Mac's own dark window colour in dark, unless a fixed colour is on.
+    static var background: NSColor { fixedBackground.flatMap(colorFromHex) ?? (isDark ? .windowBackgroundColor : .white) }
+
+    /// Whether white text reads better than black on a colour.
+    static func takesLightText(on hex: String) -> Bool { contrastRatio(hex, "#FFFFFF") > contrastRatio(hex, "#000000") }
 
     static var appearance: NSAppearance? {
-        if let l = level { return NSAppearance(named: takesLightText(level: l) ? .darkAqua : .aqua) }
-        switch mode {
-        case .system: return nil
-        case .light: return NSAppearance(named: .aqua)
-        case .dark: return NSAppearance(named: .darkAqua)
-        }
+        if fixedBackground == nil, mode == .system { return nil }
+        return NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
 
     static var isDark: Bool {
-        if let l = level { return takesLightText(level: l) }
+        if let l = lightsOut { return takesLightText(on: lights[l]) }
         switch mode {
         case .light: return false
         case .dark: return true
         case .system: return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        case .custom: return customText == .white || (customText == .automatic && takesLightText(on: customBackground))
         }
     }
 
-    /// The step after this one as L walks them: from the theme to black, up through the greys to white, then the theme again.
-    static func next(after level: Int?) -> Int? {
-        guard let l = level else { return levels.count - 1 }
-        return l == 0 ? nil : l - 1
+    /// The step after this one as L walks them: from the theme to black, then white, then the theme again.
+    static func next(after place: Int?) -> Int? {
+        guard let p = place else { return 0 }
+        return p + 1 < lights.count ? p + 1 : nil
     }
 
     /// L: the next background.
     static func cycle() {
-        level = next(after: level)
+        lightsOut = next(after: lightsOut)
         NotificationCenter.default.post(name: .themeDidChange, object: nil)
     }
 
-    /// Chooses light, dark or the Mac's own, and lets go of any stepped background.
+    /// Chooses light, dark, the Mac's own or the user's colours, and lets go of L's black or white.
     static func choose(_ chosen: ThemeMode) {
         mode = chosen
-        level = nil
+        lightsOut = nil
         NotificationCenter.default.post(name: .themeDidChange, object: nil)
     }
 
@@ -209,12 +225,6 @@ enum Theme {
 
     /// Scroller knobs that show against the background.
     static var knobStyle: NSScroller.KnobStyle { isDark ? .light : .dark }
-
-    static func step(_ by: Int) {
-        let now = level ?? 2
-        level = max(0, min(levels.count - 1, now + by))
-        NotificationCenter.default.post(name: .themeDidChange, object: nil)
-    }
 
     /// Applies the background and appearance to a window and every scroll view in it.
     static func apply(to window: NSWindow) {

@@ -484,8 +484,18 @@ final class ThemePanel: SettingsPanel {
     private let hoverText = NSColorWell()
     private let activeBackground = NSColorWell()
     private let activeText = NSColorWell()
-    /// Match The Mac, Light, Dark: one is always ticked.
+    /// Match The Mac, Light, Dark, My Own Colours: one is always ticked.
     private lazy var modes: [NSButton] = ThemeMode.allCases.map { check($0.title, #selector(modeChosen(_:))) }
+    /// For My Own Colours: the background, and whether its text is black, white, or whichever reads better.
+    private let ownBackground = NSColorWell()
+    private lazy var ownText = popup(ThemeText.allCases.map { $0.title }, #selector(ownChanged))
+
+    @objc private func ownChanged() {
+        if let hex = hexOf(ownBackground.color) { Theme.customBackground = hex }
+        if ThemeText.allCases.indices.contains(ownText.indexOfSelectedItem) { Theme.customText = ThemeText.allCases[ownText.indexOfSelectedItem] }
+        Theme.choose(.custom)   // changing a colour of your own turns them on
+        refresh()
+    }
 
     @objc private func modeChosen(_ sender: NSButton) {
         if ThemeMode.allCases.indices.contains(sender.tag) { Theme.choose(ThemeMode.allCases[sender.tag]) }
@@ -494,6 +504,10 @@ final class ThemePanel: SettingsPanel {
 
     override func rows() -> [[NSView]] {
         for (at, box) in modes.enumerated() { box.tag = at }
+        ownBackground.target = self
+        ownBackground.action = #selector(ownChanged)
+        ownBackground.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        ownBackground.heightAnchor.constraint(equalToConstant: 24).isActive = true
         for well in [selectionBackground, selectionText, hoverBackground, hoverText, activeBackground, activeText] {
             well.target = self
             well.action = #selector(changed(_:))
@@ -508,7 +522,10 @@ final class ThemePanel: SettingsPanel {
             [label("Theme:"), modes[0]],
             [blank, modes[1]],
             [blank, modes[2]],
-            [blank, note("Match The Mac follows System Settings; Light and Dark hold whatever the Mac says. Light is white. The button at the foot of the window switches between light and dark. Press L to step the background from black to white in quarters and back to the theme, and Shift-L to show the page alone, full screen.")],
+            [blank, modes[3]],
+            [label("My Background:"), row([ownBackground])],
+            [label("My Text:"), ownText],
+            [blank, note("Match The Mac follows System Settings; Light and Dark hold whatever the Mac says. Light is white. My Own Colours puts your background on every page, with black or white text: Automatic takes whichever reads better on it. The button at the foot of the window switches between light and dark. Press L to turn the background black, then white, then back to the theme, and Shift-L to show the page alone, full screen.")],
             [heading("Sidebar"), blank],
             [label("Selected Row:"), pair(selectionBackground, selectionText)],
             [blank, row([button("Reset To Default", #selector(resetSidebar))])],
@@ -522,6 +539,8 @@ final class ThemePanel: SettingsPanel {
 
     override func refresh() {
         for (box, mode) in zip(modes, ThemeMode.allCases) { box.state = mode == Theme.mode ? .on : .off }
+        ownBackground.color = colorFromHex(Theme.customBackground) ?? .gray
+        ownText.selectItem(at: ThemeText.allCases.firstIndex(of: Theme.customText) ?? 0)
         selectionBackground.color = Theme.sidebarSelectionBackground
         selectionText.color = Theme.sidebarSelectionText
         hoverBackground.color = Theme.buttonHoverBackground

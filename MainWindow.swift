@@ -41,7 +41,7 @@ final class ContentViewController: NSViewController {
         let dark = Theme.isDark
         themeSwitch.image = symbol(dark ? "sun.max" : "moon", dark ? "Light" : "Dark", size: 12)
         themeSwitch.contentTintColor = .secondaryLabelColor
-        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Steps The Background From Black To White; Shift-L Shows The Page Alone, Full Screen."
+        themeSwitch.toolTip = (dark ? "Switch To Light" : "Switch To Dark") + ". L Turns The Background Black, Then White, Then Back; Shift-L Shows The Page Alone, Full Screen."
     }
     static var releaseLine: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -670,8 +670,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
 
     @objc private func projectFilesChanged() { sidebar.reload() }
     @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
-    @objc func lighterBackground() { Theme.step(-1) }
-    /// L: the background's next step, from black to white and back to the theme.
+    /// L: black, then white, then the theme again.
     @objc func stepBackground() { Theme.cycle() }
 
     // MARK: The page alone, full screen
@@ -725,7 +724,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         builderItem.isCollapsed = was.builder
         if !was.wasFullScreen, win.styleMask.contains(.fullScreen) { win.toggleFullScreen(nil) }
     }
-    @objc func darkerBackground() { Theme.step(1) }
 
     @objc private func libraryChanged() {
         sidebar.reload()

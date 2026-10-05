@@ -204,9 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Show Sidebar", #selector(MainWindowController.toggleSidebarPane), "s", main, [.command, .control])
             add(m, "Show History", #selector(MainWindowController.toggleHistory), "y", main, [.command, .shift])
             m.addItem(.separator())
-            add(m, "Lighter Background", #selector(MainWindowController.lighterBackground), "]", main)
-            add(m, "Darker Background", #selector(MainWindowController.darkerBackground), "[", main)
-            add(m, "Step Background  (L)", #selector(MainWindowController.stepBackground), "", main)
+            add(m, "Black Or White Background  (L)", #selector(MainWindowController.stepBackground), "", main)
             add(m, "Page Full Screen  (Shift-L)", #selector(MainWindowController.pageFullScreen), "", main)
             add(m, "Customise Toolbar\u{2026}", #selector(NSWindow.runToolbarCustomizationPalette(_:)))
         }
