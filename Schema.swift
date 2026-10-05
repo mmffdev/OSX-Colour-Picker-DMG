@@ -1,11 +1,14 @@
 import AppKit
 
-// ---------- Settings ▸ Schema: a trial ----------
+// ---------- Settings ▸ Schema ----------
 //
 // How a catalogue is laid out, as the user names it: what the main group is called (Project,
-// Client, Brand…), and the groups nested inside it, as deep as they like. This is a trial of the
-// idea only. The tree built here is kept between openings so it can be lived with, but nothing
-// else in the app reads it: rail1 still shows projects as it always has.
+// Client, Brand…), and the groups nested inside it, as deep as they like. rail1 reads it: the
+// main group's name heads the list of projects, and each project shows the schema's groups in
+// the schema's order. Four of the groups are the app's own, and hold what they always have:
+// Information, Palettes, Typography and Tags. Any other group is a label only, for now: it shows
+// in every project and holds nothing. Taking one of the app's own out of the schema hides it in
+// rail1 and loses nothing: the palettes and tags are still in the project's files.
 
 /// One group in the schema: what it is called, what it is for, and the groups inside it.
 struct SchemaNode: Codable, Equatable {
@@ -13,6 +16,18 @@ struct SchemaNode: Codable, Equatable {
     var name: String
     var about = ""
     var children: [SchemaNode] = []
+    /// Which of the app's own groups this is, whatever it has been renamed to; nil for a group that is a label only.
+    var role: SchemaRole? = nil
+}
+
+/// The groups inside a project that the app fills itself.
+enum SchemaRole: String, Codable, CaseIterable {
+    case information, palettes, typography, tags
+    var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
+extension Notification.Name {
+    static let schemaDidChange = Notification.Name("schemaDidChange")
 }
 
 enum SchemaTrial {
@@ -30,13 +45,36 @@ enum SchemaTrial {
         return "Level \(level): " + (words.indices.contains(level - 1) ? words[level - 1] + " Group" : "Group")
     }
 
-    static var start: SchemaNode { SchemaNode(name: "Project") }
-
-    /// The tree as it was left; a lone Project until one is built.
-    static var saved: SchemaNode {
-        get { preferences.data(forKey: "schema.trial").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start }
-        set { if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.trial") } }
+    /// The structure the app has always had: a Project, holding Information, Palettes, Typography and Tags.
+    static var start: SchemaNode {
+        SchemaNode(name: "Project", children: SchemaRole.allCases.map { SchemaNode(name: $0.title, role: $0) })
     }
+
+    /// The schema in use; the app's own structure until it is changed. Kept under a key of its own,
+    /// so a tree built while the panel was only a trial does not rearrange rail1.
+    static var saved: SchemaNode {
+        get { preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.tree") }
+            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
+        }
+    }
+
+    /// Which of the app's own groups a group directly inside the main one is: the role it was given,
+    /// or, for one added by name, the role of that name.
+    static func role(of node: SchemaNode) -> SchemaRole? { node.role ?? SchemaRole.allCases.first { $0.title == node.name } }
+
+    /// The name for several of a thing: Projects, Companies, Classes.
+    static func plural(_ name: String) -> String {
+        let lower = name.lowercased()
+        guard let last = lower.last else { return name }
+        if last == "y", let before = lower.dropLast().last, !"aeiou".contains(before) { return name.dropLast() + "ies" }
+        if last == "s" || last == "x" || lower.hasSuffix("ch") || lower.hasSuffix("sh") { return name + "es" }
+        return name + "s"
+    }
+
+    /// What the main group is called, and several of them.
+    static var primaryName: String { let n = saved.name.trimmingCharacters(in: .whitespaces); return n.isEmpty ? "Project" : n }
 
     /// Every group, top to bottom as the map shows it, with its level: the main group is 1.
     static func rows(of root: SchemaNode) -> [(node: SchemaNode, level: Int)] {
@@ -272,7 +310,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         about.usesSingleLineMode = false
         about.cell?.wraps = true
         about.cell?.isScrollable = false
-        let hint = NSTextField(wrappingLabelWithString: "A trial of the idea. What is built here is kept so it can be lived with, but the catalogue does not use it yet: the sidebar still shows projects as before.")
+        let hint = NSTextField(wrappingLabelWithString: "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, shown in every project and holding nothing. Removing a group hides it and loses nothing.")
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 250
         let customTitle = caption("Custom Name"), aboutTitle = caption("Description")

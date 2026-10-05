@@ -31,6 +31,8 @@ final class SidebarNode: NSObject {
         /// The "Palettes" bucket inside a project, after Information, holding its palettes of colours.
         case projectPalettes(UUID)
         case palette(UUID)
+        /// A group from the schema that is a label only, inside a project: the project, then the schema group.
+        case schemaGroup(UUID, UUID)
     }
 
     let kind: Kind
@@ -51,6 +53,7 @@ final class SidebarNode: NSObject {
         if case .projectTypography = kind { return true }
         if case .projectPalettes = kind { return true }
         if case .projectInformation = kind { return true }
+        if case .schemaGroup = kind { return !children.isEmpty }
         return isGroup || projectID != nil
     }
 
@@ -482,6 +485,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var projectNodes: [UUID: SidebarNode] = [:]
     private var roots: [SidebarNode] = []
     private var selection: Selection = .all
+    /// The schema's label-only groups as they stand in each project, kept so they stay open or shut across a reload.
+    private var schemaNodes: [String: SidebarNode] = [:]
+    /// What each schema group is called, for the cell that shows it, and what the app's own groups have been named.
+    private var schemaNames: [UUID: String] = [:]
+    private var roleNames: [SchemaRole: String] = [:]
 
     // rail1 closed: a narrow strip of icons. The pages open from it; a bucket's icon opens the rail on that bucket.
     static let compactWidth: CGFloat = 56
@@ -715,6 +723,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outline.usesAlternatingRowBackgroundColors = false
         self.scroll = scroll
         NotificationCenter.default.addObserver(self, selector: #selector(themeChanged), name: .themeDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(schemaChanged), name: .schemaDidChange, object: nil)
         // Under the full-width toolbar, with a flat background of its own; the first row sits on the pages' title line.
         // rail1 begins with its title panel, as every rail and the page do.
         let root = SidebarBackdrop()
@@ -742,6 +751,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private var scroll: NSScrollView!
 
+    @objc private func schemaChanged() { reload() }
+
     @objc private func themeChanged() {
         scroll.backgroundColor = Theme.background
         outline.backgroundColor = Theme.background
@@ -762,43 +773,60 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let lib = library.library
         favourites.children = library.favourites.map { SidebarNode(.palette($0.id)) }
         var projects: [SidebarNode] = [], buckets: [SidebarNode] = []
+        let schema = SchemaTrial.saved
+        schemaNames = Dictionary(SchemaTrial.rows(of: schema).map { ($0.node.id, $0.node.name) }, uniquingKeysWith: { first, _ in first })
+        roleNames = Dictionary(schema.children.compactMap { group in SchemaTrial.role(of: group).map { ($0, group.name) } }, uniquingKeysWith: { first, _ in first })
         for p in lib.orderedProjects {
             let node = projectNodes[p.id] ?? SidebarNode(.project(p.id))
             projectNodes[p.id] = node
             let held = lib.palettes(in: p.id)
-            // Its palettes of colours sit in a bucket of their own, like its Typography palettes and tags.
+            // What a project shows, and in what order, is the schema's: the app's own groups hold what they
+            // always have, and any other group is a label, with the groups nested inside it.
             node.children = []
-            // Information comes first, always, and every project has it: part of the scaffold, with its Overview page.
-            let info = infoBuckets[p.id] ?? SidebarNode(.projectInformation(p.id))
-            infoBuckets[p.id] = info
-            if info.children.isEmpty { info.children = [SidebarNode(.overview(p.id))] }
-            node.children.append(info)
-            buckets.append(info)
-            let colours = held.filter { !$0.isTypography }
-            if !colours.isEmpty {
-                let bucket = paletteBuckets[p.id] ?? SidebarNode(.projectPalettes(p.id))
-                paletteBuckets[p.id] = bucket
-                bucket.children = colours.map { SidebarNode(.palette($0.id)) }
-                node.children.append(bucket)
-                buckets.append(bucket)
-            }
-            // Its Typography palettes sit in a bucket of their own, above its tags.
-            let type = held.filter { $0.isTypography }
-            if !type.isEmpty {
-                let bucket = typeBuckets[p.id] ?? SidebarNode(.projectTypography(p.id))
-                typeBuckets[p.id] = bucket
-                bucket.children = type.map { SidebarNode(.palette($0.id)) }
-                node.children.append(bucket)
-                buckets.append(bucket)
-            }
-            // The project's own tags sit in a bucket of their own, under its palettes.
             let own = lib.allTags.filter { lib.project(ofTag: $0) == p.id }
-            if !own.isEmpty {
-                let bucket = tagBuckets[p.id] ?? SidebarNode(.projectTags(p.id))
-                tagBuckets[p.id] = bucket
-                bucket.children = own.map { SidebarNode(.tag($0)) }
-                node.children.append(bucket)
-                buckets.append(bucket)
+            func label(_ group: SchemaNode) -> SidebarNode {
+                let key = p.id.uuidString + group.id.uuidString
+                let made = schemaNodes[key] ?? SidebarNode(.schemaGroup(p.id, group.id))
+                schemaNodes[key] = made
+                made.children = group.children.map(label)
+                buckets.append(made)
+                return made
+            }
+            for group in schema.children {
+                switch SchemaTrial.role(of: group) {
+                case .information?:
+                    // Every project has its Overview page.
+                    let info = infoBuckets[p.id] ?? SidebarNode(.projectInformation(p.id))
+                    infoBuckets[p.id] = info
+                    if info.children.isEmpty { info.children = [SidebarNode(.overview(p.id))] }
+                    node.children.append(info)
+                    buckets.append(info)
+                case .palettes?:
+                    let colours = held.filter { !$0.isTypography }
+                    guard !colours.isEmpty else { continue }
+                    let bucket = paletteBuckets[p.id] ?? SidebarNode(.projectPalettes(p.id))
+                    paletteBuckets[p.id] = bucket
+                    bucket.children = colours.map { SidebarNode(.palette($0.id)) }
+                    node.children.append(bucket)
+                    buckets.append(bucket)
+                case .typography?:
+                    let type = held.filter { $0.isTypography }
+                    guard !type.isEmpty else { continue }
+                    let bucket = typeBuckets[p.id] ?? SidebarNode(.projectTypography(p.id))
+                    typeBuckets[p.id] = bucket
+                    bucket.children = type.map { SidebarNode(.palette($0.id)) }
+                    node.children.append(bucket)
+                    buckets.append(bucket)
+                case .tags?:
+                    guard !own.isEmpty else { continue }
+                    let bucket = tagBuckets[p.id] ?? SidebarNode(.projectTags(p.id))
+                    tagBuckets[p.id] = bucket
+                    bucket.children = own.map { SidebarNode(.tag($0)) }
+                    node.children.append(bucket)
+                    buckets.append(bucket)
+                case nil:
+                    node.children.append(label(group))
+                }
             }
             projects.append(node)
         }
@@ -894,6 +922,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if case .projectTypography = node.kind { return false }
         if case .projectPalettes = node.kind { return false }
         if case .projectInformation = node.kind { return false }
+        if case .schemaGroup = node.kind { return false }
         return true
     }
     // Each main heading after the first carries the gap that separates it from the section above.
@@ -957,7 +986,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let heading = NSUserInterfaceItemIdentifier("projects")
             let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
-            cell.configure(name: "Projects", heading: true, tooltip: "New project")
+            cell.configure(name: SchemaTrial.plural(SchemaTrial.primaryName), heading: true, tooltip: "New \(SchemaTrial.primaryName)")
             cell.toolTip = node.children.isEmpty ? "Group palettes by client or piece of work. Press + to make the first project." : nil
             cell.onAdd = { [weak self] in self?.library.newProject() }
             return cell
@@ -973,14 +1002,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
         case .library: cell.textField?.stringValue = "Library"
         case .loose: cell.textField?.stringValue = "Palettes"; cell.toolTip = "Your stock of palettes. A project takes a copy, so these never change with a project"
+        case .schemaGroup(_, let group):
+            cell.textField?.stringValue = schemaNames[group].flatMap { $0.isEmpty ? nil : $0 } ?? "Unnamed"
+            cell.imageView?.image = symbol("square.dashed", "Group", size: 11)
+            cell.imageView?.contentTintColor = .tertiaryLabelColor
+            cell.toolTip = "A Group From Settings \u{25B8} Schema. It Is A Label For Now, And Holds Nothing Yet."
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .projectPalettes:
-            cell.textField?.stringValue = "Palettes"
+            cell.textField?.stringValue = roleNames[.palettes] ?? "Palettes"
             cell.imageView?.image = symbol("swatchpalette", "Project palettes", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Palettes that belong to this project"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
         case .projectInformation:
-            cell.textField?.stringValue = "Information"
+            cell.textField?.stringValue = roleNames[.information] ?? "Information"
             cell.imageView?.image = symbol("info.circle", "Project information", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "What this project is: its pages of information"
@@ -992,13 +1027,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.toolTip = "The project at a glance"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = ""
         case .projectTypography:
-            cell.textField?.stringValue = "Typography"
+            cell.textField?.stringValue = roleNames[.typography] ?? "Typography"
             cell.imageView?.image = symbol("textformat", "Project typography", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Typography palettes that belong to this project"
             (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
         case .projectTags:
-            cell.textField?.stringValue = "Tags"
+            cell.textField?.stringValue = roleNames[.tags] ?? "Tags"
             cell.imageView?.image = symbol("tag", "Project tags", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.toolTip = "Tags that belong to this project"

@@ -59,8 +59,33 @@ class HoverView: NSView {
         addTrackingArea(t)
         tracking = t
     }
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
+    override func mouseEntered(with event: NSEvent) { onHover?(true); watchScrolling() }
+    override func mouseExited(with event: NSEvent) { onHover?(false); stopWatching() }
+
+    // Scrolled out from under the pointer, a view is never told the pointer has left it, and its
+    // highlight would stay. So while the pointer is on it, it watches the list it is in scroll, and
+    // lets go as soon as the pointer is no longer over it.
+    private var scrollWatch: NSObjectProtocol?
+    private func watchScrolling() {
+        stopWatching()
+        guard let clip = enclosingScrollView?.contentView else { return }
+        clip.postsBoundsChangedNotifications = true
+        scrollWatch = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+            guard let self = self, let window = self.window else { return }
+            if !self.bounds.contains(self.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+                self.onHover?(false)
+                self.stopWatching()
+            }
+        }
+    }
+    private func stopWatching() {
+        if let watch = scrollWatch { NotificationCenter.default.removeObserver(watch) }
+        scrollWatch = nil
+    }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { stopWatching() }
+    }
 }
 
 /// One row of a bucket: an icon, a title, and on the right whatever the kind of row needs.
