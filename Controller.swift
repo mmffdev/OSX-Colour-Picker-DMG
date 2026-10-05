@@ -463,9 +463,10 @@ final class LibraryController: NSObject {
 
     /// Asks for the project's name, makes it, and opens its Overview page, where its details are
     /// filled in. `palette`, when given, goes into the project as a copy once it is made.
-    func startProject(moving palette: UUID?) {
-        onPrompt?(ModalPrompt(title: "New Project", message: "Name the project. Its details are filled in on its Overview page, which opens next.",
-                              placeholder: "Client, product or piece of work", confirm: "Create Project", symbol: "folder.badge.plus",
+    /// `kind` is what the schema calls it, where that is not Project; `made` is told the new project's id, to place it.
+    func startProject(moving palette: UUID?, called kind: String = "Project", made placed: ((UUID) -> Void)? = nil) {
+        onPrompt?(ModalPrompt(title: "New \(kind)", message: "Name the \(kind.lowercased()). Its details are filled in on its Overview page, which opens next.",
+                              placeholder: "Client, product or piece of work", confirm: "Create \(kind)", symbol: "folder.badge.plus",
                               check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
@@ -477,7 +478,8 @@ final class LibraryController: NSObject {
                 id = made
             }
             guard let made = id, let project = self.library.project(made) else { return }
-            self.flash("Created Project \(project.name)")
+            placed?(made)
+            self.flash("Created \(kind) \(project.name)")
             self.onShow?(.overview(made), false)
             // The copy goes in by the usual door, which asks about notes when the palette has some.
             if let palette = palette { self.move(palette: palette, to: made, index: 0) }

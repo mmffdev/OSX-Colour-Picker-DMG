@@ -1211,6 +1211,14 @@ func runHaloTests(check: (Bool, String) -> Void) {
     check(SchemaTrial.start.children.map { SchemaTrial.role(of: $0) } == [.information, .palettes, .typography, .tags]
           && SchemaTrial.role(of: SchemaNode(name: "Colourways", role: .palettes)) == .palettes && SchemaTrial.role(of: SchemaNode(name: "Tags")) == .tags
           && SchemaTrial.role(of: SchemaNode(name: "Trees")) == nil, "the schema starts as the app's own structure, a group keeps its role when it is renamed, and any other group is a label")
+    let clients = SchemaCollection(name: "Clients", folderName: "Client", folders: [SchemaFolder(name: "Acme")], stack: SchemaNode(name: "Contract"))
+    let first = SchemaCollection(id: SchemaTrial.firstCollection, name: "Projects", stack: SchemaTrial.start), lone = UUID(), placed = UUID(), stray = UUID()
+    let spots = [placed.uuidString: SchemaPlace(collection: clients.id, folder: clients.folders[0].id), stray.uuidString: SchemaPlace(collection: UUID(), folder: UUID())]
+    check(SchemaTrial.collection(of: lone, among: [first, clients], places: spots).id == first.id && SchemaTrial.collection(of: placed, among: [first, clients], places: spots).id == clients.id
+          && SchemaTrial.folder(of: placed, among: [first, clients], places: spots) == clients.folders[0].id && SchemaTrial.folder(of: lone, among: [first, clients], places: spots) == nil
+          && SchemaTrial.collection(of: stray, among: [first, clients], places: spots).id == first.id && SchemaTrial.folder(of: stray, among: [first, clients], places: spots) == nil
+          && SchemaTrial.memberName(of: clients) == "Contract" && SchemaTrial.title(forLevel: 0) == "Level 0: Collection",
+          "a project is in the first collection until it is placed in another, in a folder only where its collection has it, and back in the first when its collection has gone")
     check(SchemaTrial.plural("Project") == "Projects" && SchemaTrial.plural("Company") == "Companies" && SchemaTrial.plural("Class") == "Classes"
           && SchemaTrial.plural("Brand") == "Brands" && SchemaTrial.plural("Survey") == "Surveys", "the main group's name is made plural for the heading over them")
     check(Theme.next(after: nil) == 0 && Theme.next(after: 0) == 1 && Theme.next(after: 1) == 2 && Theme.next(after: 2) == 3 && Theme.next(after: 3) == nil

@@ -2,15 +2,23 @@ import AppKit
 
 // ---------- Settings ▸ Schema ----------
 //
-// How a catalogue is laid out, as the user names it: what the main group is called (Project,
-// Client, Brand…), and the groups nested inside it, as deep as they like. rail1 reads it: the
-// main group's name heads the list of projects, and each project shows the schema's groups in
-// the schema's order. Four of the groups are the app's own, and hold what they always have:
+// How a catalogue is laid out, as the user names it, from the top down:
+//
+//   Level 0  a collection: Projects, Clients, Our Own Work. Each is a heading in rail1.
+//   Level 1  optionally, what its members are grouped under: a Client, holding its Contracts.
+//   then     the member itself: a Project, a Contract. This is the app's project, with its files.
+//   below    the groups inside a member, as deep as wanted: the member's stack.
+//
+// Every collection has a default stack that its members follow, and any member can be given a
+// stack of its own. Four of a stack's groups are the app's own, and hold what they always have:
 // Information, Palettes, Typography and Tags. Any other group is a label only, for now: it shows
-// in every project and holds nothing. Taking one of the app's own out of the schema hides it in
-// rail1 and loses nothing: the palettes and tags are still in the project's files.
+// in the member and holds nothing.
+//
+// All of it is kept with the app's settings for the moment, not in the catalogue's files, so it
+// does not travel to another Mac yet. Which collection a project is in is kept by the project's
+// id, so nothing in a project's own files is touched.
 
-/// One group in the schema: what it is called, what it is for, and the groups inside it.
+/// One group in a stack: what it is called, what it is for, and the groups inside it.
 struct SchemaNode: Codable, Equatable {
     var id = UUID()
     var name: String
@@ -26,21 +34,48 @@ enum SchemaRole: String, Codable, CaseIterable {
     var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
 }
 
+/// What a collection's members are grouped under: one client, say.
+struct SchemaFolder: Codable, Equatable {
+    var id = UUID()
+    var name: String
+}
+
+/// A collection: its heading, how its members are grouped if they are, and the stack they follow.
+struct SchemaCollection: Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var about = ""
+    /// What the members are grouped under, such as "Client"; nil when they sit straight under the heading.
+    var folderName: String? = nil
+    var folders: [SchemaFolder] = []
+    /// The default stack. Its top is the member itself, named for what a member is called: Project, Contract.
+    var stack: SchemaNode
+}
+
+/// Where a project sits: its collection, and the folder in it, if any.
+struct SchemaPlace: Codable, Equatable {
+    var collection: UUID
+    var folder: UUID? = nil
+}
+
 extension Notification.Name {
     static let schemaDidChange = Notification.Name("schemaDidChange")
 }
 
 enum SchemaTrial {
-    /// Names offered for the main group, and for the groups inside it.
-    static let primaryNames = ["Project", "Client", "Customer", "Group", "Brand", "Campaign", "Job", "Production", "Title", "Account"]
+    /// Names offered for a collection, for what groups its members, for a member, and for the groups inside one.
+    static let collectionNames = ["Projects", "Clients", "Customers", "Our Own Work", "Studio", "Internal", "Brands", "Campaigns", "Productions", "Personal", "Archive"]
+    static let folderNames = ["Client", "Customer", "Brand", "Account", "Agency", "Department", "Team", "Publisher", "Studio"]
+    static let primaryNames = ["Project", "Contract", "Client", "Customer", "Group", "Brand", "Campaign", "Job", "Production", "Title", "Account"]
     static let nestedNames = ["Palettes", "Typography", "Assets", "Characters", "Environments", "Props", "Vehicles", "Textures", "Materials",
                               "Interface", "Icons", "Logos", "Photography", "Illustration", "Video", "Print", "Packaging", "Social", "Web",
                               "Deliverables", "References", "Scope", "Documents", "Information"]
 
     static func names(forLevel level: Int) -> [String] { level == 1 ? primaryNames : nestedNames }
 
-    /// "Level 1: Primary Group", "Level 2: Secondary Group", and so on down.
+    /// "Level 0: Collection", "Level 1: Primary Group", "Level 2: Secondary Group", and so on down.
     static func title(forLevel level: Int) -> String {
+        if level == 0 { return "Level 0: Collection" }
         let words = ["Primary", "Secondary", "Tertiary", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth"]
         return "Level \(level): " + (words.indices.contains(level - 1) ? words[level - 1] + " Group" : "Group")
     }
@@ -50,19 +85,68 @@ enum SchemaTrial {
         SchemaNode(name: "Project", children: SchemaRole.allCases.map { SchemaNode(name: $0.title, role: $0) })
     }
 
-    /// The schema in use; the app's own structure until it is changed. Kept under a key of its own,
-    /// so a tree built while the panel was only a trial does not rearrange rail1.
-    static var saved: SchemaNode {
-        get { preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start }
+    // MARK: Collections
+
+    /// The first collection is the one every project was in before there were collections, and is where a project with no place of its own still is.
+    static let firstCollection = UUID(uuidString: "C0110000-0000-4000-8000-000000000001") ?? UUID()
+
+    /// Every collection, in rail1's order. Until one is made there is the one the app has always had, with the stack kept before collections.
+    static var collections: [SchemaCollection] {
+        get {
+            if let kept = preferences.data(forKey: "schema.collections").flatMap({ try? JSONDecoder().decode([SchemaCollection].self, from: $0) }), !kept.isEmpty { return kept }
+            let stack = preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start
+            return [SchemaCollection(id: firstCollection, name: plural(stack.name.isEmpty ? "Project" : stack.name), stack: stack)]
+        }
         set {
-            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.tree") }
+            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.collections") }
             NotificationCenter.default.post(name: .schemaDidChange, object: nil)
         }
     }
 
-    // A project follows the schema above, the default, until it is given a stack of its own. Its own
-    // is kept here by the project's id. (Kept with the app's settings for now, not in the project's
-    // file: it does not travel with the project to another Mac yet.)
+    /// The first collection's default stack: what the schema was before there were collections.
+    static var saved: SchemaNode {
+        get { collections[0].stack }
+        set { var all = collections; all[0].stack = newValue; collections = all }
+    }
+
+    static var places: [String: SchemaPlace] {
+        get { preferences.data(forKey: "schema.places").flatMap { try? JSONDecoder().decode([String: SchemaPlace].self, from: $0) } ?? [:] }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.places") }
+            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
+        }
+    }
+
+    /// The collection a project is in: the one it was placed in, while that is still there; otherwise the first.
+    static func collection(of project: UUID, among all: [SchemaCollection], places: [String: SchemaPlace]) -> SchemaCollection {
+        places[project.uuidString].flatMap { place in all.first { $0.id == place.collection } } ?? all[0]
+    }
+    static func collection(of project: UUID) -> SchemaCollection { collection(of: project, among: collections, places: places) }
+
+    /// The folder a project is in, while its collection groups its members and still has that folder.
+    static func folder(of project: UUID, among all: [SchemaCollection], places: [String: SchemaPlace]) -> UUID? {
+        let home = collection(of: project, among: all, places: places)
+        guard home.folderName != nil, let folder = places[project.uuidString]?.folder, home.folders.contains(where: { $0.id == folder }) else { return nil }
+        return folder
+    }
+
+    /// Puts a project in a collection, and in one of its folders or none.
+    static func place(_ project: UUID, in collection: UUID, folder: UUID?) {
+        var all = places
+        all[project.uuidString] = SchemaPlace(collection: collection, folder: folder)
+        places = all
+    }
+
+    static func changeCollection(_ id: UUID, _ change: (inout SchemaCollection) -> Void) {
+        var all = collections
+        guard let at = all.firstIndex(where: { $0.id == id }) else { return }
+        change(&all[at])
+        collections = all
+    }
+
+    // MARK: Stacks
+
+    // A project follows its collection's default stack until it is given one of its own, kept here by the project's id.
     static var own: [String: SchemaNode] {
         get { preferences.data(forKey: "schema.projects").flatMap { try? JSONDecoder().decode([String: SchemaNode].self, from: $0) } ?? [:] }
         set {
@@ -71,16 +155,16 @@ enum SchemaTrial {
         }
     }
     static func hasOwn(_ project: UUID) -> Bool { own[project.uuidString] != nil }
-    /// The stack a project shows: its own, or the default.
-    static func schema(for project: UUID) -> SchemaNode { own[project.uuidString] ?? saved }
-    /// Gives a project a stack of its own, or, with nil, puts it back on the default.
+    /// The stack a project shows: its own, or its collection's default.
+    static func schema(for project: UUID) -> SchemaNode { own[project.uuidString] ?? collection(of: project).stack }
+    /// Gives a project a stack of its own, or, with nil, puts it back on its collection's default.
     static func setSchema(_ tree: SchemaNode?, for project: UUID) {
         var all = own
         all[project.uuidString] = tree
         own = all
     }
 
-    /// Which of the app's own groups a group directly inside the main one is: the role it was given,
+    /// Which of the app's own groups a group directly inside a member is: the role it was given,
     /// or, for one added by name, the role of that name.
     static func role(of node: SchemaNode) -> SchemaRole? { node.role ?? SchemaRole.allCases.first { $0.title == node.name } }
 
@@ -93,10 +177,15 @@ enum SchemaTrial {
         return name + "s"
     }
 
-    /// What the main group is called, and several of them.
-    static var primaryName: String { let n = saved.name.trimmingCharacters(in: .whitespaces); return n.isEmpty ? "Project" : n }
+    /// What a member of a collection is called: the name at the top of its default stack.
+    static func memberName(of collection: SchemaCollection) -> String {
+        let n = collection.stack.name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "Project" : n
+    }
 
-    /// Every group, top to bottom as the map shows it, with its level: the main group is 1.
+    // MARK: A stack's tree
+
+    /// Every group, top to bottom as the map shows it, with its level: the member is 1.
     static func rows(of root: SchemaNode) -> [(node: SchemaNode, level: Int)] {
         func walk(_ n: SchemaNode, _ level: Int) -> [(node: SchemaNode, level: Int)] { [(n, level)] + n.children.flatMap { walk($0, level + 1) } }
         return walk(root, 1)
@@ -128,7 +217,7 @@ enum SchemaTrial {
         return (tree, made)
     }
 
-    /// Adds a group straight after the one with this id, at its level. The main group has no siblings.
+    /// Adds a group straight after the one with this id, at its level. The member itself has no siblings.
     static func addingSibling(after id: UUID, in root: SchemaNode) -> (tree: SchemaNode, added: UUID?) {
         var made: UUID?
         func walk(_ n: SchemaNode, _ level: Int) -> SchemaNode {
@@ -145,7 +234,7 @@ enum SchemaTrial {
         return (walk(root, 1), made)
     }
 
-    /// Takes a group out, with everything inside it. The main group stays.
+    /// Takes a group out, with everything inside it. The member itself stays.
     static func removing(_ id: UUID, from root: SchemaNode) -> SchemaNode {
         var out = root
         out.children = out.children.filter { $0.id != id }.map { removing(id, from: $0) }
@@ -153,15 +242,16 @@ enum SchemaTrial {
     }
 }
 
-/// One group on the map: its level, its name, and, while it is selected or under the pointer, what can be done with it.
+/// One row on the map: its level, its name, what it holds, and, while it is selected or under the pointer, what can be done with it.
 private final class SchemaRowView: HoverView {
-    var onSelect: (() -> Void)?, onChild: (() -> Void)?, onSibling: (() -> Void)?, onRemove: (() -> Void)?
+    var onSelect: (() -> Void)?
     private let isSelected: Bool
     private let actions = NSStackView()
+    private var runs: [() -> Void] = []
     private var over = false { didSet { actions.isHidden = !(over || isSelected); needsDisplay = true } }
 
-    /// `shown` is the name the row carries; `holds`, when given, says what is inside the group, such as "3 Palettes".
-    init(_ node: SchemaNode, level: Int, selected: Bool, shown: String? = nil, holds: String? = nil) {
+    /// `does` is what the row offers, left to right: a symbol, what it says, and what it does.
+    init(_ text: String, level: Int, tip: String, selected: Bool, holds: String? = nil, strong: Bool = false, does: [(symbol: String, tip: String, run: () -> Void)]) {
         isSelected = selected
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -169,33 +259,29 @@ private final class SchemaRowView: HoverView {
         badge.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.caption, weight: .semibold)
         badge.textColor = .secondaryLabelColor
         badge.alignment = .center
-        badge.toolTip = SchemaTrial.title(forLevel: level)
-        let text = shown ?? node.name
+        badge.toolTip = tip
         let name = NSTextField(labelWithString: text.isEmpty ? "Unnamed" : text)
+        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: strong ? .semibold : .regular)
+        name.textColor = text.isEmpty ? .tertiaryLabelColor : .labelColor
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let held = NSTextField(labelWithString: holds ?? "")
         held.font = NSFont.systemFont(ofSize: TextSize.caption)
         held.textColor = .secondaryLabelColor
         held.setContentCompressionResistancePriority(.required, for: .horizontal)
-        name.font = NSFont.systemFont(ofSize: TextSize.body, weight: level == 1 ? .semibold : .regular)
-        name.textColor = text.isEmpty ? .tertiaryLabelColor : .labelColor
-        name.lineBreakMode = .byTruncatingTail
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        func action(_ symbolName: String, _ tip: String, _ selector: Selector) -> NSButton {
-            let b = symbolButton(symbolName, tooltip: tip, target: self, action: selector)
-            b.image = symbol(symbolName, tip, size: 12)
+        runs = does.map { $0.run }
+        let buttons = does.enumerated().map { at, one -> NSButton in
+            let b = symbolButton(one.symbol, tooltip: one.tip, target: self, action: #selector(actionTapped(_:)))
+            b.image = symbol(one.symbol, one.tip, size: 12)
             b.contentTintColor = .secondaryLabelColor
+            b.tag = at
             return b
-        }
-        var buttons = [action("arrow.turn.down.right", "Add A Group Inside This One", #selector(childTapped))]
-        if level > 1 {
-            buttons.append(action("plus", "Add The Next Group At This Level", #selector(siblingTapped)))
-            buttons.append(action("trash", "Remove This Group And Everything Inside It", #selector(removeTapped)))
         }
         actions.setViews(buttons, in: .trailing)
         actions.spacing = 10
         actions.isHidden = !selected
         for v in [badge, name, held, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        let indent = 10 + CGFloat(level - 1) * 20
+        let indent = 10 + CGFloat(level) * 20
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 30),
             badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent),
@@ -213,9 +299,7 @@ private final class SchemaRowView: HoverView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func childTapped() { onChild?() }
-    @objc private func siblingTapped() { onSibling?() }
-    @objc private func removeTapped() { onRemove?() }
+    @objc private func actionTapped(_ sender: NSButton) { if runs.indices.contains(sender.tag) { runs[sender.tag]() } }
     override func mouseDown(with event: NSEvent) { onSelect?() }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -269,18 +353,35 @@ private final class SchemaFlipped: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// The Schema panel. At its head, which stack is being shown: the default, or one project's. Under
-/// that, the map of groups on the left, and on the right the level, name and description of the
-/// one that is selected, or, when a group that holds things is being removed, what to do with them.
+/// The Schema panel. At its head, which collection and which stack are showing. Under that, the
+/// map on the left, from the collection down, and on the right the level, name and description of
+/// the row that is selected, or, when a group that holds things is being removed, what to do with them.
 final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
-    /// The project whose stack is showing; nil is the default.
+    /// What a selected row on the map is.
+    private enum Target {
+        /// Level 0: the collection.
+        case collection
+        /// What the collection's members are grouped under.
+        case tier
+        /// The top of a project's own stack: the project itself.
+        case member(UUID)
+        /// A group in the stack, with its level in the stack: the top is 1.
+        case node(SchemaNode, Int)
+    }
+    private enum Making { case nothing, collection, member }
+
+    private var collectionID = SchemaTrial.firstCollection
+    /// The project whose stack is showing; nil is the collection's default.
     private var stack: UUID?
     private var root = SchemaTrial.saved
+    /// The row that is selected: the collection's id, the tier's, or a group's.
     private var selected: UUID?
+    private static let tierRow = UUID(uuidString: "C0110000-0000-4000-8000-0000000000F1") ?? UUID()
     /// A group that holds things and has been asked to go: the right pane asks what becomes of them.
     private var removing: UUID?
-    private var creating = false
+    private var making = Making.nothing
 
+    private let collectionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let stackPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let stackNote = NSTextField(wrappingLabelWithString: "")
     private let resetButton = NSButton(title: "Use Default", target: nil, action: nil)
@@ -297,15 +398,23 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let customName = NSTextField()
     private let about = NSTextField()
     private let hint = NSTextField(wrappingLabelWithString: "")
-    /// The rows holding the box for a name of the user's own and its label; they take no room while a listed name is chosen.
-    private var customRow: NSGridRow!
-    private var customHead: NSGridRow!
-    private var shownLevel = 0
+    private var customRow: NSGridRow!, customHead: NSGridRow!, aboutRow: NSGridRow!, aboutHead: NSGridRow!
+    private var shownList: [String] = []
     private let detail = NSView()
     private let removal = NSStackView()
 
     private var lib: Library { library.library }
-    private var primary: String { SchemaTrial.primaryName }
+    private var all: [SchemaCollection] = SchemaTrial.collections
+    private var collection: SchemaCollection { all.first { $0.id == collectionID } ?? all[0] }
+    /// What a member of the collection showing is called: Project, Contract.
+    private var member: String { SchemaTrial.memberName(of: collection) }
+    /// How far the stack's levels are pushed down: by one when the collection groups its members.
+    private var offset: Int { collection.folderName == nil ? 0 : 1 }
+    /// The projects in the collection showing.
+    private var members: [Project] {
+        let places = SchemaTrial.places
+        return lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: all, places: places).id == collectionID }
+    }
 
     private func caption(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
@@ -319,8 +428,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     }
 
     override func loadView() {
-        selected = root.id
-        // The head: which stack, and making a new one.
+        selected = collectionID
+        // The head: which collection, which stack, and making a new one of either.
+        collectionPopup.target = self
+        collectionPopup.action = #selector(collectionChosen)
         stackPopup.target = self
         stackPopup.action = #selector(stackChosen)
         stackNote.textColor = .secondaryLabelColor
@@ -335,8 +446,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         newName.action = #selector(createTapped)
         newRow.setViews([newName, createButton, cancelCreate], in: .leading)
         newRow.spacing = 8
-        let head = NSStackView(views: [caption("Stack"), stackPopup, resetButton])
-        head.spacing = 8
+        let heads = NSGridView(views: [[caption("Collection"), collectionPopup, NSGridCell.emptyContentView], [caption("Stack"), stackPopup, resetButton]])
+        heads.rowSpacing = 8
+        heads.columnSpacing = 8
+        heads.column(at: 0).xPlacement = .trailing
 
         // Left: the map.
         let mapTitle = NSTextField(labelWithString: "Structure")
@@ -347,7 +460,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.bezelStyle = .rounded
         addNext.target = self
         addNext.action = #selector(addNextTapped)
-        let top = NSStackView(views: [head, stackNote, newRow])
+        let top = NSStackView(views: [heads, newRow, stackNote])
         top.orientation = .vertical
         top.alignment = .leading
         top.spacing = 8
@@ -355,7 +468,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         divider.boxType = .separator
         for v in [top, mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
 
-        // Right: the selected group.
+        // Right: the selected row.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         let namesTitle = caption("Name")
         names.orientation = .vertical
@@ -379,7 +492,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         column.addSubview(namesScroll)
         customName.placeholderString = "Type A Name"
         customName.delegate = self
-        about.placeholderString = "What This Group Holds"
+        about.placeholderString = "What This Holds"
         about.delegate = self
         about.usesSingleLineMode = false
         about.cell?.wraps = true
@@ -391,8 +504,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         grid.column(at: 0).width = 250
         grid.row(at: 2).topPadding = 10
         grid.row(at: 4).topPadding = 10
-        customRow = grid.row(at: 1)
         customHead = grid.row(at: 0)
+        customRow = grid.row(at: 1)
+        aboutHead = grid.row(at: 2)
+        aboutRow = grid.row(at: 3)
         for v in [namesTitle, column, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; detail.addSubview(v) }
         removal.orientation = .vertical
         removal.alignment = .leading
@@ -403,7 +518,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
         NSLayoutConstraint.activate([
             v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
-            v.heightAnchor.constraint(equalToConstant: 560),
+            v.heightAnchor.constraint(equalToConstant: 620),
             left.topAnchor.constraint(equalTo: v.topAnchor, constant: 22),
             left.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -22),
             left.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 36),
@@ -420,6 +535,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             top.topAnchor.constraint(equalTo: left.topAnchor),
             top.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             top.trailingAnchor.constraint(lessThanOrEqualTo: left.trailingAnchor),
+            collectionPopup.widthAnchor.constraint(equalToConstant: 220),
             stackPopup.widthAnchor.constraint(equalToConstant: 220),
             newName.widthAnchor.constraint(equalToConstant: 220),
             mapTitle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 20),
@@ -458,22 +574,29 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             names.leadingAnchor.constraint(equalTo: page.leadingAnchor),
             names.trailingAnchor.constraint(equalTo: page.trailingAnchor),
             names.bottomAnchor.constraint(equalTo: page.bottomAnchor),
-            // Beside the column: the name typed by hand when Custom is chosen, and the description.
+            // Beside the column: the name typed by hand, and the description.
             grid.topAnchor.constraint(equalTo: namesTitle.topAnchor),
             grid.leadingAnchor.constraint(equalTo: column.trailingAnchor, constant: 24),
             about.heightAnchor.constraint(equalToConstant: 64),
         ])
         view = v
+        load()
         show()
     }
 
-    /// For a trial run: "<project name>" shows that project's stack, and "<project name>/<group name>" presses the bin on one of its groups.
+    /// For a trial run: "<project name>" shows that project's stack, "<project name>/<group name>" presses the bin on one of its
+    /// groups, and "collection:<name>" shows that collection.
     override func viewDidAppear() {
         super.viewDidAppear()
         guard !rehearsed, let ask = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_SCHEMA"] else { return }
         rehearsed = true
+        if ask.hasPrefix("collection:") {
+            if let found = all.first(where: { $0.name == ask.dropFirst("collection:".count) }) { collectionID = found.id; stack = nil; load(); selected = collectionID; show() }
+            return
+        }
         let parts = ask.split(separator: "/", maxSplits: 1).map(String.init)
         guard let project = lib.orderedProjects.first(where: { $0.name == parts[0] }) else { return }
+        collectionID = SchemaTrial.collection(of: project.id).id
         stack = project.id
         load()
         selected = root.id
@@ -483,34 +606,46 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     override func refresh() {
         guard isViewLoaded else { return }
-        // A project that has gone takes its stack off the panel.
-        if let id = stack, lib.project(id) == nil { stack = nil }
         load()
         show()
     }
 
-    /// Reads the stack that is showing from where it is kept.
-    private func load() { root = stack.map { SchemaTrial.schema(for: $0) } ?? SchemaTrial.saved }
+    /// Reads what is showing from where it is kept.
+    private func load() {
+        all = SchemaTrial.collections
+        if !all.contains(where: { $0.id == collectionID }) { collectionID = all[0].id; stack = nil }
+        // A project that has gone, or has moved to another collection, takes its stack off the panel.
+        if let id = stack, !members.contains(where: { $0.id == id }) { stack = nil }
+        root = stack.map { SchemaTrial.schema(for: $0) } ?? collection.stack
+    }
 
     private var current: (node: SchemaNode, level: Int)? { SchemaTrial.rows(of: root).first { $0.node.id == selected } }
 
+    private var target: Target? {
+        if selected == collectionID { return .collection }
+        if selected == SchemaPanel.tierRow { return collection.folderName == nil ? nil : .tier }
+        guard let (node, level) = current else { return nil }
+        if level == 1, let project = stack { return .member(project) }
+        return .node(node, level)
+    }
+
     // MARK: What a group holds
 
-    /// The projects a group on this stack stands in: the one whose stack it is, or every project that follows the default.
-    private var projects: [UUID] { stack.map { [$0] } ?? lib.orderedProjects.map { $0.id }.filter { !SchemaTrial.hasOwn($0) } }
+    /// The projects a group on this stack stands in: the one whose stack it is, or every member that follows the default.
+    private var holders: [UUID] { stack.map { [$0] } ?? members.map { $0.id }.filter { !SchemaTrial.hasOwn($0) } }
 
     private func palettes(_ role: SchemaRole, in project: UUID) -> [UUID] {
         lib.palettes(in: project).filter { $0.isTypography == (role == .typography) }.map { $0.id }
     }
     private func tags(in project: UUID) -> [String] { lib.allTags.filter { lib.project(ofTag: $0) == project } }
 
-    /// How many things one of the app's own groups holds, across `projects`. Information holds the Overview page, which is the project's own, and counts as nothing to lose.
+    /// How many things one of the app's own groups holds, across `holders`. Information holds the Overview page, which is the project's own, and counts as nothing to lose.
     private func count(_ node: SchemaNode, level: Int) -> Int {
         guard level == 2, let role = SchemaTrial.role(of: node) else { return 0 }
         switch role {
         case .information: return 0
-        case .palettes, .typography: return projects.reduce(0) { $0 + palettes(role, in: $1).count }
-        case .tags: return projects.reduce(0) { $0 + tags(in: $1).count }
+        case .palettes, .typography: return holders.reduce(0) { $0 + palettes(role, in: $1).count }
+        case .tags: return holders.reduce(0) { $0 + tags(in: $1).count }
         }
     }
     private func noun(_ role: SchemaRole?, _ n: Int) -> String {
@@ -525,83 +660,145 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     /// Draws the head, the map and the right pane afresh.
     private func show(focusName: Bool = false) {
-        if current == nil { selected = root.id }
+        if target == nil { selected = collectionID }
         if let going = removing, !SchemaTrial.rows(of: root).contains(where: { $0.node.id == going }) { removing = nil }
+        let here = collection, inside = members
 
         // The head.
+        collectionPopup.removeAllItems()
+        for c in all {
+            collectionPopup.addItem(withTitle: c.name.isEmpty ? "Unnamed" : c.name)
+            collectionPopup.lastItem?.representedObject = c.id
+        }
+        collectionPopup.menu?.addItem(.separator())
+        collectionPopup.addItem(withTitle: "New Collection\u{2026}")
+        collectionPopup.lastItem?.tag = -1
+        if let at = collectionPopup.itemArray.firstIndex(where: { $0.representedObject as? UUID == collectionID }) { collectionPopup.selectItem(at: at) }
         stackPopup.removeAllItems()
         stackPopup.addItem(withTitle: "Default")
         stackPopup.menu?.addItem(.separator())
-        for p in lib.orderedProjects {
+        for p in inside {
             stackPopup.addItem(withTitle: p.name)
             stackPopup.lastItem?.representedObject = p.id
             stackPopup.lastItem?.image = symbol(SchemaTrial.hasOwn(p.id) ? "square.stack.3d.up.fill" : "square.stack.3d.up", "", size: 11)
         }
-        stackPopup.menu?.addItem(.separator())
-        stackPopup.addItem(withTitle: "New \(primary)\u{2026}")
+        if !inside.isEmpty { stackPopup.menu?.addItem(.separator()) }
+        stackPopup.addItem(withTitle: "New \(member)\u{2026}")
         stackPopup.lastItem?.tag = -1
         if let id = stack, let at = stackPopup.itemArray.firstIndex(where: { $0.representedObject as? UUID == id }) { stackPopup.selectItem(at: at) } else { stackPopup.selectItem(at: 0) }
         let own = stack.map { SchemaTrial.hasOwn($0) } ?? false
         resetButton.isHidden = !own
-        let following = lib.orderedProjects.filter { !SchemaTrial.hasOwn($0.id) }.count
-        stackNote.stringValue = stack == nil ? "What Every \(primary) Follows Unless It Has A Stack Of Its Own. \(following) Of \(lib.orderedProjects.count) Follow It."
-            : own ? "This \(primary) Has A Stack Of Its Own." : "This \(primary) Follows Default. Change Anything Here And It Gets A Stack Of Its Own."
-        newRow.isHidden = !creating
-        newName.placeholderString = "Name The New \(primary)"
+        let following = inside.filter { !SchemaTrial.hasOwn($0.id) }.count
+        stackNote.stringValue = stack == nil ? "What Every \(member) In \(here.name) Follows Unless It Has A Stack Of Its Own. \(following) Of \(inside.count) Follow It."
+            : own ? "This \(member) Has A Stack Of Its Own." : "This \(member) Follows Default. Change Anything Here And It Gets A Stack Of Its Own."
+        newRow.isHidden = making == .nothing
+        newName.placeholderString = making == .collection ? "Name The New Collection" : "Name The New \(member)"
 
-        // The map.
+        // The map: the collection, what groups its members if anything does, then the stack.
         map.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let projectName = stack.flatMap { lib.project($0)?.name }
-        for (node, level) in SchemaTrial.rows(of: root) {
-            let n = count(node, level: level)
-            let row = SchemaRowView(node, level: level, selected: node.id == selected, shown: level == 1 ? projectName : nil,
-                                    holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil)
-            row.onSelect = { [weak self] in self?.removing = nil; self?.selected = node.id; self?.show() }
-            row.onChild = { [weak self] in self?.add(child: true, at: node.id) }
-            row.onSibling = { [weak self] in self?.add(child: false, at: node.id) }
-            row.onRemove = { [weak self] in self?.remove(node, level: level) }
+        func add(_ row: SchemaRowView, _ id: UUID) {
+            row.onSelect = { [weak self] in self?.removing = nil; self?.selected = id; self?.view.window?.makeFirstResponder(nil); self?.show() }
             map.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: map.widthAnchor).isActive = true
         }
-        guard let (node, level) = current else { return }
-        addNext.title = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2))" : "Add Next Level \(level) Group"
-        levelTitle.stringValue = SchemaTrial.title(forLevel: level)
+        var does: [(symbol: String, tip: String, run: () -> Void)] = []
+        if here.folderName == nil {
+            does.append(("arrow.turn.down.right", "Add A Level Beneath: Group The Members, As A Client Holds Its Contracts", { [weak self] in self?.addTier() }))
+        }
+        if here.id != all[0].id {
+            does.append(("trash", inside.isEmpty ? "Remove This Collection" : "Remove This Collection: Its \(inside.count) Go Back To \(all[0].name)", { [weak self] in self?.removeCollection() }))
+        }
+        add(SchemaRowView(here.name, level: 0, tip: SchemaTrial.title(forLevel: 0), selected: selected == collectionID,
+                          holds: inside.isEmpty ? nil : "\(inside.count) \(inside.count == 1 ? member : SchemaTrial.plural(member))", strong: true, does: does), collectionID)
+        if let tier = here.folderName {
+            add(SchemaRowView(tier, level: 1, tip: SchemaTrial.title(forLevel: 1), selected: selected == SchemaPanel.tierRow,
+                              holds: here.folders.isEmpty ? nil : "\(here.folders.count) Made",
+                              does: [("trash", "Remove This Level: The Members Sit Straight Under \(here.name) Again", { [weak self] in self?.removeTier() })]), SchemaPanel.tierRow)
+        }
+        let projectName = stack.flatMap { lib.project($0)?.name }
+        for (node, level) in SchemaTrial.rows(of: root) {
+            let n = count(node, level: level)
+            var does: [(symbol: String, tip: String, run: () -> Void)] = [("arrow.turn.down.right", "Add A Group Inside This One", { [weak self] in self?.add(child: true, at: node.id) })]
+            if level > 1 {
+                does.append(("plus", "Add The Next Group At This Level", { [weak self] in self?.add(child: false, at: node.id) }))
+                does.append(("trash", "Remove This Group And Everything Inside It", { [weak self] in self?.remove(node, level: level) }))
+            }
+            add(SchemaRowView(level == 1 ? projectName ?? node.name : node.name, level: level + offset, tip: SchemaTrial.title(forLevel: level + offset),
+                              selected: node.id == selected, holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does), node.id)
+        }
 
-        // The right pane: what to do with a group's contents, or the group's own details.
-        let asking = removing == node.id
-        removal.isHidden = !asking
-        detail.isHidden = asking
-        if asking { showRemoval(node, level: level); return }
+        guard let what = target else { return }
+        // The button under the map adds to the stack; it has nothing to add for the collection or its grouping level.
+        if case .node(_, let level) = what {
+            addNext.isHidden = false
+            addNext.title = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2 + offset))" : "Add Next Level \(level + offset) Group"
+        } else if case .member = what {
+            addNext.isHidden = false
+            addNext.title = "Add \(SchemaTrial.title(forLevel: 2 + offset))"
+        } else {
+            addNext.isHidden = true
+        }
 
-        // On a project's stack the main group is the project itself, which is named on its own page.
-        let named = level == 1 && stack != nil
-        let offered = named ? [] : SchemaTrial.names(forLevel: level)
-        // A name of the user's own shows the box to type it in; a name from the list hides it.
-        let custom = !named && !offered.contains(node.name)
+        // The right pane: what to do with a group's contents, or the row's own details.
+        if case .node(let node, let level) = what, removing == node.id {
+            levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
+            removal.isHidden = false
+            detail.isHidden = true
+            showRemoval(node, level: level)
+            return
+        }
+        removal.isHidden = true
+        detail.isHidden = false
+
+        // What the row is called now, the names on offer for it, what is said about it, and a word of help.
+        var name = "", offered: [String] = [], said: String? = nil, help = "", fixed = false
+        switch what {
+        case .collection:
+            levelTitle.stringValue = SchemaTrial.title(forLevel: 0)
+            name = here.name; offered = SchemaTrial.collectionNames; said = here.about
+            help = "A collection is a heading in the sidebar, with its own members and its own default stack. Client work and your own work can each have one."
+        case .tier:
+            levelTitle.stringValue = SchemaTrial.title(forLevel: 1)
+            name = here.folderName ?? ""; offered = SchemaTrial.folderNames
+            help = "What the members of \(here.name) are grouped under. Each one is made in the sidebar, with the plus beside \(here.name), and holds its own \(SchemaTrial.plural(member))."
+        case .member(let project):
+            levelTitle.stringValue = SchemaTrial.title(forLevel: 1 + offset)
+            name = lib.project(project)?.name ?? ""; fixed = true; said = root.about
+            help = "This is the \(member) itself. Type over its name to rename it, and press Return. What a \(member) is called is set on the Default stack."
+        case .node(let node, let level):
+            levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
+            name = node.name; offered = SchemaTrial.names(forLevel: level); said = node.about
+            help = level == 1 ? "What a member of \(here.name) is called. Each one is a project of the app's, with its own files."
+                : "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, holding nothing."
+        }
+        // A name of the user's own shows the box to type it in; a name from the list hides it. A member's name is always typed.
+        let custom = fixed || !offered.contains(name)
         names.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        func add(_ row: SchemaNameRow, _ choose: @escaping () -> Void) {
+        func offer(_ row: SchemaNameRow, _ choose: @escaping () -> Void) {
             row.onChoose = choose
             names.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: names.widthAnchor).isActive = true
         }
-        if named {
-            add(SchemaNameRow(projectName ?? "", chosen: true)) {}
+        if fixed {
+            offer(SchemaNameRow(name, chosen: true)) { [weak self] in if let self = self { self.view.window?.makeFirstResponder(self.customName) } }
         } else {
-            add(SchemaNameRow("Custom Name\u{2026}", chosen: custom, quiet: true)) { [weak self] in self?.choose(name: nil) }
-            for name in offered { add(SchemaNameRow(name, chosen: !custom && name == node.name)) { [weak self] in self?.choose(name: name) } }
+            offer(SchemaNameRow("Custom Name\u{2026}", chosen: custom, quiet: true)) { [weak self] in self?.choose(name: nil) }
+            for one in offered { offer(SchemaNameRow(one, chosen: !custom && one == name)) { [weak self] in self?.choose(name: one) } }
         }
-        // A different group's level starts its column at the top.
-        if level != shownLevel {
-            shownLevel = level
+        // A different list starts its column at the top.
+        if offered != shownList {
+            shownList = offered
             namesScroll.contentView.scroll(to: .zero)
             namesScroll.reflectScrolledClipView(namesScroll.contentView)
         }
         customRow.isHidden = !custom
         customHead.isHidden = !custom
-        if customName.currentEditor() == nil { customName.stringValue = custom ? node.name : "" }
-        if about.currentEditor() == nil { about.stringValue = node.about }
-        hint.stringValue = named ? "This stack is the \(primary) \(projectName ?? "") itself. What a \(primary) is called is set on the Default stack."
-            : "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, holding nothing."
+        (customHead.cell(at: 0).contentView as? NSTextField)?.stringValue = fixed ? "Name" : "Custom Name"
+        aboutRow.isHidden = said == nil
+        aboutHead.isHidden = said == nil
+        if customName.currentEditor() == nil { customName.stringValue = custom ? name : "" }
+        if about.currentEditor() == nil { about.stringValue = said ?? "" }
+        hint.stringValue = help
         if focusName, custom { view.window?.makeFirstResponder(customName) }
     }
 
@@ -633,17 +830,18 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
                 removal.addArrangedSubview(words(role == .tags ? "Deleting a tag takes it off everything that carries it." : "Deleting a palette leaves its colours in All Swatches, and the deletion is recorded as a step in History."))
             }
         } else {
-            removal.addArrangedSubview(words("These are spread over the \(projects.count) that follow Default. On Default the group can be renamed, and they stay where they are. To delete them, choose each \(primary) under Stack and remove the group there."))
+            removal.addArrangedSubview(words("These are spread over the \(holders.count) that follow Default. On Default the group can be renamed, and they stay where they are. To delete them, choose each \(member) under Stack and remove the group there."))
             removal.addArrangedSubview(push("Keep The \(noun(role, n)) And Rename The Group", #selector(keepAndRename)))
         }
         removal.addArrangedSubview(push("Cancel", #selector(cancelRemoval)))
     }
 
-    // MARK: Changing
+    // MARK: Changing the stack
 
     /// Keeps the stack that is showing. A project that was following the default gets a stack of its own the first time anything on it is changed.
     private func keep() {
-        if let id = stack { SchemaTrial.setSchema(root, for: id) } else { SchemaTrial.saved = root }
+        if let id = stack { SchemaTrial.setSchema(root, for: id) } else { let tree = root; SchemaTrial.changeCollection(collectionID) { $0.stack = tree } }
+        all = SchemaTrial.collections
     }
 
     private func add(child: Bool, at id: UUID) {
@@ -698,24 +896,119 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         show()
     }
 
-    /// Under the map: the next group at the selected one's level, or the first inside the main group.
+    /// Under the map: the next group at the selected one's level, or the first inside the member.
     @objc private func addNextTapped() {
         guard let (node, level) = current else { return }
         add(child: level == 1, at: node.id)
     }
 
+    // MARK: Names
+
+    /// Gives the selected row a name: the collection's, the grouping level's, the project's own, or a group's.
+    private func setName(_ name: String, done: Bool) {
+        guard let what = target else { return }
+        switch what {
+        case .collection: SchemaTrial.changeCollection(collectionID) { $0.name = name }; all = SchemaTrial.collections
+        case .tier: SchemaTrial.changeCollection(collectionID) { $0.folderName = name }; all = SchemaTrial.collections
+        case .member(let project):
+            // The project's own name: kept when the typing is finished, not letter by letter, as it renames its files.
+            let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard done, !typed.isEmpty, typed != lib.project(project)?.name else { return }
+            library.apply("Rename Project") { _ = $0.renameProject(project, to: typed) }
+        case .node(let node, _):
+            // One of the app's own groups keeps its part under its new name.
+            root = SchemaTrial.changing(node.id, in: root) { $0.role = SchemaTrial.role(of: $0); $0.name = name }
+            keep()
+        }
+    }
+
     /// A name from the column, or nil for Custom, which empties the name ready to be typed.
     private func choose(name: String?) {
-        guard let id = selected else { return }
-        if name == nil, let now = current, !SchemaTrial.names(forLevel: now.level).contains(now.node.name) {
-            view.window?.makeFirstResponder(customName)   // already a name of the user's own: go to it, and keep it
+        guard let what = target else { return }
+        if name == nil {
+            // Already a name of the user's own: go to it, and keep it.
+            let now: String, offered: [String]
+            switch what {
+            case .collection: now = collection.name; offered = SchemaTrial.collectionNames
+            case .tier: now = collection.folderName ?? ""; offered = SchemaTrial.folderNames
+            case .member: return
+            case .node(let node, let level): now = node.name; offered = SchemaTrial.names(forLevel: level)
+            }
+            if !offered.contains(now) { view.window?.makeFirstResponder(customName); return }
+        }
+        view.window?.makeFirstResponder(nil)
+        setName(name ?? "", done: true)
+        show(focusName: name == nil)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === customName || field === about else { return }
+        if field === customName {
+            setName(field.stringValue, done: false)
+        } else if let what = target {
+            let text = field.stringValue
+            switch what {
+            case .collection: SchemaTrial.changeCollection(collectionID) { $0.about = text }; all = SchemaTrial.collections
+            case .tier: break
+            case .member: root.about = text; keep()
+            case .node(let node, _): root = SchemaTrial.changing(node.id, in: root) { $0.about = text }; keep()
+            }
+        }
+        show()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === customName else { return }
+        setName(field.stringValue, done: true)
+        load()
+        show()
+    }
+
+    // MARK: Collections
+
+    /// Groups the collection's members under a level of their own: a Client, holding its Contracts.
+    private func addTier() {
+        SchemaTrial.changeCollection(collectionID) { $0.folderName = SchemaTrial.folderNames[0] }
+        all = SchemaTrial.collections
+        selected = SchemaPanel.tierRow
+        show()
+    }
+
+    /// Takes the grouping level away. The folders made in it are let go; the members stay in the collection.
+    private func removeTier() {
+        SchemaTrial.changeCollection(collectionID) { $0.folderName = nil; $0.folders = [] }
+        all = SchemaTrial.collections
+        selected = collectionID
+        show()
+    }
+
+    /// Takes a collection away. Its members are not touched: with no collection of their own they are in the first one again.
+    private func removeCollection() {
+        guard collectionID != all[0].id else { return }
+        let going = collectionID
+        SchemaTrial.collections = all.filter { $0.id != going }
+        collectionID = SchemaTrial.firstCollection
+        stack = nil
+        load()
+        selected = collectionID
+        show()
+    }
+
+    @objc private func collectionChosen() {
+        removing = nil
+        view.window?.makeFirstResponder(nil)
+        if collectionPopup.selectedItem?.tag == -1 {
+            making = .collection
+            show()
+            view.window?.makeFirstResponder(newName)
             return
         }
-        // One of the app's own groups keeps its part under its new name.
-        root = SchemaTrial.changing(id, in: root) { $0.role = SchemaTrial.role(of: $0); $0.name = name ?? "" }
-        keep()
-        view.window?.makeFirstResponder(nil)
-        show(focusName: name == nil)
+        making = .nothing
+        collectionID = collectionPopup.selectedItem?.representedObject as? UUID ?? all[0].id
+        stack = nil
+        load()
+        selected = collectionID
+        show()
     }
 
     // MARK: Stacks
@@ -724,12 +1017,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         removing = nil
         view.window?.makeFirstResponder(nil)
         if stackPopup.selectedItem?.tag == -1 {
-            creating = true
+            making = .member
             show()
             view.window?.makeFirstResponder(newName)
             return
         }
-        creating = false
+        making = .nothing
         stack = stackPopup.selectedItem?.representedObject as? UUID
         load()
         selected = root.id
@@ -747,38 +1040,40 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     }
 
     @objc private func cancelCreateTapped() {
-        creating = false
+        making = .nothing
         newName.stringValue = ""
         show()
     }
 
-    /// Makes a new project, as New Project does, and gives it a stack of its own to shape, starting as the default.
+    /// Makes what the name box is for: a collection, starting with the stack of the one showing; or a
+    /// member of this collection, a real project, with a stack of its own to shape.
     @objc private func createTapped() {
         let name = newName.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard creating, ProjectField.problem(name: name, values: [:]) == nil else { NSSound.beep(); return }
-        var made: UUID?
-        library.apply("New Project") { lib in
-            let id = lib.createProject(named: name)
-            let organisation = ProjectField.tidy(Prefs.organisation)
-            if !organisation.isEmpty { lib.setProjectDetails(id, organisation) }
-            made = id
+        guard making != .nothing, ProjectField.problem(name: name, values: [:]) == nil else { NSSound.beep(); return }
+        if making == .collection {
+            let made = SchemaCollection(name: name, stack: collection.stack)
+            SchemaTrial.collections = all + [made]
+            collectionID = made.id
+            stack = nil
+            load()
+            selected = collectionID
+        } else {
+            var made: UUID?
+            library.apply("New Project") { lib in
+                let id = lib.createProject(named: name)
+                let organisation = ProjectField.tidy(Prefs.organisation)
+                if !organisation.isEmpty { lib.setProjectDetails(id, organisation) }
+                made = id
+            }
+            guard let id = made, lib.project(id) != nil else { NSSound.beep(); return }
+            SchemaTrial.place(id, in: collectionID, folder: nil)
+            SchemaTrial.setSchema(collection.stack, for: id)
+            stack = id
+            load()
+            selected = root.id
         }
-        guard let id = made, lib.project(id) != nil else { NSSound.beep(); return }
-        SchemaTrial.setSchema(SchemaTrial.saved, for: id)
-        creating = false
+        making = .nothing
         newName.stringValue = ""
-        stack = id
-        load()
-        selected = root.id
-        show()
-    }
-
-    func controlTextDidChange(_ obj: Notification) {
-        guard let id = selected, let field = obj.object as? NSTextField, field === customName || field === about else { return }
-        root = SchemaTrial.changing(id, in: root) { node in
-            if field === customName { node.name = field.stringValue } else { node.about = field.stringValue }
-        }
-        keep()
         show()
     }
 }

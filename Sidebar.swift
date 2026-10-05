@@ -33,6 +33,10 @@ final class SidebarNode: NSObject {
         case palette(UUID)
         /// A group from the schema that is a label only, inside a project: the project, then the schema group.
         case schemaGroup(UUID, UUID)
+        /// A collection's heading, for every collection after the first; the first is `.projects`.
+        case collection(UUID)
+        /// What a collection's members are grouped under, such as one client: the collection, then the folder.
+        case folder(UUID, UUID)
     }
 
     let kind: Kind
@@ -42,7 +46,7 @@ final class SidebarNode: NSObject {
 
     var isGroup: Bool {
         switch kind {
-        case .favourites, .library, .loose, .tags, .projects, .tools, .typography: return true
+        case .favourites, .library, .loose, .tags, .projects, .tools, .typography, .collection: return true
         default: return false
         }
     }
@@ -54,6 +58,7 @@ final class SidebarNode: NSObject {
         if case .projectPalettes = kind { return true }
         if case .projectInformation = kind { return true }
         if case .schemaGroup = kind { return !children.isEmpty }
+        if case .folder = kind { return true }
         return isGroup || projectID != nil
     }
 
@@ -250,8 +255,9 @@ final class ProjectHeaderCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false, locked: Bool? = nil) {
+    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false, locked: Bool? = nil, symbolName: String = "folder") {
         title.stringValue = name
+        folder.image = symbol(symbolName, name, size: 12)
         warning.isHidden = !lost
         lock.isHidden = locked == nil
         if let locked = locked {
@@ -488,6 +494,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// The schema's label-only groups as they stand in each project, kept so they stay open or shut across a reload.
     private var schemaNodes: [String: SidebarNode] = [:]
     /// What each schema group is called, for the cell that shows it, and what the app's own groups have been named.
+    /// The collections as they stood at the last reload, their headings after the first, and their folders, kept so they stay open or shut.
+    private var collectionsNow: [SchemaCollection] = []
+    private var collectionNodes: [UUID: SidebarNode] = [:]
+    private var folderNodes: [UUID: SidebarNode] = [:]
     private var schemaNames: [String: String] = [:]
     private var roleNames: [UUID: [SchemaRole: String]] = [:]
 
@@ -753,6 +763,23 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc private func schemaChanged() { reload() }
 
+    /// A new member of a collection, in one of its folders or none: a project, asked for by the name the collection gives it.
+    private func newMember(in collection: SchemaCollection, folder: UUID?) {
+        library.startProject(moving: nil, called: SchemaTrial.memberName(of: collection)) { made in
+            SchemaTrial.place(made, in: collection.id, folder: folder)
+        }
+    }
+
+    /// A new folder in a collection that groups its members: a client, say. Asked for by name.
+    private func newFolder(in collection: SchemaCollection) {
+        let kind = collection.folderName ?? "Group"
+        library.onPrompt?(ModalPrompt(title: "New \(kind)", message: "Name the \(kind.lowercased()). Its \(SchemaTrial.plural(SchemaTrial.memberName(of: collection)).lowercased()) are made inside it.",
+                                      placeholder: "\(kind) name", confirm: "Create \(kind)", symbol: "building.2",
+                                      check: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Give the \(kind.lowercased()) a name." : nil }) { name in
+            SchemaTrial.changeCollection(collection.id) { $0.folders.append(SchemaFolder(name: name.trimmingCharacters(in: .whitespacesAndNewlines))) }
+        })
+    }
+
     /// What one of the app's own groups is called in a project: the name its stack gives it.
     private func named(_ role: SchemaRole, in project: UUID) -> String {
         roleNames[project]?[role].flatMap { $0.isEmpty ? nil : $0 } ?? role.title
@@ -845,8 +872,31 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         typography.children = lib.listedPalettes.filter { $0.isTypography }.map { SidebarNode(.palette($0.id)) }
         // Every tag, global or not, for quick access; a project's own also sit in its bucket above.
         tags.children = lib.allTags.map { SidebarNode(.tag($0)) } + [SidebarNode(.editTags)]
-        projectsGroup.children = projects
-        roots = [libraryGroup, toolsGroup, favourites, projectsGroup, loose, typography, tags]
+        // Each collection is a heading, the first being the one there has always been. Under it: its folders,
+        // where it groups its members, each holding its own; then the members in no folder.
+        let all = SchemaTrial.collections, places = SchemaTrial.places
+        collectionsNow = all
+        var tops: [SidebarNode] = [], folders: [SidebarNode] = []
+        for (at, c) in all.enumerated() {
+            let top = at == 0 ? projectsGroup : (collectionNodes[c.id] ?? SidebarNode(.collection(c.id)))
+            if at > 0 { collectionNodes[c.id] = top }
+            let members = projects.filter { node in node.projectID.map { SchemaTrial.collection(of: $0, among: all, places: places).id == c.id } ?? false }
+            var inside: [SidebarNode] = []
+            if c.folderName != nil {
+                for f in c.folders {
+                    let node = folderNodes[f.id] ?? SidebarNode(.folder(c.id, f.id))
+                    folderNodes[f.id] = node
+                    node.children = members.filter { $0.projectID.flatMap { SchemaTrial.folder(of: $0, among: all, places: places) } == f.id }
+                    inside.append(node)
+                    folders.append(node)
+                }
+            }
+            inside += members.filter { $0.projectID.flatMap { SchemaTrial.folder(of: $0, among: all, places: places) } == nil }
+            top.children = inside
+            tops.append(top)
+        }
+        buckets += folders
+        roots = [libraryGroup, toolsGroup, favourites] + tops + [loose, typography, tags]
 
         settingSelection = true
         outline.reloadData()
@@ -864,7 +914,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// Opens a project in the list and scrolls to it, without changing what the page shows.
     func reveal(project id: UUID) {
         guard let node = projectNodes[id] else { return }
-        outline.expandItem(projectsGroup)
+        // Its collection's heading, its folder if it is in one, then the project itself.
+        for top in roots { if top === projectsGroup || { if case .collection = top.kind { return true }; return false }() { outline.expandItem(top) } }
+        for folder in folderNodes.values where folder.children.contains(where: { $0 === node }) { outline.expandItem(folder) }
         outline.expandItem(node)
         let row = outline.row(forItem: node)
         guard row >= 0 else { return }
@@ -931,6 +983,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if case .projectPalettes = node.kind { return false }
         if case .projectInformation = node.kind { return false }
         if case .schemaGroup = node.kind { return false }
+        if case .folder = node.kind { return false }
         return true
     }
     // Each main heading after the first carries the gap that separates it from the section above.
@@ -990,13 +1043,31 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
             return cell
         }
-        if node.kind == .projects {
+        // A collection's heading: the first collection's is the heading there has always been.
+        var heads: SchemaCollection?
+        if node.kind == .projects { heads = collectionsNow.first }
+        if case .collection(let id) = node.kind { heads = collectionsNow.first { $0.id == id } }
+        if let c = heads {
             let heading = NSUserInterfaceItemIdentifier("projects")
             let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
-            cell.configure(name: SchemaTrial.plural(SchemaTrial.primaryName), heading: true, tooltip: "New \(SchemaTrial.primaryName)")
-            cell.toolTip = node.children.isEmpty ? "Group palettes by client or piece of work. Press + to make the first project." : nil
-            cell.onAdd = { [weak self] in self?.library.newProject() }
+            // The plus makes what sits straight under the heading: one of what groups the members, or a member.
+            let makes = c.folderName ?? SchemaTrial.memberName(of: c)
+            cell.configure(name: c.name.isEmpty ? "Unnamed" : c.name, heading: true, tooltip: "New \(makes)")
+            cell.toolTip = node.children.isEmpty ? "Nothing here yet. Press + to make the first \(makes.lowercased())." : nil
+            cell.onAdd = { [weak self] in
+                if c.folderName != nil { self?.newFolder(in: c) } else { self?.newMember(in: c, folder: nil) }
+            }
+            return cell
+        }
+        if case .folder(let cid, let fid) = node.kind, let c = collectionsNow.first(where: { $0.id == cid }), let f = c.folders.first(where: { $0.id == fid }) {
+            let id = NSUserInterfaceItemIdentifier("folder")
+            let cell = o.makeView(withIdentifier: id, owner: self) as? ProjectHeaderCell ?? {
+                let made = ProjectHeaderCell(frame: .zero); made.identifier = id; return made }()
+            let member = SchemaTrial.memberName(of: c)
+            cell.configure(name: f.name, tooltip: "New \(member) For \(f.name)", symbolName: "building.2")
+            cell.toolTip = node.children.isEmpty ? "No \(SchemaTrial.plural(member).lowercased()) yet. Press + to make the first." : nil
+            cell.onAdd = { [weak self] in self?.newMember(in: c, folder: f.id) }
             return cell
         }
 
@@ -1303,8 +1374,30 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             add("Show Project File", #selector(projectFileClicked(_:)), id)
             add("Keep Project In\u{2026}", #selector(moveProjectClicked(_:)), id)
             add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
+            // Where it sits: any collection, or any folder of one that groups its members.
+            let move = NSMenu()
+            for c in collectionsNow {
+                let item = move.addItem(withTitle: c.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = [id, c.id] as [UUID]
+                guard c.folderName != nil else { continue }
+                for f in c.folders {
+                    let inner = move.addItem(withTitle: f.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
+                    inner.target = self
+                    inner.indentationLevel = 1
+                    inner.representedObject = [id, c.id, f.id] as [UUID]
+                }
+            }
+            menu.addItem(withTitle: "Move To", action: nil, keyEquivalent: "").submenu = move
             menu.addItem(.separator())
             add("Delete Project", #selector(deleteProjectClicked(_:)), id)
+        } else if case .folder(let cid, let fid)? = clicked?.kind {
+            add("Rename\u{2026}", #selector(renameFolderClicked(_:)), [cid, fid] as [UUID])
+            let empty = clicked?.children.isEmpty ?? true
+            add("Delete", #selector(deleteFolderClicked(_:)), [cid, fid] as [UUID])
+            menu.items.last?.isEnabled = empty
+            menu.autoenablesItems = false
+            if !empty { menu.items.last?.toolTip = "Move what it holds elsewhere first" }
         } else {
             menu.addItem(withTitle: "New Palette", action: #selector(LibraryController.newPalette), keyEquivalent: "").target = library
             menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
@@ -1344,4 +1437,28 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func moveProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.moveProject(id) } }
     @objc private func projectPackClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportDesignPack(project: id) } }
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
+
+    /// Move To: the project, the collection, and the folder if one was chosen.
+    @objc private func placeClicked(_ s: NSMenuItem) {
+        guard let ids = s.representedObject as? [UUID], ids.count >= 2 else { return }
+        SchemaTrial.place(ids[0], in: ids[1], folder: ids.count > 2 ? ids[2] : nil)
+    }
+
+    @objc private func renameFolderClicked(_ s: NSMenuItem) {
+        guard let ids = s.representedObject as? [UUID], ids.count == 2, let c = collectionsNow.first(where: { $0.id == ids[0] }),
+              let f = c.folders.first(where: { $0.id == ids[1] }) else { return }
+        let kind = c.folderName ?? "Group"
+        library.onPrompt?(ModalPrompt(title: "Rename \(f.name)", message: "The \(kind.lowercased())'s new name.", placeholder: f.name, confirm: "Rename", symbol: "building.2",
+                                      check: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Give the \(kind.lowercased()) a name." : nil }) { name in
+            SchemaTrial.changeCollection(ids[0]) { c in
+                if let at = c.folders.firstIndex(where: { $0.id == ids[1] }) { c.folders[at].name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+        })
+    }
+
+    /// Takes away a folder that holds nothing.
+    @objc private func deleteFolderClicked(_ s: NSMenuItem) {
+        guard let ids = s.representedObject as? [UUID], ids.count == 2 else { return }
+        SchemaTrial.changeCollection(ids[0]) { $0.folders.removeAll { $0.id == ids[1] } }
+    }
 }
