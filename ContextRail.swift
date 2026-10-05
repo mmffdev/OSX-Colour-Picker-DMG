@@ -49,7 +49,7 @@ enum RailStyle {
 }
 
 /// A view that says when the pointer comes onto it and leaves it.
-final class HoverView: NSView {
+class HoverView: NSView {
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
     override func updateTrackingAreas() {
@@ -190,6 +190,15 @@ final class RailBucket: NSView {
     private let rows = NSStackView()
     private let head = HoverView()
     private(set) var isOpen = true
+    private var headHeight: NSLayoutConstraint!
+    /// False where something else names the bucket, as a dropdown's button does: the rows alone, always open.
+    var showsHeading = true {
+        didSet {
+            head.isHidden = !showsHeading
+            headHeight.constant = showsHeading ? RailStyle.row : 0
+            if !showsHeading { isOpen = true; show() }
+        }
+    }
 
     init(_ title: String) {
         super.init(frame: .zero)
@@ -210,7 +219,6 @@ final class RailBucket: NSView {
             head.topAnchor.constraint(equalTo: topAnchor),
             head.leadingAnchor.constraint(equalTo: leadingAnchor),
             head.trailingAnchor.constraint(equalTo: trailingAnchor),
-            head.heightAnchor.constraint(equalToConstant: RailStyle.row),
             arrow.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -RailStyle.trailing),
             arrow.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             arrow.widthAnchor.constraint(equalToConstant: 12),
@@ -221,6 +229,8 @@ final class RailBucket: NSView {
             rows.trailingAnchor.constraint(equalTo: trailingAnchor),
             rows.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        headHeight = head.heightAnchor.constraint(equalToConstant: RailStyle.row)
+        headHeight.isActive = true
         show()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -239,6 +249,82 @@ final class RailBucket: NSView {
         rows.isHidden = !isOpen
     }
     @objc private func toggle() { isOpen.toggle(); show() }
+}
+
+/// A dropdown on a page's options bar: an icon, a title and a small arrow, as a rail's row is an
+/// icon and a title. Pressed, it drops its bucket of rows beneath it.
+final class BarDropdown: HoverView {
+    private let icon = NSImageView(), title = NSTextField(labelWithString: ""), arrow = NSImageView()
+    private let bucket: RailBucket
+    private let popover = NSPopover()
+    private var over = false { didSet { needsDisplay = true } }
+
+    init(_ text: String, symbol name: String, bucket: RailBucket, tip: String) {
+        self.bucket = bucket
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        toolTip = tip
+        title.font = RailStyle.bodyFont
+        icon.contentTintColor = .secondaryLabelColor
+        arrow.image = symbol("chevron.down", "Open", size: 8, weight: .semibold)
+        arrow.contentTintColor = .tertiaryLabelColor
+        show(text, symbol: name)
+        for v in [icon, title, arrow] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: RailStyle.row),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            arrow.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 6),
+            arrow.centerYAnchor.constraint(equalTo: centerYAnchor),
+            arrow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+        ])
+        onHover = { [weak self] on in self?.over = on }
+        // The bucket's rows, without its heading, in a panel that closes on a press elsewhere.
+        bucket.showsHeading = false
+        let holder = NSViewController()
+        holder.view = NSView()
+        bucket.removeFromSuperview()
+        holder.view.addSubview(bucket)
+        NSLayoutConstraint.activate([
+            holder.view.widthAnchor.constraint(equalToConstant: 250),
+            bucket.topAnchor.constraint(equalTo: holder.view.topAnchor, constant: 6),
+            bucket.bottomAnchor.constraint(equalTo: holder.view.bottomAnchor, constant: -6),
+            bucket.leadingAnchor.constraint(equalTo: holder.view.leadingAnchor),
+            bucket.trailingAnchor.constraint(equalTo: holder.view.trailingAnchor),
+        ])
+        popover.contentViewController = holder
+        popover.behavior = .transient
+        setAccessibilityRole(.popUpButton)
+        setAccessibilityLabel(text)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Changes what the button says, for a dropdown that names what is chosen in it.
+    func show(_ text: String, symbol name: String) {
+        title.stringValue = text
+        icon.image = symbol(name, text, size: 13)
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        toggle()
+    }
+
+    /// Drops the rows, or takes them back up.
+    func toggle() {
+        if popover.isShown { popover.close() } else { popover.show(relativeTo: bounds, of: self, preferredEdge: .minY) }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard over || popover.isShown else { return }
+        Theme.buttonHoverBackground.withAlphaComponent(0.55).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+    }
 }
 
 /// A rail a page hands to the window: the title panel, then its buckets.

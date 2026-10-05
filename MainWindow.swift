@@ -454,8 +454,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         selection = s
         library.current = s
         // rail2 is there for a page that has one: for now, a palette's.
-        var rail: NSView?
-        if case .palette(let id) = s, library.library.swatch(id)?.isTypography != true { rail = content.palette.contextRail }
+        let rail: NSView? = nil
+        // A palette's options are on its own bar now; rail2 waits for the information rail.
         contextRail.show(rail)
         let opening = rail != nil && contextItem.isCollapsed
         contextItem.isCollapsed = rail == nil || pageAlone != nil
@@ -638,6 +638,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             self.frameSettled = true
             // Nothing is being typed on opening: the palette's name does not start out selected for editing.
             if self.window?.firstResponder is NSText { self.window?.makeFirstResponder(nil) }
+            // For a trial run: one of the palette page's dropdowns opened, or a bucket slid out of rail1's strip.
+            let env = ProcessInfo.processInfo.environment
+            if let n = env["MMFFDEV_COLOUR3_DROPDOWN"].flatMap({ Int($0) }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.content.palette.rehearseDropdown(n) }
+            }
+            if let title = env["MMFFDEV_COLOUR3_SLIDE_OUT"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.setSidebar(compact: true) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.sidebar.rehearseSlideOut(title) }
+            }
             // For a trial run: rail1 shut to its strip, then opened again.
             if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_RAIL"] != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.setSidebar(compact: true) }

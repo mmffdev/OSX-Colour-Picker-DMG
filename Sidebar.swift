@@ -317,6 +317,50 @@ final class ThemedRowView: NSTableRowView {
     }
 }
 
+/// One of the strip's icons: a button that says when the pointer is on it.
+final class StripButton: NSButton {
+    var onHover: ((Bool) -> Void)?
+    private var tracking: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+}
+
+/// What slides out beside rail1's strip: a rail holding one bucket's contents, over the page, with an edge and a shadow.
+final class SlideOutRail: HoverView {
+    static let width: CGFloat = 250
+    let rail = ContextRail()
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        shadow = { let s = NSShadow(); s.shadowBlurRadius = 18; s.shadowOffset = NSSize(width: 6, height: 0); s.shadowColor = NSColor.black.withAlphaComponent(0.28); return s }()
+        rail.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rail)
+        NSLayoutConstraint.activate([
+            rail.topAnchor.constraint(equalTo: topAnchor), rail.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rail.leadingAnchor.constraint(equalTo: leadingAnchor), rail.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.background.setFill()
+        bounds.fill()
+        NSColor.separatorColor.setFill()
+        NSRect(x: bounds.maxX - 1, y: 0, width: 1, height: bounds.height).fill()
+        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+    }
+    // Presses stop here: nothing under the slide-out is pressed through it.
+    override func mouseDown(with event: NSEvent) {}
+}
+
 /// A cell whose text the list does not resize to the system's sidebar size.
 final class HeadingCellView: NSTableCellView {
     override var rowSizeStyle: NSTableView.RowSizeStyle { get { .custom } set {} }
@@ -468,9 +512,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 if let last = strip.arrangedSubviews.last { strip.setCustomSpacing(18, after: last) }
                 continue
             }
-            let b = symbolButton(entry.symbol, tooltip: entry.title, target: self, action: #selector(stripTapped(_:)))
-            b.image = symbol(entry.symbol, entry.title, size: 15)
+            let b = StripButton(image: symbol(entry.symbol, entry.title, size: 15), target: self, action: #selector(stripTapped(_:)))
+            b.isBordered = false
+            b.toolTip = entry.bucket == nil ? entry.title : nil   // a bucket's icon slides its contents out, which says what it is
+            b.setAccessibilityLabel(entry.title)
             b.tag = at
+            b.onHover = { [weak self, weak b] over in if let b = b { self?.stripHover(b, over) } }
             b.translatesAutoresizingMaskIntoConstraints = false
             b.widthAnchor.constraint(equalToConstant: 34).isActive = true
             b.heightAnchor.constraint(equalToConstant: 30).isActive = true
@@ -489,7 +536,112 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
     }
 
+    // MARK: The slide-out
+
+    private var slideOut: SlideOutRail?
+    private var slideOutFor = -1
+    private var overStrip = false, overSlideOut = false
+    private var closing: DispatchWorkItem?
+
+    /// The pointer came onto, or left, one of the strip's icons.
+    private func stripHover(_ button: NSButton, _ over: Bool) {
+        overStrip = over
+        guard over else { closeSlideOutSoon(); return }
+        guard isCompact, stripItems.indices.contains(button.tag), let entry = stripItems[button.tag], let bucket = entry.bucket else { closeSlideOut(); return }
+        closing?.cancel()
+        if slideOutFor != button.tag { openSlideOut(for: bucket, named: entry.title, tag: button.tag) }
+    }
+
+    /// What a bucket holds, as rows that go where they say and shut the slide-out behind them.
+    private func slideOutBuckets(for bucket: SidebarNode) -> [RailBucket] {
+        let lib = library.library
+        func go(_ to: Selection) -> RailRow.Kind { .link { [weak self] in self?.closeSlideOut(); self?.onSelect?(to) } }
+        func palette(_ s: Swatch) -> RailRow {
+            RailRow(s.name, symbol: s.isTypography ? "textformat" : "swatchpalette", dot: s.isTypography ? nil : s.entries.first.flatMap { colorFromHex($0.hex) },
+                    tip: s.name, kind: go(.palette(s.id)))
+        }
+        func one(_ rows: [NSView], none: String) -> [RailBucket] {
+            let b = RailBucket("")
+            b.showsHeading = false
+            b.set(rows.isEmpty ? [RailRow(none, symbol: "circle.dashed", kind: .link {})] : rows)
+            return [b]
+        }
+        switch bucket.kind {
+        case .favourites: return one(library.favourites.map(palette), none: "No Favourites Yet")
+        case .loose: return one(lib.swatches.filter { $0.projectID == nil && !$0.isTypography }.map(palette), none: "No Palettes Yet")
+        case .typography: return one(lib.swatches.filter { $0.projectID == nil && $0.isTypography }.map(palette), none: "No Typography Yet")
+        case .tags: return one(lib.allTags.map { tag in RailRow("#" + tag, symbol: "tag", dot: tagColour(lib.info(forTag: tag)), kind: go(.tag(tag))) }, none: "No Tags Yet")
+        case .projects:
+            // Each project is a bucket of its own: its overview, then its palettes.
+            let all = lib.orderedProjects.map { p -> RailBucket in
+                let b = RailBucket(p.name)
+                b.set([RailRow("Overview", symbol: "doc.text", kind: go(.overview(p.id)))] + lib.swatches.filter { $0.projectID == p.id }.map(palette))
+                return b
+            }
+            return all.isEmpty ? one([], none: "No Projects Yet") : all
+        default: return []
+        }
+    }
+
+    private func openSlideOut(for bucket: SidebarNode, named name: String, tag: Int) {
+        guard let host = view.window?.contentView else { return }
+        slideOut?.removeFromSuperview()
+        let panel = SlideOutRail()
+        panel.rail.title.title.stringValue = name
+        panel.rail.set(slideOutBuckets(for: bucket))
+        panel.onHover = { [weak self] over in
+            self?.overSlideOut = over
+            if over { self?.closing?.cancel() } else { self?.closeSlideOutSoon() }
+        }
+        // Beside the strip, from under the toolbar to the foot of the rail, over the page.
+        let strip = view.convert(view.bounds, to: host), top = view.safeAreaInsets.top
+        let height = strip.height - top, y = host.isFlipped ? strip.minY + top : strip.minY
+        let rest = NSRect(x: strip.maxX, y: y, width: SlideOutRail.width, height: height)
+        panel.frame = rest.offsetBy(dx: -14, dy: 0)
+        panel.alphaValue = 0
+        host.addSubview(panel)
+        slideOut = panel
+        slideOutFor = tag
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().frame = rest
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    /// Shuts the slide-out a moment after the pointer has left both it and the strip, so crossing from one to the other keeps it open.
+    private func closeSlideOutSoon() {
+        closing?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.overStrip, !self.overSlideOut else { return }
+            self.closeSlideOut()
+        }
+        closing = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: work)
+    }
+
+    private func closeSlideOut() {
+        closing?.cancel()
+        guard let panel = slideOut else { return }
+        slideOut = nil
+        slideOutFor = -1
+        overSlideOut = false
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.12
+            panel.animator().alphaValue = 0
+        }, completionHandler: { panel.removeFromSuperview() })
+    }
+
+    /// For a trial run: slides out the strip's bucket with this title.
+    func rehearseSlideOut(_ title: String) {
+        guard let at = stripItems.firstIndex(where: { $0?.title == title }), let bucket = stripItems[at]?.bucket else { return }
+        overStrip = true
+        openSlideOut(for: bucket, named: title, tag: at)
+    }
+
     @objc private func stripTapped(_ sender: NSButton) {
+        closeSlideOut()
         guard stripItems.indices.contains(sender.tag), let entry = stripItems[sender.tag] else { return }
         if let page = entry.page { onSelect?(page); return }
         onWantsFull?()
@@ -508,6 +660,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         titlePanel.isHidden = compact
         scroll.isHidden = compact
         strip.isHidden = !compact
+        if !compact { closeSlideOut() }
     }
     private var settingSelection = false
 

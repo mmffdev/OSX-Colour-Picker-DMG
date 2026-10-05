@@ -389,7 +389,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var slotCounts: [Int] = []
     /// Under the spectrum: how the page is grouped and what it shows.
     // rail2 for this page: how the page is displayed, the palette as a whole, the selected swatch, labels and tags.
-    let contextRail = ContextRail()
+    /// Under the header's own bar: each bucket of the page's options as a dropdown. rail2 is left free.
+    private let optionsBar = NSStackView()
+    private var purposeDropdown: BarDropdown!
     private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatches")
     private let labelsBucket = RailBucket("Labels"), tagsBucket = RailBucket("Tags")
 
@@ -614,7 +616,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         paletteTitle.orientation = .horizontal
         paletteTitle.alignment = .centerY
         paletteTitle.spacing = 10
-        for v in [header, paletteTitle, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
+        for v in [header, optionsBar, paletteTitle, spectrum, verdicts, swatchesHeading, bars, scroll, list, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(v)
         }
@@ -627,7 +629,11 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             header.heightAnchor.constraint(greaterThanOrEqualToConstant: PageStyle.height),   // taller while the tag bar shows its second row
             headerHeight,
-            paletteTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            // The dropdowns' icons stand on the page's left edge, as the title's mark does.
+            optionsBar.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
+            optionsBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side - 8),
+            optionsBar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -side),
+            paletteTitle.topAnchor.constraint(equalTo: optionsBar.bottomAnchor, constant: 14),
             paletteTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: side),
             paletteTitle.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -side),
             spectrum.topAnchor.constraint(equalTo: paletteTitle.bottomAnchor, constant: 30),
@@ -890,7 +896,22 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
             RailRow(purpose.title, symbol: purpose.symbol, tip: purpose.about, kind: .toggle { [weak self] in self?.purposeChosen(purpose) })
         }
         purposeBucket.set(purposeRows)
-        contextRail.set([purposeBucket, displayBucket, paletteBucket, swatchBucket, labelsBucket, tagsBucket])
+        purposeDropdown = BarDropdown("Purposes", symbol: "square.stack.3d.up", bucket: purposeBucket, tip: "The Purpose This Palette Is Turned To")
+        optionsBar.setViews([
+            purposeDropdown,
+            BarDropdown("Display", symbol: "slider.horizontal.3", bucket: displayBucket, tip: "The Contrast, The Profile And The Order"),
+            BarDropdown("Palette", symbol: "chart.pie", bucket: paletteBucket, tip: "The Palette As A Whole"),
+            BarDropdown("Swatches", symbol: "square.grid.2x2", bucket: swatchBucket, tip: "Grouping, Filtering, And What Shows With Every Swatch"),
+            BarDropdown("Labels", symbol: "number", bucket: labelsBucket, tip: "The Values Shown On Every Swatch"),
+            BarDropdown("Tags", symbol: "tag", bucket: tagsBucket, tip: "This Palette's Tags"),
+        ], in: .leading)
+        optionsBar.orientation = .horizontal
+        optionsBar.spacing = 4
+    }
+
+    /// For a trial run: opens one of the bar's dropdowns.
+    func rehearseDropdown(_ index: Int) {
+        if let d = optionsBar.views.indices.contains(index) ? optionsBar.views[index] as? BarDropdown : nil { d.toggle() }
     }
 
     /// Brings the rail up to date with the page: what is chosen, what is on, and whether a swatch is selected.
@@ -901,6 +922,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         showMenu.selectItem(at: PaletteFilter.allCases.firstIndex(of: Prefs.paletteFilter) ?? 0)
         let showing = library.shownPurpose(for: id)
         for (row, purpose) in zip(purposeRows, Purpose.allCases) { row.isOn = purpose == showing }
+        // The purposes dropdown says which one is on.
+        if let showing = showing { purposeDropdown.show(showing.title, symbol: showing.symbol) }
         let asList = Prefs.paletteListView
         for (row, on) in zip(panelRows, [Prefs.paletteNotes && asList, Prefs.paletteHistory, Prefs.paletteChannels, Prefs.histograms]) { row.isOn = on }
         // Always there: these act on the whole page, and a filter that hides every swatch must stay within reach to be undone.
