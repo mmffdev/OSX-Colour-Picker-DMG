@@ -37,6 +37,8 @@ final class HistoryRailController: NSViewController, NSTableViewDataSource, NSTa
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
+        // Nothing painted behind the steps: the rail shows the window's background, whichever step of grey is on.
+        table.backgroundColor = .clear
         table.style = .fullWidth   // no padding of the table's own: the cell sets the page inset itself
         table.rowHeight = 40
         table.intercellSpacing = .zero   // a cell starts on the rail's own edge, so its inset is the page inset
