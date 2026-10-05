@@ -389,6 +389,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let createButton = NSButton(title: "Create", target: nil, action: nil)
     private let cancelCreate = NSButton(title: "Cancel", target: nil, action: nil)
     private let newRow = NSStackView()
+    private var makingRows: [NSGridRow] = []
     private let map = NSStackView()
     private let addNext = NSButton(title: "", target: nil, action: nil)
     private let levelTitle = NSTextField(labelWithString: "")
@@ -444,12 +445,15 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         newName.delegate = self
         newName.target = self
         newName.action = #selector(createTapped)
-        newRow.setViews([newName, createButton, cancelCreate], in: .leading)
+        // The box for a new name sits under the dropdowns, on their edges, with its buttons under it: one neat stack.
+        newRow.setViews([createButton, cancelCreate], in: .leading)
         newRow.spacing = 8
-        let heads = NSGridView(views: [[caption("Collection"), collectionPopup, NSGridCell.emptyContentView], [caption("Stack"), stackPopup, resetButton]])
+        let heads = NSGridView(views: [[caption("Collection"), collectionPopup, NSGridCell.emptyContentView], [caption("Stack"), stackPopup, resetButton],
+                                       [NSGridCell.emptyContentView, newName, NSGridCell.emptyContentView], [NSGridCell.emptyContentView, newRow, NSGridCell.emptyContentView]])
         heads.rowSpacing = 8
         heads.columnSpacing = 8
         heads.column(at: 0).xPlacement = .trailing
+        makingRows = [heads.row(at: 2), heads.row(at: 3)]
 
         // Left: the map.
         let mapTitle = NSTextField(labelWithString: "Structure")
@@ -460,10 +464,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.bezelStyle = .rounded
         addNext.target = self
         addNext.action = #selector(addNextTapped)
-        let top = NSStackView(views: [heads, newRow, stackNote])
+        let top = NSStackView(views: [heads, stackNote])
         top.orientation = .vertical
         top.alignment = .leading
-        top.spacing = 8
+        top.spacing = 16   // room for the words to breathe under the controls
         let left = NSView(), right = NSView(), divider = NSBox()
         divider.boxType = .separator
         for v in [top, mapTitle, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
@@ -503,7 +507,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         grid.rowSpacing = 6
         grid.column(at: 0).width = 250
         grid.row(at: 2).topPadding = 10
-        grid.row(at: 4).topPadding = 10
+        grid.row(at: 4).topPadding = 18
         customHead = grid.row(at: 0)
         customRow = grid.row(at: 1)
         aboutHead = grid.row(at: 2)
@@ -511,7 +515,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         for v in [namesTitle, column, grid] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; detail.addSubview(v) }
         removal.orientation = .vertical
         removal.alignment = .leading
-        removal.spacing = 12
+        removal.spacing = 16
         for v in [levelTitle, detail, removal] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; right.addSubview(v) }
 
         let v = NSView()
@@ -538,7 +542,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             collectionPopup.widthAnchor.constraint(equalToConstant: 220),
             stackPopup.widthAnchor.constraint(equalToConstant: 220),
             newName.widthAnchor.constraint(equalToConstant: 220),
-            mapTitle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 20),
+            mapTitle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 26),
             mapTitle.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
             map.topAnchor.constraint(equalTo: mapTitle.bottomAnchor, constant: 10),
             map.leadingAnchor.constraint(equalTo: left.leadingAnchor),
@@ -585,11 +589,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     }
 
     /// For a trial run: "<project name>" shows that project's stack, "<project name>/<group name>" presses the bin on one of its
-    /// groups, and "collection:<name>" shows that collection.
+    /// groups, and "collection:<name>" shows that collection, and "new" opens the box for a new collection's name.
     override func viewDidAppear() {
         super.viewDidAppear()
         guard !rehearsed, let ask = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_SCHEMA"] else { return }
         rehearsed = true
+        if ask == "new" { making = .collection; show(); return }
         if ask.hasPrefix("collection:") {
             if let found = all.first(where: { $0.name == ask.dropFirst("collection:".count) }) { collectionID = found.id; stack = nil; load(); selected = collectionID; show() }
             return
@@ -689,10 +694,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         let own = stack.map { SchemaTrial.hasOwn($0) } ?? false
         resetButton.isHidden = !own
         let following = inside.filter { !SchemaTrial.hasOwn($0.id) }.count
-        stackNote.stringValue = stack == nil ? "What Every \(member) In \(here.name) Follows Unless It Has A Stack Of Its Own. \(following) Of \(inside.count) Follow It."
-            : own ? "This \(member) Has A Stack Of Its Own." : "This \(member) Follows Default. Change Anything Here And It Gets A Stack Of Its Own."
-        newRow.isHidden = making == .nothing
-        newName.placeholderString = making == .collection ? "Name The New Collection" : "Name The New \(member)"
+        stackNote.stringValue = stack == nil ? "What every member of this collection follows, unless it has a stack of its own. \(following) of \(inside.count) follow it."
+            : own ? "This member has a stack of its own." : "This member follows Default. Change anything here and it gets a stack of its own."
+        makingRows.forEach { $0.isHidden = making == .nothing }
+        newName.placeholderString = making == .collection ? "Name The New Collection" : "Name The New Member"
 
         // The map: the collection, what groups its members if anything does, then the stack.
         map.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -703,7 +708,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         }
         var does: [(symbol: String, tip: String, run: () -> Void)] = []
         if here.folderName == nil {
-            does.append(("arrow.turn.down.right", "Add A Level Beneath: Group The Members, As A Client Holds Its Contracts", { [weak self] in self?.addTier() }))
+            does.append(("arrow.turn.down.right", "Add A Level Beneath, To Group The Members", { [weak self] in self?.addTier() }))
         }
         if here.id != all[0].id {
             does.append(("trash", inside.isEmpty ? "Remove This Collection" : "Remove This Collection: Its \(inside.count) Go Back To \(all[0].name)", { [weak self] in self?.removeCollection() }))
@@ -756,19 +761,19 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         case .collection:
             levelTitle.stringValue = SchemaTrial.title(forLevel: 0)
             name = here.name; offered = SchemaTrial.collectionNames; said = here.about
-            help = "A collection is a heading in the sidebar, with its own members and its own default stack. Client work and your own work can each have one."
+            help = "A collection is a heading in the sidebar, with its own members and its own default stack."
         case .tier:
             levelTitle.stringValue = SchemaTrial.title(forLevel: 1)
             name = here.folderName ?? ""; offered = SchemaTrial.folderNames
-            help = "What the members of \(here.name) are grouped under. Each one is made in the sidebar, with the plus beside \(here.name), and holds its own \(SchemaTrial.plural(member))."
+            help = "What the members of this collection are grouped under. Each one is made in the sidebar, with the plus beside the collection's heading, and holds its own members."
         case .member(let project):
             levelTitle.stringValue = SchemaTrial.title(forLevel: 1 + offset)
             name = lib.project(project)?.name ?? ""; fixed = true; said = root.about
-            help = "This is the \(member) itself. Type over its name to rename it, and press Return. What a \(member) is called is set on the Default stack."
+            help = "This is the member itself. Type over its name to rename it, and press Return. What a member is called is set on the Default stack."
         case .node(let node, let level):
             levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
             name = node.name; offered = SchemaTrial.names(forLevel: level); said = node.about
-            help = level == 1 ? "What a member of \(here.name) is called. Each one is a project of the app's, with its own files."
+            help = level == 1 ? "What a member of this collection is called. Each one has its own files."
                 : "The sidebar follows this as you change it. Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now, holding nothing."
         }
         // A name of the user's own shows the box to type it in; a name from the list hides it. A member's name is always typed.
@@ -830,7 +835,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
                 removal.addArrangedSubview(words(role == .tags ? "Deleting a tag takes it off everything that carries it." : "Deleting a palette leaves its colours in All Swatches, and the deletion is recorded as a step in History."))
             }
         } else {
-            removal.addArrangedSubview(words("These are spread over the \(holders.count) that follow Default. On Default the group can be renamed, and they stay where they are. To delete them, choose each \(member) under Stack and remove the group there."))
+            removal.addArrangedSubview(words("These are spread over the \(holders.count) that follow Default. On Default the group can be renamed, and they stay where they are. To delete them, choose each member under Stack and remove the group there."))
             removal.addArrangedSubview(push("Keep The \(noun(role, n)) And Rename The Group", #selector(keepAndRename)))
         }
         removal.addArrangedSubview(push("Cancel", #selector(cancelRemoval)))
