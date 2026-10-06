@@ -198,6 +198,7 @@ func runSelfTest() -> Never {
     runOrderTests(check: check)
     runContrastTests(check: check)
     runTypographyTests(check: check)
+    runSetupTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
     exit(failed == 0 ? 0 : 1)
@@ -792,7 +793,9 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && !AdobeAccess.grantsAdding(rules.replacingOccurrences(of: ",delete_child", with: ""), user: "rick", uid: 501),
           "a folder counts as unlocked only when its rules let this very account add and replace files")
     check(AdobeAccess.state == .nothingToDo || !AdobeAccess.folders.isEmpty, "Adobe access has nothing to set up where no Adobe app is installed")
-    check(Permission.all.map { $0.title } == ["Adobe apps"], "the first-open setup lists each permission once")
+    let permissionTitles = Permission.all.map { $0.title }
+    check(permissionTitles == ["Screen Recording", "Documents Folder", "Adobe apps"] && Set(permissionTitles).count == permissionTitles.count,
+          "the first-open setup lists each permission once: Screen Recording, Documents, Adobe")
 
     print("project files")
     var projLib = Library()
@@ -2270,4 +2273,38 @@ func runImportTests(check: (Bool, String) -> Void) {
     let into = merged.merge([ImportedPalette(name: "Brand", colours: brand.colours)], into: project)
     check(into.palettesMade == 1 && merged.palettes(in: project).count == 1 && merged.palettes(in: nil).filter { $0.name == "Brand" }.count == 1,
           "an import into a member makes the palette there, not in the stock list of the same name")
+}
+
+// ---------- The setup: its steps, its draft and its proof strip ----------
+
+func runSetupTests(check: (Bool, String) -> Void) {
+    let steps = SetupAssistant.steps
+    check(steps.first == "Welcome" && steps.last == "The Halo" && steps.firstIndex(of: "Ready") == steps.count - 2,
+          "the setup opens on the welcome page, makes things at Ready and ends on the halo: \(steps)")
+    check(SetupAssistant.reasons.count == steps.count && SetupAssistant.reasons.dropFirst().allSatisfy { !$0.isEmpty },
+          "every step after the welcome has its reason for the welcome page's list")
+
+    struct Sample: Codable, Equatable { var step: Int; var name: String; var folder: URL? }
+    let suite = "mmffdev-colour3-selftest-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let draft = Sample(step: 3, name: "Studio", folder: URL(fileURLWithPath: "/Volumes/Client/Work"))
+    SetupDraft.save(draft, key: "draft", in: defaults)
+    check(SetupDraft.load(Sample.self, key: "draft", in: defaults) == draft, "a setup's draft survives being kept and read back, as across a relaunch")
+    SetupDraft.clear(key: "draft", in: defaults)
+    check(SetupDraft.load(Sample.self, key: "draft", in: defaults) == nil, "a draft is gone once the setup has made things")
+
+    let paper = NSColor.white, ink = Brand.master
+    let first = ProofStrip.tone(step: 0, of: steps.count, ink: ink, paper: paper).usingColorSpace(.sRGB)!
+    let last = ProofStrip.tone(step: steps.count - 1, of: steps.count, ink: ink, paper: paper).usingColorSpace(.sRGB)!
+    let master = ink.usingColorSpace(.sRGB)!
+    check(abs(last.redComponent - master.redComponent) < 0.01 && abs(last.blueComponent - master.blueComponent) < 0.01,
+          "the proof strip's last patch is the master colour at full strength")
+    check(first.redComponent > last.redComponent + 0.3, "the first patch is a pale tone of it, so the strip reads as a ramp")
+
+    check(HaloTrainer.lessons.map { $0.id } == ["open", "turn", "deeper", "confirm"], "the halo trainer teaches its four moves in order")
+    check(HaloTrainer.progress(["open", "deeper"]) == (2, 4) && HaloTrainer.progress(["open", "turn", "deeper", "confirm", "other"]) == (4, 4),
+          "the trainer counts only its own lessons")
+    check(ThemedButton.readable(on: Brand.master) == .white && ThemedButton.readable(on: NSColor(srgbRed: 0.95, green: 0.66, blue: 0, alpha: 1)) == .black,
+          "a lead button's text is white on Blue Ribbon and black on saffron")
 }

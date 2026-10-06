@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
+        _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
         let splash = SplashWindowController()
         self.splash = splash
         if Prefs.assistantDone {

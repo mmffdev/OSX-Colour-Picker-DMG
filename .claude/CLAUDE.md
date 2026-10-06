@@ -2,6 +2,10 @@
 
 macOS colour picker app (MMFFDev Colour 3). The source is at the repository root; the two earlier apps were removed on 2026-10-02 and live only in git history. Build: `./build.sh` (compiles, runs the self-test, installs); installers: `./make_dmg.sh`, `./make_pkg.sh`. Day to day, open `Package.swift` in Xcode and Cmd+R: it rebuilds only what changed and runs the bare binary; the installed app still comes from `./build.sh`.
 
+## The name is Colorgain
+
+Since 2026-10-07 the app is called **Colorgain**, spelled exactly so: one word, capital C, American "Color". Every new piece of user-facing text says Colorgain. "MMFFDev Colour 3" is the old name; it survives only where renaming is a migration (the bundle and executable names, the Application Support folder, the bundle identifier, the Sparkle feed, the installers, the Store product identifiers) and goes when the rename feature in Vector is done. The rest of the app's own words keep British spelling ("colour"); only the name is American.
+
 ## Build after every commit
 
 After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.

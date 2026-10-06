@@ -17,7 +17,47 @@ struct Permission {
     /// What the button does. Throws to show an error.
     let act: () throws -> Void
 
-    static var all: [Permission] { [adobe] }
+    static var all: [Permission] { [screenRecording, documents, adobe] }
+
+    /// Sample reads the screen through ScreenCaptureKit. macOS asks once, and only applies the
+    /// answer to a fresh copy of the app, so a grant made now needs a restart.
+    static let screenRecording = Permission(
+        title: "Screen Recording",
+        state: {
+            if ScreenAccess.granted { return ScreenAccess.restartNeeded ? .waiting : .on }
+            return ScreenAccess.asked ? .waiting : .off
+        },
+        detail: {
+            if ScreenAccess.granted {
+                return ScreenAccess.restartNeeded ? "Allowed. macOS applies it when \(Brand.name) restarts."
+                    : "On. Sample turns any part of the screen into a palette."
+            }
+            return ScreenAccess.asked
+                ? "Switch \(Brand.name) on in System Settings \u{25B8} Privacy & Security \u{25B8} Screen & System Audio Recording. macOS applies it after a restart."
+                : "Lets Sample turn any part of the screen into a palette. macOS needs \(Brand.name) restarted once it is allowed."
+        },
+        button: {
+            if ScreenAccess.granted { return ScreenAccess.restartNeeded ? "Restart Now" : nil }
+            return ScreenAccess.asked ? "Open System Settings" : "Allow\u{2026}"
+        },
+        act: {
+            if ScreenAccess.granted { if ScreenAccess.restartNeeded { Relaunch.now() }; return }
+            if ScreenAccess.asked { ScreenAccess.openSettings() } else { ScreenAccess.ask() }
+        })
+
+    /// A catalogue kept in Documents makes macOS ask once whether the app may use the folder. Asked
+    /// here, the question comes while the user is reading why, instead of out of nowhere later.
+    static let documents = Permission(
+        title: "Documents Folder",
+        state: { DocumentsAccess.allowed ? .on : DocumentsAccess.refused ? .waiting : .off },
+        detail: {
+            if DocumentsAccess.allowed { return "On. Catalogues and \(Brand.name)'s files can live in Documents." }
+            return DocumentsAccess.refused
+                ? "Switch \(Brand.name) on in System Settings \u{25B8} Privacy & Security \u{25B8} Files & Folders, or keep your catalogue somewhere else."
+                : "Your catalogue goes in Documents unless you choose another folder. macOS asks once whether \(Brand.name) may use it."
+        },
+        button: { DocumentsAccess.allowed ? nil : DocumentsAccess.refused ? "Open System Settings" : "Allow\u{2026}" },
+        act: { DocumentsAccess.refused ? DocumentsAccess.openSettings() : DocumentsAccess.ask() })
 
     static let adobe = Permission(
         title: "Adobe apps",
@@ -58,6 +98,67 @@ struct Permission {
         })
 }
 
+extension Notification.Name {
+    /// Posted when a permission may have changed: a row was pressed, or an answer came back from macOS.
+    static let permissionsChanged = Notification.Name("permissionsChanged")
+}
+
+enum ScreenAccess {
+    /// Whether this copy of the app started with the permission. Read at launch (main.swift), since
+    /// macOS only applies a grant to a copy started after it.
+    static let grantedAtLaunch = CGPreflightScreenCaptureAccess()
+    static var granted: Bool { CGPreflightScreenCaptureAccess() }
+    /// Asked at some point on this Mac, so a refusal is told apart from never asked.
+    static var asked: Bool {
+        get { preferences.bool(forKey: "screenRecordingAsked") }
+        set { preferences.set(newValue, forKey: "screenRecordingAsked") }
+    }
+    private static var askedThisRun = false
+    /// Asked while this copy was running and not allowed when it started: only a restart makes it work.
+    static var restartNeeded: Bool { askedThisRun && !grantedAtLaunch }
+
+    static func ask() {
+        asked = true
+        askedThisRun = true
+        _ = CGRequestScreenCaptureAccess()
+        NotificationCenter.default.post(name: .permissionsChanged, object: nil)
+    }
+    static func openSettings() {
+        askedThisRun = true
+        if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(u) }
+        NotificationCenter.default.post(name: .permissionsChanged, object: nil)
+    }
+}
+
+enum DocumentsAccess {
+    static var folder: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents") }
+    static var allowed: Bool {
+        get { preferences.bool(forKey: "documentsAllowed") }
+        set { preferences.set(newValue, forKey: "documentsAllowed") }
+    }
+    static var refused: Bool {
+        get { preferences.bool(forKey: "documentsRefused") }
+        set { preferences.set(newValue, forKey: "documentsRefused") }
+    }
+    /// Reading the folder is what makes macOS ask, and it waits for the answer, so it is read off the main thread.
+    static func ask() {
+        let path = folder.path
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = (try? FileManager.default.contentsOfDirectory(atPath: path)) != nil
+            DispatchQueue.main.async {
+                allowed = ok
+                refused = !ok
+                NotificationCenter.default.post(name: .permissionsChanged, object: nil)
+            }
+        }
+    }
+    static func openSettings() {
+        if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") { NSWorkspace.shared.open(u) }
+        refused = false   // read again on the next press, once the switch may have been turned on
+        NotificationCenter.default.post(name: .permissionsChanged, object: nil)
+    }
+}
+
 /// One permission as a row. `refresh()` reads the state again.
 final class PermissionRow: NSView {
     private let permission: Permission
@@ -66,14 +167,14 @@ final class PermissionRow: NSView {
     private let button = NSButton(title: "", target: nil, action: nil)
     var onError: ((Error) -> Void)?
 
-    init(_ p: Permission) {
+    init(_ p: Permission, textWidth: CGFloat = 330) {
         permission = p
         super.init(frame: .zero)
         let title = NSTextField(labelWithString: p.title)
         title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         detail.font = NSFont.systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.preferredMaxLayoutWidth = 330
+        detail.preferredMaxLayoutWidth = textWidth
         light.font = NSFont.systemFont(ofSize: 14)
         light.setContentHuggingPriority(.required, for: .horizontal)
         button.bezelStyle = .rounded
@@ -93,7 +194,7 @@ final class PermissionRow: NSView {
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            words.widthAnchor.constraint(equalToConstant: 330),
+            words.widthAnchor.constraint(equalToConstant: textWidth),
         ])
         refresh()
     }
@@ -113,6 +214,7 @@ final class PermissionRow: NSView {
     @objc private func pressed() {
         do { try permission.act() } catch { onError?(error) }
         refresh()
+        NotificationCenter.default.post(name: .permissionsChanged, object: nil)
     }
 }
 
@@ -121,18 +223,19 @@ final class PermissionRow: NSView {
 final class PermissionsView: NSStackView {
     private var rows: [PermissionRow] = []
 
-    init(onError: @escaping (Error) -> Void) {
+    init(textWidth: CGFloat = 330, spacing gap: CGFloat = 18, onError: @escaping (Error) -> Void) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .leading
-        spacing = 18
+        spacing = gap
         for p in Permission.all {
-            let r = PermissionRow(p)
+            let r = PermissionRow(p, textWidth: textWidth)
             r.onError = onError
             rows.append(r)
             addArrangedSubview(r)
         }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .permissionsChanged, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
 
