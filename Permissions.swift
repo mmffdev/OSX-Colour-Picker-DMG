@@ -132,6 +132,27 @@ enum ScreenAccess {
 
 enum DocumentsAccess {
     static var folder: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents") }
+
+    /// Whether `url` is Documents or inside it, which is what makes macOS ask.
+    static func inside(_ url: URL, documents: URL = folder) -> Bool {
+        let p = url.standardizedFileURL.path, d = documents.standardizedFileURL.path
+        return p == d || p.hasPrefix(d + "/")
+    }
+
+    /// This launch is about to read something kept in Documents, and nothing on this Mac has yet
+    /// said why macOS will ask. The Store build never asks: the sandbox reaches folders through the panel.
+    static var neededAtLaunch: Bool {
+        #if APPSTORE
+        return false
+        #else
+        guard !allowed else { return false }
+        let c = Catalogues.standard
+        var places = [c.root] + c.registry.map { URL(fileURLWithPath: $0.path) }
+        if let p = ProjectFiles.folder { places.append(p) }
+        if let s = SyncSettings.folder { places.append(s) }
+        return places.contains { inside($0) }
+        #endif
+    }
     static var allowed: Bool {
         get { preferences.bool(forKey: "documentsAllowed") }
         set { preferences.set(newValue, forKey: "documentsAllowed") }
@@ -223,12 +244,12 @@ final class PermissionRow: NSView {
 final class PermissionsView: NSStackView {
     private var rows: [PermissionRow] = []
 
-    init(textWidth: CGFloat = 330, spacing gap: CGFloat = 18, onError: @escaping (Error) -> Void) {
+    init(_ list: [Permission] = Permission.all, textWidth: CGFloat = 330, spacing gap: CGFloat = 18, onError: @escaping (Error) -> Void) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .leading
         spacing = gap
-        for p in Permission.all {
+        for p in list {
             let r = PermissionRow(p, textWidth: textWidth)
             r.onError = onError
             rows.append(r)
