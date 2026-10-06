@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__vector__vector_transition",
+      "mcp__vector__vector_post_comment",
+      "mcp__vector__vector_create_artefact"
+    ]
+  }
+}

@@ -37,11 +37,12 @@ func runPickMode() -> Never {
 // ---------- The app ----------
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let library = LibraryController()
+    lazy var library = LibraryController()
     /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds.
-    let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    lazy var updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     var main: MainWindowController?
     var settings: SettingsWindowController?
+    private var splash: SplashWindowController?
 
     /// The standard About panel, with the credit the colour name list's licence asks for.
     @objc func showAbout() {
@@ -59,13 +60,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
+        let splash = SplashWindowController()
+        self.splash = splash
+        splash.present { [weak self] in self?.revealMainWindow() }
+        NSApp.activate(ignoringOtherApps: true)
+        // Let the launch artwork reach the screen before loading the library and editor.
+        DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() }
+    }
+
+    private func prepareMainWindow() {
         library.watchPrintCondition()
         let main = MainWindowController(library: library)
         self.main = main
         let bar = menus(for: main)
         Shortcuts.install(on: bar)   // before macOS adds its own items to the Edit menu
         NSApp.mainMenu = bar
+    }
+
+    private func revealMainWindow() {
+        guard let main = main else { return }
         main.showWindow(nil)
+        splash?.close()
+        splash = nil
         NSApp.activate(ignoringOtherApps: true)
         if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac

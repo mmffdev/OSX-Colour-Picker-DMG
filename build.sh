@@ -34,6 +34,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
 cp MMFFDevColour3 "$APP/Contents/MacOS/MMFFDevColour3"
 cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The icon of each kind of file the app keeps: colproject.icns, colpalette.icns and the rest.
+cp icons/*.icns "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/MacOS/MMFFDevColour3"
 stamp_version "$APP"
 add_sparkle "$APP"

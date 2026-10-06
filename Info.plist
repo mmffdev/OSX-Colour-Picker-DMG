@@ -30,9 +30,30 @@
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.catalogue</string>
+            <key>UTTypeDescription</key>
+            <string>Colour Catalogue</string>
+            <key>UTTypeIconFile</key>
+            <string>colcatalogue</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colcatalogue</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.project</string>
             <key>UTTypeDescription</key>
             <string>Colour Project</string>
+            <key>UTTypeIconFile</key>
+            <string>colproject</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -47,9 +68,30 @@
         </dict>
         <dict>
             <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.data</string>
+            <key>UTTypeDescription</key>
+            <string>Colour Project Data</string>
+            <key>UTTypeIconFile</key>
+            <string>coldata</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>coldata</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.palette</string>
             <key>UTTypeDescription</key>
             <string>Colour Palette</string>
+            <key>UTTypeIconFile</key>
+            <string>colpalette</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -67,6 +109,8 @@
             <string>com.mmffdev.colour.swatch</string>
             <key>UTTypeDescription</key>
             <string>Colour Swatch</string>
+            <key>UTTypeIconFile</key>
+            <string>colswatch</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -84,6 +128,8 @@
             <string>com.mmffdev.colour.history</string>
             <key>UTTypeDescription</key>
             <string>Colour History</string>
+            <key>UTTypeIconFile</key>
+            <string>colhistory</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -101,6 +147,8 @@
             <string>com.mmffdev.colour.purpose.web</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For Screen And Web</string>
+            <key>UTTypeIconFile</key>
+            <string>colweb</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -118,6 +166,8 @@
             <string>com.mmffdev.colour.purpose.print</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For Print</string>
+            <key>UTTypeIconFile</key>
+            <string>colprint</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -135,6 +185,8 @@
             <string>com.mmffdev.colour.purpose.photo</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For Photography</string>
+            <key>UTTypeIconFile</key>
+            <string>colphoto</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -152,6 +204,8 @@
             <string>com.mmffdev.colour.purpose.video</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For Video And Broadcast</string>
+            <key>UTTypeIconFile</key>
+            <string>colvideo</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -169,6 +223,8 @@
             <string>com.mmffdev.colour.purpose.cine</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For Cinema And VFX</string>
+            <key>UTTypeIconFile</key>
+            <string>colcine</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -186,6 +242,8 @@
             <string>com.mmffdev.colour.purpose.3d</string>
             <key>UTTypeDescription</key>
             <string>Colour Settings For 3D And Games</string>
+            <key>UTTypeIconFile</key>
+            <string>col3d</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.json</string>
@@ -198,12 +256,66 @@
                 </array>
             </dict>
         </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.sync.project</string>
+            <key>UTTypeDescription</key>
+            <string>Colour Project Being Synced</string>
+            <key>UTTypeIconFile</key>
+            <string>colsyncproject</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colsyncproject</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.sync.catalogue</string>
+            <key>UTTypeDescription</key>
+            <string>Colour Catalogue Being Synced</string>
+            <key>UTTypeIconFile</key>
+            <string>colsynccatalogue</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colsynccatalogue</string>
+                </array>
+            </dict>
+        </dict>
     </array>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
+            <string>Colour Catalogue</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colcatalogue</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.catalogue</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
             <string>Colour Project</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colproject</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -215,7 +327,23 @@
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
+            <string>Colour Project Data</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>coldata</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.data</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
             <string>Colour Palette</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colpalette</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -228,6 +356,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Swatch</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colswatch</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -240,6 +370,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour History</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colhistory</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -252,6 +384,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For Screen And Web</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colweb</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -264,6 +398,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For Print</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colprint</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -276,6 +412,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For Photography</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colphoto</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -288,6 +426,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For Video And Broadcast</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colvideo</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -300,6 +440,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For Cinema And VFX</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colcine</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -312,6 +454,8 @@
         <dict>
             <key>CFBundleTypeName</key>
             <string>Colour Settings For 3D And Games</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>col3d</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -319,6 +463,34 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.mmffdev.colour.purpose.3d</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colour Project Being Synced</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colsyncproject</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.sync.project</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colour Catalogue Being Synced</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colsynccatalogue</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.sync.catalogue</string>
             </array>
         </dict>
     </array>
