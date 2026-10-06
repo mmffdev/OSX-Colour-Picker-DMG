@@ -457,9 +457,15 @@ final class SidebarOutlineView: NSOutlineView {
     /// A main heading other than the first: its row is taller, and its contents sit at the bottom of it.
     private func hasGapAbove(_ row: Int) -> Bool { row > 0 && level(forRow: row) == 0 }
 
+    /// Where the right-hand icon column's centre is on every row: the gear of a member row sits there.
+    private func trailingColumnCentre(row: Int) -> CGFloat {
+        super.frameOfCell(atColumn: 0, row: row).maxX - SidebarOutlineView.trailingPad - SidebarOutlineView.trailingIcon / 2
+    }
+
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         var frame = super.frameOfOutlineCell(atRow: row)
-        if level(forRow: row) == 0 { frame.origin.x = visibleRect.maxX - SidebarOutlineView.trailingPad - frame.width - 2 }
+        // A main heading's arrow is centred on the gear column of the rows under it.
+        if level(forRow: row) == 0 { frame.origin.x = trailingColumnCentre(row: row) - frame.width / 2 }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
     }
@@ -474,7 +480,9 @@ final class SidebarOutlineView: NSOutlineView {
             let x = isExpandable(item(atRow: row)) && !main ? start + RailStyle.step : start
             frame.size.width -= x - frame.origin.x
             frame.origin.x = x
-            if main { frame.size.width -= first.width + 6 }
+            // A main heading's cell stops one icon short, so its gear lands on the padlock column of the rows under it
+            // and leaves the gear column to the arrow.
+            if main { frame.size.width -= SidebarOutlineView.trailingIcon + 6 }
         }
         if hasGapAbove(row) { frame.origin.y += SidebarOutlineView.sectionGap; frame.size.height -= SidebarOutlineView.sectionGap }
         return frame
