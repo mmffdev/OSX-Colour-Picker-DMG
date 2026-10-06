@@ -213,7 +213,10 @@ final class ProjectHeaderCell: NSTableCellView {
     private let warning = NSImageView()
     private var add: NSButton!
     private var lock: NSButton!
+    private var gear: NSButton!
     var onLock: (() -> Void)?
+    /// The gear was pressed; hands over the button so the menu can open under it.
+    var onGear: ((NSButton) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -234,11 +237,15 @@ final class ProjectHeaderCell: NSTableCellView {
         lock.image = symbol("lock.open", "", size: 11)
         lock.contentTintColor = .tertiaryLabelColor
         lock.imagePosition = .imageOnly
-        // The padlock sits on its own at the far right: a spacer takes up the slack after the plus.
+        gear = symbolButton("gearshape", tooltip: "Project actions", target: self, action: #selector(gearTapped(_:)))
+        gear.image = symbol("gearshape", "", size: 11)
+        gear.contentTintColor = .tertiaryLabelColor
+        gear.imagePosition = .imageOnly
+        // The padlock and the gear sit at the far right: a spacer takes up the slack after the plus.
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let stack = NSStackView(views: [folder, title, warning, add, spacer, lock])
+        let stack = NSStackView(views: [folder, title, warning, add, spacer, lock, gear])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
@@ -255,6 +262,9 @@ final class ProjectHeaderCell: NSTableCellView {
             lock.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             lock.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
             lock.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            gear.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            gear.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            gear.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -264,6 +274,7 @@ final class ProjectHeaderCell: NSTableCellView {
         folder.image = symbol(symbolName, name, size: 12)
         warning.isHidden = !lost
         lock.isHidden = locked == nil
+        gear.isHidden = locked == nil   // only a project has actions; the headings do not
         if let locked = locked {
             lock.image = symbol(locked ? "lock.fill" : "lock.open", "", size: 11)
             lock.contentTintColor = locked ? .systemOrange : .tertiaryLabelColor
@@ -278,6 +289,7 @@ final class ProjectHeaderCell: NSTableCellView {
     }
     @objc private func addTapped() { onAdd?() }
     @objc private func lockTapped() { onLock?() }
+    @objc private func gearTapped(_ sender: NSButton) { onGear?(sender) }
 }
 
 /// The sidebar's own background: the theme's, flat, in place of the system's tinted sidebar.
@@ -1023,6 +1035,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: library.lostProjects[id] != nil, locked: locked)
             cell.onAdd = { [weak self] in self?.library.addPalette(to: id) }
             cell.onLock = { [weak self] in self?.library.setProjectLocked(id, !locked) }
+            cell.onGear = { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forProject: id)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            }
             return cell
         }
         if node.kind == .typography {
@@ -1373,30 +1391,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = clicked?.paletteID {
             fill(menu, forPalette: id)
         } else if let id = clicked?.projectID {
-            add("New Palette in Project", #selector(newInProjectClicked(_:)), id)
-            add("Project Details\u{2026}", #selector(projectDetailsClicked(_:)), id)
-            add("Rename Project\u{2026}", #selector(renameProjectClicked(_:)), id)
-            add("Show Project File", #selector(projectFileClicked(_:)), id)
-            add("Keep Project In\u{2026}", #selector(moveProjectClicked(_:)), id)
-            add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
-            // Where it sits: any collection, or any folder of one that groups its members.
-            let move = NSMenu()
-            for c in collectionsNow {
-                let item = move.addItem(withTitle: c.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = [id, c.id] as [UUID]
-                guard c.folderName != nil else { continue }
-                for f in c.folders {
-                    let inner = move.addItem(withTitle: f.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
-                    inner.target = self
-                    inner.indentationLevel = 1
-                    inner.representedObject = [id, c.id, f.id] as [UUID]
-                }
-            }
-            menu.addItem(withTitle: "Move To", action: nil, keyEquivalent: "").submenu = move
-            menu.addItem(.separator())
-            add("Delete Project, Keep Its Palettes", #selector(deleteProjectClicked(_:)), id)
-            add("Remove Project And Everything In It\u{2026}", #selector(dumpProjectClicked(_:)), id)
+            fill(menu, forProject: id)
         } else if case .folder(let cid, let fid)? = clicked?.kind {
             add("Rename\u{2026}", #selector(renameFolderClicked(_:)), [cid, fid] as [UUID])
             menu.addItem(.separator())
@@ -1421,6 +1416,51 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             menu.addItem(withTitle: "Project Templates\u{2026}", action: #selector(LibraryController.manageProjectTemplates), keyEquivalent: "").target = library
         }
     }
+
+    /// A project's actions, for a right-click on its row and for the row's gear. Named by what the schema calls it.
+    private func fill(_ menu: NSMenu, forProject id: UUID) {
+        func add(_ title: String, _ action: Selector, _ object: Any? = nil) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+        }
+        let kind = SchemaTrial.memberName(of: SchemaTrial.collection(of: id))
+        let locked = library.library.project(id)?.isLocked ?? false
+        add("New Palette In \(kind)", #selector(newInProjectClicked(_:)), id)
+        menu.items.last?.isEnabled = !locked
+        // Picks go to a palette: the one in the project that has them now, else its first, else a new one.
+        let hasTarget = library.picksGo(to: id)
+        let hasPalette = library.library.swatches.contains { $0.projectID == id && !$0.isTypography }
+        add(hasTarget ? "Stop Sending Picks Here" : "Send Picks Here", #selector(targetProjectClicked(_:)), id)
+        menu.items.last?.isEnabled = hasTarget || hasPalette || !locked
+        menu.addItem(.separator())
+        add("\(kind) Details\u{2026}", #selector(projectDetailsClicked(_:)), id)
+        add("Rename \(kind)\u{2026}", #selector(renameProjectClicked(_:)), id)
+        add("Show \(kind) File", #selector(projectFileClicked(_:)), id)
+        add("Keep \(kind) In\u{2026}", #selector(moveProjectClicked(_:)), id)
+        add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
+        // Where it sits: any collection, or any folder of one that groups its members.
+        let move = NSMenu()
+        for c in collectionsNow {
+            let item = move.addItem(withTitle: c.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = [id, c.id] as [UUID]
+            guard c.folderName != nil else { continue }
+            for f in c.folders {
+                let inner = move.addItem(withTitle: f.name, action: #selector(placeClicked(_:)), keyEquivalent: "")
+                inner.target = self
+                inner.indentationLevel = 1
+                inner.representedObject = [id, c.id, f.id] as [UUID]
+            }
+        }
+        menu.addItem(withTitle: "Move To", action: nil, keyEquivalent: "").submenu = move
+        menu.addItem(.separator())
+        add("Delete \(kind), Keep Its Palettes", #selector(deleteProjectClicked(_:)), id)
+        add("Remove \(kind) And Everything In It\u{2026}", #selector(dumpProjectClicked(_:)), id)
+        menu.autoenablesItems = false
+    }
+
+    @objc private func targetProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.togglePicks(to: id) } }
 
     private func id(_ s: NSMenuItem) -> UUID? { s.representedObject as? UUID }
 

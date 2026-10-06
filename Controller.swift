@@ -810,6 +810,19 @@ final class LibraryController: NSObject {
         flash(on ? "Added the palettes in \(p.name) to Favourites" : "Removed the palettes in \(p.name) from Favourites")
     }
 
+    /// Whether picks go into this project: its palette that has them, if any.
+    func picksGo(to project: UUID) -> Bool { library.activeSwatchID.flatMap { library.swatch($0) }?.projectID == project }
+
+    /// Sends picks into the project, or stops: to the palette there that has them, or its first colour
+    /// palette, or a new one made for it; nothing happens to a locked project that has no palette yet.
+    func togglePicks(to project: UUID) {
+        if picksGo(to: project) { setTarget(nil); return }
+        if let first = library.swatches.first(where: { $0.projectID == project && !$0.isTypography }) { setTarget(first.id); return }
+        guard library.project(project)?.isLocked != true else { return }
+        addPalette(to: project)
+        if let made = library.swatches.last(where: { $0.projectID == project && !$0.isTypography }) { setTarget(made.id) }
+    }
+
     func setTarget(_ id: UUID?) {
         apply("Send Picks To Palette") { $0.activeSwatchID = id }
         flash(library.activeSwatch.map { "Picks now go to \($0.name)" } ?? "Picks now go to the library only")

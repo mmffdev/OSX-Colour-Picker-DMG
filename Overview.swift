@@ -19,6 +19,8 @@ final class OverviewViewController: NSViewController {
     /// What the form on show was built from; a change to any of it builds the form afresh.
     private var built: Built?
     private struct Built: Equatable { let id: UUID; let name: String; let details: [String: String]; let locked: Bool }
+    /// The actions a palette's page has, for the project as a whole; greyed where there is nothing yet for them to act on.
+    private var newPalette: NSButton!, target: NSButton!, lock: NSButton!, copyAll: NSButton!, pack: NSButton!, file: NSButton!
 
     init(library: LibraryController) {
         self.library = library
@@ -32,6 +34,14 @@ final class OverviewViewController: NSViewController {
         profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         profile.target = self
         profile.action = #selector(profileChanged)
+        newPalette = symbolButton("plus.rectangle.on.rectangle", tooltip: "New palette in this project", target: self, action: #selector(newPaletteTapped))
+        target = symbolButton("eyedropper", tooltip: "Send picks here", target: self, action: #selector(targetTapped))
+        lock = symbolButton("lock.open", tooltip: "Lock the project so nothing in it can change", target: self, action: #selector(lockTapped))
+        copyAll = symbolButton("doc.on.doc", tooltip: "Copy every colour in this project", target: self, action: #selector(copyAllTapped))
+        pack = symbolButton("square.and.arrow.up", tooltip: "Export a design pack of this project", target: self, action: #selector(packTapped))
+        file = symbolButton("folder", tooltip: "Show the project's files in Finder", target: self, action: #selector(fileTapped))
+        for b in [newPalette, target, lock, copyAll, pack, file] as [NSButton] { header.bar.addArrangedSubview(b) }
+        header.bar.setCustomSpacing(12, after: pack)
         header.bar.addArrangedSubview(profile)
         for v in [header, host] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(v) }
         NSLayoutConstraint.activate([
@@ -68,6 +78,18 @@ final class OverviewViewController: NSViewController {
         library.setProfile(chosen.flatMap { want in library.offeredProfiles.first { $0.id == want } }, ofProject: id)
     }
 
+    @objc private func newPaletteTapped() { if let id = projectID { library.addPalette(to: id) } }
+    @objc private func targetTapped() { if let id = projectID { library.togglePicks(to: id) } }
+    @objc private func lockTapped() { if let id = projectID, let p = library.library.project(id) { library.setProjectLocked(id, !p.isLocked) } }
+    @objc private func copyAllTapped() {
+        guard let id = projectID else { return }
+        var seen = Set<String>(), hexes: [String] = []
+        for s in library.library.swatches where s.projectID == id { for h in library.hexes(in: s.id) where seen.insert(h).inserted { hexes.append(h) } }
+        library.copy(hexes, from: library.library.project(id)?.name)
+    }
+    @objc private func packTapped() { if let id = projectID { library.exportDesignPack(project: id) } }
+    @objc private func fileTapped() { if let id = projectID { library.showProjectFile(id) } }
+
     func show(_ id: UUID) {
         projectID = id
         reload()
@@ -83,6 +105,20 @@ final class OverviewViewController: NSViewController {
         header.striped = true
         header.lock = project.isLocked
         fillProfiles(for: project)
+        // What each action has to work on: nothing to copy or pack until there is a colour; nothing new in a locked project.
+        let palettes = library.library.swatches.filter { $0.projectID == id }
+        let colours = palettes.flatMap { $0.entries.map { $0.hex } }
+        let sending = library.picksGo(to: id)
+        newPalette.isEnabled = !project.isLocked
+        target.isEnabled = sending || palettes.contains { !$0.isTypography } || !project.isLocked
+        target.image = symbol(sending ? "eyedropper.full" : "eyedropper", "Picks")
+        target.toolTip = sending ? "Picks go here. Click to stop" : "Send picks here"
+        lock.image = symbol(project.isLocked ? "lock.fill" : "lock.open", "Lock")
+        lock.contentTintColor = project.isLocked ? .systemOrange : .secondaryLabelColor
+        lock.toolTip = project.isLocked ? "Locked: nothing in the project can change. Click to unlock" : "Lock the project so nothing in it can change"
+        copyAll.isEnabled = !colours.isEmpty
+        pack.isEnabled = !palettes.isEmpty
+        file.isEnabled = library.lostProjects[id] == nil
 
         // The form is left alone while what it shows is unchanged, so typing is not lost to an unrelated change.
         let now = Built(id: id, name: project.name, details: project.details ?? [:], locked: project.isLocked)
