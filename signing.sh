@@ -24,10 +24,13 @@ if [ -z "${NOTARIZE:-}" ]; then
     fi
 fi
 
-# Compiler flags that link Sparkle. The second rpath lets the bare binary run the self-test from the
-# build folder before it is put in a bundle.
-SPARKLE_FLAGS=(-F vendor/Sparkle -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks
-               -Xlinker -rpath -Xlinker "$PWD/vendor/Sparkle")
+# compile_app <output path>  — builds the app's binary, optimised, from Package.swift, the one build
+# definition Xcode also uses, and puts a copy at the path given. Only the files that changed since the
+# last build are recompiled, so a second build is quick. Sparkle is linked there; see Package.swift.
+compile_app() {
+    swift build -c release --product MMFFDevColour3
+    cp "$(swift build -c release --show-bin-path)/MMFFDevColour3" "$1"
+}
 
 # stamp_version <path/to/App.app>  — the build number is the commit count, so every build is newer than the last.
 stamp_version() {

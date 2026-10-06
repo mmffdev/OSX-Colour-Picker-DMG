@@ -19,7 +19,7 @@ ROOT="$STAGE/root"
 APP="$ROOT/$APP_NAME.app"
 
 echo "compiling swift..."
-swiftc -O *.swift "${SPARKLE_FLAGS[@]}" -o "$STAGE/MMFFDevColour3"
+compile_app "$STAGE/MMFFDevColour3"
 
 echo "running self-test..."
 "$STAGE/MMFFDevColour3" --self-test > /dev/null || { "$STAGE/MMFFDevColour3" --self-test; exit 1; }
