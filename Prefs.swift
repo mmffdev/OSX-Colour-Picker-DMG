@@ -120,6 +120,11 @@ enum Prefs {
         get { bool("setupDone", false) }
         set { d.set(newValue, forKey: "setupDone") }
     }
+    /// The setup assistant has been through once: where the app's data is, the first catalogue, the schema.
+    static var assistantDone: Bool {
+        get { bool("assistantDone", false) }
+        set { d.set(newValue, forKey: "assistantDone") }
+    }
 
     static var sounds: Bool {
         get { bool("sounds", true) }

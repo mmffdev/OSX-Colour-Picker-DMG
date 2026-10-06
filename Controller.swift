@@ -266,7 +266,7 @@ final class LibraryController: NSObject {
     func setProjectFolder(_ id: UUID, _ folder: URL?) {
         guard let p = library.project(id) else { return }
         let old = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder)
-        apply("Keep Project In") { $0.setProjectFolder(id, folder?.path) }
+        apply("Keep Project In") { $0.setProjectFolder(id, folder.map { ProjectFiles.keep($0, beside: store.url) }) }
         projectFilesWritten[id] = nil
         if let new = projectFolderURL(id), new != old, FileManager.default.fileExists(atPath: old.path) {
             try? FileManager.default.removeItem(at: new)
@@ -281,7 +281,7 @@ final class LibraryController: NSObject {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [ColourFiles.project, ColourFiles.legacyProject].map { UTType(filenameExtension: $0) ?? .data }
+        panel.allowedContentTypes = [ColourFiles.project, ColourFiles.earlierProject, ColourFiles.legacyProject].map { UTType(filenameExtension: $0) ?? .data }
         panel.prompt = "Use This"
         panel.message = "Find \u{201C}\(p.name)\u{201D}: its \(ProjectFiles.fileExtension) file, or the folder holding it"
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
@@ -290,7 +290,7 @@ final class LibraryController: NSObject {
                 let root = try ProjectFiles.adopt(url, for: p)
                 let under = ProjectFiles.master(library: self.store.url, master: ProjectFiles.folder)
                 let inMaster = root.deletingLastPathComponent().resolvingSymlinksInPath() == under.resolvingSymlinksInPath()
-                let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : root.path
+                let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : ProjectFiles.keep(root, beside: self.store.url)
                 self.apply("Find Project File") { $0.setProjectFolder(id, own) }
                 // The project was known only by name while its files were out of reach: read it from where it is now.
                 self.reload()

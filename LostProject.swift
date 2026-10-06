@@ -49,7 +49,7 @@ final class LostProjectController: NSViewController {
         let keep = NSTextField(wrappingLabelWithString: "A project\u{2019}s palettes, swatches, typography and tags are kept in its own files, so they are out of reach until the files are found. Nothing has been deleted.")
         keep.font = NSFont.systemFont(ofSize: TextSize.body)
         keep.textColor = .secondaryLabelColor
-        let options = NSTextField(wrappingLabelWithString: "Find The File points the app at the project where it is now: its .colproject file, or the folder holding it. Delete Project takes the project out of the catalogue; its files, wherever they are, are left alone.")
+        let options = NSTextField(wrappingLabelWithString: "Find The File points the app at the project where it is now: its .colspace file, or the folder holding it. Delete Project takes the project out of the catalogue; its files, wherever they are, are left alone.")
         options.font = NSFont.systemFont(ofSize: TextSize.body)
         options.textColor = .secondaryLabelColor
         let buttons = NSStackView(views: [find, delete])

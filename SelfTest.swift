@@ -815,7 +815,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     var written: [UUID: Data] = [:]
     let firstWrite = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
     let again = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    let expected = projRoot.appendingPathComponent("Main/Projects/Client A/Project/Client A.colproject")
+    let expected = projRoot.appendingPathComponent("Main/Projects/Client A/Space/Client A.colspace")
     check(firstWrite.files.map { $0.path } == [expected.path] && firstWrite.firstTime == [client] && again.files.isEmpty
           && (try? ProjectFiles.read(expected).data()) == fileData,
           "a project is a folder named for it, with its file in Config, under a Projects folder beside the library; written only when it changes")
@@ -823,7 +823,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let brandDoc = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: brandFile))
     let projectDoc = try? ColourFiles.decoder().decode(ProjectDocument.self, from: Data(contentsOf: expected))
     check(brandDoc?.palette.name == "Brand" && brandDoc?.project == client && brandDoc?.colours.count == 2 && brandDoc?.format == "colour-palette"
-          && projectDoc?.palettes == [brandSwatch] && projectDoc?.format == "colour-project"
+          && projectDoc?.palettes == [brandSwatch] && projectDoc?.format == "colour-space"
           && String(data: (try? Data(contentsOf: brandFile)) ?? Data(), encoding: .utf8)?.contains("\"name\" : \"Brand\"") == true,
           "each palette is a file of its own beside the project's, in plain text anyone can read, and the project lists its palettes in order")
     // Purposes: a file beside the palette for each one it serves, there exactly while it serves it.
@@ -836,7 +836,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let purposeDir = projRoot.appendingPathComponent("Purposes/Projects/Client A/Channels"), purposePalettes = projRoot.appendingPathComponent("Purposes/Projects/Client A/Palettes")
     let printSide = purposeDir.appendingPathComponent("Brand.colprint"), webSide = purposeDir.appendingPathComponent("Brand.colweb")
     let printDoc = try? ColourFiles.decoder().decode(PurposeDocument.self, from: Data(contentsOf: printSide))
-    let wholeBack = try? ProjectFiles.read(projRoot.appendingPathComponent("Purposes/Projects/Client A/Project/Client A.colproject"))
+    let wholeBack = try? ProjectFiles.read(projRoot.appendingPathComponent("Purposes/Projects/Client A/Space/Client A.colspace"))
     check(fm.fileExists(atPath: webSide.path) && printDoc?.palette == brandSwatch && printDoc?.settings.purpose == .print && printDoc?.paletteName == "Brand"
           && purposeLib.swatch(brandSwatch)?.purposeList == [.web, .print] && wholeBack?.palettes.first?.purposeList == [.web, .print]
           && (try? wholeBack?.data()) == (try? ProjectFile(project: purposeLib.project(client)!, in: purposeLib).data()),
@@ -876,11 +876,11 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! fileData.write(to: loose)
     let adopted = try! ProjectFiles.adopt(loose, for: projLib.project(client)!)
     check(adopted.path == projRoot.appendingPathComponent("Found/Client A").path
-          && fm.fileExists(atPath: adopted.appendingPathComponent("Project/Client A.colproject").path) && !fm.fileExists(atPath: loose.path)
-          && (try? ProjectFiles.read(adopted.appendingPathComponent("Project/Client A.colproject")).data()) == fileData,
+          && fm.fileExists(atPath: adopted.appendingPathComponent("Space/Client A.colspace").path) && !fm.fileExists(atPath: loose.path)
+          && (try? ProjectFiles.read(adopted.appendingPathComponent("Space/Client A.colspace")).data()) == fileData,
           "a found file on its own, even one an earlier version wrote in one piece, is given its folder structure beside it and still reads")
     check((try? ProjectFiles.adopt(adopted, for: projLib.project(client)!))?.path == adopted.path
-          && (try? ProjectFiles.adopt(adopted.appendingPathComponent("Project"), for: projLib.project(client)!))?.path == adopted.path,
+          && (try? ProjectFiles.adopt(adopted.appendingPathComponent("Space"), for: projLib.project(client)!))?.path == adopted.path,
           "the project folder, or the folder in it that holds the file, is accepted as the file's home")
     var otherLib = Library()
     let otherProject = otherLib.createProject(named: "Other", at: tp)
@@ -897,7 +897,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     _ = projLib.renameProject(client, to: "Client B")
     written[client] = nil
     let renamed = try! ProjectFiles.write(projLib, library: libURL, master: nil, written: &written)
-    check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Project/Client B.colproject").path]
+    check(renamed.files.map { $0.path } == [projRoot.appendingPathComponent("Main/Projects/Client B/Space/Client B.colspace").path]
           && !fm.fileExists(atPath: projRoot.appendingPathComponent("Main/Projects/Client A").path),
           "a renamed project's folder and file take the new name")
 
@@ -934,13 +934,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let indexText = String(data: (try? Data(contentsOf: catStore.url)) ?? Data(), encoding: .utf8) ?? ""
     let aConfig = catDir.appendingPathComponent("Projects/Job A")
     check(catStore.url.lastPathComponent == "Studio.colcatalogue" && indexText.contains("Job A") && !indexText.contains("Autumn")
-          && fm.fileExists(atPath: aConfig.appendingPathComponent("Project/Job A.colproject").path) && fm.fileExists(atPath: aConfig.appendingPathComponent("Config/Job A.coldata").path)
+          && fm.fileExists(atPath: aConfig.appendingPathComponent("Space/Job A.colspace").path) && fm.fileExists(atPath: aConfig.appendingPathComponent("Config/Job A.coldata").path)
           && fm.fileExists(atPath: aConfig.appendingPathComponent("Palettes/Autumn.colpalette").path) && fm.fileExists(atPath: aConfig.appendingPathComponent("Channels/Autumn.colprint").path)
           && !fm.fileExists(atPath: aConfig.appendingPathComponent("Channels/Autumn.colweb").path)
           && ProjectFiles.folders.allSatisfy { fm.fileExists(atPath: aConfig.appendingPathComponent($0).path) }
           && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Config/Unfiled.coldata").path) && fm.fileExists(atPath: catDir.appendingPathComponent("Unfiled/Palettes/Scratch.colpalette").path),
           "the catalogue's file is the index, named for the catalogue; each project holds its own palettes, and what belongs to no project is in Unfiled")
-    let aProject = try? ColourFiles.decoder().decode(ProjectDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Project/Job A.colproject")))
+    let aProject = try? ColourFiles.decoder().decode(ProjectDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Space/Job A.colspace")))
     let aPalette = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: aConfig.appendingPathComponent("Palettes/Autumn.colpalette")))
     let looseFile = try? ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: catDir.appendingPathComponent("Unfiled/Palettes/Scratch.colpalette")))
     check(aProject?.turned == [TurnedPalette(palette: inA, purpose: .print, changedAt: tcat.addingTimeInterval(2))] && aPalette?.palette.purpose == nil
@@ -1008,17 +1008,58 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! nestStore.save(catLib)
     let nestA = nestDir.appendingPathComponent("Projects/Job A")
     try! fm.createDirectory(at: nestA.appendingPathComponent("Config/Palettes"), withIntermediateDirectories: true)
-    try! fm.moveItem(at: nestA.appendingPathComponent("Project/Job A.colproject"), to: nestA.appendingPathComponent("Config/Job A.colproject"))
+    try! fm.moveItem(at: nestA.appendingPathComponent("Space/Job A.colspace"), to: nestA.appendingPathComponent("Config/Job A.colproject"))
+    try! fm.removeItem(at: nestA.appendingPathComponent("Space"))
     try! fm.moveItem(at: nestA.appendingPathComponent("Palettes/Autumn.colpalette"), to: nestA.appendingPathComponent("Config/Palettes/Autumn.colpalette"))
     try! fm.moveItem(at: nestA.appendingPathComponent("Channels/Autumn.colprint"), to: nestA.appendingPathComponent("Config/Palettes/Autumn.colprint"))
     let nestedBack = try! LibraryStore(directory: nestDir, legacyURL: nil).load()
     check(nestedBack == catLib, "a project an earlier version kept nested in its Config folder is still read whole")
     let nestAgain = LibraryStore(directory: nestDir, legacyURL: nil)
     try! nestAgain.mutate { $0.addPick("#123456", at: tcat.addingTimeInterval(30)) }
-    check(fm.fileExists(atPath: nestA.appendingPathComponent("Project/Job A.colproject").path) && fm.fileExists(atPath: nestA.appendingPathComponent("Channels/Autumn.colprint").path)
+    check(fm.fileExists(atPath: nestA.appendingPathComponent("Space/Job A.colspace").path) && fm.fileExists(atPath: nestA.appendingPathComponent("Channels/Autumn.colprint").path)
           && !fm.fileExists(atPath: nestA.appendingPathComponent("Config/Job A.colproject").path) && !fm.fileExists(atPath: nestA.appendingPathComponent("Config/Palettes").path)
           && (try? nestAgain.load().swatch(inA)?.purposeList) == [.print],
           "and when it is next saved its files go into folders of their own, with nothing left nested")
+
+    // A project as the version before this kept it: a Project folder holding a .colproject file. Read, and tidied when saved.
+    let earlierDir = root.appendingPathComponent("catalogue/Earlier")
+    try! LibraryStore(directory: earlierDir, legacyURL: nil).save(catLib)
+    let earlierA = earlierDir.appendingPathComponent("Projects/Job A")
+    try! fm.createDirectory(at: earlierA.appendingPathComponent("Project"), withIntermediateDirectories: true)
+    try! fm.moveItem(at: earlierA.appendingPathComponent("Space/Job A.colspace"), to: earlierA.appendingPathComponent("Project/Job A.colproject"))
+    try! fm.removeItem(at: earlierA.appendingPathComponent("Space"))
+    check((try? LibraryStore(directory: earlierDir, legacyURL: nil).load()) == catLib, "a member kept as Project/Name.colproject by the version before is still read whole")
+    try! LibraryStore(directory: earlierDir, legacyURL: nil).mutate { $0.addPick("#123457", at: tcat.addingTimeInterval(31)) }
+    check(fm.fileExists(atPath: earlierA.appendingPathComponent("Space/Job A.colspace").path) && !fm.fileExists(atPath: earlierA.appendingPathComponent("Project").path),
+          "and when it is next saved the file is Space/Name.colspace and the Project folder is gone")
+
+    print("where catalogues and their members are kept")
+    let homeDir = root.appendingPathComponent("home"), awayDir = root.appendingPathComponent("awayDir")
+    let cats = Catalogues(root: homeDir, legacyURL: nil)
+    let inside = try! cats.create("Inside")
+    let outside = try! cats.create("Outside", under: awayDir)
+    check(cats.directory(for: inside) == homeDir.appendingPathComponent("Catalogues/Inside") && cats.directory(for: outside) == awayDir.appendingPathComponent("Outside")
+          && fm.fileExists(atPath: awayDir.appendingPathComponent("Outside/Outside.colcatalogue").path) && Set(cats.names()).isSuperset(of: ["Inside", "Outside"]),
+          "a catalogue is made under Catalogues in the app's home, or under any folder the user chose, and both are listed")
+    let adoptedName = try! Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).adopt(awayDir.appendingPathComponent("Outside/Outside.colcatalogue"))
+    check(adoptedName == "Outside" && Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).directory(for: "Outside") == awayDir.appendingPathComponent("Outside"),
+          "a .colcatalogue file chosen from anywhere is opened where it is, under its own name, with nothing copied")
+    let renamedOut = try! cats.rename("Outside", to: "Outer")
+    check(renamedOut == "Outer" && cats.directory(for: "Outer") == awayDir.appendingPathComponent("Outer") && fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outer.colcatalogue").path),
+          "a catalogue kept awayDir is renamed where it is, folder and file alike")
+    let indexURL = awayDir.appendingPathComponent("Outer/Outer.colcatalogue")
+    check(ProjectFiles.keep(awayDir.appendingPathComponent("Outer/Clients/Cookra"), beside: indexURL) == "Clients/Cookra"
+          && ProjectFiles.keep(root.appendingPathComponent("drive/Cookra"), beside: indexURL) == root.appendingPathComponent("drive/Cookra").path
+          && ProjectFiles.resolve("Clients/Cookra", beside: indexURL) == awayDir.appendingPathComponent("Outer/Clients/Cookra")
+          && ProjectFiles.resolve(root.appendingPathComponent("drive/Cookra").path, beside: indexURL) == root.appendingPathComponent("drive/Cookra"),
+          "a member's folder is kept relative to its catalogue when it is inside it, so it moves with the catalogue, and in full otherwise")
+    try! Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").mutate { lib in
+        let id = lib.createProject(named: "Cookra")
+        lib.setProjectFolder(id, "Clients/Cookra")
+    }
+    check(fm.fileExists(atPath: homeDir.appendingPathComponent("Catalogues/Inside/Clients/Cookra/Space/Cookra.colspace").path)
+          && (try? Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").load().projects.first?.name) == "Cookra",
+          "a member whose folder is relative is written and read back inside its catalogue's folder")
 
     print("purposes on the page")
     var tabLib = Library()

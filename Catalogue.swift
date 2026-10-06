@@ -12,7 +12,7 @@ import Foundation
 //     Unfiled/Palettes/Loose.colpalette        palettes that sit in no project
 //     Unfiled/Channels/Loose.colprint          and their purposes
 //
-//     <Projects>/Brand/Project/Brand.colproject   the project
+//     <Projects>/Brand/Space/Brand.colspace       the member
 //     <Projects>/Brand/Config/Brand.coldata       its own tags, and the tags and profiles it carries with it
 //     <Projects>/Brand/History/Brand.colhistory
 //     <Projects>/Brand/Palettes/…                 its palettes, each with the colours it uses
@@ -109,7 +109,10 @@ enum CatalogueFiles {
         try? fm.removeItem(at: folder.appendingPathComponent("\(unfiled).\(ColourFiles.data)"))
 
         let doc = CatalogueDocument(library: lib.version,
-                                    projects: lib.projects.map { ProjectRef(id: $0.id, name: $0.name, createdAt: $0.createdAt, folder: $0.folder) },
+                                    // Every member's folder is written, so the catalogue says where its members are
+                                    // without this Mac's settings: relative when inside the catalogue, in full otherwise.
+                                    projects: lib.projects.map { ProjectRef(id: $0.id, name: $0.name, createdAt: $0.createdAt,
+                                                                            folder: $0.folder ?? ProjectFiles.keep(ProjectFiles.root(for: $0, library: index, master: master), beside: index)) },
                                     palettes: lib.swatches.map { $0.id }, colours: lib.colours.map { $0.hex },
                                     tags: lib.tagInfo.map { TagKey(name: $0.name, project: $0.projectID) },
                                     activePalette: lib.activeSwatchID, deleted: lib.deleted)
@@ -139,8 +142,10 @@ enum CatalogueFiles {
                 continue
             }
             // Where the project is, is the catalogue's to say: the project's own file cannot know it has been moved.
+            // A folder that is just the usual place under the master folder is kept as no folder at all.
             var project = whole.project
-            project.folder = ref.folder
+            let usual = ProjectFiles.keep(ProjectFiles.master(library: index, master: master).appendingPathComponent(filesystemName(ref.name)), beside: index)
+            project.folder = ref.folder == usual ? nil : ref.folder
             lib.projects.append(project)
             swatches += whole.palettes
             for colour in whole.colours where colours[colour.hex] == nil { colours[colour.hex] = colour }

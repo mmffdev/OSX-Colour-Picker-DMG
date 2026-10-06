@@ -64,10 +64,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         let splash = SplashWindowController()
         self.splash = splash
-        splash.present { [weak self] in self?.revealMainWindow() }
+        if Prefs.assistantDone {
+            splash.present { [weak self] in self?.revealMainWindow() }
+            // Let the launch artwork reach the screen before loading the library and editor.
+            DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() }
+        } else {
+            // The first open: the assistant settles where everything lives before any of it is loaded.
+            splash.present { [weak self] in
+                self?.splash?.close()
+                self?.splash = nil
+                SetupAssistant.show { _ in
+                    self?.prepareMainWindow()
+                    self?.revealMainWindow()
+                }
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
-        // Let the launch artwork reach the screen before loading the library and editor.
-        DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() }
+    }
+
+    /// The assistant again, from the app menu: what it settles is applied to the open window.
+    @objc func runSetupAssistant() {
+        SetupAssistant.show { [weak self] name in
+            guard let self = self else { return }
+            if name != self.library.catalogue { self.library.open(catalogue: name) } else { self.library.reload() }
+        }
     }
 
     private func prepareMainWindow() {
@@ -172,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu("MMFFDev Colour 3") { m in
             add(m, "About MMFFDev Colour 3", #selector(showAbout), "", self)
+            add(m, "Setup Assistant\u{2026}", #selector(runSetupAssistant), "", self)
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
             m.addItem(.separator())
             add(m, "Settings\u{2026}", #selector(showSettings), ",", self)

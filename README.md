@@ -87,7 +87,7 @@ Every Swift file in the root is compiled into the app, so scripts and other Swif
 - `helper/`: the Adobe helper itself, a small root process that can only write swatch files into Adobe's library folders.
 - `help/`: the help pages (installing, adding palettes to Adobe apps, history).
 - `installer/`: the `.pkg` installer's distribution file and welcome page.
-- `icons/`: the icon for each kind of file the app keeps (`.colproject`, `.colpalette` and the rest).
+- `icons/`: the icon for each kind of file the app keeps (`.colspace`, `.colpalette` and the rest).
 - `vendor/Sparkle/`: the Sparkle update framework.
 - `tools/make_icon.swift`: draws `AppIcon.icns`.
 - `design/`, `assets/`: design reviews, mockups and icon studies. Not part of the build.

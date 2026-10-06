@@ -10,7 +10,7 @@ import Foundation
 // file has an extension of our own that says what it is, and every one is plain JSON that any
 // text editor opens: it is the user's own work, and nothing is hidden.
 //
-//     Client A/Project/Client A.colproject     the project: its details and the order of its palettes
+//     Client A/Space/Client A.colspace         the member: its details and the order of its palettes
 //     Client A/Config/Client A.coldata         its tags, and the tags and profiles it carries with it
 //     Client A/History/Client A.colhistory     what happened to it, when project history is on
 //     Client A/Palettes/Brand.colpalette       one palette and the colours it uses
@@ -25,10 +25,11 @@ import Foundation
 /// What every file of ours says about itself.
 enum ColourFiles {
     static let generator = "MMFFDev Colour 3"
-    static let project = "colproject", palette = "colpalette", swatch = "colswatch", history = "colhistory"
+    /// A space is one member of a collection, whatever the user calls it: a project, a client, a brand.
+    static let project = "colspace", palette = "colpalette", swatch = "colswatch", history = "colhistory"
     static let catalogue = "colcatalogue", data = "coldata"
-    /// The one file an earlier version wrote.
-    static let legacyProject = "config"
+    /// The names earlier versions gave the same file: ".colproject", and before that one "config" file.
+    static let earlierProject = "colproject", legacyProject = "config"
     /// Every extension found in a project's Palettes folder.
     static var paletteFolder: [String] { [palette] + Purpose.allCases.map { $0.fileExtension } }
 
@@ -47,10 +48,12 @@ enum ColourFiles {
     }
 }
 
-/// "Client A.colproject": the project itself. Its palettes are files of their own; this lists
+/// "Client A.colspace": the member itself. Its palettes are files of their own; this lists
 /// them in order, and the colours in the order the library holds them.
 struct ProjectDocument: Codable, Equatable {
-    var format = "colour-project"
+    var format = "colour-space"
+    /// The format tags this file has carried: today's, and the one earlier versions wrote.
+    static let formats = ["colour-space", "colour-project"]
     var version = 2
     var generator = ColourFiles.generator
     var project: Project
@@ -230,19 +233,21 @@ struct ProjectStep: Codable, Equatable {
 }
 
 /// Where project files go. A project is a folder named for it, holding a folder for each kind of
-/// file: "Cookra/Project/Cookra.colproject", "Cookra/Palettes/…". Exports will sit beside them later.
+/// file: "Cookra/Space/Cookra.colspace", "Cookra/Palettes/…". Exports will sit beside them later.
 ///
-///     <Projects folder>/<Project name>/Project/<Project name>.colproject
+///     <Projects folder>/<Project name>/Space/<Project name>.colspace
 ///
 /// A project can have a folder of its own anywhere instead of sitting under the master folder.
 enum ProjectFiles {
-    static let projectFolder = "Project", configFolder = "Config", historyFolder = "History"
+    static let projectFolder = "Space", configFolder = "Config", historyFolder = "History"
+    /// What the Space folder was called before.
+    static let earlierProjectFolder = "Project"
     static let palettesFolder = "Palettes", channelsFolder = "Channels", swatchesFolder = "Swatches"
     /// Every folder a project has, made when it is written so the shape is there to see.
     static let folders = [projectFolder, configFolder, historyFolder, palettesFolder, channelsFolder, swatchesFolder]
     static let fileExtension = ColourFiles.project
     /// A project's file under either name: today's, or the one an earlier version wrote.
-    static func isProjectFile(_ url: URL) -> Bool { [ColourFiles.project, ColourFiles.legacyProject].contains(url.pathExtension.lowercased()) }
+    static func isProjectFile(_ url: URL) -> Bool { [ColourFiles.project, ColourFiles.earlierProject, ColourFiles.legacyProject].contains(url.pathExtension.lowercased()) }
     /// The one file the first version wrote.
     static func legacyURL(in root: URL, name: String) -> URL {
         root.appendingPathComponent(configFolder).appendingPathComponent(filesystemName(name) + "." + ColourFiles.legacyProject)
@@ -253,7 +258,11 @@ enum ProjectFiles {
     }
     /// The project's file wherever it is: where it belongs, or where an earlier version left it.
     static func existingFile(in root: URL, name: String) -> URL? {
-        [configURL(in: root, name: name), nestedURL(in: root, name: name), legacyURL(in: root, name: name)].first { FileManager.default.fileExists(atPath: $0.path) }
+        let base = filesystemName(name)
+        let earlier = [root.appendingPathComponent(earlierProjectFolder).appendingPathComponent(base + "." + ColourFiles.earlierProject),
+                       root.appendingPathComponent(configFolder).appendingPathComponent(base + "." + ColourFiles.earlierProject)]
+        return ([configURL(in: root, name: name), nestedURL(in: root, name: name)] + earlier + [legacyURL(in: root, name: name)])
+            .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// The master folder; nil until chosen, when it defaults to "Projects" beside the library file.
@@ -266,17 +275,29 @@ enum ProjectFiles {
         master ?? library.deletingLastPathComponent().appendingPathComponent("Projects")
     }
 
-    /// The project's folder: its own, or one named for it under the master folder.
+    /// The project's folder: its own, or one named for it under the master folder. A folder kept
+    /// as a relative path is inside the catalogue's folder, so it moves with the catalogue.
     static func root(for project: Project, library: URL, master: URL?) -> URL {
-        if let own = project.folder { return URL(fileURLWithPath: own) }
+        if let own = project.folder { return resolve(own, beside: library) }
         return self.master(library: library, master: master).appendingPathComponent(filesystemName(project.name))
+    }
+
+    /// A folder as the catalogue keeps it: relative when it is inside the catalogue's folder, absolute otherwise.
+    static func keep(_ folder: URL, beside library: URL) -> String {
+        let home = library.deletingLastPathComponent().standardizedFileURL.path + "/"
+        let path = folder.standardizedFileURL.path
+        return path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
+    }
+
+    static func resolve(_ kept: String, beside library: URL) -> URL {
+        kept.hasPrefix("/") ? URL(fileURLWithPath: kept) : library.deletingLastPathComponent().appendingPathComponent(kept)
     }
 
     static func url(for project: Project, library: URL, master: URL?) -> URL {
         configURL(in: root(for: project, library: library, master: master), name: project.name)
     }
 
-    /// Where a project's own file belongs: "<root>/Project/<name>.colproject".
+    /// Where a project's own file belongs: "<root>/Space/<name>.colspace".
     static func configURL(in root: URL, name: String) -> URL {
         root.appendingPathComponent(projectFolder).appendingPathComponent(filesystemName(name) + "." + fileExtension)
     }
@@ -360,6 +381,12 @@ enum ProjectFiles {
     /// its own folders. The history, which is not rewritten with everything else, is moved across.
     private static func tidyEarlier(_ root: URL, name: String, id: UUID) {
         let fm = FileManager.default, config = root.appendingPathComponent(configFolder), base = filesystemName(name)
+        // The Project folder, as the Space folder was called: its file goes, and the folder with it once empty.
+        let earlier = root.appendingPathComponent(earlierProjectFolder)
+        for file in (try? fm.contentsOfDirectory(at: earlier, includingPropertiesForKeys: nil)) ?? [] where isProjectFile(file) && projectID(of: file) == id {
+            try? fm.removeItem(at: file)
+        }
+        if ((try? fm.contentsOfDirectory(atPath: earlier.path)) ?? []).filter({ $0 != ".DS_Store" }).isEmpty { try? fm.removeItem(at: earlier) }
         for file in (try? fm.contentsOfDirectory(at: config, includingPropertiesForKeys: nil)) ?? [] {
             let ext = file.pathExtension.lowercased()
             if isProjectFile(file), projectID(of: file) == id { try? fm.removeItem(at: file) }
@@ -431,11 +458,11 @@ enum ProjectFiles {
     /// in the folders beside it, or from how an earlier version kept them.
     static func read(_ file: URL) throws -> ProjectFile {
         let data = try Data(contentsOf: file), d = ColourFiles.decoder()
-        guard let doc = try? d.decode(ProjectDocument.self, from: data), doc.format == "colour-project" else { return try ProjectFile.read(data) }
+        guard let doc = try? d.decode(ProjectDocument.self, from: data), ProjectDocument.formats.contains(doc.format) else { return try ProjectFile.read(data) }
         let home = file.deletingLastPathComponent(), base = file.deletingPathExtension().lastPathComponent
         // In its Project folder, with the rest in folders beside that; or, as an earlier version
         // had it, in Config with everything nested there.
-        let flat = home.lastPathComponent == projectFolder, root = home.deletingLastPathComponent()
+        let flat = [projectFolder, earlierProjectFolder].contains(home.lastPathComponent), root = home.deletingLastPathComponent()
         let paletteDir = flat ? root.appendingPathComponent(palettesFolder) : home.appendingPathComponent(palettesFolder)
         let channelDirs = flat ? [root.appendingPathComponent(channelsFolder), paletteDir] : [paletteDir]
         let dataFile = (flat ? root.appendingPathComponent(configFolder) : home).appendingPathComponent(base + "." + ColourFiles.data)
@@ -482,7 +509,7 @@ enum ProjectFiles {
     }
 
     /// The folders inside a project's folder where its own file may be: where it belongs, and where an earlier version kept it.
-    private static let homes = [projectFolder, configFolder]
+    private static let homes = [projectFolder, earlierProjectFolder, configFolder]
 
     /// A project folder under `parent` that holds this project's file, by id.
     private static func findFolder(holding id: UUID, under parent: URL, fm: FileManager) -> URL? {

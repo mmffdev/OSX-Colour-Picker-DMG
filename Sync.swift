@@ -242,21 +242,80 @@ func change(from a: Library, to b: Library) -> LibraryChange {
 struct Catalogues {
     static let mainName = "Main"
     static let currentKey = "currentCatalogue"
+    /// Where the app keeps its own data, when the user has chosen somewhere other than Application Support.
+    static let homeKey = "appHome"
 
     let root: URL
     /// The v1 colour list and the v2 library. Read once to seed Main, never written.
     let legacyURL: URL?
     var previousURL: URL? = nil
 
-    static let standard: Catalogues = {
+    /// Application Support, which is where the app's data starts; the seed the setup assistant offers to move.
+    static var seedRoot: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("MMFFDev Colour 3")
+    }
+
+    /// The folder the user chose for the app's data, or nil while it is still in Application Support.
+    static var home: URL? {
+        get { preferences.string(forKey: homeKey).map { URL(fileURLWithPath: $0) } }
+        set { preferences.set(newValue?.path, forKey: homeKey) }
+    }
+
+    /// Read afresh each time, so a home chosen in the setup assistant takes effect before anything loads.
+    static var standard: Catalogues {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         // MMFFDEV_COLOUR3_HOME points the app at another folder, for trying things without touching real data.
         let override = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"].map { URL(fileURLWithPath: $0) }
         return Catalogues(
-            root: override ?? support.appendingPathComponent("MMFFDev Colour 3"),
+            root: override ?? home ?? seedRoot,
             legacyURL: support.appendingPathComponent("MMFFDev Colour").appendingPathComponent("library.json"),
             previousURL: support.appendingPathComponent("MMFFDev Colour 2").appendingPathComponent("library.json"))
-    }()
+    }
+
+    /// Moves the app's data to a folder of the user's choosing, catalogues inside it and all, and
+    /// remembers the new home. The folder must be empty or not yet there. Anything that will not
+    /// move stays where it was and is reported.
+    static func moveHome(to dest: URL) throws {
+        let fm = FileManager.default, from = standard.root
+        guard from != dest else { return }
+        if fm.fileExists(atPath: dest.path) {
+            guard ((try? fm.contentsOfDirectory(atPath: dest.path)) ?? []).filter({ !$0.hasPrefix(".") }).isEmpty else { throw CatalogueError.notEmpty(dest) }
+        } else {
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        }
+        for item in (try? fm.contentsOfDirectory(atPath: from.path)) ?? [] where !item.hasPrefix(".") {
+            try fm.moveItem(at: from.appendingPathComponent(item), to: dest.appendingPathComponent(item))
+        }
+        home = dest
+    }
+
+    // MARK: Where each catalogue is
+
+    /// A catalogue kept somewhere of its own: its name, and the folder holding its file.
+    struct Entry: Codable, Equatable {
+        var name: String
+        var path: String
+    }
+
+    /// "catalogues.json" in the app's home: the catalogues that live outside it. Those inside are found by looking.
+    var registryURL: URL { root.appendingPathComponent("catalogues.json") }
+
+    var registry: [Entry] {
+        get { (try? Data(contentsOf: registryURL)).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? [] }
+        nonmutating set {
+            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            if let data = try? ColourFiles.encoder().encode(newValue) { try? data.write(to: registryURL, options: .atomic) }
+        }
+    }
+
+    /// Puts a catalogue that lives in `dir` on the list under `name`, replacing an entry of that name.
+    func register(_ name: String, at dir: URL) {
+        var all = registry.filter { $0.name != name }
+        all.append(Entry(name: name, path: dir.path))
+        registry = all
+    }
+
+    func unregister(_ name: String) { registry = registry.filter { $0.name != name } }
 
     /// The catalogue last opened on this Mac.
     static var currentName: String {
@@ -270,8 +329,10 @@ struct Catalogues {
 
     var folder: URL { root.appendingPathComponent("Catalogues") }
 
+    /// The folder a catalogue's file is in: the one it was registered at, or its folder under Catalogues.
     func directory(for name: String) -> URL {
-        name == Catalogues.mainName ? root : folder.appendingPathComponent(filesystemName(name))
+        if let own = registry.first(where: { $0.name == name }) { return URL(fileURLWithPath: own.path) }
+        return name == Catalogues.mainName ? root : folder.appendingPathComponent(filesystemName(name))
     }
 
     /// Earlier versions' libraries seed Main on a fresh install only — never after a rename.
@@ -293,9 +354,11 @@ struct Catalogues {
             || fm.fileExists(atPath: dir.appendingPathComponent(".library.json.icloud").path)
     }
 
+    /// Every catalogue but Main: those found under Catalogues, and those registered elsewhere whose folder is reachable.
     private func others() -> [String] {
-        Catalogues.subfoldersHoldingLibraries(in: folder)
-            .filter { $0 != Catalogues.mainName }
+        var names = Catalogues.subfoldersHoldingLibraries(in: folder)
+        for entry in registry where Catalogues.holdsCatalogue(URL(fileURLWithPath: entry.path)) && !names.contains(entry.name) { names.append(entry.name) }
+        return names.filter { $0 != Catalogues.mainName }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -322,12 +385,19 @@ struct Catalogues {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }
+        } else if let own = registry.first(where: { $0.name == old }) {
+            // Kept somewhere of its own: the folder is renamed where it is.
+            let was = URL(fileURLWithPath: own.path), now = was.deletingLastPathComponent().appendingPathComponent(new)
+            try fm.moveItem(at: was, to: now)
+            unregister(old)
+            register(new, at: now)
         } else {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try fm.moveItem(at: directory(for: old), to: dest)
         }
         // The catalogue's file carries the catalogue's name.
-        if let index = CatalogueFiles.index(in: dest) {
+        if let index = CatalogueFiles.index(in: directory(for: new)) {
+            let dest = directory(for: new)
             let named = dest.appendingPathComponent(new + "." + ColourFiles.catalogue)
             if index.lastPathComponent != named.lastPathComponent { try? fm.moveItem(at: index, to: named) }
         }
@@ -342,13 +412,33 @@ struct Catalogues {
         return ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { name in holdsCatalogue(dir.appendingPathComponent(name)) }
     }
 
-    /// Creates an empty catalogue. The name is made unique and safe for a folder.
+    /// Creates an empty catalogue. The name is made unique and safe for a folder. With `under`, the
+    /// catalogue is a folder named for it inside that folder, wherever the user chose, instead of
+    /// under Catalogues in the app's home.
     @discardableResult
-    func create(_ raw: String, holding library: Library = Library()) throws -> String {
+    func create(_ raw: String, holding library: Library = Library(), under parent: URL? = nil) throws -> String {
         let name = uniqueName(filesystemName(raw), among: names())
+        if let parent = parent {
+            let dir = parent.appendingPathComponent(name)
+            guard !Catalogues.holdsCatalogue(dir) else { throw CatalogueError.nameTaken(name) }
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            register(name, at: dir)
+        }
         let dir = directory(for: name)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try store(for: name).save(library)
+        return name
+    }
+
+    /// Opens a catalogue where it is: the folder holding a .colcatalogue file is put on the list
+    /// under the file's name. Nothing is copied or changed. Returns the name as it is now listed.
+    @discardableResult
+    func adopt(_ index: URL) throws -> String {
+        let dir = index.deletingLastPathComponent()
+        guard Catalogues.holdsCatalogue(dir) else { throw SyncError.unreadable(index) }
+        if let already = registry.first(where: { URL(fileURLWithPath: $0.path) == dir }) { return already.name }
+        let name = uniqueName(filesystemName(index.deletingPathExtension().lastPathComponent), among: names())
+        register(name, at: dir)
         return name
     }
 
@@ -365,11 +455,13 @@ struct Catalogues {
 enum CatalogueError: LocalizedError {
     case missing(String)
     case nameTaken(String)
+    case notEmpty(URL)
 
     var errorDescription: String? {
         switch self {
         case .missing(let n): return "There is no catalogue called \u{201C}\(n)\u{201D}."
         case .nameTaken(let n): return "There is already a catalogue called \u{201C}\(n)\u{201D}. Choose another name."
+        case .notEmpty(let u): return "\u{201C}\(u.lastPathComponent)\u{201D} already has things in it. Choose an empty folder, or a new one."
         }
     }
 }

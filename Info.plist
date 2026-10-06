@@ -49,9 +49,28 @@
         </dict>
         <dict>
             <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.space</string>
+            <key>UTTypeDescription</key>
+            <string>Colour Space File</string>
+            <key>UTTypeIconFile</key>
+            <string>colspace</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colspace</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.project</string>
             <key>UTTypeDescription</key>
-            <string>Colour Project</string>
+            <string>Colour Project (Earlier)</string>
             <key>UTTypeIconFile</key>
             <string>colproject</string>
             <key>UTTypeConformsTo</key>
@@ -313,15 +332,16 @@
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Colour Project</string>
+            <string>Colour Space File</string>
             <key>CFBundleTypeIconFile</key>
-            <string>colproject</string>
+            <string>colspace</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
             <string>Owner</string>
             <key>LSItemContentTypes</key>
             <array>
+                <string>com.mmffdev.colour.space</string>
                 <string>com.mmffdev.colour.project</string>
             </array>
         </dict>
