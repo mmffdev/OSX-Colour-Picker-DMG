@@ -448,15 +448,16 @@ final class SaveBar: NSView, NSTextFieldDelegate {
     }
 
     @objc private func paletteTapped(_ sender: NSButton) {
+        // The menu opens upward from the button, so New Palette goes last, nearest the pointer, as it does on the swatch pages.
         let menu = NSMenu()
-        menu.addItem(withTitle: "New Palette", action: #selector(keepNew(_:)), keyEquivalent: "").target = self
         let palettes = library.paletteOrder
-        if !palettes.isEmpty { menu.addItem(.separator()) }
         for s in palettes {
             let item = menu.addItem(withTitle: s.name, action: #selector(keepIn(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = s.id
         }
+        if !palettes.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(withTitle: "New Palette", action: #selector(keepNew(_:)), keyEquivalent: "").target = self
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
     }
 
