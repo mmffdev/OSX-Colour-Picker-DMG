@@ -72,6 +72,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Store.start()
         #endif
         _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
+        if Prefs.assistantDone && DocumentsAccess.neededAtLaunch {
+            // The catalogue is in Documents and macOS has not been asked with a reason: say why first.
+            PermissionGate.show([Permission.documents]) { [weak self] in self?.openUp() }
+        } else {
+            openUp()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The splash, then the main window, or the setup assistant on a first open.
+    private func openUp() {
         let splash = SplashWindowController()
         self.splash = splash
         if Prefs.assistantDone {
@@ -89,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// The assistant again, from the app menu: what it settles is applied to the open window.

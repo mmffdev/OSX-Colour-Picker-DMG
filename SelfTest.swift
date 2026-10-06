@@ -2323,6 +2323,11 @@ func runSetupTests(check: (Bool, String) -> Void) {
     check(HaloTrainer.lessons.map { $0.id } == ["open", "turn", "deeper", "confirm"], "the halo trainer teaches its four moves in order")
     check(HaloTrainer.progress(["open", "deeper"]) == (2, 4) && HaloTrainer.progress(["open", "turn", "deeper", "confirm", "other"]) == (4, 4),
           "the trainer counts only its own lessons")
+    let docs = URL(fileURLWithPath: "/Users/someone/Documents")
+    check(DocumentsAccess.inside(docs.appendingPathComponent("Studio/Clients"), documents: docs) && DocumentsAccess.inside(docs, documents: docs)
+          && !DocumentsAccess.inside(URL(fileURLWithPath: "/Users/someone/Documents Old/Studio"), documents: docs)
+          && !DocumentsAccess.inside(URL(fileURLWithPath: "/Users/someone/Library/Application Support/MMFFDev Colour 3"), documents: docs),
+          "a launch counts as needing Documents only for a folder inside it, not one that merely starts with its name")
     check(ThemedButton.readable(on: Brand.master) == .white && ThemedButton.readable(on: NSColor(srgbRed: 0.95, green: 0.66, blue: 0, alpha: 1)) == .black,
           "a lead button's text is white on Blue Ribbon and black on saffron")
 }
