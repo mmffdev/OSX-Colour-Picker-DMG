@@ -461,7 +461,7 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
     var org = Library()
     let web = org.createSwatch(named: "Web", hexes: ["#111111"], at: at(1))
     let print_ = org.createSwatch(named: "Print", hexes: ["#222222"], at: at(2))
-    let loose = org.createSwatch(named: "Loose", hexes: ["#333333"], at: at(3))
+    _ = org.createSwatch(named: "Loose", hexes: ["#333333"], at: at(3))
     let proj = org.createProject(named: "My Project", at: at(10))
     check(org.createProject(named: "My Project", at: at(11)) != proj && org.projects.map { $0.name } == ["My Project", "My Project 2"],
           "project names are made unique")

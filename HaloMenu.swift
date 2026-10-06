@@ -25,18 +25,19 @@ struct HaloAction {
     var keepsOpen = false
     /// Set to make the action open a text box in the centre; Return hands back what was typed.
     var edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil
-    /// Set to make the action grow a ring of its own outside the one it sits on, holding these.
-    var children: (() -> [HaloAction])? = nil
     var onSelect: () -> Void = {}
+    /// Set to make the action grow a ring of its own outside the one it sits on, holding these. Declared
+    /// after onSelect so a trailing closure on either initialiser is the action, never the ring.
+    var children: (() -> [HaloAction])? = nil
 }
 
 extension HaloAction {
     init(id: String, label: String, symbol name: String, description: String? = nil, disabled: Bool = false,
          checked: Bool? = nil, confirmation: (label: String, keyboardHint: String)? = nil, keepsOpen: Bool = false,
          edit: (value: String, placeholder: String, hint: String, onCommit: (String) -> Void)? = nil,
-         children: (() -> [HaloAction])? = nil, onSelect: @escaping () -> Void = {}) {
+         onSelect: @escaping () -> Void = {}, children: (() -> [HaloAction])? = nil) {
         self.init(id: id, label: label, icon: NSImage(systemSymbolName: name, accessibilityDescription: label) ?? NSImage(),
-                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, edit: edit, children: children, onSelect: onSelect)
+                  description: description, disabled: disabled, checked: checked, confirmation: confirmation, keepsOpen: keepsOpen, edit: edit, onSelect: onSelect, children: children)
     }
 }
 
