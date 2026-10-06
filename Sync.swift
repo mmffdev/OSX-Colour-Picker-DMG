@@ -616,10 +616,17 @@ final class SyncEngine {
 // ---------- Settings (per Mac) ----------
 
 /// Preferences for this Mac. A trial run (MMFFDEV_COLOUR3_HOME set) gets its own, so it can
-/// never pick up — or sync into — the real sync folder.
+/// never pick up — or sync into — the real sync folder. The bare binary Xcode runs from the build
+/// folder has no bundle identifier, so .standard would be an empty domain of its own and the app would
+/// forget its catalogue and its projects folder; it reads the installed app's domain instead.
 let preferences: UserDefaults = {
-    guard ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"] != nil else { return .standard }
-    return UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial") ?? .standard
+    if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"] != nil {
+        return UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial") ?? .standard
+    }
+    if Bundle.main.bundleIdentifier == nil {
+        return UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3") ?? .standard
+    }
+    return .standard
 }()
 
 enum SyncSettings {
