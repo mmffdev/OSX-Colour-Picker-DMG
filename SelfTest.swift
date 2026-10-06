@@ -1706,7 +1706,7 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           "the memory reads back from its file as it was written, and a missing file is an empty memory")
 
     check(ProjectField.fields(in: .studio).map { $0.title } == ["Studio", "Department", "Project owner", "Contact name", "Job title", "Email", "Phone", "Extension",
-                                                                 "Mobile number", "Website", "Address", "Company number", "VAT / tax number"]
+                                                                 "Mobile number", "Website", "Address line 1", "Address line 2", "Town / city", "County / state", "Postcode", "Country", "Company number", "VAT / tax number"]
           && ProjectField.tidy(["ownerDepartment": " Design ", "ownerMobile": "07", "nonsense": "x"]) == ["ownerDepartment": "Design", "ownerMobile": "07"],
           "the Studio section holds the organisation's fields in order, and the new ones are kept like the rest")
 

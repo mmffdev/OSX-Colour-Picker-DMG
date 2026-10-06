@@ -10,9 +10,12 @@ import AppKit
 /// One box on the project form. The raw value is the key the answer is stored under.
 enum ProjectField: String, CaseIterable {
     case description, reference, purchaseOrder, status, startDate, dueDate
-    case clientCompany, clientContact, clientRole, clientEmail, clientPhone, clientWebsite, clientAddress, clientCompanyNumber, clientTaxNumber
+    // The address is its lines, so it can be laid out on a document or searched by town or postcode;
+    // clientAddress and ownerAddress are the first line, and the key an earlier version's one box was saved under.
+    case clientCompany, clientContact, clientRole, clientEmail, clientPhone, clientWebsite,
+         clientAddress, clientAddress2, clientTown, clientCounty, clientPostcode, clientCountry, clientCompanyNumber, clientTaxNumber
     case ownerCompany, ownerDepartment, ownerName, ownerContact, ownerRole, ownerEmail, ownerPhone, ownerExtension, ownerMobile,
-         ownerWebsite, ownerAddress, ownerCompanyNumber, ownerTaxNumber
+         ownerWebsite, ownerAddress, ownerAddress2, ownerTown, ownerCounty, ownerPostcode, ownerCountry, ownerCompanyNumber, ownerTaxNumber
     case copyright, usageTerms, confidentiality
     case colourSpace, brandGuidelines
     case notes
@@ -29,10 +32,10 @@ enum ProjectField: String, CaseIterable {
     var section: Section {
         switch self {
         case .description, .reference, .purchaseOrder, .status, .startDate, .dueDate: return .project
-        case .clientCompany, .clientContact, .clientRole, .clientEmail, .clientPhone, .clientWebsite, .clientAddress,
-             .clientCompanyNumber, .clientTaxNumber: return .client
+        case .clientCompany, .clientContact, .clientRole, .clientEmail, .clientPhone, .clientWebsite, .clientAddress, .clientAddress2,
+             .clientTown, .clientCounty, .clientPostcode, .clientCountry, .clientCompanyNumber, .clientTaxNumber: return .client
         case .ownerCompany, .ownerDepartment, .ownerName, .ownerContact, .ownerRole, .ownerEmail, .ownerPhone, .ownerExtension, .ownerMobile,
-             .ownerWebsite, .ownerAddress, .ownerCompanyNumber, .ownerTaxNumber: return .studio
+             .ownerWebsite, .ownerAddress, .ownerAddress2, .ownerTown, .ownerCounty, .ownerPostcode, .ownerCountry, .ownerCompanyNumber, .ownerTaxNumber: return .studio
         case .copyright, .usageTerms, .confidentiality: return .rights
         case .colourSpace, .brandGuidelines: return .colour
         case .notes: return .notes
@@ -53,7 +56,12 @@ enum ProjectField: String, CaseIterable {
         case .clientEmail: return "Email"
         case .clientPhone: return "Phone"
         case .clientWebsite: return "Website"
-        case .clientAddress: return "Address"
+        case .clientAddress, .ownerAddress: return "Address line 1"
+        case .clientAddress2, .ownerAddress2: return "Address line 2"
+        case .clientTown, .ownerTown: return "Town / city"
+        case .clientCounty, .ownerCounty: return "County / state"
+        case .clientPostcode, .ownerPostcode: return "Postcode"
+        case .clientCountry, .ownerCountry: return "Country"
         case .clientCompanyNumber: return "Company number"
         case .clientTaxNumber: return "VAT / tax number"
         case .ownerName: return "Project owner"
@@ -61,7 +69,6 @@ enum ProjectField: String, CaseIterable {
         case .ownerEmail: return "Email"
         case .ownerPhone: return "Phone"
         case .ownerWebsite: return "Website"
-        case .ownerAddress: return "Address"
         case .ownerDepartment: return "Department"
         case .ownerContact: return "Contact name"
         case .ownerRole: return "Job title"
@@ -80,7 +87,7 @@ enum ProjectField: String, CaseIterable {
 
     var kind: Kind {
         switch self {
-        case .description, .clientAddress, .ownerAddress, .usageTerms, .notes: return .lines
+        case .description, .usageTerms, .notes: return .lines
         case .status: return .choice(["Proposal", "Active", "On hold", "Complete", "Archived"])
         case .confidentiality: return .choice(["Public", "Internal", "Confidential", "Under NDA"])
         default: return .line
@@ -97,6 +104,8 @@ enum ProjectField: String, CaseIterable {
         case .copyright: return "e.g. \u{00A9} 2026 Company Ltd. All rights reserved."
         case .usageTerms: return "Who may use these colours, where, and for how long"
         case .colourSpace: return "e.g. sRGB, Display P3, FOGRA39"
+        case .clientAddress, .ownerAddress: return "Building and street"
+        case .clientPostcode, .ownerPostcode: return "e.g. LE10 1SW"
         default: return ""
         }
     }
