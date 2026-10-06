@@ -219,11 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Sync Now", #selector(LibraryController.syncNow), "s", library, [.command, .shift])
             m.addItem(.separator())
             add(m, "Export\u{2026}", #selector(MainWindowController.exportShown), "e", main)
+            add(m, "Export Palette File\u{2026}", #selector(MainWindowController.exportShownPaletteFile), "", main)
             add(m, "Export Design Pack\u{2026}", #selector(MainWindowController.exportDesignPack), "e", main, [.command, .option])
             add(m, "Add to macOS Colour Panel", #selector(MainWindowController.addShownToColourPanel), "", main)
             m.addItem(adobeMenuItem(target: main, action: #selector(MainWindowController.addShownToAdobe(_:))))
             add(m, "Export Library\u{2026}", #selector(LibraryController.exportLibrary), "e", library, [.command, .shift])
             m.addItem(.separator())
+            add(m, "Import Palette Files\u{2026}", #selector(MainWindowController.importPaletteFilesShown), "", main)
+            add(m, "Import CSS Tokens\u{2026}", #selector(MainWindowController.importTokensShown), "", main)
             add(m, "Import from MMFFDev Colour 2", #selector(LibraryController.importFromV2), "", library)
         }
         menu("Edit") { m in

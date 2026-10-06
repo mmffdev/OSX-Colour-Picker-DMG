@@ -819,6 +819,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     }
 
     @objc func exportShown() { library.export(library.exportPalettes(for: selection)) }
+    /// The palette showing, as a .colpalette; from any other page, the footer says what to open.
+    @objc func exportShownPaletteFile() {
+        if case .palette(let id) = selection { library.exportPaletteFile(id) } else { library.flash("Open a palette to export it as a file") }
+    }
+    /// Where an import from the File menu lands: the member whose palette or Overview is showing, else the stock list.
+    private var shownProject: UUID? {
+        switch selection {
+        case .palette(let id): return library.library.swatch(id)?.projectID
+        case .overview(let id): return id
+        default: return nil
+        }
+    }
+    @objc func importPaletteFilesShown() { library.importPalettes(.paletteFiles, into: shownProject) }
+    @objc func importTokensShown() { library.importPalettes(.tokens, into: shownProject) }
     @objc func exportDesignPack() { library.exportDesignPack(for: selection) }
     @objc func addShownToAdobe(_ sender: NSMenuItem) {
         guard let send = sender.representedObject as? AdobeSend else { return }

@@ -1272,6 +1272,20 @@ enum SwatchMenu {
                     HaloAction(id: h.rawValue, label: h.title, symbol: harmonySymbols[h] ?? "circle") { library.makePalette(h, from: hex) }
                 }
             },
+            group("files", "Palette Files", "doc.badge.arrow.up", "Bring palettes in from files, or send this one out") {
+                let home = palette.flatMap { library.library.swatch($0)?.projectID }
+                var inner = [
+                    HaloAction(id: "import-files", label: "Import Palette Files\u{2026}", symbol: "square.and.arrow.down",
+                               description: "Our own .colpalette files, into this palette's home") { library.importPalettes(.paletteFiles, into: home) },
+                    HaloAction(id: "import-tokens", label: "Import CSS Tokens\u{2026}", symbol: "curlybraces",
+                               description: "CSS, SCSS or design-token JSON; duplicates are skipped") { library.importPalettes(.tokens, into: home) },
+                ]
+                if let id = palette {
+                    inner.append(HaloAction(id: "export-file", label: "Export Palette File\u{2026}", symbol: "square.and.arrow.up",
+                                            description: "This palette as a .colpalette for another catalogue") { library.exportPaletteFile(id) })
+                }
+                return inner
+            },
             HaloAction(id: "lab", label: "Open In cLab", symbol: labSymbolName, description: "Build on this colour on the wheel") {
                 library.onOpenLab?(hex)
             },

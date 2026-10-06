@@ -296,6 +296,37 @@ final class ProjectHeaderCell: NSTableCellView {
     @objc private func gearTapped(_ sender: NSButton) { onGear?(sender) }
 }
 
+/// A row with an icon, a name and a count: a bucket inside a member (its palettes, typography, tags), or a page.
+/// A bucket shows a gear at the far right that opens its actions; a page row hides it.
+final class BucketCellView: NSTableCellView {
+    let gear: NSButton
+    /// The gear was pressed; hands over the button so the menu can open under it.
+    var onGear: ((NSButton) -> Void)?
+
+    override init(frame: NSRect) {
+        gear = NSButton(frame: .zero)
+        super.init(frame: frame)
+        gear.isBordered = false
+        gear.bezelStyle = .inline
+        gear.image = symbol("gearshape", "", size: 11)
+        gear.imagePosition = .imageOnly
+        gear.contentTintColor = .tertiaryLabelColor
+        gear.isHidden = true
+        gear.target = self
+        gear.action = #selector(gearTapped(_:))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// `actions` names what the gear acts on ("Palettes actions"); nil hides it.
+    func setGear(_ actions: String?, _ handler: ((NSButton) -> Void)?) {
+        gear.isHidden = actions == nil
+        gear.toolTip = actions
+        gear.setAccessibilityLabel(actions ?? "")
+        onGear = handler
+    }
+    @objc private func gearTapped(_ sender: NSButton) { onGear?(sender) }
+}
+
 /// The sidebar's own background: the theme's, flat, in place of the system's tinted sidebar.
 final class SidebarBackdrop: NSView {
     override var isOpaque: Bool { true }
@@ -1055,6 +1086,22 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
             return cell
         }
+        if node.kind == .loose {
+            let heading = NSUserInterfaceItemIdentifier("loose")
+            let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
+                let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
+            cell.configure(name: "Palettes", heading: true, tooltip: "New palette", actions: "Palettes actions")
+            cell.toolTip = "Your stock of palettes. A project takes a copy, so these never change with a project"
+            cell.onAdd = { [weak self] in self?.library.newPalette() }
+            let empty = node.children.isEmpty
+            cell.onGear = { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forBucket: .palettes, in: nil, empty: empty)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            }
+            return cell
+        }
         if node.kind == .typography {
             let heading = NSUserInterfaceItemIdentifier("typography")
             let cell = o.makeView(withIdentifier: heading, owner: self) as? ProjectHeaderCell ?? {
@@ -1122,6 +1169,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if node.isGroup {
             cell.textField?.font = SidebarOutlineView.headingFont
             cell.textField?.textColor = RailStyle.headingColour
+        }
+        if let (role, project) = bucket(node), let holder = cell as? BucketCellView {
+            let empty = node.children.isEmpty
+            holder.setGear("\(named(role, in: project)) actions") { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forBucket: role, in: project, empty: empty)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            }
+        } else {
+            (cell as? BucketCellView)?.setGear(nil, nil)
         }
         switch node.kind {
         case .favourites: cell.textField?.stringValue = "Favourites"; cell.toolTip = node.children.isEmpty ? "Star a palette to keep it here" : nil
@@ -1201,13 +1259,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private func plainCell(_ id: NSUserInterfaceItemIdentifier, icon: Bool) -> NSTableCellView {
         // A heading keeps the font it is given: a sidebar list otherwise sets every cell's text to the system's sidebar size.
-        let cell = icon ? NSTableCellView() : HeadingCellView()
+        let cell = icon ? BucketCellView() : HeadingCellView()
         cell.identifier = id
         let text = NSTextField(labelWithString: "")
         text.lineBreakMode = .byTruncatingTail
         cell.textField = text
         var views: [NSView] = [text]
-        if icon {
+        if let bucket = cell as? BucketCellView {
             let image = NSImageView()
             image.contentTintColor = .controlAccentColor
             cell.imageView = image
@@ -1216,7 +1274,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             count.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             count.textColor = .tertiaryLabelColor
             text.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            views = [image, text, count]
+            // The gear takes the right-hand icon column every row shares; the count sits where a member's padlock does.
+            views = [image, text, count, bucket.gear]
         }
         let stack = NSStackView(views: views)
         stack.orientation = .horizontal
@@ -1225,9 +1284,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         cell.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: icon ? -SidebarOutlineView.trailingPad : -8),
             stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
+        if let bucket = cell as? BucketCellView {
+            NSLayoutConstraint.activate([
+                bucket.gear.widthAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+                bucket.gear.heightAnchor.constraint(equalToConstant: SidebarOutlineView.trailingIcon),
+            ])
+        }
         return cell
     }
 
@@ -1399,6 +1464,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             menu.addItem(.separator())
             add("Copy All", #selector(copyClicked(_:)), id)
             add("Export\u{2026}", #selector(exportClicked(_:)), id)
+            add("Export Palette File\u{2026}", #selector(exportPaletteFileClicked(_:)), id)
             add("Export Design Pack\u{2026}", #selector(packClicked(_:)), id)
             add("Add to macOS Colour Panel", #selector(panelClicked(_:)), id)
             menu.addItem(adobeMenuItem(target: self, action: #selector(adobeClicked(_:)), palette: id))
@@ -1425,14 +1491,49 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         } else if clicked?.kind == .projects, let c = collectionsNow.first {
             fill(menu, forCollection: c.id, empty: clicked?.children.isEmpty ?? true)
         } else if let (role, pid) = bucket(clicked) {
-            let empty = clicked?.children.isEmpty ?? true
-            add("Empty It\u{2026}", #selector(dumpBucketClicked(_:)), [role.rawValue, pid.uuidString])
-            menu.items.last?.isEnabled = !empty
-            menu.autoenablesItems = false
+            fill(menu, forBucket: role, in: pid, empty: clicked?.children.isEmpty ?? true)
+        } else if clicked?.kind == .loose {
+            fill(menu, forBucket: .palettes, in: nil, empty: clicked?.children.isEmpty ?? true)
         } else {
             menu.addItem(withTitle: "New Palette", action: #selector(LibraryController.newPalette), keyEquivalent: "").target = library
             menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
             menu.addItem(withTitle: "Project Templates\u{2026}", action: #selector(LibraryController.manageProjectTemplates), keyEquivalent: "").target = library
+        }
+    }
+
+    /// A bucket's actions, for a right-click on its row and for the row's gear: the palettes, typography or tags of a
+    /// member (`project`), or the stock Palettes list (nil). Palettes come in from files here and go out to them.
+    private func fill(_ menu: NSMenu, forBucket role: SchemaRole, in project: UUID?, empty: Bool) {
+        func add(_ title: String, _ action: Selector, _ object: Any? = nil, enabled: Bool = true) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+            item.isEnabled = enabled
+        }
+        menu.autoenablesItems = false
+        let locked = project.flatMap { library.library.project($0)?.isLocked } ?? false
+        let holder = project.map { " In \(SchemaTrial.memberName(of: SchemaTrial.collection(of: $0)))" } ?? ""
+        let target = project.map { [$0] } ?? []
+        switch role {
+        case .palettes:
+            add("New Palette\(holder)", #selector(newInBucketClicked(_:)), target, enabled: !locked)
+            add("Import Palette Files\u{2026}", #selector(importPaletteFilesClicked(_:)), target, enabled: !locked)
+            add("Import CSS Tokens\u{2026}", #selector(importTokensClicked(_:)), target, enabled: !locked)
+            menu.addItem(.separator())
+            add("Export Palettes\u{2026}", #selector(exportBucketClicked(_:)), target, enabled: !empty)
+            add("Export Palette Files\u{2026}", #selector(exportPaletteFilesClicked(_:)), target, enabled: !empty)
+            if let p = project { add("Export Design Pack\u{2026}", #selector(exportProjectPackClicked(_:)), [p], enabled: !empty) }
+        case .typography:
+            add("New Typography Palette\(holder)", #selector(newTypographyInBucketClicked(_:)), target, enabled: !locked)
+        case .tags:
+            add("New Tag", #selector(newTagInBucketClicked(_:)), target, enabled: !locked)
+            add("Edit Tags\u{2026}", #selector(editTagsClicked(_:)), target)
+        case .information:
+            break
+        }
+        if let p = project, role != .information {
+            menu.addItem(.separator())
+            add("Empty It\u{2026}", #selector(dumpBucketClicked(_:)), [role.rawValue, p.uuidString], enabled: !empty && !locked)
         }
     }
 
@@ -1549,6 +1650,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
     @objc private func dumpProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(project: id, over: view.window) } }
     @objc private func dumpCollectionClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(collection: id, over: view.window) } }
+    /// The member a bucket item was pressed on: its one id, or none for the stock list.
+    private func bucketProject(_ s: NSMenuItem) -> UUID? { (s.representedObject as? [UUID])?.first }
+    @objc private func newInBucketClicked(_ s: NSMenuItem) { library.addPalette(to: bucketProject(s)) }
+    @objc private func newTypographyInBucketClicked(_ s: NSMenuItem) { library.addTypography(to: bucketProject(s)) }
+    @objc private func newTagInBucketClicked(_ s: NSMenuItem) { library.showTagEditor(focusing: library.newTag()) }
+    @objc private func editTagsClicked(_ s: NSMenuItem) { library.showTagEditor() }
+    @objc private func importPaletteFilesClicked(_ s: NSMenuItem) { library.importPalettes(.paletteFiles, into: bucketProject(s)) }
+    @objc private func importTokensClicked(_ s: NSMenuItem) { library.importPalettes(.tokens, into: bucketProject(s)) }
+    @objc private func exportBucketClicked(_ s: NSMenuItem) { library.exportPalettes(in: bucketProject(s)) }
+    @objc private func exportPaletteFilesClicked(_ s: NSMenuItem) { library.exportPaletteFiles(in: bucketProject(s)) }
+    @objc private func exportProjectPackClicked(_ s: NSMenuItem) { if let p = bucketProject(s) { library.exportDesignPack(project: p) } }
+    @objc private func exportPaletteFileClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportPaletteFile(id) } }
     @objc private func newFolderClicked(_ s: NSMenuItem) { if let id = id(s), let c = collectionsNow.first(where: { $0.id == id }) { newFolder(in: c) } }
     @objc private func newMemberInFolderClicked(_ s: NSMenuItem) {
         guard let ids = s.representedObject as? [UUID], ids.count == 2, let c = collectionsNow.first(where: { $0.id == ids[0] }) else { return }

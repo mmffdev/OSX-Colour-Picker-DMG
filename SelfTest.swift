@@ -188,6 +188,7 @@ func runSelfTest() -> Never {
     runHaloTests(check: check)
     runShortcutTests(check: check)
     runProjectTests(check: check)
+    runImportTests(check: check)
     runColourSpaceTests(check: check)
     runTagTests(check: check)
     runNameTests(check: check)
@@ -2210,4 +2211,63 @@ func runTypographyTests(check: (Bool, String) -> Void) {
     let merged = mergeLibraries(local: lib, remote: other)
     check(merged.swatch(first)?.name == "Headlines" && merged.swatch(first)?.styles?.last?.name == "From The Other Mac" && merged.swatch(first)?.styles?.count == 3,
           "a sync keeps the newer pairings and the newer name, each on its own")
+}
+
+func runImportTests(check: (Bool, String) -> Void) {
+    print("importing palettes from files")
+    // CSS the app wrote comes back as it went: one palette per comment group, each colour under its name.
+    let brand = ExportPalette(name: "Brand", colours: [ExportColour(name: "Steel Blue", hex: "#4F8093"), ExportColour(name: "Ember", hex: "#B55226")])
+    let night = ExportPalette(name: "Night", colours: [ExportColour(name: "Ink", hex: "#1B1B1B")])
+    if let css = ExportFormat.css.data([brand, night]) {
+        let back = PaletteImport.read(css, fallback: "tokens")
+        check(back.map { $0.name } == ["Brand", "Night"], "CSS the app exported reads back as the same palettes")
+        check(back.first?.colours == brand.colours, "each CSS variable gives back its colour and its name")
+    } else { check(false, "the CSS export renders") }
+    if let scss = ExportFormat.scss.data([brand]) {
+        check(PaletteImport.read(scss, fallback: "x").first?.colours.map { $0.hex } == ["#4F8093", "#B55226"], "SCSS variables read back too")
+    }
+    let loose = PaletteImport.variables(in: ":root {\n  --accent: rgb(79, 128, 147);\n  --paper: #FFF;\n  --gap: 4px;\n  --color-ember: rgb(181 82 38 / 50%);\n}", fallback: "site")
+    check(loose.count == 1 && loose[0].name == "site", "variables before any comment make one palette named for the file")
+    check(loose.first?.colours.map { $0.hex } == ["#4F8093", "#FFFFFF", "#B55226"], "rgb(), #RGB and rgb with alpha read as colours; a length does not")
+    check(loose.first?.colours.map { $0.name } == ["Accent", "Paper", "Ember"], "a variable's name is its words, with a color prefix dropped")
+    check(PaletteImport.variableName("--swatch-steel-blue") == "Steel Blue" && PaletteImport.variableName("$primary_dark") == "Primary Dark",
+          "swatch and $ markers go, and kebab or snake case becomes words")
+
+    // Tokens: the 2025 object value, the older hex string, a description as the name, and a group as a palette.
+    let tokens = """
+    { "brand": { "steel": { "$type": "color", "$value": { "colorSpace": "srgb", "components": [0.3098, 0.502, 0.5765], "alpha": 1, "hex": "#4f8093" }, "$description": "Steel Blue" },
+                 "ember": { "$type": "color", "$value": "#B55226" } },
+      "spacing": { "gap": { "$type": "dimension", "$value": "4px" } } }
+    """
+    let read = PaletteImport.read(Data(tokens.utf8), fallback: "x")
+    check(read.map { $0.name } == ["Brand"], "a tokens group with colours is a palette; one without is not")
+    check(read.first?.colours == [ExportColour(name: "Ember", hex: "#B55226"), ExportColour(name: "Steel Blue", hex: "#4F8093")],
+          "a token's description names it, else its key does; both value forms read")
+
+    // A .colpalette the app wrote reads back whole, with the names given in it.
+    var lib = Library()
+    let id = lib.createSwatch(named: "Brand", hexes: ["#4F8093", "#B55226"])
+    lib.setName("Steel Blue", of: "#4F8093", in: id)
+    if let doc = try? ProjectFile.paletteDocuments([lib.swatch(id)!], colours: lib.colours, project: nil).first {
+        let own = PaletteImport.read(doc.data, fallback: "x")
+        check(own.first?.name == "Brand" && own.first?.colours.first?.name == "Steel Blue" && own.first?.colours.count == 2,
+              "a .colpalette reads back as its palette, with its names")
+    } else { check(false, "the palette document writes") }
+
+    // Merging: a new palette is made; the same again changes nothing; a name clash is numbered; a project keeps it.
+    var merged = Library()
+    let target = merged.createSwatch(named: "Picks", hexes: ["#000000"])
+    let first = merged.merge([ImportedPalette(name: "Brand", colours: brand.colours)], into: nil)
+    check(first == ImportOutcome(palettesMade: 1, added: 2, skipped: 0, renamed: 0), "an import into an empty place makes the palette and adds every colour")
+    check(merged.activeSwatchID == target, "an import does not redirect picks")
+    let again = merged.merge([ImportedPalette(name: "brand", colours: brand.colours)], into: nil)
+    check(again == ImportOutcome(palettesMade: 0, added: 0, skipped: 2, renamed: 0), "the same file again, whatever its case, is skipped whole")
+    let clash = merged.merge([ImportedPalette(name: "Brand", colours: [ExportColour(name: "Ember", hex: "#C06030")])], into: nil)
+    let brandID = merged.palettes(in: nil).first { $0.name == "Brand" }!.id
+    check(clash == ImportOutcome(palettesMade: 0, added: 1, skipped: 0, renamed: 1) && merged.name(of: "#C06030", in: brandID) == "Ember 2",
+          "a different colour under a taken name comes in as the next number of that name")
+    let project = merged.createProject(named: "Acme")
+    let into = merged.merge([ImportedPalette(name: "Brand", colours: brand.colours)], into: project)
+    check(into.palettesMade == 1 && merged.palettes(in: project).count == 1 && merged.palettes(in: nil).filter { $0.name == "Brand" }.count == 1,
+          "an import into a member makes the palette there, not in the stock list of the same name")
 }

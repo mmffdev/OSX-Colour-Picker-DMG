@@ -1536,3 +1536,102 @@ final class FormatChooser: NSObject, NSOpenSavePanelDelegate {
         panel.nameFieldStringValue = format.fileName(for: palettes)
     }
 }
+
+// MARK: Palette files in and out
+
+extension LibraryController {
+    /// What an import panel is for: the app's own palette files, or variables and tokens from other tools.
+    enum ImportKind {
+        case paletteFiles, tokens
+        var title: String { self == .paletteFiles ? "Import Palette Files" : "Import CSS Tokens" }
+        var message: String {
+            self == .paletteFiles ? "Choose .colpalette files. Each becomes a palette, or merges into one of the same name."
+                : "Choose CSS, SCSS or design-token JSON files. Their colours merge in; duplicates are skipped."
+        }
+        var extensions: [String] { self == .paletteFiles ? [ColourFiles.palette] : ["css", "scss", "json", "txt"] }
+    }
+
+    /// Reads the chosen files into the palettes of `project`, or the stock list when nil, and says what happened.
+    func importPalettes(_ kind: ImportKind, into project: UUID?) {
+        if let p = project, library.project(p)?.isLocked == true { flash("Locked: unlock the \(SchemaTrial.memberName(of: SchemaTrial.collection(of: p)).lowercased()) first"); return }
+        let panel = NSOpenPanel()
+        panel.title = kind.title
+        panel.message = kind.message
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = kind.extensions.compactMap { UTType(filenameExtension: $0) }
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, !panel.urls.isEmpty else { return }
+            var imported: [ImportedPalette] = [], unread: [String] = []
+            for url in panel.urls {
+                let found = (try? Data(contentsOf: url)).map { PaletteImport.read($0, fallback: url.deletingPathExtension().lastPathComponent) } ?? []
+                if found.isEmpty { unread.append(url.lastPathComponent) } else { imported += found }
+            }
+            guard !imported.isEmpty else { self.flash("No colours found in \(unread.joined(separator: ", "))"); return }
+            var outcome = ImportOutcome()
+            self.apply(kind.title) { outcome = $0.merge(imported, into: project) }
+            let where_ = project.flatMap { self.library.project($0)?.name } ?? "Palettes"
+            self.flash("Imported into \(where_): \(outcome.summary)" + (unread.isEmpty ? "" : ". Nothing read from \(unread.joined(separator: ", "))"))
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// Every palette of colours in `project` (nil: the stock list), in one file of the chosen format.
+    func exportPalettes(in project: UUID?) {
+        export(library.palettes(in: project).filter { !$0.isTypography }.compactMap { library.exportPalette($0.id, by: paletteSort) })
+    }
+
+    /// One palette as a .colpalette, the app's own file, for another catalogue to import.
+    func exportPaletteFile(_ id: UUID) {
+        guard let s = library.swatch(id) else { return }
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.message = "Export \u{201C}\(s.name)\u{201D} as a palette file"
+        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.palette)].compactMap { $0 }
+        panel.nameFieldStringValue = filesystemName(s.name) + "." + ColourFiles.palette
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, let url = panel.url else { return }
+            do {
+                guard let file = try self.paletteFiles([s]).first else { return }
+                try file.data.write(to: url, options: .atomic)
+                self.flash("Exported \(url.lastPathComponent)")
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch { self.show(error) }
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// Every palette of colours in `project` (nil: the stock list) as .colpalette files in a chosen folder.
+    func exportPaletteFiles(in project: UUID?) {
+        let palettes = library.palettes(in: project).filter { !$0.isTypography && !$0.entries.isEmpty }
+        guard !palettes.isEmpty else { flash("Nothing to export yet"); return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Export Here"
+        panel.message = "Each palette becomes a .colpalette file in the folder you choose"
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, let folder = panel.url else { return }
+            do {
+                var written: [URL] = []
+                for file in try self.paletteFiles(palettes) {
+                    let url = folder.appendingPathComponent(file.name)
+                    try file.data.write(to: url, options: .atomic)
+                    written.append(url)
+                }
+                self.flash("Exported \(plural(written.count, "palette file", "palette files")) to \(folder.lastPathComponent)")
+                NSWorkspace.shared.activateFileViewerSelecting(written)
+            } catch { self.show(error) }
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+    }
+
+    /// The .colpalette bytes for some palettes, each on its own (no project), named for the palette.
+    private func paletteFiles(_ palettes: [Swatch]) throws -> [(name: String, data: Data)] {
+        try ProjectFile.paletteDocuments(palettes, colours: library.colours, project: nil)
+            .filter { $0.path.hasSuffix("." + ColourFiles.palette) }
+            .map { (name: ($0.path as NSString).lastPathComponent, data: $0.data) }
+    }
+}
