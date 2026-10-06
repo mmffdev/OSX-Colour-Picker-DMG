@@ -25,7 +25,9 @@ enum FolderAccess {
         #if APPSTORE
         let path = url.standardizedFileURL.path
         guard held[path] == nil else { return }
-        guard let data = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
+        let data: Data
+        do { data = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) }
+        catch { NSLog("FolderAccess: could not make a bookmark for %@: %@", path, error.localizedDescription); return }
         var all = stored
         all[path] = data
         stored = all
@@ -47,16 +49,16 @@ enum FolderAccess {
     }
 
     /// At launch: every remembered folder is opened again. A bookmark gone stale (the folder moved) is
-    /// remade from where it now resolves; one that no longer resolves is dropped.
+    /// remade from where it now resolves. One that does not resolve is kept and logged: a drive not
+    /// mounted or a cloud folder not yet downloaded resolves next time, and dropping it would lose the grant for good.
     static func restoreAll() {
         #if APPSTORE
         var all = stored
         for (path, data) in all {
             var stale = false
-            guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) else {
-                all[path] = nil
-                continue
-            }
+            let url: URL
+            do { url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) }
+            catch { NSLog("FolderAccess: could not resolve the bookmark for %@: %@", path, error.localizedDescription); continue }
             if url.startAccessingSecurityScopedResource() { scoped.insert(path) }
             held[path] = url
             if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {

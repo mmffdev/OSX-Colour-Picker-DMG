@@ -33,10 +33,19 @@ if [ "$MODE" = "archive" ]; then
     exit 0
 fi
 
-echo "building (ad hoc signed)..."
+# Signed with the Developer ID when the keychain has one, ad hoc otherwise. Developer ID matters for
+# trying the app: the sandbox ties security-scoped bookmarks to a real signing identity, so an ad hoc
+# copy forgets every folder the user chose as soon as it quits.
+source ./signing.sh
+if [ -n "$APP_IDENTITY" ]; then
+    echo "building (signed: $APP_IDENTITY)..."
+    SIGN=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$APP_IDENTITY" DEVELOPMENT_TEAM=6QVKGBRP5J PROVISIONING_PROFILE_SPECIFIER=)
+else
+    echo "building (ad hoc signed; folders chosen will not be remembered between launches)..."
+    SIGN=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=)
+fi
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release -derivedDataPath "$DERIVED" \
-    CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-    build -quiet
+    "${SIGN[@]}" build -quiet
 
 echo "checking entitlements..."
 codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "com.apple.security.app-sandbox" \
