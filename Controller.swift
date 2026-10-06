@@ -464,10 +464,11 @@ final class LibraryController: NSObject {
     /// Asks for the project's name, makes it, and opens its Overview page, where its details are
     /// filled in. `palette`, when given, goes into the project as a copy once it is made.
     /// `kind` is what the schema calls it, where that is not Project; `made` is told the new project's id, to place it.
-    func startProject(moving palette: UUID?, called kind: String = "Project", made placed: ((UUID) -> Void)? = nil) {
+    func startProject(moving palette: UUID?, called kind: String = "Project", in collection: SchemaCollection? = nil, made placed: ((UUID) -> Void)? = nil) {
+        let place = ModalPlace { [weak self] name in self?.usualFolder(for: name, in: collection) ?? URL(fileURLWithPath: NSHomeDirectory()) }
         onPrompt?(ModalPrompt(title: "New \(kind)", message: "Name the \(kind.lowercased()). Its details are filled in on its Overview page, which opens next.",
                               placeholder: "Client, product or piece of work", confirm: "Create \(kind)", symbol: "folder.badge.plus",
-                              check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
+                              check: { ProjectField.problem(name: $0, values: [:]) }, place: place) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
             self.apply("New Project") { lib in
@@ -475,6 +476,8 @@ final class LibraryController: NSObject {
                 // The Studio section starts as the organisation set in Settings; the form can change any of it.
                 let organisation = ProjectField.tidy(Prefs.organisation)
                 if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
+                // Where it is kept, as the sheet showed: inside the catalogue by a relative path, elsewhere in full.
+                lib.setProjectFolder(made, ProjectFiles.keep(place.folder(for: lib.project(made)?.name ?? name), beside: self.store.url))
                 id = made
             }
             guard let made = id, let project = self.library.project(made) else { return }
@@ -484,6 +487,18 @@ final class LibraryController: NSObject {
             // The copy goes in by the usual door, which asks about notes when the palette has some.
             if let palette = palette { self.move(palette: palette, to: made, index: 0) }
         })
+    }
+
+    /// The folder a new member of `collection` goes in by default: a folder named for the collection
+    /// beside the catalogue's file, or, while the catalogue still lives in the app's own home, under
+    /// the projects folder chosen in Settings, or Documents.
+    func usualFolder(for name: String, in collection: SchemaCollection?) -> URL {
+        let heading = filesystemName((collection ?? SchemaTrial.collections[0]).name)
+        let catalogueFolder = store.url.deletingLastPathComponent()
+        let inHome = catalogueFolder.standardizedFileURL.path.hasPrefix(Catalogues.standard.root.standardizedFileURL.path)
+        let parent = inHome ? (ProjectFiles.folder ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents").appendingPathComponent(catalogue))
+                            : catalogueFolder
+        return parent.appendingPathComponent(heading).appendingPathComponent(filesystemName(name))
     }
 
     /// Asks for a project's name, makes it, and keeps `hexes` in it as a palette. The page stays

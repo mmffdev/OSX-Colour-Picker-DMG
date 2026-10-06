@@ -12,6 +12,16 @@ struct ModalChoice {
     let run: () -> Void
 }
 
+/// Where the thing being named will be kept: the usual folder for a name, until the user chooses another.
+final class ModalPlace {
+    /// The folder a thing of this name would go in, named for it.
+    let usual: (String) -> URL
+    /// The folder the user chose instead, if any: the thing goes straight in it, by its name.
+    var chosen: URL?
+    init(usual: @escaping (String) -> URL) { self.usual = usual }
+    func folder(for name: String) -> URL { chosen.map { $0.appendingPathComponent(filesystemName(name)) } ?? usual(name) }
+}
+
 /// One line of text to ask for: what it is for, what to check, and what to do with it.
 struct ModalPrompt {
     let title: String
@@ -21,6 +31,8 @@ struct ModalPrompt {
     let symbol: String
     /// What is wrong with the text, in words for the user; nil when it will do.
     let check: (String) -> String?
+    /// Set when the thing named gets a folder: the sheet shows where, and lets it be changed.
+    var place: ModalPlace? = nil
     let done: (String) -> Void
 }
 
@@ -30,6 +42,7 @@ final class PromptSheet: NSView, NSTextFieldDelegate {
     private let prompt: ModalPrompt
     private let field = NSTextField()
     private let problem = caption("")
+    private let where_ = NSTextField(labelWithString: "")
 
     init(_ prompt: ModalPrompt) {
         self.prompt = prompt
@@ -64,11 +77,35 @@ final class PromptSheet: NSView, NSTextFieldDelegate {
         bar.alignment = .centerY
         bar.spacing = PageStyle.barSpacing
 
+        // Where it will be kept, when it gets a folder: the path follows the name as it is typed.
+        let kept = NSStackView()
+        if prompt.place != nil {
+            where_.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
+            where_.textColor = .secondaryLabelColor
+            where_.lineBreakMode = .byTruncatingMiddle
+            where_.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let text = NSStackView(views: [caption("Kept in"), where_])
+            text.orientation = .vertical
+            text.alignment = .leading
+            text.spacing = 2
+            let gap = NSView()
+            gap.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+            kept.setViews([text, gap, toolButton("Change\u{2026}", "folder", "Choose another folder for it", target: self, action: #selector(changeTapped))], in: .leading)
+            kept.orientation = .horizontal
+            kept.alignment = .centerY
+            kept.spacing = PageStyle.barSpacing
+            showPlace()
+        }
+
         addSubview(panel)
-        for v in [panel, heading, body, field, bar] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        for v in [heading, body, field, bar] as [NSView] { panel.addSubview(v) }
+        for v in [panel, heading, body, field, kept, bar] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        for v in [heading, body, field, kept, bar] as [NSView] { panel.addSubview(v) }
         let pad = SwatchListStyle.sheetPad
         NSLayoutConstraint.activate([
+            kept.topAnchor.constraint(equalTo: field.bottomAnchor, constant: prompt.place == nil ? 0 : 12),
+            kept.leadingAnchor.constraint(equalTo: field.leadingAnchor),
+            kept.trailingAnchor.constraint(equalTo: field.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: kept.bottomAnchor, constant: 18),
             panel.widthAnchor.constraint(equalToConstant: 520),
             heading.topAnchor.constraint(equalTo: panel.topAnchor, constant: pad),
             heading.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: pad),
@@ -79,7 +116,6 @@ final class PromptSheet: NSView, NSTextFieldDelegate {
             field.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 14),
             field.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
             field.trailingAnchor.constraint(equalTo: heading.trailingAnchor),
-            bar.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 18),
             bar.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: heading.trailingAnchor),
             bar.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -pad),
@@ -119,6 +155,27 @@ final class PromptSheet: NSView, NSTextFieldDelegate {
         prompt.done(text)
     }
     @objc private func cancelTapped() { removeFromSuperview() }
+
+    private func showPlace() {
+        guard let place = prompt.place else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        where_.stringValue = (place.folder(for: name.isEmpty ? "Name" : name).path as NSString).abbreviatingWithTildeInPath
+    }
+    func controlTextDidChange(_ obj: Notification) { showPlace() }
+
+    @objc private func changeTapped() {
+        guard let place = prompt.place, let win = window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose the folder its own folder goes in"
+        panel.directoryURL = place.chosen ?? place.usual("Name").deletingLastPathComponent()
+        panel.beginSheetModal(for: win) { [weak self] r in
+            if r == .OK, let u = panel.url { place.chosen = u; self?.showPlace() }
+        }
+    }
     override func cancelOperation(_ sender: Any?) { cancelTapped() }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {

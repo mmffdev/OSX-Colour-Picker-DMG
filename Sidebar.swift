@@ -769,7 +769,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     /// A new member of a collection, in one of its folders or none: a project, asked for by the name the collection gives it.
     private func newMember(in collection: SchemaCollection, folder: UUID?) {
-        library.startProject(moving: nil, called: SchemaTrial.memberName(of: collection)) { made in
+        library.startProject(moving: nil, called: SchemaTrial.memberName(of: collection), in: collection) { made in
             SchemaTrial.place(made, in: collection.id, folder: folder)
         }
     }
