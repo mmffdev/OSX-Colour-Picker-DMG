@@ -1208,6 +1208,12 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && SchemaTrial.changing(schemaThree.added ?? UUID(), in: schemaThree.tree) { $0.name = "Trees" }.children[5].children[0].name == "Trees"
           && SchemaTrial.title(forLevel: 1) == "Level 1: Primary Group" && SchemaTrial.title(forLevel: 2) == "Level 2: Secondary Group",
           "removing a schema group takes what is inside it and never the main group, and a group is renamed wherever it sits")
+    let moved = SchemaTrial.moving(schemaTwo.added ?? UUID(), to: 0, in: schemaThree.tree)
+    check(moved.children.map { $0.name } == ["Characters", "Information", "Palettes", "Typography", "Tags", "Assets"] && moved.children[0].children.count == 1
+          && SchemaTrial.moving(schemaOne.added ?? UUID(), to: 99, in: schemaThree.tree).children.last?.name == "Assets"
+          && SchemaTrial.moving(schemaTwo.added ?? UUID(), to: 6, in: schemaThree.tree) == schemaThree.tree
+          && SchemaTrial.moving(schemaTwo.added ?? UUID(), to: 5, in: schemaThree.tree) == schemaThree.tree,
+          "a group is dragged to a place among its siblings, keeping what is inside it; past the end means last, and its own slot leaves it where it is")
     check(SchemaTrial.start.children.map { SchemaTrial.role(of: $0) } == [.information, .palettes, .typography, .tags]
           && SchemaTrial.role(of: SchemaNode(name: "Colourways", role: .palettes)) == .palettes && SchemaTrial.role(of: SchemaNode(name: "Tags")) == .tags
           && SchemaTrial.role(of: SchemaNode(name: "Trees")) == nil, "the schema starts as the app's own structure, a group keeps its role when it is renamed, and any other group is a label")

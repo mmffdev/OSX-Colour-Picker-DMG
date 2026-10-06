@@ -234,6 +234,20 @@ enum SchemaTrial {
         return (walk(root, 1), made)
     }
 
+    /// Puts a group at this place among its siblings, counting as the list stands before it is taken out.
+    static func moving(_ id: UUID, to index: Int, in root: SchemaNode) -> SchemaNode {
+        var out = root
+        if let from = out.children.firstIndex(where: { $0.id == id }) {
+            let node = out.children.remove(at: from)
+            var to = min(max(index, 0), out.children.count + 1)
+            if from < to { to -= 1 }
+            out.children.insert(node, at: min(to, out.children.count))
+            return out
+        }
+        out.children = out.children.map { moving(id, to: index, in: $0) }
+        return out
+    }
+
     /// Takes a group out, with everything inside it. The member itself stays.
     static func removing(_ id: UUID, from root: SchemaNode) -> SchemaNode {
         var out = root
@@ -245,10 +259,17 @@ enum SchemaTrial {
 /// One row on the map: its level, its name, what it holds, and, while it is selected or under the pointer, what can be done with it.
 private final class SchemaRowView: HoverView {
     var onSelect: (() -> Void)?
+    /// Set on a row that can be put in another order among its siblings: the drag ends with where it was dropped,
+    /// as an index among the rows that share its parent.
+    var onMove: ((Int) -> Void)? { didSet { grip.isHidden = onMove == nil || !(over || isSelected) } }
+    /// The rows this one can be dropped among, in order, itself included.
+    var siblings: [SchemaRowView] = []
+    private let grip = SchemaGrip()
+    private var dropLine: CGFloat? { didSet { needsDisplay = true } }
     private let isSelected: Bool
     private let actions = NSStackView()
     private var runs: [() -> Void] = []
-    private var over = false { didSet { actions.isHidden = !(over || isSelected); needsDisplay = true } }
+    private var over = false { didSet { actions.isHidden = !(over || isSelected); grip.isHidden = onMove == nil || !(over || isSelected); needsDisplay = true } }
 
     /// `does` is what the row offers, left to right: a symbol, what it says, and what it does.
     init(_ text: String, level: Int, tip: String, selected: Bool, holds: String? = nil, strong: Bool = false, does: [(symbol: String, tip: String, run: () -> Void)]) {
@@ -280,10 +301,16 @@ private final class SchemaRowView: HoverView {
         actions.setViews(buttons, in: .trailing)
         actions.spacing = 10
         actions.isHidden = !selected
-        for v in [badge, name, held, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        grip.isHidden = true
+        grip.toolTip = "Drag To Put This Group In Another Order"
+        for v in [grip, badge, name, held, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         let indent = 10 + CGFloat(level) * 20
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 30),
+            grip.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -4),
+            grip.centerYAnchor.constraint(equalTo: centerYAnchor),
+            grip.widthAnchor.constraint(equalToConstant: 10),
+            grip.heightAnchor.constraint(equalToConstant: 14),
             badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent),
             badge.centerYAnchor.constraint(equalTo: centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: 18),
@@ -300,13 +327,73 @@ private final class SchemaRowView: HoverView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func actionTapped(_ sender: NSButton) { if runs.indices.contains(sender.tag) { runs[sender.tag]() } }
-    override func mouseDown(with event: NSEvent) { onSelect?() }
+
+    override func mouseDown(with event: NSEvent) {
+        guard onMove != nil, grip.frame.insetBy(dx: -6, dy: -8).contains(convert(event.locationInWindow, from: nil)) else { onSelect?(); return }
+        drag(from: event)
+    }
+
+    /// The row follows the pointer up and down its siblings; a line shows where it would land, and letting go puts it there.
+    private func drag(from start: NSEvent) {
+        guard let window = window, let parent = superview else { return }
+        let mine = siblings.firstIndex { $0 === self } ?? 0
+        var target = mine
+        var moved = false
+        func slot(for event: NSEvent) -> Int {
+            let y = parent.convert(event.locationInWindow, from: nil).y
+            // Rows are listed top to bottom; the parent's y runs the way its flipping says.
+            var at = siblings.count
+            for (i, row) in siblings.enumerated() {
+                let f = row.frame
+                let above = parent.isFlipped ? y < f.midY : y > f.midY
+                if above { at = i; break }
+            }
+            return at
+        }
+        while true {
+            guard let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            if event.type == .leftMouseUp { break }
+            moved = true
+            let at = slot(for: event)
+            if at != target {
+                target = at
+                siblings.forEach { $0.dropLine = nil }
+                // The line sits on the top edge of the row at the slot, or under the last when past the end.
+                if at < siblings.count { siblings[at].dropLine = parent.isFlipped ? 0 : siblings[at].bounds.height }
+                else if let last = siblings.last { last.dropLine = parent.isFlipped ? last.bounds.height : 0 }
+            }
+            alphaValue = 0.5
+        }
+        alphaValue = 1
+        siblings.forEach { $0.dropLine = nil }
+        guard moved else { onSelect?(); return }
+        if target != mine, target != mine + 1 { onMove?(target) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard isSelected || over else { return }
-        NSColor.labelColor.withAlphaComponent(isSelected ? 0.10 : 0.05).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 6, yRadius: 6).fill()
+        if isSelected || over {
+            NSColor.labelColor.withAlphaComponent(isSelected ? 0.10 : 0.05).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 6, yRadius: 6).fill()
+        }
+        if let y = dropLine {
+            NSColor.controlAccentColor.setFill()
+            let x = grip.frame.minX
+            NSBezierPath(roundedRect: NSRect(x: x, y: max(0, min(y - 1, bounds.height - 2)), width: bounds.width - x - 10, height: 2), xRadius: 1, yRadius: 1).fill()
+        }
     }
+}
+
+/// The handle a row is dragged by: two columns of three dots.
+private final class SchemaGrip: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.tertiaryLabelColor.setFill()
+        for col in 0..<2 {
+            for row in 0..<3 {
+                NSBezierPath(ovalIn: NSRect(x: CGFloat(col) * 5 + 1, y: CGFloat(row) * 5 + 1, width: 3, height: 3)).fill()
+            }
+        }
+    }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
 }
 
 /// One name in the column of names on offer: ticked when it is the selected group's.
@@ -611,6 +698,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         guard !rehearsed, let ask = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_SCHEMA"] else { return }
         rehearsed = true
         if ask == "new" { making = .collection; show(); return }
+        if ask.hasPrefix("group:"), let row = SchemaTrial.rows(of: root).first(where: { $0.node.name == ask.dropFirst("group:".count) }) { selected = row.node.id; show(); return }
         if ask.hasPrefix("collection:") {
             if let found = all.first(where: { $0.name == ask.dropFirst("collection:".count) }) { collectionID = found.id; stack = nil; load(); selected = collectionID; show() }
             return
@@ -621,6 +709,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         stack = project.id
         load()
         selected = root.id
+        if parts.count > 1, parts[1] == "remove" { show(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.removeMember(project.id) }; return }
         if parts.count > 1, let row = SchemaTrial.rows(of: root).first(where: { $0.node.name == parts[1] }) { remove(row.node, level: row.level) } else { show() }
     }
     private var rehearsed = false
@@ -748,15 +837,29 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
                               does: [("trash", "Remove This Level: The Members Sit Straight Under \(here.name) Again", { [weak self] in self?.removeTier() })]), SchemaPanel.tierRow)
         }
         let projectName = stack.flatMap { lib.project($0)?.name }
+        var rowsOf: [UUID: SchemaRowView] = [:]
+        var parentOf: [UUID: UUID] = [:]
+        for (node, _) in SchemaTrial.rows(of: root) { for child in node.children { parentOf[child.id] = node.id } }
         for (node, level) in SchemaTrial.rows(of: root) {
             let n = count(node, level: level)
             var does: [(symbol: String, tip: String, run: () -> Void)] = [("arrow.turn.down.right", "Add A Group Inside This One", { [weak self] in self?.add(child: true, at: node.id) })]
             if level > 1 {
                 does.append(("plus", "Add The Next Group At This Level", { [weak self] in self?.add(child: false, at: node.id) }))
                 does.append(("trash", "Remove This Group And Everything Inside It", { [weak self] in self?.remove(node, level: level) }))
+            } else if let project = stack {
+                // The member itself, with everything it holds: asked for with a slide, never a click.
+                does.append(("trash", "Remove This \(member) And Everything In It", { [weak self] in self?.removeMember(project) }))
             }
-            add(SchemaRowView(level == 1 ? projectName ?? node.name : node.name, level: level + offset, tip: SchemaTrial.title(forLevel: level + offset),
-                              selected: node.id == selected, holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does), node.id)
+            let row = SchemaRowView(level == 1 ? projectName ?? node.name : node.name, level: level + offset, tip: SchemaTrial.title(forLevel: level + offset),
+                                    selected: node.id == selected, holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does)
+            if level > 1 { row.onMove = { [weak self] at in self?.move(node.id, to: at) } }
+            rowsOf[node.id] = row
+            add(row, node.id)
+        }
+        // Groups are dragged among the rows that share their parent.
+        for (node, _) in SchemaTrial.rows(of: root) {
+            let rows = node.children.compactMap { rowsOf[$0.id] }
+            rows.forEach { $0.siblings = rows }
         }
 
         guard let what = target else { return }
@@ -887,6 +990,49 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         let result = child ? SchemaTrial.addingChild(to: id, in: root) : SchemaTrial.addingSibling(after: id, in: root)
         root = result.tree
         if let made = result.added { selected = made }
+        keep()
+        view.window?.makeFirstResponder(nil)
+        show()
+    }
+
+    /// The member and all it holds, gone for good once the slide completes. A locked member refuses.
+    private func removeMember(_ project: UUID) {
+        guard let p = lib.project(project) else { return }
+        guard !p.isLocked else {
+            NSSound.beep()
+            rightHelp.stringValue = "\(p.name) is locked. Unlock it in the sidebar before removing it."
+            return
+        }
+        let colours = palettes(.palettes, in: project).count, type = palettes(.typography, in: project).count, tags = tags(in: project).count
+        var held: [String] = []
+        if colours > 0 { held.append(plural(colours, "palette")) }
+        if type > 0 { held.append(plural(type, "typography palette")) }
+        if tags > 0 { held.append(plural(tags, "tag")) }
+        let what = held.isEmpty ? "It holds nothing yet." : "Its " + held.joined(separator: ", ") + " and every group inside it are deleted, not moved."
+        SlideConfirm.ask(over: view.window, title: "Remove \(p.name) From \(collection.name)", note: what + " This cannot be undone.") { [weak self] in
+            guard let self = self else { return }
+            let ids = self.palettes(.palettes, in: project) + self.palettes(.typography, in: project)
+            let names = self.tags(in: project)
+            self.library.apply("Remove \(self.member)") { lib in
+                ids.forEach { lib.deleteSwatch($0) }
+                names.forEach { lib.deleteTag($0) }
+                lib.deleteProject(project)
+            }
+            SchemaTrial.setSchema(nil, for: project)
+            SchemaTrial.places.removeValue(forKey: project.uuidString)
+            self.removing = nil
+            self.stack = nil
+            self.load()
+            self.selected = self.collectionID
+            self.show()
+        }
+    }
+
+    /// A group dragged to another place among its siblings.
+    private func move(_ id: UUID, to index: Int) {
+        removing = nil
+        root = SchemaTrial.moving(id, to: index, in: root)
+        selected = id
         keep()
         view.window?.makeFirstResponder(nil)
         show()
