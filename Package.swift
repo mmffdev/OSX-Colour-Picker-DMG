@@ -21,10 +21,10 @@ let package = Package(
             path: ".",
             exclude: [
                 "Package.swift",
-                "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release",
+                "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", "appstore",
                 "Claude outputs", ".build", ".swiftpm", ".idea", ".claude",
                 "AppIcon.icns", "Info.plist",
-                "build.sh", "make_dmg.sh", "make_pkg.sh", "signing.sh", "store_notary_credentials.sh",
+                "build.sh", "make_dmg.sh", "make_pkg.sh", "make_appstore.sh", "signing.sh", "store_notary_credentials.sh",
                 "COLOUR-MANAGEMENT.md", "HANDOVER.md", "PALETTE-PAGE-DESIGNS.md", "README.md", "scratch.md",
                 "Colour Management App Product Vision and Feature Deep Dive.md", "Research Software.md",
                 "MMFFDev-Colour-3.dmg", "MMFFDev-Colour-3.pkg",

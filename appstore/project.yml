@@ -1,0 +1,89 @@
+# The Mac App Store build of MMFFDev Colour 3. XcodeGen turns this into the Xcode project that
+# make_appstore.sh builds and archives. The sources are the same .swift files at the repository root
+# that Package.swift compiles for the direct download; this is a second view of them, sandboxed,
+# built with APPSTORE set so that what the Store cannot carry (Sparkle, the root helper and the rest,
+# see .claude/c_appstore_backlog.md) compiles out.
+#
+# Regenerate after adding or removing a .swift file: ./make_appstore.sh does it every time.
+name: MMFFDevColour3Store
+options:
+  xcodeVersion: "27.0"
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+settings:
+  base:
+    DEVELOPMENT_TEAM: 6QVKGBRP5J
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "3.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  MMFFDev Colour 3:
+    type: application
+    platform: macOS
+    sources:
+      - path: ..
+        name: Sources
+        includes: ["*.swift"]
+        excludes: ["Package.swift", "appstore", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
+      - path: ../AppIcon.icns
+        buildPhase: resources
+      - path: ../icons
+        name: File Icons
+        buildPhase: resources
+        includes: ["*.icns"]
+    settings:
+      base:
+        PRODUCT_NAME: MMFFDev Colour 3
+        EXECUTABLE_NAME: MMFFDevColour3
+        PRODUCT_BUNDLE_IDENTIFIER: com.mmffdev.mmffdevcolour3
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: $(SRCROOT)/../Info.plist
+        CODE_SIGN_ENTITLEMENTS: $(SRCROOT)/MMFFDevColour3.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: APPSTORE
+        SWIFT_STRICT_CONCURRENCY: minimal
+        COMBINE_HIDPI_IMAGES: YES
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -O
+    postBuildScripts:
+      - name: Stamp the Store property list
+        shell: /bin/bash
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          # The shared Info.plist carries the direct download's Sparkle keys and an old minimum system;
+          # the Store copy loses the first and takes the project's deployment target for the second.
+          # The build number and commit are stamped as signing.sh does for the direct download.
+          set -euo pipefail
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          for key in SUEnableAutomaticChecks SUFeedURL SUPublicEDKey SUScheduledCheckInterval; do
+              /usr/libexec/PlistBuddy -c "Delete :$key" "$plist" 2>/dev/null || true
+          done
+          /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOSX_DEPLOYMENT_TARGET" "$plist"
+          cd "$SRCROOT/.."
+          if git rev-parse --git-dir >/dev/null 2>&1; then
+              build="$(git rev-list --count HEAD)"
+              commit="$(git rev-parse --short HEAD)"
+              if [ -n "$(git status --porcelain --untracked-files=no -- '*.swift')" ]; then commit="$commit+"; fi
+              /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
+              /usr/libexec/PlistBuddy -c "Delete :ColourBuildCommit" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$plist"
+          fi
+schemes:
+  MMFFDev Colour 3:
+    build:
+      targets:
+        MMFFDev Colour 3: all
+    run:
+      config: Debug
+    archive:
+      config: Release

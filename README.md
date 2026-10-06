@@ -36,7 +36,11 @@ Requires the Xcode command line tools (`xcode-select --install`).
 ./build.sh        # compiles, runs the self-test, installs to /Applications/MMFFDev Colour 3.app
 ./make_dmg.sh     # compiles, runs the self-test, packages MMFFDev-Colour-3.dmg and writes the Sparkle update feed
 ./make_pkg.sh     # compiles, runs the self-test, packages MMFFDev-Colour-3.pkg
+./make_appstore.sh         # the Mac App Store edition: sandboxed, no Sparkle or helper, runs the self-test
+./make_appstore.sh archive # the same, signed for App Store Connect and exported as a .pkg
 ```
+
+The Store edition is built by Xcode from `appstore/project.yml` (needs `brew install xcodegen`), compiling the same root files with `APPSTORE` set. See `.claude/CLAUDE.md` for what the two editions differ in.
 
 The app installs to `/Applications`, not `~/Applications`, because the Adobe helper only works from there. A copy left in `~/Applications` by an older build is removed.
 

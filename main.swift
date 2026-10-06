@@ -1,11 +1,14 @@
 import AppKit
+#if !APPSTORE
 import Sparkle
+#endif
 
 // ---------- Pick mode (hotkey-triggered) ----------
 
 func runPickMode() -> Never {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
+    FolderAccess.restoreAll()
 
     let sampler = NSColorSampler()
     let semaphore = DispatchSemaphore(value: 0)
@@ -40,8 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var library = LibraryController()
     /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds. Only started inside
     /// a bundle; the bare binary Xcode runs from the build folder has no feed and no bundle to update.
+    #if !APPSTORE
     lazy var updater = SPUStandardUpdaterController(startingUpdater: Bundle.main.bundleURL.pathExtension == "app",
                                                     updaterDelegate: nil, userDriverDelegate: nil)
+    #endif
     var main: MainWindowController?
     var settings: SettingsWindowController?
     private var splash: SplashWindowController?
@@ -62,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
+        FolderAccess.restoreAll()   // the Store build: folders the user chose before stay reachable
+        #if APPSTORE
+        Store.start()
+        #endif
         let splash = SplashWindowController()
         self.splash = splash
         if Prefs.assistantDone {
@@ -105,7 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splash?.close()
         splash = nil
         NSApp.activate(ignoringOtherApps: true)
-        if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
+        if Permission.all.isEmpty { Prefs.setupDone = true }   // nothing to ask: the Store build
+        else if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
         rehearse(main)
     }
@@ -193,7 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu("MMFFDev Colour 3") { m in
             add(m, "About MMFFDev Colour 3", #selector(showAbout), "", self)
             add(m, "Setup Assistant\u{2026}", #selector(runSetupAssistant), "", self)
+            #if !APPSTORE
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
+            #endif
             m.addItem(.separator())
             add(m, "Settings\u{2026}", #selector(showSettings), ",", self)
             m.addItem(.separator())

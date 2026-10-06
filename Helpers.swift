@@ -3,12 +3,14 @@ import UniformTypeIdentifiers
 
 let shutterPath = "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif"
 
+/// The camera shutter macOS plays for a screenshot. Kept while it plays, since a sound let go of stops.
+private var shutter: NSSound?
+
 func playShutter() {
     guard Prefs.sounds else { return }
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
-    p.arguments = [shutterPath]
-    try? p.run()
+    shutter?.stop()
+    shutter = NSSound(contentsOfFile: shutterPath, byReference: true)
+    shutter?.play()
 }
 
 func copyToClipboard(_ s: String) {
@@ -487,10 +489,16 @@ func copyIntoFolder(_ files: [URL], _ folder: URL, prompt: String) throws -> Adm
     } catch CocoaError.fileWriteNoPermission {
     } catch let e as NSError where e.domain == NSPOSIXErrorDomain && (e.code == EACCES || e.code == EPERM) {
     }
+    #if APPSTORE
+    // The sandbox has no way to write where the user may not: the caller shows the files for dragging across.
+    return .cancelled
+    #else
     if AdobeHelper.install(files, into: folder) { return .copied }
     return try runAsAdministrator(["/bin/cp", "-f"] + files.map { $0.path } + [folder.path + "/"], prompt: prompt)
+    #endif
 }
 
+#if !APPSTORE
 /// Runs one command as an administrator through macOS's own password dialog. Every word is passed
 /// through AppleScript's "quoted form of", so no name, however odd, can be read by the shell as
 /// anything but a word. The command is the only thing ever run with those rights.
@@ -508,6 +516,7 @@ func runAsAdministrator(_ words: [String], prompt: String) throws -> AdminCopy {
         NSLocalizedDescriptionKey: "macOS would not run that as an administrator.",
         NSLocalizedRecoverySuggestionErrorKey: failure[NSAppleScript.errorMessage] as? String ?? ""])
 }
+#endif
 
 /// One menu item per place an installed Adobe app keeps its libraries, each carrying an `AdobeSend`.
 func adobeMenuItem(target: AnyObject, action: Selector, palette: UUID? = nil) -> NSMenuItem {
@@ -568,6 +577,12 @@ func writeDesignPack(_ pack: DesignPack, into parent: URL, options: ExportOption
     return root
 }
 
+#if APPSTORE
+// A sandboxed process cannot reach the user's git configuration or keys, so the pack is only written.
+var gitAvailable: Bool { false }
+func gitRoot(of folder: URL) -> URL? { nil }
+func gitCommitAndPush(repo: URL, path: URL, message: String) -> (ok: Bool, message: String) { (false, "not in this edition") }
+#else
 private let gitPath = "/usr/bin/git"
 var gitAvailable: Bool { FileManager.default.isExecutableFile(atPath: gitPath) }
 
@@ -601,6 +616,7 @@ func gitCommitAndPush(repo: URL, path: URL, message: String) -> (ok: Bool, messa
     }
     return (true, "pushed")
 }
+#endif
 
 // ---------- Grid shared by the palette page and All Swatches ----------
 

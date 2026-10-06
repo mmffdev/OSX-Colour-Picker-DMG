@@ -173,7 +173,7 @@ final class PromptSheet: NSView, NSTextFieldDelegate {
         panel.message = "Choose the folder its own folder goes in"
         panel.directoryURL = place.chosen ?? place.usual("Name").deletingLastPathComponent()
         panel.beginSheetModal(for: win) { [weak self] r in
-            if r == .OK, let u = panel.url { place.chosen = u; self?.showPlace() }
+            if r == .OK, let u = panel.url { FolderAccess.remember(u); place.chosen = u; self?.showPlace() }
         }
     }
     override func cancelOperation(_ sender: Any?) { cancelTapped() }

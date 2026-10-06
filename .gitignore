@@ -5,3 +5,5 @@ MMFFDevColour3
 release/
 .build/
 .swiftpm/
+appstore/*.xcodeproj/
+appstore/build/

@@ -17,8 +17,16 @@ struct Permission {
     /// What the button does. Throws to show an error.
     let act: () throws -> Void
 
-    static var all: [Permission] { [adobe] }
+    /// The Store build asks macOS for nothing it has to allow up front, so it has no rows.
+    static var all: [Permission] {
+        #if APPSTORE
+        return []
+        #else
+        return [adobe]
+        #endif
+    }
 
+    #if !APPSTORE
     static let adobe = Permission(
         title: "Adobe apps",
         state: {
@@ -56,6 +64,7 @@ struct Permission {
             case .nothingToDo: break
             }
         })
+    #endif
 }
 
 /// One permission as a row. `refresh()` reads the state again.

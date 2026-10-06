@@ -1,3 +1,5 @@
+// Not in the Store build: a root helper and an administrator password are both outside the sandbox.
+#if !APPSTORE
 import Foundation
 import ServiceManagement
 
@@ -145,3 +147,4 @@ enum AdobeAccess {
         return names.dropLast().joined(separator: ", ") + " and " + names.last!
     }
 }
+#endif

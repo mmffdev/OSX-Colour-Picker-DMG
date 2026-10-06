@@ -1,0 +1,50 @@
+#!/bin/bash
+# Build the Mac App Store edition of MMFFDev Colour 3.
+#
+#   ./make_appstore.sh            builds a sandboxed Release app, signed ad hoc, checks its entitlements
+#                                 and runs the self-test inside it. Needs no certificates.
+#   ./make_appstore.sh archive    archives with the Apple Distribution identity and exports the .pkg
+#                                 that App Store Connect takes. Needs the Store certificates in the keychain.
+#
+# The project is generated from appstore/project.yml by XcodeGen (brew install xcodegen), so adding a
+# .swift file at the repository root needs nothing else. The direct download keeps ./build.sh.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+PROJECT="appstore/MMFFDevColour3Store.xcodeproj"
+SCHEME="MMFFDev Colour 3"
+DERIVED="appstore/build"
+APP="$DERIVED/Build/Products/Release/MMFFDev Colour 3.app"
+MODE="${1:-build}"
+
+command -v xcodegen >/dev/null || { echo "xcodegen is needed: brew install xcodegen"; exit 1; }
+echo "generating project..."
+xcodegen generate --spec appstore/project.yml --project appstore --quiet
+
+if [ "$MODE" = "archive" ]; then
+    ARCHIVE="$DERIVED/MMFFDevColour3.xcarchive"
+    echo "archiving..."
+    xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release -derivedDataPath "$DERIVED" \
+        -archivePath "$ARCHIVE" archive -quiet
+    echo "exporting for App Store Connect..."
+    xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist appstore/ExportOptions.plist \
+        -exportPath "$DERIVED/export" -quiet
+    echo "exported: $DERIVED/export"
+    exit 0
+fi
+
+echo "building (ad hoc signed)..."
+xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release -derivedDataPath "$DERIVED" \
+    CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+    build -quiet
+
+echo "checking entitlements..."
+codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "com.apple.security.app-sandbox" \
+    || { echo "the app is not sandboxed"; exit 1; }
+if otool -L "$APP/Contents/MacOS/MMFFDevColour3" | grep -q Sparkle; then echo "Sparkle is linked"; exit 1; fi
+if /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$APP/Contents/Info.plist" >/dev/null 2>&1; then echo "Sparkle keys remain"; exit 1; fi
+
+echo "running self-test..."
+"$APP/Contents/MacOS/MMFFDevColour3" --self-test
+
+echo "built: $APP"
