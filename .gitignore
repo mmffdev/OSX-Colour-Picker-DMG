@@ -3,3 +3,5 @@ AppIcon.iconset/
 MMFFDevColour3
 .env.notarytool
 release/
+.build/
+.swiftpm/

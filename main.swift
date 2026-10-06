@@ -38,8 +38,10 @@ func runPickMode() -> Never {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var library = LibraryController()
-    /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds.
-    lazy var updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds. Only started inside
+    /// a bundle; the bare binary Xcode runs from the build folder has no feed and no bundle to update.
+    lazy var updater = SPUStandardUpdaterController(startingUpdater: Bundle.main.bundleURL.pathExtension == "app",
+                                                    updaterDelegate: nil, userDriverDelegate: nil)
     var main: MainWindowController?
     var settings: SettingsWindowController?
     private var splash: SplashWindowController?

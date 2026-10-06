@@ -13,7 +13,7 @@ APP="/Applications/MMFFDev Colour 3.app"
 OLD="$HOME/Applications/MMFFDev Colour 3.app"
 
 echo "compiling swift..."
-swiftc -O *.swift "${SPARKLE_FLAGS[@]}" -o MMFFDevColour3
+compile_app MMFFDevColour3
 
 echo "running self-test..."
 ./MMFFDevColour3 --self-test

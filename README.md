@@ -40,6 +40,8 @@ Requires the Xcode command line tools (`xcode-select --install`).
 
 The app installs to `/Applications`, not `~/Applications`, because the Adobe helper only works from there. A copy left in `~/Applications` by an older build is removed.
 
+All three scripts build from `Package.swift`, which is also what Xcode opens: open that file in Xcode (File > Open) and Cmd+R builds only the files that changed and runs the app, in a few seconds, with the debugger. What Xcode runs is the bare binary, not the installed bundle, so the Adobe helper, the file icons and the update check are only seen in the app `./build.sh` installs. Iterate in Xcode; prove in `./build.sh`.
+
 The build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right (for example "Release v3.0  8aee45d"). A "+" after the hash means the build had uncommitted Swift changes. Commit first, then build.
 
 Signing lives in `signing.sh`. The build signs with a Developer ID from the keychain when there is one, and ad hoc otherwise. `store_notary_credentials.sh` saves notarisation credentials once, from a `.env.notarytool` file that is never committed.

@@ -19,7 +19,7 @@ trap 'rm -rf "$STAGE" "$BUILD"' EXIT
 APP="$STAGE/$APP_NAME.app"
 
 echo "compiling swift..."
-swiftc -O *.swift "${SPARKLE_FLAGS[@]}" -o "$BUILD/MMFFDevColour3"
+compile_app "$BUILD/MMFFDevColour3"
 
 echo "running self-test..."
 "$BUILD/MMFFDevColour3" --self-test > /dev/null || { "$BUILD/MMFFDevColour3" --self-test; exit 1; }
