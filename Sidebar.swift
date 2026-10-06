@@ -65,8 +65,12 @@ final class SidebarNode: NSObject {
     var paletteID: UUID? { if case .palette(let id) = kind { return id }; return nil }
     var projectID: UUID? { if case .project(let id) = kind { return id }; return nil }
     var tag: String? { if case .tag(let t) = kind { return t }; return nil }
-    /// The project a Palettes bucket belongs to.
-    var bucketProjectID: UUID? { if case .projectPalettes(let id) = kind { return id }; return nil }
+    /// The project a Palettes or Typography bucket belongs to.
+    var bucketProjectID: UUID? {
+        if case .projectPalettes(let id) = kind { return id }
+        if case .projectTypography(let id) = kind { return id }
+        return nil
+    }
 }
 
 let paletteDragType = NSPasteboard.PasteboardType("com.mmffdev.colour3.palette")
@@ -837,8 +841,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     node.children.append(info)
                     buckets.append(info)
                 case .palettes?:
+                    // Every bucket shows, empty or not: an empty one is where the first thing is dropped.
                     let colours = held.filter { !$0.isTypography }
-                    guard !colours.isEmpty else { continue }
                     let bucket = paletteBuckets[p.id] ?? SidebarNode(.projectPalettes(p.id))
                     paletteBuckets[p.id] = bucket
                     bucket.children = colours.map { SidebarNode(.palette($0.id)) }
@@ -846,14 +850,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     buckets.append(bucket)
                 case .typography?:
                     let type = held.filter { $0.isTypography }
-                    guard !type.isEmpty else { continue }
                     let bucket = typeBuckets[p.id] ?? SidebarNode(.projectTypography(p.id))
                     typeBuckets[p.id] = bucket
                     bucket.children = type.map { SidebarNode(.palette($0.id)) }
                     node.children.append(bucket)
                     buckets.append(bucket)
                 case .tags?:
-                    guard !own.isEmpty else { continue }
                     let bucket = tagBuckets[p.id] ?? SidebarNode(.projectTags(p.id))
                     tagBuckets[p.id] = bucket
                     bucket.children = own.map { SidebarNode(.tag($0)) }
@@ -1091,8 +1093,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.stringValue = named(.palettes, in: project)
             cell.imageView?.image = symbol("swatchpalette", "Project palettes", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
-            cell.toolTip = "Palettes that belong to this project"
-            (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
+            cell.toolTip = node.children.isEmpty ? "No palettes yet. Drop one here, or copy it in from a palette's menu." : "Palettes that belong to this project"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = node.children.isEmpty ? "" : "\(node.children.count)"
         case .projectInformation(let project):
             cell.textField?.stringValue = named(.information, in: project)
             cell.imageView?.image = symbol("info.circle", "Project information", size: 11)
@@ -1109,14 +1111,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.stringValue = named(.typography, in: project)
             cell.imageView?.image = symbol("textformat", "Project typography", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
-            cell.toolTip = "Typography palettes that belong to this project"
-            (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
+            cell.toolTip = node.children.isEmpty ? "No typography palettes yet. Drop one here." : "Typography palettes that belong to this project"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = node.children.isEmpty ? "" : "\(node.children.count)"
         case .projectTags(let project):
             cell.textField?.stringValue = named(.tags, in: project)
             cell.imageView?.image = symbol("tag", "Project tags", size: 11)
             cell.imageView?.contentTintColor = .secondaryLabelColor
-            cell.toolTip = "Tags that belong to this project"
-            (cell.viewWithTag(7) as? NSTextField)?.stringValue = "\(node.children.count)"
+            cell.toolTip = node.children.isEmpty ? "No tags of its own yet. A tag made on one of its palettes lands here." : "Tags that belong to this project"
+            (cell.viewWithTag(7) as? NSTextField)?.stringValue = node.children.isEmpty ? "" : "\(node.children.count)"
         case .editTags:
             cell.textField?.stringValue = "Edit Tags\u{2026}"
             cell.imageView?.image = symbol("slider.horizontal.3", "Edit tags", size: 11)
@@ -1247,9 +1249,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 let there: UUID? = place.kind == .loose ? nil : (place.projectID ?? place.bucketProjectID)
                 return there == home ? .move : .copy
             }
+            let typography = palette.flatMap { library.library.swatch($0)?.isTypography } ?? false
             func takes(_ place: SidebarNode) -> Bool {
                 if place.projectID != nil { return true }
-                if case .projectPalettes = place.kind { return true }
+                // Each bucket takes its own kind, so a palette never lands under the wrong heading.
+                if case .projectPalettes = place.kind { return !typography }
+                if case .projectTypography = place.kind { return typography }
                 if place.kind == .loose, home != nil { return true }   // a project's palette, copied back to stock
                 // These lists are only arranged by dragging: what is in each is decided elsewhere.
                 return [.favourites, .loose, .typography].contains(place.kind) && place.children.contains { $0.paletteID == palette }

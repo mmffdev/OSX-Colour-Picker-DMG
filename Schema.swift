@@ -468,14 +468,13 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.target = self
         addNext.action = #selector(addNextTapped)
         // Each column is a title, its words, then its controls, on one line across both.
-        let top = NSStackView(views: [mapTitle, leftHelp, heads])
+        let top = NSStackView(views: [mapTitle, leftHelp])
         top.orientation = .vertical
         top.alignment = .leading
-        top.spacing = 18
-        top.setCustomSpacing(10, after: mapTitle)
+        top.spacing = 10
         let left = NSView(), right = NSView(), divider = NSBox()
         divider.boxType = .separator
-        for v in [top, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
+        for v in [top, heads, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
 
         // Right: the selected row.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -526,6 +525,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
         let v = NSView()
         for part in [left, divider, right] as [NSView] { part.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(part) }
+        // One line under both sets of words, below whichever is taller, that the controls on each side hang from.
+        let line = NSLayoutGuide()
+        v.addLayoutGuide(line)
+        let hugs = [top, topRight].map { line.topAnchor.constraint(equalTo: $0.bottomAnchor) }
+        hugs.forEach { $0.priority = .defaultLow }
+        NSLayoutConstraint.activate(hugs)
         NSLayoutConstraint.activate([
             v.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsPanel.minimumWidth),
             v.heightAnchor.constraint(equalToConstant: 620),
@@ -548,7 +553,13 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             collectionPopup.widthAnchor.constraint(equalToConstant: 220),
             stackPopup.widthAnchor.constraint(equalToConstant: 220),
             newName.widthAnchor.constraint(equalToConstant: 220),
-            map.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 22),
+            line.topAnchor.constraint(greaterThanOrEqualTo: top.bottomAnchor),
+            line.topAnchor.constraint(greaterThanOrEqualTo: topRight.bottomAnchor),
+            line.heightAnchor.constraint(equalToConstant: 0),
+            line.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            heads.topAnchor.constraint(equalTo: line.topAnchor, constant: 22),
+            heads.leadingAnchor.constraint(equalTo: top.leadingAnchor),
+            map.topAnchor.constraint(equalTo: heads.bottomAnchor, constant: 22),
             map.leadingAnchor.constraint(equalTo: left.leadingAnchor),
             map.trailingAnchor.constraint(equalTo: left.trailingAnchor),
             // Under the last group on the map, at its right.
@@ -558,11 +569,11 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             topRight.topAnchor.constraint(equalTo: right.topAnchor),
             topRight.leadingAnchor.constraint(equalTo: right.leadingAnchor),
             topRight.trailingAnchor.constraint(lessThanOrEqualTo: right.trailingAnchor),
-            detail.topAnchor.constraint(equalTo: topRight.bottomAnchor, constant: 22),
+            detail.topAnchor.constraint(equalTo: line.topAnchor, constant: 22),
             detail.leadingAnchor.constraint(equalTo: right.leadingAnchor),
             detail.trailingAnchor.constraint(equalTo: right.trailingAnchor),
             detail.bottomAnchor.constraint(equalTo: right.bottomAnchor),
-            removal.topAnchor.constraint(equalTo: topRight.bottomAnchor, constant: 22),
+            removal.topAnchor.constraint(equalTo: line.topAnchor, constant: 22),
             removal.leadingAnchor.constraint(equalTo: right.leadingAnchor),
             removal.trailingAnchor.constraint(lessThanOrEqualTo: right.trailingAnchor),
             // The names: a column the height of the pane, scrolling inside itself.
@@ -819,6 +830,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         }
         customRow.isHidden = !custom
         customHead.isHidden = !custom
+        aboutHead.topPadding = custom ? 10 : 0   // with nothing above it, Description sits level with Name
         (customHead.cell(at: 0).contentView as? NSTextField)?.stringValue = fixed ? "Name" : "Custom Name"
         aboutRow.isHidden = said == nil
         aboutHead.isHidden = said == nil
