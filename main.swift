@@ -202,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu("File") { m in
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
+            add(m, "Sample An Area", #selector(LibraryController.sampleArea), "P", library)
             add(m, "New Colour\u{2026}", #selector(LibraryController.newColour), "k", library, [.command, .shift])
             m.addItem(.separator())
             add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)

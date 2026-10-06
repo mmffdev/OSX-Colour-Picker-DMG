@@ -4,6 +4,7 @@ import AppKit
 
 private extension NSToolbarItem.Identifier {
     static let pick = NSToolbarItem.Identifier("pick")
+    static let sample = NSToolbarItem.Identifier("sample")
     static let newPalette = NSToolbarItem.Identifier("newPalette")
     static let fromImage = NSToolbarItem.Identifier("fromImage")
     static let build = NSToolbarItem.Identifier("build")
@@ -891,11 +892,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarToggle, .pick, .newPalette, .lab, .flexibleSpace, .history, .share, .settings, .search]
+        [.sidebarToggle, .pick, .sample, .newPalette, .lab, .flexibleSpace, .history, .share, .settings, .search]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarToggle, .pick, .newPalette, .lab, .build, .fromImage, .paste, .export, .share, .history,
+        [.sidebarToggle, .pick, .sample, .newPalette, .lab, .build, .fromImage, .paste, .export, .share, .history,
          .sync, .settings, .search, .flexibleSpace, .space]
     }
 
@@ -919,6 +920,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
             let i = item("Pick", "eyedropper", "Pick colours from the screen (\u{2318}P)", library, #selector(LibraryController.togglePicking))
             if flag { pickItem = i }
             return i
+        case .sample:
+            return item("Sample", "rectangle.dashed", "Drag over an area of the screen and make a palette of its colours (\u{21E7}\u{2318}P)", library, #selector(LibraryController.sampleArea))
         case .newPalette:
             return item("New Palette", "plus.rectangle.on.rectangle", "Start an empty palette and send picks to it (\u{2318}N)",
                         library, #selector(LibraryController.newPalette))

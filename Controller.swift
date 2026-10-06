@@ -432,6 +432,27 @@ final class LibraryController: NSObject {
         }
     }
 
+    /// Sample: a rectangle dragged over the screen becomes a palette of the colours under it.
+    @objc func sampleArea() {
+        stopPicking()
+        guard CGPreflightScreenCaptureAccess() else {
+            // macOS asks once; the toolbar button works the next time, after the app is allowed.
+            CGRequestScreenCaptureAccess()
+            flash("Allow Screen Recording for MMFFDev Colour 3 in System Settings \u{25B8} Privacy & Security, then try Sample again")
+            return
+        }
+        ScreenSampler.begin { [weak self] image in
+            guard let self = self else { return }
+            guard let image = image else { return }
+            let hexes = extractPalette(from: image, count: Prefs.imagePaletteSize)
+            guard !hexes.isEmpty else { self.flash("No colours found in that area"); return }
+            playShutter()
+            let id = self.createPalette(named: "Sampled", hexes: hexes)
+            let name = id.flatMap { self.library.swatch($0)?.name } ?? "palette"
+            self.flash("Sampled \(plural(hexes.count, "swatch", "swatches")) into \(name)")
+        }
+    }
+
     private func clickLandedOnThisWindow() -> Bool {
         guard let w = window else { return false }
         let p = NSEvent.mouseLocation
