@@ -17,6 +17,10 @@ The Store build cannot carry: Sparkle (`main.swift`, `Package.swift`, the `SU*` 
 
 Keep the direct-download build working on its branches. A change that only serves the sandbox goes behind a build flag or stays on `osx-appstore-build`.
 
+## The name is Colorgain
+
+Since 2026-10-07 the app is called **Colorgain**, spelled exactly so: one word, capital C, American "Color". Every new piece of user-facing text says Colorgain. "MMFFDev Colour 3" is the old name; it survives only where renaming is a migration (the bundle and executable names, the Application Support folder, the bundle identifier, the Sparkle feed, the installers, the Store product identifiers) and goes when the rename feature in Vector is done. The rest of the app's own words keep British spelling ("colour"); only the name is American.
+
 ## Build after every commit
 
 After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.

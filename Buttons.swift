@@ -62,6 +62,9 @@ func watchTheme(_ view: NSView) {
 final class ThemedButton: NSButton {
     private var hovering = false
     private var tracking: NSTrackingArea?
+    /// A fill of its own instead of the theme's greys, for the one button a page leads with (a
+    /// setup's Continue). Its text is black or white, whichever reads better on it.
+    var prominent: NSColor? { didSet { needsDisplay = true } }
 
     init(title: String, image: NSImage?, target: AnyObject?, action: Selector?) {
         super.init(frame: .zero)
@@ -117,9 +120,13 @@ final class ThemedButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let active = isHighlighted || state == .on
-        let fill = !isEnabled ? Theme.buttonRest : active ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.buttonRest
+        var fill = !isEnabled ? Theme.buttonRest : active ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.buttonRest
         var ink = active ? Theme.buttonActiveText : hovering ? Theme.buttonHoverText : Theme.text
         if !isEnabled { ink = Theme.text.withAlphaComponent(0.35) }
+        if let lead = prominent?.usingColorSpace(.sRGB), isEnabled {
+            fill = isHighlighted ? lead.blended(withFraction: 0.2, of: .black) ?? lead : hovering ? lead.blended(withFraction: 0.12, of: .white) ?? lead : lead
+            ink = ThemedButton.readable(on: lead)
+        }
         fill.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: ButtonStyle.radius, yRadius: ButtonStyle.radius).fill()
 
@@ -134,6 +141,16 @@ final class ThemedButton: NSButton {
             x += iconSize.width + between
         }
         if textSize.width > 0 { text.draw(at: NSPoint(x: x, y: bounds.midY - textSize.height / 2)) }
+    }
+}
+
+extension ThemedButton {
+    /// Black or white, whichever has more contrast on `colour` (WCAG relative luminance).
+    static func readable(on colour: NSColor) -> NSColor {
+        let c = colour.usingColorSpace(.sRGB) ?? colour
+        func lin(_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin(c.redComponent) + 0.7152 * lin(c.greenComponent) + 0.0722 * lin(c.blueComponent)
+        return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? .white : .black
     }
 }
 

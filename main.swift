@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if APPSTORE
         Store.start()
         #endif
+        _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
         let splash = SplashWindowController()
         self.splash = splash
         if Prefs.assistantDone {
