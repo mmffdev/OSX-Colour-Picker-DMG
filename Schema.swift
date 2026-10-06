@@ -481,6 +481,8 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private var makingRows: [NSGridRow] = []
     private let map = NSStackView()
     private let addNext = NSButton(title: "", target: nil, action: nil)
+    /// Under the map while a member's own stack is open: the member and all it holds, gone after a slide.
+    private let removeMemberButton = NSButton(title: "", target: nil, action: nil)
     private let levelTitle = NSTextField(labelWithString: "")
     /// The names on offer, as a column that scrolls inside the pane: Custom Name first, then the list for the level.
     private let names = NSStackView()
@@ -554,6 +556,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         addNext.bezelStyle = .rounded
         addNext.target = self
         addNext.action = #selector(addNextTapped)
+        removeMemberButton.bezelStyle = .rounded
+        removeMemberButton.image = symbol("trash", "Remove", size: 11)
+        removeMemberButton.imagePosition = .imageLeading
+        removeMemberButton.target = self
+        removeMemberButton.action = #selector(removeMemberTapped)
+        removeMemberButton.isHidden = true
         // Each column is a title, its words, then its controls, on one line across both.
         let top = NSStackView(views: [mapTitle, leftHelp])
         top.orientation = .vertical
@@ -561,7 +569,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         top.spacing = 10
         let left = NSView(), right = NSView(), divider = NSBox()
         divider.boxType = .separator
-        for v in [top, heads, map, addNext] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
+        for v in [top, heads, map, addNext, removeMemberButton] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; left.addSubview(v) }
 
         // Right: the selected row.
         levelTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -652,6 +660,8 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             // Under the last group on the map, at its right.
             addNext.topAnchor.constraint(equalTo: map.bottomAnchor, constant: 12),
             addNext.trailingAnchor.constraint(equalTo: left.trailingAnchor, constant: -8),
+            removeMemberButton.topAnchor.constraint(equalTo: addNext.topAnchor),
+            removeMemberButton.leadingAnchor.constraint(equalTo: left.leadingAnchor, constant: 10),
 
             topRight.topAnchor.constraint(equalTo: right.topAnchor),
             topRight.leadingAnchor.constraint(equalTo: right.leadingAnchor),
@@ -700,7 +710,11 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         if ask == "new" { making = .collection; show(); return }
         if ask.hasPrefix("group:"), let row = SchemaTrial.rows(of: root).first(where: { $0.node.name == ask.dropFirst("group:".count) }) { selected = row.node.id; show(); return }
         if ask.hasPrefix("collection:") {
-            if let found = all.first(where: { $0.name == ask.dropFirst("collection:".count) }) { collectionID = found.id; stack = nil; load(); selected = collectionID; show() }
+            let want = ask.dropFirst("collection:".count).split(separator: "/", maxSplits: 1).map(String.init)
+            if let found = all.first(where: { $0.name == want[0] }) {
+                collectionID = found.id; stack = nil; load(); selected = collectionID; show()
+                if want.count > 1, want[1] == "remove" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.removeCollection() } }
+            }
             return
         }
         let parts = ask.split(separator: "/", maxSplits: 1).map(String.init)
@@ -827,7 +841,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             does.append(("arrow.turn.down.right", "Add A Level Beneath, To Group The Members", { [weak self] in self?.addTier() }))
         }
         if here.id != all[0].id {
-            does.append(("trash", inside.isEmpty ? "Remove This Collection" : "Remove This Collection: Its \(inside.count) Go Back To \(all[0].name)", { [weak self] in self?.removeCollection() }))
+            does.append(("trash", inside.isEmpty ? "Remove This Collection" : "Remove This Collection And Everything In It", { [weak self] in self?.removeCollection() }))
         }
         add(SchemaRowView(here.name, level: 0, tip: SchemaTrial.title(forLevel: 0), selected: selected == collectionID,
                           holds: inside.isEmpty ? nil : "\(inside.count) \(inside.count == 1 ? member : SchemaTrial.plural(member))", strong: true, does: does), collectionID)
@@ -862,6 +876,13 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             rows.forEach { $0.siblings = rows }
         }
 
+        if let project = stack, let name = lib.project(project)?.name {
+            removeMemberButton.isHidden = false
+            removeMemberButton.title = "Remove \(name)\u{2026}"
+            removeMemberButton.toolTip = "Remove This \(member) And Everything In It, After A Slide To Confirm"
+        } else {
+            removeMemberButton.isHidden = true
+        }
         guard let what = target else { return }
         // The button under the map adds to the stack; it has nothing to add for the collection or its grouping level.
         if case .node(_, let level) = what {
@@ -903,7 +924,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         case .member(let project):
             levelTitle.stringValue = SchemaTrial.title(forLevel: 1 + offset)
             name = lib.project(project)?.name ?? ""; fixed = true; said = root.about
-            help = "You are editing \(name), one \(memberWord) in \(heading). Type over its name and press Return to rename it. The groups below are its own, and the sidebar shows them under it."
+            help = "You are editing \(name), one \(memberWord) in \(heading). Type over its name and press Return to rename it. The groups below are its own, and the sidebar shows them under it. Remove, under the map, takes it and all it holds away for good."
         case .node(let node, let level):
             levelTitle.stringValue = SchemaTrial.title(forLevel: level + offset)
             name = node.name; offered = SchemaTrial.names(forLevel: level); said = node.about
@@ -912,7 +933,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
                 : "You are editing a group \(level - 1) levels inside each \(memberWord) of \(heading). Groups this deep are labels for now: they show in the sidebar and hold nothing yet."
         }
         // A name of the user's own shows the box to type it in; a name from the list hides it. A member's name is always typed.
-        let custom = fixed || !offered.contains(name)
+        let custom = fixed || renaming || !offered.contains(name)
         names.arrangedSubviews.forEach { $0.removeFromSuperview() }
         func offer(_ row: SchemaNameRow, _ choose: @escaping () -> Void) {
             row.onChoose = choose
@@ -940,7 +961,11 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         if customName.currentEditor() == nil { customName.stringValue = custom ? name : "" }
         if about.currentEditor() == nil { about.stringValue = said ?? "" }
         rightHelp.stringValue = help
-        if focusName, custom { view.window?.makeFirstResponder(customName) }
+        if focusName, custom {
+            view.window?.makeFirstResponder(customName)
+            if renaming { customName.currentEditor()?.selectAll(nil) }
+        }
+        renaming = false
     }
 
     /// A group that holds things has been asked to go: say what it holds, and offer to keep them under a new name, or to delete them.
@@ -995,31 +1020,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         show()
     }
 
-    /// The member and all it holds, gone for good once the slide completes. A locked member refuses.
+    @objc private func removeMemberTapped() { if let project = stack { removeMember(project) } }
+
+    /// The member and all it holds, gone for good once the slide completes.
     private func removeMember(_ project: UUID) {
-        guard let p = lib.project(project) else { return }
-        guard !p.isLocked else {
-            NSSound.beep()
-            rightHelp.stringValue = "\(p.name) is locked. Unlock it in the sidebar before removing it."
-            return
-        }
-        let colours = palettes(.palettes, in: project).count, type = palettes(.typography, in: project).count, tags = tags(in: project).count
-        var held: [String] = []
-        if colours > 0 { held.append(plural(colours, "palette")) }
-        if type > 0 { held.append(plural(type, "typography palette")) }
-        if tags > 0 { held.append(plural(tags, "tag")) }
-        let what = held.isEmpty ? "It holds nothing yet." : "Its " + held.joined(separator: ", ") + " and every group inside it are deleted, not moved."
-        SlideConfirm.ask(over: view.window, title: "Remove \(p.name) From \(collection.name)", note: what + " This cannot be undone.") { [weak self] in
+        library.dump(project: project, over: view.window) { [weak self] in
             guard let self = self else { return }
-            let ids = self.palettes(.palettes, in: project) + self.palettes(.typography, in: project)
-            let names = self.tags(in: project)
-            self.library.apply("Remove \(self.member)") { lib in
-                ids.forEach { lib.deleteSwatch($0) }
-                names.forEach { lib.deleteTag($0) }
-                lib.deleteProject(project)
-            }
-            SchemaTrial.setSchema(nil, for: project)
-            SchemaTrial.places.removeValue(forKey: project.uuidString)
             self.removing = nil
             self.stack = nil
             self.load()
@@ -1040,15 +1046,36 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     /// The bin on a group: gone at once when it holds nothing; asked about when it holds something.
     private func remove(_ node: SchemaNode, level: Int) {
-        guard count(node, level: level) == 0 else {
-            removing = node.id
+        let n = count(node, level: level)
+        guard n == 0 else {
             selected = node.id
             show()
+            askAboutContents(of: node, level: level, holding: n)
             return
         }
         root = SchemaTrial.removing(node.id, from: root)
         keep()
         show()
+    }
+
+    /// A group that holds things cannot simply go. The panel says so, offers to keep them under another
+    /// name, and only a slide deletes them with the group.
+    private func askAboutContents(of node: SchemaNode, level: Int, holding n: Int) {
+        let role = SchemaTrial.role(of: node), things = "\(n) \(noun(role, n))"
+        let keep = SlideConfirm.Option(title: "Keep The \(noun(role, n)) And Rename The Group") { [weak self] in self?.keepAndRename() }
+        guard let project = stack else {
+            // On Default they are spread over every member that follows it; deleting is done member by member.
+            let note = "Its \(things) are spread over the \(holders.count) that follow Default, and would be left with nowhere to show. On Default the group can be renamed and they stay where they are. To delete them, choose each member under Stack and remove the group there."
+            SlideConfirm.ask(over: view.window, title: "\(node.name) Holds \(things)", note: note, options: [keep], commit: "Remove") { }
+            return
+        }
+        let name = lib.project(project)?.name ?? ""
+        var note = "A group that holds things cannot simply go: they would still be in \(name), with nowhere to show. Keep them and give the group another name, or delete the \(things) and remove the group. "
+        note += role == .tags ? "A deleted tag comes off everything that carries it." : "A deleted palette leaves its colours in All Swatches, and the deletion is recorded as a step in History."
+        if lib.project(project)?.isLocked == true { note += " \(name) is locked, so nothing in it can be deleted until it is unlocked in the sidebar." }
+        SlideConfirm.ask(over: view.window, title: "\(node.name) Holds \(things)", note: note + " This cannot be undone.", options: [keep], commit: "Delete And Remove") { [weak self] in
+            self?.deleteAndRemove()
+        }
     }
 
     @objc private func cancelRemoval() { removing = nil; show() }
@@ -1057,21 +1084,19 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     @objc private func keepAndRename() {
         removing = nil
         guard let id = selected else { return }
-        root = SchemaTrial.changing(id, in: root) { $0.role = SchemaTrial.role(of: $0); $0.name = "" }   // it keeps its part, whatever it is called next
+        // It keeps its part, whatever it is called next; and its name until a new one is typed, so walking away changes nothing.
+        root = SchemaTrial.changing(id, in: root) { $0.role = SchemaTrial.role(of: $0) }
         keep()
+        renaming = true
         show(focusName: true)
     }
+    /// Set by Keep And Rename: the name box opens with the present name selected, instead of the list's tick.
+    private var renaming = false
 
     /// Deletes what the group holds in this project, then takes the group off its stack.
     @objc private func deleteAndRemove() {
         guard let project = stack, let (node, _) = current, let role = SchemaTrial.role(of: node) else { return }
-        switch role {
-        case .palettes, .typography:
-            let ids = palettes(role, in: project)
-            library.apply(role == .typography ? "Delete Typography Palettes" : "Delete Palettes") { lib in ids.forEach { lib.deleteSwatch($0) } }
-        case .tags: library.deleteTags(tags(in: project))
-        case .information: break
-        }
+        library.erase(role: role, of: project)
         removing = nil
         // Only if they have really gone: a locked project refuses the change.
         guard count(node, level: 2) == 0 else { show(); return }
@@ -1169,13 +1194,14 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     /// Takes a collection away. Its members are not touched: with no collection of their own they are in the first one again.
     private func removeCollection() {
         guard collectionID != all[0].id else { return }
-        let going = collectionID
-        SchemaTrial.collections = all.filter { $0.id != going }
-        collectionID = SchemaTrial.firstCollection
-        stack = nil
-        load()
-        selected = collectionID
-        show()
+        library.dump(collection: collectionID, over: view.window) { [weak self] in
+            guard let self = self else { return }
+            self.collectionID = SchemaTrial.firstCollection
+            self.stack = nil
+            self.load()
+            self.selected = self.collectionID
+            self.show()
+        }
     }
 
     @objc private func collectionChosen() {

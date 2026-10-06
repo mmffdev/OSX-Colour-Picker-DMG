@@ -1395,14 +1395,26 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
             menu.addItem(withTitle: "Move To", action: nil, keyEquivalent: "").submenu = move
             menu.addItem(.separator())
-            add("Delete Project", #selector(deleteProjectClicked(_:)), id)
+            add("Delete Project, Keep Its Palettes", #selector(deleteProjectClicked(_:)), id)
+            add("Remove Project And Everything In It\u{2026}", #selector(dumpProjectClicked(_:)), id)
         } else if case .folder(let cid, let fid)? = clicked?.kind {
             add("Rename\u{2026}", #selector(renameFolderClicked(_:)), [cid, fid] as [UUID])
+            menu.addItem(.separator())
             let empty = clicked?.children.isEmpty ?? true
-            add("Delete", #selector(deleteFolderClicked(_:)), [cid, fid] as [UUID])
-            menu.items.last?.isEnabled = empty
+            add(empty ? "Remove" : "Remove And Everything In It\u{2026}", #selector(deleteFolderClicked(_:)), [cid, fid] as [UUID])
+        } else if case .collection(let cid)? = clicked?.kind {
+            let c = collectionsNow.first { $0.id == cid }
+            add("New \(c.map { SchemaTrial.memberName(of: $0) } ?? "Project")", #selector(newMemberClicked(_:)), cid)
+            if cid != SchemaTrial.firstCollection {
+                menu.addItem(.separator())
+                let empty = clicked?.children.isEmpty ?? true
+                add(empty ? "Remove Collection" : "Remove Collection And Everything In It\u{2026}", #selector(dumpCollectionClicked(_:)), cid)
+            }
+        } else if let (role, pid) = bucket(clicked) {
+            let empty = clicked?.children.isEmpty ?? true
+            add("Empty It\u{2026}", #selector(dumpBucketClicked(_:)), [role.rawValue, pid.uuidString])
+            menu.items.last?.isEnabled = !empty
             menu.autoenablesItems = false
-            if !empty { menu.items.last?.toolTip = "Move what it holds elsewhere first" }
         } else {
             menu.addItem(withTitle: "New Palette", action: #selector(LibraryController.newPalette), keyEquivalent: "").target = library
             menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
@@ -1442,6 +1454,23 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func moveProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.moveProject(id) } }
     @objc private func projectPackClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportDesignPack(project: id) } }
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
+    @objc private func dumpProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(project: id, over: view.window) } }
+    @objc private func dumpCollectionClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(collection: id, over: view.window) } }
+    @objc private func newMemberClicked(_ s: NSMenuItem) { if let id = id(s), let c = collectionsNow.first(where: { $0.id == id }) { newMember(in: c, folder: nil) } }
+    @objc private func dumpBucketClicked(_ s: NSMenuItem) {
+        guard let pair = s.representedObject as? [String], pair.count == 2, let role = SchemaRole(rawValue: pair[0]), let id = UUID(uuidString: pair[1]) else { return }
+        library.dump(role: role, of: id, over: view.window)
+    }
+
+    /// The bucket a row is, if it is one of the three that hold things.
+    private func bucket(_ node: SidebarNode?) -> (SchemaRole, UUID)? {
+        switch node?.kind {
+        case .projectPalettes(let id)?: return (.palettes, id)
+        case .projectTypography(let id)?: return (.typography, id)
+        case .projectTags(let id)?: return (.tags, id)
+        default: return nil
+        }
+    }
 
     /// Move To: the project, the collection, and the folder if one was chosen.
     @objc private func placeClicked(_ s: NSMenuItem) {
@@ -1461,9 +1490,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         })
     }
 
-    /// Takes away a folder that holds nothing.
+    /// Takes away a folder: at once when it holds nothing, after a slide with everything in it when it does.
     @objc private func deleteFolderClicked(_ s: NSMenuItem) {
         guard let ids = s.representedObject as? [UUID], ids.count == 2 else { return }
-        SchemaTrial.changeCollection(ids[0]) { $0.folders.removeAll { $0.id == ids[1] } }
+        library.dump(folder: ids[1], in: ids[0], over: view.window)
     }
 }
