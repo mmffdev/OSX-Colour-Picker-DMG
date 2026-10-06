@@ -269,12 +269,16 @@ final class ProjectHeaderCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false, locked: Bool? = nil, symbolName: String = "folder") {
+    /// `actions` names what the gear acts on ("Client actions", "Collection actions"); nil hides the gear.
+    func configure(name: String, heading: Bool = false, tooltip: String, lost: Bool = false, locked: Bool? = nil, symbolName: String = "folder", actions: String? = nil) {
         title.stringValue = name
         folder.image = symbol(symbolName, name, size: 12)
         warning.isHidden = !lost
         lock.isHidden = locked == nil
-        gear.isHidden = locked == nil   // only a project has actions; the headings do not
+        let acts = actions ?? (locked == nil ? nil : "Project actions")
+        gear.isHidden = acts == nil
+        gear.toolTip = acts
+        gear.setAccessibilityLabel(acts ?? "")
         if let locked = locked {
             lock.image = symbol(locked ? "lock.fill" : "lock.open", "", size: 11)
             lock.contentTintColor = locked ? .systemOrange : .tertiaryLabelColor
@@ -1073,10 +1077,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = heading; return c }()
             // The plus makes what sits straight under the heading: one of what groups the members, or a member.
             let makes = c.folderName ?? SchemaTrial.memberName(of: c)
-            cell.configure(name: c.name.isEmpty ? "Unnamed" : c.name, heading: true, tooltip: "New \(makes)")
+            cell.configure(name: c.name.isEmpty ? "Unnamed" : c.name, heading: true, tooltip: "New \(makes)", actions: "\(c.name.isEmpty ? "Collection" : c.name) actions")
             cell.toolTip = node.children.isEmpty ? "Nothing here yet. Press + to make the first \(makes.lowercased())." : nil
             cell.onAdd = { [weak self] in
                 if c.folderName != nil { self?.newFolder(in: c) } else { self?.newMember(in: c, folder: nil) }
+            }
+            let empty = node.children.isEmpty
+            cell.onGear = { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forCollection: c.id, empty: empty)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             }
             return cell
         }
@@ -1085,9 +1096,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let cell = o.makeView(withIdentifier: id, owner: self) as? ProjectHeaderCell ?? {
                 let made = ProjectHeaderCell(frame: .zero); made.identifier = id; return made }()
             let member = SchemaTrial.memberName(of: c)
-            cell.configure(name: f.name, tooltip: "New \(member) For \(f.name)", symbolName: "building.2")
+            cell.configure(name: f.name, tooltip: "New \(member) For \(f.name)", symbolName: "building.2", actions: "\(c.folderName ?? "Folder") actions")
             cell.toolTip = node.children.isEmpty ? "No \(SchemaTrial.plural(member).lowercased()) yet. Press + to make the first." : nil
             cell.onAdd = { [weak self] in self?.newMember(in: c, folder: f.id) }
+            let empty = node.children.isEmpty
+            cell.onGear = { [weak self] button in
+                guard let self = self else { return }
+                let menu = NSMenu()
+                self.fill(menu, forFolder: f.id, in: c.id, empty: empty)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            }
             return cell
         }
 
@@ -1393,18 +1411,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         } else if let id = clicked?.projectID {
             fill(menu, forProject: id)
         } else if case .folder(let cid, let fid)? = clicked?.kind {
-            add("Rename\u{2026}", #selector(renameFolderClicked(_:)), [cid, fid] as [UUID])
-            menu.addItem(.separator())
-            let empty = clicked?.children.isEmpty ?? true
-            add(empty ? "Remove" : "Remove And Everything In It\u{2026}", #selector(deleteFolderClicked(_:)), [cid, fid] as [UUID])
+            fill(menu, forFolder: fid, in: cid, empty: clicked?.children.isEmpty ?? true)
         } else if case .collection(let cid)? = clicked?.kind {
-            let c = collectionsNow.first { $0.id == cid }
-            add("New \(c.map { SchemaTrial.memberName(of: $0) } ?? "Project")", #selector(newMemberClicked(_:)), cid)
-            if cid != SchemaTrial.firstCollection {
-                menu.addItem(.separator())
-                let empty = clicked?.children.isEmpty ?? true
-                add(empty ? "Remove Collection" : "Remove Collection And Everything In It\u{2026}", #selector(dumpCollectionClicked(_:)), cid)
-            }
+            fill(menu, forCollection: cid, empty: clicked?.children.isEmpty ?? true)
+        } else if clicked?.kind == .projects, let c = collectionsNow.first {
+            fill(menu, forCollection: c.id, empty: clicked?.children.isEmpty ?? true)
         } else if let (role, pid) = bucket(clicked) {
             let empty = clicked?.children.isEmpty ?? true
             add("Empty It\u{2026}", #selector(dumpBucketClicked(_:)), [role.rawValue, pid.uuidString])
@@ -1415,6 +1426,40 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             menu.addItem(withTitle: "New Project\u{2026}", action: #selector(LibraryController.newProject), keyEquivalent: "").target = library
             menu.addItem(withTitle: "Project Templates\u{2026}", action: #selector(LibraryController.manageProjectTemplates), keyEquivalent: "").target = library
         }
+    }
+
+    /// A collection heading's actions, for a right-click on its row and for the row's gear: one of what sits under it,
+    /// and, for any collection but the first, its removal. The first stays: it is where things land.
+    private func fill(_ menu: NSMenu, forCollection cid: UUID, empty: Bool) {
+        func add(_ title: String, _ action: Selector, _ object: Any? = nil) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+        }
+        let c = collectionsNow.first { $0.id == cid }
+        if let folder = c?.folderName {
+            add("New \(folder)", #selector(newFolderClicked(_:)), cid)
+        }
+        add("New \(c.map { SchemaTrial.memberName(of: $0) } ?? "Project")", #selector(newMemberClicked(_:)), cid)
+        if cid != SchemaTrial.firstCollection {
+            menu.addItem(.separator())
+            add(empty ? "Remove Collection" : "Remove Collection And Everything In It\u{2026}", #selector(dumpCollectionClicked(_:)), cid)
+        }
+    }
+
+    /// A folder's actions (the tier that groups a collection's members), for a right-click and for the row's gear.
+    private func fill(_ menu: NSMenu, forFolder fid: UUID, in cid: UUID, empty: Bool) {
+        func add(_ title: String, _ action: Selector, _ object: Any? = nil) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+        }
+        if let c = collectionsNow.first(where: { $0.id == cid }) {
+            add("New \(SchemaTrial.memberName(of: c))", #selector(newMemberInFolderClicked(_:)), [cid, fid] as [UUID])
+        }
+        add("Rename\u{2026}", #selector(renameFolderClicked(_:)), [cid, fid] as [UUID])
+        menu.addItem(.separator())
+        add(empty ? "Remove" : "Remove And Everything In It\u{2026}", #selector(deleteFolderClicked(_:)), [cid, fid] as [UUID])
     }
 
     /// A project's actions, for a right-click on its row and for the row's gear. Named by what the schema calls it.
@@ -1496,6 +1541,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
     @objc private func dumpProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(project: id, over: view.window) } }
     @objc private func dumpCollectionClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(collection: id, over: view.window) } }
+    @objc private func newFolderClicked(_ s: NSMenuItem) { if let id = id(s), let c = collectionsNow.first(where: { $0.id == id }) { newFolder(in: c) } }
+    @objc private func newMemberInFolderClicked(_ s: NSMenuItem) {
+        guard let ids = s.representedObject as? [UUID], ids.count == 2, let c = collectionsNow.first(where: { $0.id == ids[0] }) else { return }
+        newMember(in: c, folder: ids[1])
+    }
     @objc private func newMemberClicked(_ s: NSMenuItem) { if let id = id(s), let c = collectionsNow.first(where: { $0.id == id }) { newMember(in: c, folder: nil) } }
     @objc private func dumpBucketClicked(_ s: NSMenuItem) {
         guard let pair = s.representedObject as? [String], pair.count == 2, let role = SchemaRole(rawValue: pair[0]), let id = UUID(uuidString: pair[1]) else { return }
