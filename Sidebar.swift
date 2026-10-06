@@ -1273,8 +1273,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             count.tag = 7
             count.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             count.textColor = .tertiaryLabelColor
-            text.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            // The gear takes the right-hand icon column every row shares; the count sits where a member's padlock does.
+            // The name takes up the slack, so the count and the gear stay at the far right: the gear on the icon
+            // column every row shares, the count where a member's padlock sits.
+            text.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+            count.setContentHuggingPriority(.required, for: .horizontal)
+            count.setContentCompressionResistancePriority(.required, for: .horizontal)
+            bucket.gear.setContentHuggingPriority(.required, for: .horizontal)
             views = [image, text, count, bucket.gear]
         }
         let stack = NSStackView(views: views)
