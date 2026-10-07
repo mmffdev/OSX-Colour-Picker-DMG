@@ -22,7 +22,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     // MARK: State
 
     /// What a row on the map is: a collection, the level grouping its members, or a group in its stack with its level in the stack, the member being 1.
-    private enum Target: Equatable {
+    private enum Target: Hashable {
         case collection(UUID), tier(UUID), node(UUID, UUID, Int)
         var collection: UUID { switch self { case .collection(let c), .tier(let c), .node(let c, _, _): return c } }
     }
@@ -51,6 +51,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     private var gripRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
     private var nameHits: [(NSRect, String?)] = []
+    /// The rollover: the row under the pointer, and how far each row's orange pane has flown out, 0 to 1, driven by the clock.
+    /// A selected row's pane stays out; a click on a row already under the pointer changes nothing, so it cannot flick.
+    private var hoverRow: Target?
+    private var reveal: [Target: CGFloat] = [:]
+    private var clock: Timer?
+    private var lastTick = Date()
     /// A group being dragged among its siblings, and the slot the pointer is over.
     private var dragging: Target?
     private var dragSlot: Int?
@@ -76,8 +82,44 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         about.placeholderAttributedString = Design.attributed("What this holds", .body, colour: Design.soft)
         customName.target = self; customName.action = #selector(nameEntered)
         for v in [customName, about] { addSubview(v) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: The rollover's clock
+
+    /// Where a row's pane should be: out for the row under the pointer and the selected one, home for the rest.
+    private func goal(_ t: Target) -> CGFloat { t == hoverRow || t == selected ? 1 : 0 }
+    /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
+    private func settle() {
+        let moving = mapRows.contains { (reveal[$0.target] ?? 0) != goal($0.target) }
+        guard moving, clock == nil else { return }
+        lastTick = Date()
+        clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            // Fast: the whole flight in a tenth of a second, so the wave follows the pointer without lag.
+            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick) / 0.1)
+            self.lastTick = now
+            var done = true
+            for r in self.mapRows {
+                let g = self.goal(r.target), v = self.reveal[r.target] ?? 0
+                if v == g { continue }
+                let next = v < g ? min(g, v + step) : max(g, v - step)
+                self.reveal[r.target] = next
+                if next != g { done = false }
+            }
+            self.reveal = self.reveal.filter { $0.value > 0 }
+            self.needsDisplay = true
+            if done { t.invalidate(); self.clock = nil }
+        }
+        RunLoop.main.add(clock!, forMode: .common)
+    }
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let over = rowRects.firstIndex { $0.contains(p) }.map { mapRows[$0].target }
+        if over != hoverRow { hoverRow = over; settle() }
+    }
+    override func mouseExited(with event: NSEvent) { if hoverRow != nil { hoverRow = nil; settle() } }
     override var isFlipped: Bool { true }
 
     func reload() {
@@ -236,6 +278,13 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             // The selected row's ground breaks the grid: from the rail's divider to the middle of the gutter between the panels.
             if on { fill(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
+            let name = Design.attributed(r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
+            // The pane: from the divider under the level, the grip and the name, to the name's end plus a step; eased out, and back.
+            if let v = reveal[r.target], v > 0 {
+                let full = x + 36 + name.size().width + Self.step
+                let eased = 1 - pow(1 - v, 3)
+                fill(NSRect(x: 0, y: box.minY, width: (full * eased).rounded(), height: box.height), Design.App.gridColour)
+            }
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
             // The grip between the level and the name: two columns of three dots; a drag from it puts the row in another order among its own.
             let grip = NSRect(x: x + 16, y: box.minY, width: Self.grip, height: box.height)
@@ -243,7 +292,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 for dx in [0, 4] as [CGFloat] { for dy in [-4, 0, 4] as [CGFloat] { fill(NSRect(x: grip.minX + 2 + dx, y: b - 5 + dy, width: 1.5, height: 1.5), on ? Design.quiet : Design.soft) } }
                 gripRects.append(grip)
             } else { gripRects.append(.zero) }
-            let name = Design.attributed(r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             var right = box.maxX
             if on {
                 for (title, glyph, run) in r.does.reversed() {
@@ -324,6 +372,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             dragging = gripRects[i].contains(p) && canDrag(r.target) ? r.target : nil
             dragStart = p
             refresh()
+            settle()
         }
     }
     /// What can be put in another order: a collection among the collections, a group among its siblings. The grouping level and the member stand alone.
