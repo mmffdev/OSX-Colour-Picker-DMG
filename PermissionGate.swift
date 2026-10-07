@@ -27,6 +27,9 @@ final class PermissionGate: NSWindowController {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         win.title = Brand.name
         win.isReleasedWhenClosed = false
+        // Above every other app's windows until it is answered: macOS does not let an app take the front on
+        // its own, and a gate that slips behind the window it was opened from looks like nothing happened.
+        win.level = .floating
         super.init(window: win)
 
         let title = NSTextField(labelWithString: "Before \(Brand.name) Opens")

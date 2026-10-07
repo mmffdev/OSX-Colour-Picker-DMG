@@ -117,6 +117,9 @@ final class ThemedButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
+    /// A press counts even when the app is not the active one. AppKit otherwise spends the first click on
+    /// activating the app and the button does nothing, which is what a gate shown before the app opens meets.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         let active = isHighlighted || state == .on
@@ -293,6 +296,8 @@ final class ToggleBar: NSControl {
 /// a secondary one, underlined text for a quiet one. Helvetica Neue Medium 13, 32 high, radius 4.
 /// The primary carries the arrow on its right behind a hairline.
 final class SwissButton: NSButton {
+    /// A press counts even when the app is not the active one; see ThemedButton.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     enum Kind { case primary, secondary, quiet }
     private(set) var kind: Kind
     /// A button that turns into another, as Keep It becomes Remove once the slide is home.
