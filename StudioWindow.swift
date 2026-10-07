@@ -26,7 +26,7 @@ final class StudioWindowController: NSWindowController {
         w.title = Brand.edition
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
-        w.isMovableByWindowBackground = true
+        w.isMovableByWindowBackground = false   // a press on the page is a press on the page, never a drag of the window
         w.backgroundColor = Design.paper
         w.minSize = Design.App.least
         w.contentView = frame
