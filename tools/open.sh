@@ -13,13 +13,9 @@
 set -euo pipefail
 APP="/Applications/MMFFDev Colour 3.app"
 BUNDLE_ID="com.mmffdev.mmffdevcolour3"
-TRIAL="${TMPDIR:-/tmp}colorgain-new-user"
 
 case "${1:-}" in
   new)
-    rm -rf "$TRIAL"
-    mkdir -p "$TRIAL"
-    defaults delete "$BUNDLE_ID.trial" >/dev/null 2>&1 || true
     if [ "${2:-}" = "permissions" ]; then
         tccutil reset ScreenCapture "$BUNDLE_ID" >/dev/null
         tccutil reset SystemPolicyDocumentsFolder "$BUNDLE_ID" >/dev/null
@@ -28,9 +24,10 @@ case "${1:-}" in
         defaults delete "$BUNDLE_ID" documentsRefused >/dev/null 2>&1 || true
         echo "macOS has forgotten the app's Screen Recording and Documents permissions."
     fi
-    # Through Launch Services, as a customer opens it, so macOS asks in the app's own name.
-    open -n -a "$APP" --env MMFFDEV_COLOUR3_HOME="$TRIAL"
-    echo "Opened as a new user. Its files are in $TRIAL and go next time."
+    # Through Launch Services, as a customer opens it, so macOS asks in the app's own name. The app's
+    # own --new-user wipes and makes the throwaway home, the same as ticking it in Xcode's scheme.
+    open -n -a "$APP" --args --new-user
+    echo "Opened as a new user, in a throwaway home that is wiped on the next new-user open."
     ;;
   me)
     open -a "$APP"
