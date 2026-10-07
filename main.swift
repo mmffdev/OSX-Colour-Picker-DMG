@@ -285,6 +285,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // ---------- Entry point ----------
 
+// --new-user: a first open, clean, as a brand-new user sees it. Tick it in Xcode under Product ▸
+// Scheme ▸ Edit Scheme ▸ Run ▸ Arguments; tools/open.sh new passes it to the installed app. A throwaway
+// home and settings of its own, wiped on every such launch, so your own catalogues are never touched.
+// Set before anything reads the preferences, which pick their domain from MMFFDEV_COLOUR3_HOME.
+if CommandLine.arguments.contains("--new-user") {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("colorgain-new-user")
+    try? fm.removeItem(at: home)
+    try? fm.createDirectory(at: home, withIntermediateDirectories: true)
+    UserDefaults.standard.removePersistentDomain(forName: "com.mmffdev.mmffdevcolour3.trial")
+    setenv("MMFFDEV_COLOUR3_HOME", home.path, 1)
+}
+
 if CommandLine.arguments.contains("--self-test") {
     runSelfTest()
 } else if CommandLine.arguments.contains("--write-project-files") {
