@@ -86,7 +86,12 @@ targets:
       - name: Stamp the build and add the helper
         shell: /bin/bash
         basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
         script: |
+          # The input files put this phase after the property list and the binary are in place; without
+          # them Xcode may process Info.plist after the stamp and lose it.
           # What build.sh does after compiling: the build number is the commit count, the commit is
           # stamped for the footer (a "+" when Swift files were uncommitted), and the Adobe helper and
           # its daemon plist go into the bundle. Xcode signs the whole bundle after this phase.
