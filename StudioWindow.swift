@@ -22,7 +22,7 @@ final class StudioWindowController: NSWindowController {
     init(library: LibraryController) {
         frame = StudioFrame(library: library)
         let w = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+                             styleMask: [.closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = Brand.edition
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
@@ -502,11 +502,17 @@ final class StudioFrame: NSView {
 // MARK: - The header, 64 high
 
 /// The wordmark, the tabs, Search, the tile-size slider and the avatar, all on one baseline.
-final class StudioHeader: NSView {
+final class StudioHeader: NSView, Overlay {
+    var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
+    func dismissOverlay() { closeMenu() }
     var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { needsLayout = true; needsDisplay = true } }
     var live: Int? = 0 { didSet { needsDisplay = true } }
     private var settingsRect = NSRect.zero
     var onTab: ((Int) -> Void)?
+    /// The three window marks at the top of column 1, where macOS would put its buttons: close, minimise, and arrange, which drops its menu.
+    private var markRects: [NSRect] = []
+    private var markHover: Int?
+    private var dropped: SwissDropdown.MenuPanel?
     var onSettings: (() -> Void)?
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
@@ -533,6 +539,7 @@ final class StudioHeader: NSView {
         addSubview(field)
         slider.onChange = { [weak self] v in self?.onAcross?(4 + Int((v * 4).rounded())) }
         addSubview(slider)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
@@ -551,6 +558,22 @@ final class StudioHeader: NSView {
         let g = Design.App.gutter, b = Self.baseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
+        // The three marks above the wordmark: a cross, a dash and the diagonal arrow, each in a 10 square; quiet until the pointer is on one.
+        markRects = []
+        for i in 0..<3 {
+            let r = NSRect(x: col(1) + CGFloat(i) * 16, y: 8, width: 10, height: 10)
+            let c = markHover == i ? Design.ink : Design.quiet
+            c.setStroke()
+            let e = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+            let p = NSBezierPath(); p.lineWidth = 1.1
+            switch i {
+            case 0: p.move(to: NSPoint(x: r.minX + 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.maxY - 3)); p.move(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.minX + 3, y: r.maxY - 3))
+            case 1: p.move(to: NSPoint(x: r.minX + 3, y: r.midY)); p.line(to: NSPoint(x: r.maxX - 3, y: r.midY))
+            default: p.move(to: NSPoint(x: r.minX + 3, y: r.maxY - 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.move(to: NSPoint(x: r.minX + 4, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.maxY - 4))
+            }
+            p.stroke()
+            markRects.append(r.insetBy(dx: -4, dy: -4))
+        }
         // The wordmark: bold lowercase, until there is a logo.
         NSAttributedString(string: Brand.wordmark, attributes: [.font: Design.font(18, .bold), .foregroundColor: Design.ink, .kern: -0.4]).draw(x: col(1), baseline: b)
         // The tabs from column 3, 24 apart; the live one Medium in ink, the rest quiet. Lab and Projects wait for their redesign.
@@ -579,8 +602,54 @@ final class StudioHeader: NSView {
         initial.draw(x: box.midX - initial.size().width / 2, baseline: b - 7)
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let over = markRects.firstIndex { $0.contains(p) }
+        if over != markHover { markHover = over; needsDisplay = true }
+    }
+    override func mouseExited(with event: NSEvent) { if markHover != nil { markHover = nil; needsDisplay = true } }
+
+    /// The arrange menu: the window to the left or right half, centred, full screen, or on another display.
+    private func arrange() {
+        guard let win = window else { return }
+        var items = ["Left Half", "Right Half", "Centre", "Full Screen"]
+        let others = NSScreen.screens.filter { $0 != win.screen }
+        items += others.map { "Move To \($0.localizedName)" }
+        let panel = SwissDropdown.MenuPanel(items: items, chosen: "", width: 220) { [weak self] i in
+            self?.closeMenu()
+            guard let v = win.screen?.visibleFrame else { return }
+            switch i {
+            case 0: win.setFrame(NSRect(x: v.minX, y: v.minY, width: v.width / 2, height: v.height), display: true, animate: true)
+            case 1: win.setFrame(NSRect(x: v.midX, y: v.minY, width: v.width / 2, height: v.height), display: true, animate: true)
+            case 2: win.center()
+            case 3: win.toggleFullScreen(nil)
+            default:
+                let s = others[i - 4].visibleFrame, f = win.frame
+                win.setFrame(NSRect(x: s.midX - f.width / 2, y: s.midY - f.height / 2, width: min(f.width, s.width), height: min(f.height, s.height)), display: true, animate: true)
+            }
+        }
+        let origin = win.convertToScreen(convert(NSRect(x: markRects[2].minX, y: markRects[2].maxY, width: 1, height: 1), to: nil)).origin
+        panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
+        win.addChildWindow(panel, ordered: .above)
+        dropped = panel
+        Overlays.opened(self)
+    }
+    private func closeMenu() {
+        if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
+        dropped = nil
+        Overlays.closed(self)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if let i = markRects.firstIndex(where: { $0.contains(p) }) {
+            switch i {
+            case 0: window?.performClose(nil)
+            case 1: window?.miniaturize(nil)
+            default: arrange()
+            }
+            return
+        }
         if let i = tabRects.firstIndex(where: { $0.contains(p) }), i != 2 { onTab?(i); return }
         if settingsRect.contains(p) { onSettings?(); return }
         super.mouseDown(with: event)

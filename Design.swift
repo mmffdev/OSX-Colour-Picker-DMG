@@ -192,7 +192,7 @@ enum Design {
         static let unit: CGFloat = 24
         static let textBaseline: CGFloat = 17
         /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
-        static var masterGrid = true
+        static var masterGrid = false
         static let gridColour = hex("#FCC80A")
         static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
         static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) }
