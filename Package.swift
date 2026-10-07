@@ -22,7 +22,8 @@ let package = Package(
             exclude: [
                 "Package.swift",
                 "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release",
-                "Claude outputs", ".build", ".swiftpm", ".idea", ".claude",
+                "Claude outputs", ".build", ".swiftpm", ".idea", ".vscode", ".claude",
+                "appstore", "project.yml", "Colorgain.xcodeproj", "Colorgain Style Sheet.html",
                 "AppIcon.icns", "Info.plist",
                 "build.sh", "make_dmg.sh", "make_pkg.sh", "signing.sh", "store_notary_credentials.sh",
                 "COLOUR-MANAGEMENT.md", "HANDOVER.md", "PALETTE-PAGE-DESIGNS.md", "README.md", "scratch.md",

@@ -1,0 +1,129 @@
+# The direct-download build of Colorgain as an Xcode project, for opening the repository root in
+# Xcode and pressing Cmd+R. XcodeGen turns this into Colorgain.xcodeproj, which is committed so it
+# opens without a step. The sources are the same .swift files at the root that Package.swift and
+# build.sh compile; this is the second view of them, giving Xcode what the package cannot: a real
+# bundle with Info.plist, the icon, Sparkle embedded, the helper, the commit stamped, signed with
+# the Developer ID so permissions and bookmarks hold between builds.
+#
+# After adding or removing a .swift file: `xcodegen` at the root, then commit the project with it.
+# The Store build has its own spec in appstore/project.yml on osx-appstore-build.
+name: Colorgain
+options:
+  xcodeVersion: "27.0"
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  groupSortPosition: top
+settings:
+  base:
+    DEVELOPMENT_TEAM: 6QVKGBRP5J
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "3.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Colorgain:
+    type: application
+    platform: macOS
+    sources:
+      - path: .
+        name: Sources
+        includes: ["*.swift"]
+        excludes:
+          - Package.swift
+          - project.yml
+          - Colorgain.xcodeproj
+          - appstore
+          - helper
+          - vendor
+          - tools
+          - help
+          - design
+          - assets
+          - icons
+          - installer
+          - release
+          - .build
+          - .swiftpm
+          - .claude
+          - .idea
+          - .vscode
+          - Claude outputs
+      - path: AppIcon.icns
+        buildPhase: resources
+      - path: icons
+        name: File Icons
+        buildPhase: resources
+        includes: ["*.icns"]
+    dependencies:
+      - framework: vendor/Sparkle/Sparkle.framework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_NAME: MMFFDev Colour 3
+        EXECUTABLE_NAME: MMFFDevColour3
+        PRODUCT_BUNDLE_IDENTIFIER: com.mmffdev.mmffdevcolour3
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: $(SRCROOT)/Info.plist
+        CODE_SIGN_STYLE: Manual
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        COMBINE_HIDPI_IMAGES: YES
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -O
+    postBuildScripts:
+      - name: Stamp the build and add the helper
+        shell: /bin/bash
+        basedOnDependencyAnalysis: false
+        script: |
+          # What build.sh does after compiling: the build number is the commit count, the commit is
+          # stamped for the footer (a "+" when Swift files were uncommitted), and the Adobe helper and
+          # its daemon plist go into the bundle. Xcode signs the whole bundle after this phase.
+          set -euo pipefail
+          cd "$SRCROOT"
+          app="$TARGET_BUILD_DIR/$WRAPPER_NAME"
+          plist="$app/Contents/Info.plist"
+          if git rev-parse --git-dir >/dev/null 2>&1; then
+              build="$(git rev-list --count HEAD)"
+              commit="$(git rev-parse --short HEAD)"
+              if [ -n "$(git status --porcelain --untracked-files=no -- '*.swift')" ]; then commit="$commit+"; fi
+              /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
+              /usr/libexec/PlistBuddy -c "Delete :ColourBuildCommit" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$plist"
+          fi
+          helper="$app/Contents/MacOS/MMFFDevColour3Helper"
+          id="com.mmffdev.mmffdevcolour3.helper"
+          if [ ! -f "$helper" ] || [ helper/main.swift -nt "$helper" ] || [ AdobeHelperRules.swift -nt "$helper" ]; then
+              xcrun swiftc -O helper/main.swift AdobeHelperRules.swift -o "$helper"
+          fi
+          mkdir -p "$app/Contents/Library/LaunchDaemons"
+          cp "helper/$id.plist" "$app/Contents/Library/LaunchDaemons/$id.plist"
+          if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "$EXPANDED_CODE_SIGN_IDENTITY" != "-" ]; then
+              codesign --force --options runtime --timestamp --identifier "$id" --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$helper"
+          else
+              codesign --force --identifier "$id" --sign - "$helper"
+          fi
+schemes:
+  Colorgain:
+    build:
+      targets:
+        Colorgain: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "--new-user": false
+        "--studio": false
+        "--self-test": false
+    archive:
+      config: Release

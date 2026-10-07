@@ -5,3 +5,4 @@ MMFFDevColour3
 release/
 .build/
 .swiftpm/
+xcuserdata/
