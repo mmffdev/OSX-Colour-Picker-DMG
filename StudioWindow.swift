@@ -137,7 +137,7 @@ final class StudioFrame: NSView {
         footer.grid = (A.column(1, in: w), A.columnWidth(in: w), page.frame.minX + A.gutter / 2)
         rail1.inset = A.column(1, in: w)
         rail2.inset = A.column(3, in: w) - rail2.frame.minX
-        page.inset = A.gutter / 2
+        page.inset = A.gutter
         history.inset = A.column(11, in: w) - history.frame.minX
     }
 
@@ -231,34 +231,28 @@ final class StudioFrame: NSView {
                 keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: "\(s.entries.count) " + (s.entries.count == 1 ? "colour" : "colours"), colours: s.entries.prefix(8).map { Design.hex($0.hex) }, hex: nil, id: s.id) : nil
             }
         }
-        let items: [TileGrid.Item], title: (String, String), meta: (String, String)
+        let items: [TileGrid.Item], title: String, meta: (String, String)
         switch place {
         case .catalogue:
             items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
-            title = ("All", "Colours"); meta = ("\(items.count) colours", library.paletteSort.title)
+            title = "All Colours"; meta = ("\(items.count) colours", library.paletteSort.title)
         case .palette(let id):
             let s = lib.swatch(id)
             items = tiles(lib.hexes(inSwatch: id, by: library.paletteSort), in: id)
-            title = split(s?.name ?? "Palette", or: "Palette")
+            title = s?.name ?? "Palette"
             meta = ("\(items.count) colours", s?.projectID.flatMap { lib.project($0)?.name } ?? "No project")
         case .project(let id):
             let list = palettes(lib.palettes(in: id))
             items = cards(list)
-            title = split(lib.project(id)?.name ?? "Project", or: "Project")
+            title = lib.project(id)?.name ?? "Project"
             meta = ("\(items.count) palettes", "\(list.reduce(0) { $0 + $1.entries.count }) colours")
         case .palettes:
             let list = palettes(lib.listedPalettes)
             items = cards(list)
-            title = ("All", "Palettes"); meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
+            title = "All Palettes"; meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
         }
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
-    }
-
-    /// A name as the two-tone title: the first word ink, the rest soft; a one-word name takes `or` as its second line.
-    private func split(_ name: String, or second: String) -> (String, String) {
-        let words = name.split(separator: " ", maxSplits: 1).map(String.init)
-        return words.count == 2 ? (words[0], words[1]) : (name, second)
     }
 
     private func fillHistory() {
@@ -431,13 +425,30 @@ class StudioRail: NSView {
         var heading = ""
         override var isFlipped: Bool { true }
         var height: CGFloat { 0 }
-        /// The heading row: Heading at the left, the arrow on the same baseline at the right. Returns the baseline.
-        func drawHeading() -> CGFloat {
-            let b = StudioRail.top + 14
-            Design.attributed(heading, .heading).draw(x: inset, baseline: b)
-            Design.arrow(16).draw(in: NSRect(x: bounds.width - inset - 16, y: b - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            return b
+        /// The area header every region shares: the Heading with the arrow on its baseline, a row of two
+        /// Labels under it, and the Rule beneath, at the same height in every area so the rule reads as
+        /// one line across the window broken only by each area's side padding. Returns the y under the rule.
+        @discardableResult
+        func drawHeader(_ left: String, _ right: String) -> CGFloat {
+            AreaHeader.draw(heading: heading, left: left, right: right, in: bounds, inset: inset)
+            return AreaHeader.height
         }
+    }
+}
+
+/// The header of an area, drawn the same in rail1, rail2, the page and the history rail.
+enum AreaHeader {
+    static let headingBaseline: CGFloat = StudioRail.top + 14
+    static let labelBaseline: CGFloat = headingBaseline + 33
+    static let rule: CGFloat = StudioRail.top + 14 + 16 + 27
+    static let height: CGFloat = rule + 1
+    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat) {
+        let r = bounds.width - inset
+        Design.attributed(heading, .heading).draw(x: inset, baseline: headingBaseline, width: r - inset - 24)
+        Design.arrow(16).draw(in: NSRect(x: r - 16, y: headingBaseline - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        Design.attributed(left, .label, colour: Design.quiet).draw(x: inset, baseline: labelBaseline)
+        Design.attributed(right, .label, colour: Design.quiet).draw(right: r, baseline: labelBaseline)
+        hairline(x: inset, y: rule, width: r - inset, Design.rule)
     }
 }
 
@@ -458,14 +469,14 @@ final class LibraryRail: StudioRail {
         private var hits: [(NSRect, StudioFrame.Place)] = []
 
         override var height: CGFloat {
-            rows.reduce(StudioRail.top + 14 + 8) { h, r in
+            rows.reduce(AreaHeader.height) { h, r in
                 if case .group = r { return h + Self.groupAbove + 11 + Self.groupBelow }
                 return h + Self.row + Self.gap
             } + 24
         }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeading() + 8
+            var y = drawHeader("Name", "Count")
             hits = []
             let right = bounds.width - inset
             for r in rows {
@@ -510,7 +521,7 @@ final class PaletteTable: StudioRail {
         // The chosen palette is brought into view, which the eye expects when it was chosen elsewhere.
         if let i = rows.firstIndex(where: { $0.chosen }) {
             layoutSubtreeIfNeeded()
-            let y = StudioRail.top + 14 + 16 + Body.titles + CGFloat(i) * Body.row
+            let y = AreaHeader.height + CGFloat(i) * Body.row
             body.scrollToVisible(NSRect(x: 0, y: y - Body.row, width: 1, height: Body.row * 3))
         }
     }
@@ -518,18 +529,13 @@ final class PaletteTable: StudioRail {
     final class Body: RailBody {
         var rows: [Row] = []
         var onPick: ((UUID) -> Void)?
-        static let row: CGFloat = 36, titles: CGFloat = 28
+        static let row: CGFloat = 36
         private var hits: [(NSRect, UUID)] = []
-        override var height: CGFloat { StudioRail.top + 14 + 16 + Self.titles + CGFloat(rows.count) * Self.row + 24 }
+        override var height: CGFloat { AreaHeader.height + CGFloat(rows.count) * Self.row + 24 }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeading() + 16
+            var y = drawHeader("Palette", "Colours")
             let right = bounds.width - inset
-            // The column titles, on a Rule.
-            Design.attributed("Palette", .label, colour: Design.quiet).draw(x: inset, baseline: y + 17)
-            Design.attributed("Colours", .label, colour: Design.quiet).draw(right: right, baseline: y + 17)
-            hairline(x: inset, y: y + Self.titles - 1, width: right - inset, Design.rule)
-            y += Self.titles
             hits = []
             for r in rows {
                 let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
@@ -567,10 +573,10 @@ final class HistoryRail: StudioRail {
         var onPick: ((String) -> Void)?
         static let row: CGFloat = 44
         private var hits: [(NSRect, String)] = []
-        override var height: CGFloat { StudioRail.top + 14 + 16 + CGFloat(rows.count) * Self.row + 24 }
+        override var height: CGFloat { AreaHeader.height + CGFloat(rows.count) * Self.row + 24 }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeading() + 16
+            var y = drawHeader("Colour", "When")
             let right = bounds.width - inset
             hits = []
             for r in rows {
@@ -599,14 +605,15 @@ final class StudioPage: NSView {
     var inset: CGFloat = 8 { didSet { needsLayout = true } }
     let grid = TileGrid()
     private let scroll = NSScrollView()
-    private var title: (String, String) = ("", "")
+    private var title = ""
     private var meta: (String, String) = ("", "")
-    static let titleSize: CGFloat = 48
-    /// The header's height: the title's baseline from the top, the hairline 16 under it, then 22 clear.
-    static var headerHeight: CGFloat { Design.App.pageTop + 42 + 16 + 1 + 22 }
+    /// The area header, then 16 clear before the tiles.
+    static var headerHeight: CGFloat { AreaHeader.height + 16 }
 
     init() {
         super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = Design.card.cgColor
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -618,7 +625,7 @@ final class StudioPage: NSView {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    func set(title: (String, String), meta: (String, String), items: [TileGrid.Item]) {
+    func set(title: String, meta: (String, String), items: [TileGrid.Item]) {
         self.title = title; self.meta = meta
         grid.items = items
         needsDisplay = true
@@ -635,20 +642,8 @@ final class StudioPage: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // The page's own six columns.
-        let w = bounds.width - 2 * inset, g = Design.App.gutter
-        let col = (w - 5 * g) / 6
-        func x(_ c: Int) -> CGFloat { inset + CGFloat(c - 1) * (col + g) }
-        let b = Design.App.pageTop + 42
-        // The two-tone title in columns 1 to 4: the first word ink, the second soft.
-        let t = NSMutableAttributedString(attributedString: Design.attributed(title.0 + " ", .title, size: Self.titleSize))
-        t.append(Design.attributed(title.1, .title, size: Self.titleSize, colour: Design.soft))
-        t.draw(x: x(1), baseline: b, width: 4 * col + 3 * g)
-        // Two captions of metadata in columns 5 to 6, the arrow at the right edge, all on the title's baseline.
-        Design.attributed(meta.0, .caption, colour: Design.quiet).draw(x: x(5), baseline: b)
-        Design.attributed(meta.1, .caption, colour: Design.quiet).draw(x: x(6), baseline: b, width: col - 24)
-        Design.arrow(16).draw(in: NSRect(x: x(6) + col - 16, y: b - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        hairline(x: inset, y: b + 16, width: w, Design.ink)
+        // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
+        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset)
     }
 }
 
@@ -681,6 +676,8 @@ final class TileGrid: NSView {
             let r = rect(i)
             guard r.intersects(dirtyRect) else { continue }
             fill(r, Design.card)
+            Design.rule.setStroke()
+            let edge = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
             let block = NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block)
             if it.colours.isEmpty { fill(block, Design.mist) }
             else {
