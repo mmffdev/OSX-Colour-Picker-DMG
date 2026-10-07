@@ -558,22 +558,6 @@ final class StudioHeader: NSView, Overlay {
         let g = Design.App.gutter, b = Self.baseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        // The three marks above the wordmark: a cross, a dash and the diagonal arrow, each in a 10 square; quiet until the pointer is on one.
-        markRects = []
-        for i in 0..<3 {
-            let r = NSRect(x: col(1) + CGFloat(i) * 16, y: 8, width: 10, height: 10)
-            let c = markHover == i ? Design.ink : Design.quiet
-            c.setStroke()
-            let e = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-            let p = NSBezierPath(); p.lineWidth = 1.1
-            switch i {
-            case 0: p.move(to: NSPoint(x: r.minX + 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.maxY - 3)); p.move(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.minX + 3, y: r.maxY - 3))
-            case 1: p.move(to: NSPoint(x: r.minX + 3, y: r.midY)); p.line(to: NSPoint(x: r.maxX - 3, y: r.midY))
-            default: p.move(to: NSPoint(x: r.minX + 3, y: r.maxY - 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.move(to: NSPoint(x: r.minX + 4, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.minY + 3)); p.line(to: NSPoint(x: r.maxX - 3, y: r.maxY - 4))
-            }
-            p.stroke()
-            markRects.append(r.insetBy(dx: -4, dy: -4))
-        }
         // The wordmark: bold lowercase, until there is a logo.
         NSAttributedString(string: Brand.wordmark, attributes: [.font: Design.font(18, .bold), .foregroundColor: Design.ink, .kern: -0.4]).draw(x: col(1), baseline: b)
         // The tabs from column 3, 24 apart; the live one Medium in ink, the rest quiet. Lab and Projects wait for their redesign.
@@ -595,11 +579,22 @@ final class StudioHeader: NSView, Overlay {
         let sx = col(11) - 24 - settings.size().width
         settings.draw(x: sx, baseline: b)
         settingsRect = NSRect(x: sx - 8, y: 0, width: settings.size().width + 16, height: bounds.height)
-        // The avatar: a 24 square at the right edge carrying the user's initial.
-        let box = NSRect(x: right - 24, y: b - 24, width: 24, height: 24)
-        fill(box, Design.mist)
-        let initial = Design.attributed(String(NSFullUserName().prefix(1)).uppercased(), .bodyStrong)
-        initial.draw(x: box.midX - initial.size().width / 2, baseline: b - 7)
+        // The three window marks at the right end, each a clean 24 glyph hung from the baseline, no box: the arrow that
+        // arranges, the dash that minimises, the cross that closes. Quiet until the pointer is on one.
+        markRects = []
+        for i in 0..<3 {
+            let r = NSRect(x: right - 24 - CGFloat(2 - i) * 36, y: b - 24, width: 24, height: 24)
+            (markHover == i ? Design.ink : Design.quiet).setStroke()
+            let p = NSBezierPath(); p.lineWidth = 1.3; p.lineCapStyle = .butt
+            let g = r.insetBy(dx: 5, dy: 5)
+            switch i {
+            case 2: p.move(to: NSPoint(x: g.minX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY)); p.move(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.minX, y: g.maxY))
+            case 1: p.move(to: NSPoint(x: g.minX, y: g.midY)); p.line(to: NSPoint(x: g.maxX, y: g.midY))
+            default: p.move(to: NSPoint(x: g.minX, y: g.maxY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.move(to: NSPoint(x: g.minX + 4, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY - 4))
+            }
+            p.stroke()
+            markRects.append(r.insetBy(dx: -6, dy: -6))
+        }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -628,7 +623,7 @@ final class StudioHeader: NSView, Overlay {
                 win.setFrame(NSRect(x: s.midX - f.width / 2, y: s.midY - f.height / 2, width: min(f.width, s.width), height: min(f.height, s.height)), display: true, animate: true)
             }
         }
-        let origin = win.convertToScreen(convert(NSRect(x: markRects[2].minX, y: markRects[2].maxY, width: 1, height: 1), to: nil)).origin
+        let origin = win.convertToScreen(convert(NSRect(x: markRects[0].maxX - 220, y: markRects[0].maxY, width: 1, height: 1), to: nil)).origin
         panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
         win.addChildWindow(panel, ordered: .above)
         dropped = panel
@@ -644,7 +639,7 @@ final class StudioHeader: NSView, Overlay {
         let p = convert(event.locationInWindow, from: nil)
         if let i = markRects.firstIndex(where: { $0.contains(p) }) {
             switch i {
-            case 0: window?.performClose(nil)
+            case 2: window?.performClose(nil)
             case 1: window?.miniaturize(nil)
             default: arrange()
             }
