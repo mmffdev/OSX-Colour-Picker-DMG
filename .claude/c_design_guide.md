@@ -21,5 +21,6 @@ Load only the child a screen touches:
 3. **The right word count.** Write to the space. If a paragraph runs past its columns, cut words before moving a margin.
 4. **Negative space.** Empty columns are part of the design. Fill a gap only when the screen is worse without it.
 5. **One voice.** Every size is a weight of Helvetica Neue, every grey is from the six, every gap is on the beat. Nothing is improvised.
+6. **Nothing below a changing text may move.** Two things side by side that carry weight, a heading and its words over a list or a set of controls, sit at one fixed height on both sides, and what is under them starts on one line across the screen whatever the words above say. Dynamic words get a box of a fixed number of lines, and the words are rewritten to fit the box; the box never grows to fit the words. The grid exists so that a change on one side cannot shift the other. (Rick, 2026-10-08: "Balance balance balance, this is why we have the grid.")
 
 Rick's standard, verbatim: "balance is everything to me, using the right word count to balance space." Measure a screenshot before reporting any layout.

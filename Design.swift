@@ -186,6 +186,14 @@ enum Design {
         static let footer: CGFloat = 48
         /// The page's clear space above its title.
         static let pageTop: CGFloat = 34
+        /// Master Inner: the beat every row under an area's rule keeps, and where a line of text sits in a
+        /// row. Every row is a multiple of the unit, so a row in one area shares its baseline with a row in
+        /// another; a two-line row is two units, a header row one. The overlay draws it (Rick, 2026-10-08).
+        static let unit: CGFloat = 24
+        static let textBaseline: CGFloat = 17
+        /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
+        static var masterGrid = true
+        static let gridColour = hex("#FCC80A")
         static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
         static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) }
         static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { CGFloat(to - from + 1) * columnWidth(in: width) + CGFloat(to - from) * gutter }

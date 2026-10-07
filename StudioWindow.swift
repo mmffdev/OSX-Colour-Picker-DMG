@@ -36,6 +36,8 @@ final class StudioWindowController: NSWindowController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    private static var gridKey: Any?
+
     static func show(library: LibraryController) {
         let c = shared ?? StudioWindowController(library: library)
         shared = c
@@ -49,6 +51,14 @@ final class StudioWindowController: NSWindowController {
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        // The backslash key turns Master Inner on and off, whenever no words are being typed.
+        if gridKey == nil {
+            gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c] e in
+                guard e.characters == "\\", !(c?.window?.firstResponder is NSText) else { return e }
+                c?.frame.toggleGrid()
+                return nil
+            }
+        }
         // The controller's questions come up on the window's own panels, not the old window's.
         library.onPrompt = { [weak c] p in
             SwissConfirm.name(over: c?.window, title: p.title, note: p.message, placeholder: p.placeholder, confirm: p.confirm, check: p.check) { p.done($0) }
@@ -118,13 +128,15 @@ final class StudioFrame: NSView {
     let page = StudioPage()
     let history = HistoryRail()
     let footer = StudioFooter()
+    /// Master Inner over everything: the columns and the beat, in the grid's orange, when it is on.
+    let overlay = GridOverlay()
 
     init(library: LibraryController) {
         self.library = library
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
-        for v in [header, rail1, rail2, page, history, footer] { addSubview(v) }
+        for v in [header, rail1, rail2, page, history, footer, overlay] { addSubview(v) }
         header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : i == 3 ? .projects : .palettes) }
         header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -169,12 +181,22 @@ final class StudioFrame: NSView {
         history.frame = NSRect(x: A.column(11, in: w) - A.gutter / 2, y: top, width: w - A.column(11, in: w) + A.gutter / 2, height: bodyH)
         page.frame = NSRect(x: rail2.frame.maxX + 1, y: top, width: history.frame.minX - rail2.frame.maxX - 2, height: bodyH)
         header.grid = (A.column(1, in: w), A.columnWidth(in: w))
-        footer.grid = (A.column(1, in: w), A.columnWidth(in: w), page.frame.minX + A.gutter / 2)
-        rail1.inset = A.column(1, in: w)
-        rail2.inset = A.column(3, in: w) - rail2.frame.minX
-        page.inset = A.gutter
-        history.inset = A.column(11, in: w) - history.frame.minX
+        footer.grid = (A.column(1, in: w), A.columnWidth(in: w), A.column(5, in: w))
+        // Every area's words sit exactly on its columns: the left edge on the first, the right edge at the end of the last.
+        func edges(_ v: NSView, _ from: Int, _ to: Int) -> (CGFloat, CGFloat) {
+            (A.column(from, in: w) - v.frame.minX, v.frame.maxX - (A.column(to, in: w) + A.columnWidth(in: w)))
+        }
+        (rail1.inset, rail1.insetRight) = edges(rail1, 1, 2)
+        (rail2.inset, rail2.insetRight) = edges(rail2, 3, 4)
+        (page.inset, page.insetRight) = edges(page, 5, 10)
+        (history.inset, history.insetRight) = edges(history, 11, 12)
+        overlay.frame = bounds
+        overlay.isHidden = !A.masterGrid
+        overlay.needsDisplay = true
     }
+
+    /// The backslash key: Master Inner on and off.
+    func toggleGrid() { A.masterGrid.toggle(); overlay.isHidden = !A.masterGrid; overlay.needsDisplay = true }
 
     override func draw(_ dirtyRect: NSRect) {
         // The hairlines that edge the regions: under the header, over the footer, beside each rail.
@@ -517,8 +539,9 @@ final class StudioHeader: NSView {
         let g = Design.App.gutter
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        field.frame = NSRect(x: col(7) - 2, y: Self.baseline - 15, width: span(3) + 4, height: 20)
-        slider.frame = NSRect(x: col(11), y: Self.baseline - 12, width: grid.column, height: 16)
+        // Law 1: the field's text on the baseline, the slider's and the chip's bottoms on it.
+        field.frame = NSRect(x: col(7) - 2, y: Self.baseline - 16, width: span(3) + 4, height: 20)
+        slider.frame = NSRect(x: col(11), y: Self.baseline - 16, width: grid.column, height: 16)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -547,10 +570,10 @@ final class StudioHeader: NSView {
         settings.draw(x: sx, baseline: b)
         settingsRect = NSRect(x: sx - 8, y: 0, width: settings.size().width + 16, height: bounds.height)
         // The avatar: a 24 square at the right edge carrying the user's initial.
-        let box = NSRect(x: right - 24, y: b - 17, width: 24, height: 24)
+        let box = NSRect(x: right - 24, y: b - 24, width: 24, height: 24)
         fill(box, Design.mist)
         let initial = Design.attributed(String(NSFullUserName().prefix(1)).uppercased(), .bodyStrong)
-        initial.draw(x: box.midX - initial.size().width / 2, baseline: b - 1)
+        initial.draw(x: box.midX - initial.size().width / 2, baseline: b - 7)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -597,6 +620,7 @@ final class MiniSlider: NSView {
 /// The rail scrolls when its rows pass its height, the scroller hidden until the wheel moves.
 class StudioRail: NSView {
     var inset: CGFloat = 24 { didSet { needsLayout = true } }
+    var insetRight: CGFloat = 24 { didSet { needsLayout = true } }
     static let top: CGFloat = 22
     let scroll = NSScrollView()
     let body: RailBody
@@ -623,19 +647,23 @@ class StudioRail: NSView {
         super.layout()
         scroll.frame = NSRect(x: 0, y: AreaHeader.height, width: bounds.width, height: bounds.height - AreaHeader.height)
         body.inset = inset
+        body.insetRight = insetRight
         body.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(scroll.frame.height, body.height))
         // Rows that fit do not scroll at all; only a longer list moves under the header.
         scroll.verticalScrollElasticity = body.height > scroll.frame.height ? .allowed : .none
         body.needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
-        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset)
+        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset, insetRight: insetRight)
     }
 
     class RailBody: NSView {
-        var inset: CGFloat = 24
+        var inset: CGFloat = 24, insetRight: CGFloat = 24
         override var isFlipped: Bool { true }
         var height: CGFloat { 0 }
+        /// Master Inner: a row's top at a count of units from the rule, and the line its text sits on.
+        static var unit: CGFloat { Design.App.unit }
+        static var line: CGFloat { Design.App.textBaseline }
     }
 }
 
@@ -648,8 +676,8 @@ enum AreaHeader {
     static let labelBaseline: CGFloat = headingBaseline + 33
     static let rule: CGFloat = StudioRail.top + 14 + 16 + 27
     static let height: CGFloat = rule + 1
-    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat) {
-        let r = bounds.width - inset
+    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat, insetRight: CGFloat? = nil) {
+        let r = bounds.width - (insetRight ?? inset)
         Design.attributed(heading, .heading).draw(x: inset, baseline: headingBaseline, width: r - inset - 24)
         Design.arrow(16).draw(in: NSRect(x: r - 16, y: headingBaseline - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         Design.attributed(left, .label, colour: Design.quiet).draw(x: inset, baseline: labelBaseline)
@@ -680,7 +708,10 @@ final class LibraryRail: StudioRail {
         var chosen: StudioFrame.Place = .catalogue
         var onPick: ((StudioFrame.Place) -> Void)?
         var onDrop: ((UUID, UUID) -> Void)?
-        static let row: CGFloat = 20, two: CGFloat = 40, gap: CGFloat = 6, groupAbove: CGFloat = 24, groupBelow: CGFloat = 10, step: CGFloat = 16
+        static var row: CGFloat { unit }
+        static var two: CGFloat { unit * 2 }
+        static var groupAbove: CGFloat { unit }
+        static let step: CGFloat = 16
         private var hits: [(NSRect, StudioFrame.Place)] = []
         /// The palette under the mouse at mouseDown, so a drag can take it; the member a drag is over.
         private var pressed: (UUID, String, [NSColor])?
@@ -689,32 +720,36 @@ final class LibraryRail: StudioRail {
         override init(frame: NSRect) { super.init(frame: frame); registerForDraggedTypes([PaletteDrag.type]) }
         required init?(coder: NSCoder) { fatalError() }
 
+        /// The first group's header sits on the first-order line, the first row under the rule; every later group has a unit of air above it.
         override var height: CGFloat {
-            rows.reduce(0) { h, r in
+            var h: CGFloat = 0
+            for (i, r) in rows.enumerated() {
                 switch r {
-                case .group: return h + Self.groupAbove + 11 + Self.groupBelow
-                case .row: return h + Self.row + Self.gap
-                case .palette: return h + Self.two + Self.gap
+                case .group: h += (i == 0 ? 0 : Self.groupAbove) + Self.row
+                case .row: h += Self.row
+                case .palette: h += Self.two
                 }
-            } + 24
+            }
+            return h + Self.unit
         }
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
             hits = []
-            let right = bounds.width - inset
-            for r in rows {
+            let right = bounds.width - insetRight
+            for (i, r) in rows.enumerated() {
                 switch r {
                 case .group(let title):
-                    y += Self.groupAbove
-                    Design.attributed(title, .label, colour: Design.quiet).draw(x: inset, baseline: y + 9)
-                    y += 11 + Self.groupBelow
+                    if i > 0 { y += Self.groupAbove }
+                    // A first-order header: Title Case, the body weight, on the line every area shares.
+                    Design.attributed(title, .body).draw(x: inset, baseline: y + Self.line)
+                    y += Self.row
                 case .row(let name, let count, let place, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let on = place == chosen
                     if on { fill(box, Design.mist) }
-                    // Rows sit one small step in from their group's label, so the groups read as groups.
-                    let b = y + 14, x = inset + 12 + CGFloat(indent) * Self.step
+                    // Rows sit one small step in from their group's header, so the groups read as groups.
+                    let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
                     let countW = countText.size().width
                     let nameText = Design.attributed(name, on ? .bodyStrong : .body)
@@ -727,39 +762,39 @@ final class LibraryRail: StudioRail {
                         let e = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
                     }
                     hits.append((box, place))
-                    y += Self.row + Self.gap
+                    y += Self.row
                 case .palette(let name, let count, let place, let colours):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
                     let on = place == chosen
                     if on { fill(box, Design.mist) }
                     let x = inset + 12
                     let nameText = Design.attributed(name, on ? .bodyStrong : .body)
-                    nameText.draw(x: x, baseline: y + 14, width: right - x - (on ? 10 : 0))
-                    if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + 8, width: 4, height: 4), Design.ink) }
-                    // The second line: the colours as one strip, the same width on every row, the count at the right.
+                    nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))
+                    if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + Self.line - 6, width: 4, height: 4), Design.ink) }
+                    // The second line: the colours as one strip, its bottom on the second line, the same width on every row, the count at the right.
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
-                    let strip = NSRect(x: x, y: y + 22, width: right - x - 36, height: 10)
+                    let strip = NSRect(x: x, y: y + Self.unit + Self.line - 10, width: right - x - 36, height: 10)
                     if colours.isEmpty { fill(strip, Design.mist) }
                     else {
                         let bw = strip.width / CGFloat(colours.count)
                         for (k, c) in colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
                     }
-                    countText.draw(right: right, baseline: y + 31)
+                    countText.draw(right: right, baseline: y + Self.unit + Self.line)
                     hits.append((box, place))
-                    y += Self.two + Self.gap
+                    y += Self.two
                 }
             }
         }
 
         private func palette(at p: NSPoint) -> (UUID, String, [NSColor])? {
             var y: CGFloat = 0
-            for r in rows {
+            for (i, r) in rows.enumerated() {
                 switch r {
-                case .group: y += Self.groupAbove + 11 + Self.groupBelow
-                case .row: y += Self.row + Self.gap
+                case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
+                case .row: y += Self.row
                 case .palette(let name, _, let place, let colours):
                     if case .palette(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return (id, name, colours) }
-                    y += Self.two + Self.gap
+                    y += Self.two
                 }
             }
             return nil
@@ -867,27 +902,31 @@ final class PaletteTable: StudioRail {
     final class Body: RailBody, NSDraggingSource {
         var rows: [Row] = []
         var onPick: ((StudioFrame.Place) -> Void)?
-        static let row: CGFloat = 36, group: CGFloat = 34, step: CGFloat = 16, strip: CGFloat = 44, divider: CGFloat = 26
+        static var row: CGFloat { unit }
+        static var group: CGFloat { unit }
+        static var divider: CGFloat { unit }
+        static let step: CGFloat = 16, strip: CGFloat = 44
         private var hits: [(NSRect, StudioFrame.Place)] = []
         private var pressed: (UUID, String, [NSColor])?
         static func height(of r: Row) -> CGFloat {
             switch r { case .group: return group; case .divider: return divider; default: return row }
         }
-        override var height: CGFloat { rows.reduce(0) { $0 + Self.height(of: $1) } + 24 }
+        override var height: CGFloat { rows.reduce(0) { $0 + Self.height(of: $1) } + Self.unit }
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
-            let right = bounds.width - inset
+            let right = bounds.width - insetRight
             hits = []
             for r in rows {
                 switch r {
                 case .group(let name, let indent):
-                    Design.attributed(name, .label, colour: Design.quiet).draw(x: inset + CGFloat(indent) * Self.step, baseline: y + 25)
+                    // A first-order header: Title Case, the body weight, on the shared line.
+                    Design.attributed(name, .body).draw(x: inset + CGFloat(indent) * Self.step, baseline: y + Self.line)
                     y += Self.group
                 case .palette(let id, let name, let count, let colours, let chosen, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     if chosen { fill(box, Design.mist) }
-                    let b = y + 22, x = inset + CGFloat(indent) * Self.step
+                    let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
                     // The whole palette as a strip, each colour an equal band; an empty one is Mist.
                     let strip = NSRect(x: x, y: b - 9, width: Self.strip, height: 10)
                     if colours.isEmpty { fill(strip, Design.mist) }
@@ -904,7 +943,7 @@ final class PaletteTable: StudioRail {
                 case .item(let name, let detail, let indent, let place, let chosen):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     if chosen { fill(box, Design.mist) }
-                    let b = y + 22, x = inset + CGFloat(indent) * Self.step
+                    let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
                     let detailText = Design.attributed(detail ?? "", .caption, colour: Design.quiet)
                     let dim = place == nil && detail == nil && name == "None found"
                     Design.attributed(name, chosen ? .bodyStrong : .body, colour: dim ? Design.soft : Design.ink).draw(x: x, baseline: b, width: right - x - detailText.size().width - 12)
@@ -913,12 +952,12 @@ final class PaletteTable: StudioRail {
                     if let p = place { hits.append((box, p)) }
                     y += Self.row
                 case .divider(let word):
-                    Design.attributed(word, .label, colour: Design.quiet).draw(x: inset, baseline: y + 17)
+                    Design.attributed(word, .label, colour: Design.quiet).draw(x: inset, baseline: y + Self.line)
                     hairline(x: inset, y: y + Self.divider - 1, width: right - inset, Design.rule)
                     y += Self.divider
                 }
             }
-            if rows.isEmpty { Design.attributed("Nothing found", .caption, colour: Design.soft).draw(x: inset, baseline: y + 22) }
+            if rows.isEmpty { Design.attributed("Nothing found", .caption, colour: Design.soft).draw(x: inset, baseline: y + Self.line) }
         }
 
         private func palette(at p: NSPoint) -> (UUID, String, [NSColor])? {
@@ -956,25 +995,26 @@ final class HistoryRail: StudioRail {
     final class Body: RailBody {
         var rows: [Row] = []
         var onPick: ((String) -> Void)?
-        static let row: CGFloat = 44
+        static var row: CGFloat { unit * 2 }
         private var hits: [(NSRect, String)] = []
-        override var height: CGFloat { CGFloat(rows.count) * Self.row + 24 }
+        override var height: CGFloat { CGFloat(rows.count) * Self.row + Self.unit }
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
-            let right = bounds.width - inset
+            let right = bounds.width - insetRight
             hits = []
             for r in rows {
                 let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                fill(NSRect(x: inset, y: y + 11, width: 22, height: 22), Design.hex(r.hex))
+                // The swatch hangs between the two lines: its top on the first, its bottom on the second.
+                fill(NSRect(x: inset, y: y + Self.line - 12, width: 24, height: Self.unit + 12), Design.hex(r.hex))
                 let time = Design.attributed(r.time, .caption, colour: Design.quiet)
-                Design.attributed(r.name, .body).draw(x: inset + 34, baseline: y + 19, width: right - inset - 34 - time.size().width - 12)
-                Design.attributed(r.what, .caption, colour: Design.quiet).draw(x: inset + 34, baseline: y + 34)
-                time.draw(right: right, baseline: y + 19)
+                Design.attributed(r.name, .body).draw(x: inset + 36, baseline: y + Self.line, width: right - inset - 36 - time.size().width - 12)
+                Design.attributed(r.what, .caption, colour: Design.quiet).draw(x: inset + 36, baseline: y + Self.unit + Self.line)
+                time.draw(right: right, baseline: y + Self.line)
                 hits.append((box, r.hex))
                 y += Self.row
             }
-            if rows.isEmpty { Design.attributed("Nothing found", .caption, colour: Design.soft).draw(x: inset, baseline: y + 19) }
+            if rows.isEmpty { Design.attributed("Nothing found", .caption, colour: Design.soft).draw(x: inset, baseline: y + Self.line) }
         }
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
@@ -988,6 +1028,7 @@ final class HistoryRail: StudioRail {
 /// The page: 34 clear, then a Split header on its own six columns, a hairline, 22 clear, and the grid of tiles.
 final class StudioPage: NSView {
     var inset: CGFloat = 8 { didSet { needsLayout = true } }
+    var insetRight: CGFloat = 8 { didSet { needsLayout = true } }
     let grid = TileGrid()
     let settings = CatalogueSettings()
     let schema = SchemaSettings()
@@ -1002,7 +1043,7 @@ final class StudioPage: NSView {
     private var title = ""
     private var meta: (String, String) = ("", "")
     /// The area header, then 16 clear before the tiles.
-    static var headerHeight: CGFloat { AreaHeader.height + 16 }
+    static var headerHeight: CGFloat { AreaHeader.height }
 
     init() {
         super.init(frame: .zero)
@@ -1067,16 +1108,19 @@ final class StudioPage: NSView {
     override func layout() {
         super.layout()
         var top = Self.headerHeight
+        let u = Design.App.unit
         if !newButton.isHidden {
-            newButton.frame = NSRect(x: inset, y: top, width: newButton.intrinsicContentSize.width, height: 32)
-            top += 32 + 16
+            // The button's words on the first row's line; the tiles two units down.
+            newButton.frame = NSRect(x: inset, y: top + Design.App.textBaseline - 22, width: newButton.intrinsicContentSize.width, height: 32)
+            top += 2 * u
         }
-        scroll.frame = NSRect(x: inset, y: top, width: bounds.width - 2 * inset, height: bounds.height - top)
-        settingsScroll.frame = scroll.frame
+        let tilesTop = top + (section == .tiles ? u : 0)
+        scroll.frame = NSRect(x: inset, y: tilesTop, width: bounds.width - inset - insetRight, height: bounds.height - tilesTop)
+        settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: bounds.height - top)
         let sh = settings.height(forWidth: scroll.frame.width)
         settings.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, sh))
         settingsScroll.verticalScrollElasticity = sh > scroll.frame.height ? .allowed : .none
-        schemaScroll.frame = scroll.frame
+        schemaScroll.frame = settingsScroll.frame
         let kh = schema.height(forWidth: scroll.frame.width)
         schema.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, kh))
         schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
@@ -1088,7 +1132,7 @@ final class StudioPage: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset)
+        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset, insetRight: insetRight)
     }
 }
 
@@ -1883,6 +1927,41 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     @objc private func showInFinder() {
         guard let lib = library else { return }
         NSWorkspace.shared.activateFileViewerSelecting([lib.store.url])
+    }
+}
+
+// MARK: - Master Inner, drawn over the window
+
+/// The grid over everything: the twelve columns as faint bands with their edges, the two margins, the
+/// header's baseline, the area header's lines, then the beat under the rule, every unit, with the
+/// line text sits on in each. In the grid's orange, light enough to read through. Takes no clicks.
+final class GridOverlay: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        typealias A = Design.App
+        let w = bounds.width, h = bounds.height, c = A.gridColour
+        let cw = A.columnWidth(in: w)
+        for i in 1...A.columns {
+            let x = A.column(i, in: w)
+            fill(NSRect(x: x, y: 0, width: cw, height: h), c.withAlphaComponent(0.05))
+            fill(NSRect(x: x, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+            fill(NSRect(x: x + cw - 1, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+        }
+        // The header's baseline, the area header's heading and label lines and its rule.
+        let strong = c.withAlphaComponent(0.6), faint = c.withAlphaComponent(0.25)
+        fill(NSRect(x: 0, y: StudioHeader.baseline, width: w, height: 1), strong)
+        let top = A.header + 1
+        for y in [AreaHeader.headingBaseline, AreaHeader.labelBaseline, AreaHeader.rule] { fill(NSRect(x: 0, y: top + y, width: w, height: 1), strong) }
+        // The beat: a unit line and, within each unit, the line text sits on.
+        var y = top + AreaHeader.height
+        let bottom = h - A.footer
+        while y < bottom {
+            fill(NSRect(x: 0, y: y, width: w, height: 1), faint)
+            fill(NSRect(x: 0, y: y + A.textBaseline, width: w, height: 1), strong)
+            y += A.unit
+        }
+        fill(NSRect(x: 0, y: h - A.footer + StudioFooter.baseline, width: w, height: 1), strong)
     }
 }
 

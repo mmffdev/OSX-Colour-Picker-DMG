@@ -13,7 +13,7 @@ import AppKit
 // on offer with the chosen one marked, a box for a name of your own, and a description. A group that
 // holds things cannot simply go: the window's own panel asks what becomes of them.
 
-final class SchemaSettings: NSView, NSTextFieldDelegate {
+final class SchemaSettings: NSView, NSTextFieldDelegate, Overlay {
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     var onResize: (() -> Void)?
@@ -50,13 +50,15 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     // MARK: The views
 
-    private var collectionDrop: SwissDropdown?
-    private var stackDrop: SwissDropdown?
     private let useDefault = SwissButton("Use Default", .quiet)
     private let addNext = SwissButton("Add", .secondary)
     private let removeMember = SwissButton("Remove", .quiet)
     private let customName = NSTextField(string: "")
     private let about = NSTextField(string: "")
+    /// The head's lists, dropped under Collection or Stack; through the one overlay handler.
+    private var dropped: SwissDropdown.MenuPanel?
+    var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
+    func dismissOverlay() { closeMenu() }
 
     /// One row of the map, as the drawing lays it out.
     private struct MapRow { let id: UUID; let text: String; let level: Int; let holds: String?; let strong: Bool; let node: SchemaNode?; let does: [(String, Int, () -> Void)] }
@@ -64,12 +66,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     private var rowRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
     private var nameHits: [(NSRect, String?)] = []
+    private var headHits: [(NSRect, Int)] = []
     /// A group being dragged among its siblings, and the slot the pointer is over.
     private var dragging: UUID?
     private var dragSlot: Int?
     private var dragStart: NSPoint?
 
-    static let row: CGFloat = 32, nameRow: CGFloat = 26, step: CGFloat = 20, gutter: CGFloat = 32, head: CGFloat = 84
+    /// Master Inner: the unit and the line text sits on in it; the page's six columns within its width.
+    private static var u: CGFloat { Design.App.unit }
+    private static var line: CGFloat { Design.App.textBaseline }
+    private static let step: CGFloat = 16, helpUnits: CGFloat = 3
 
     init() {
         super.init(frame: .zero)
@@ -97,7 +103,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     func reload() {
         load()
         if selected == nil || target == nil { selected = collectionID }
-        rebuildHead()
         refresh()
     }
     private func refresh() { needsLayout = true; needsDisplay = true; onResize?() }
@@ -112,28 +117,37 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         if let id = stack { SchemaTrial.setSchema(root, for: id) } else { let tree = root; SchemaTrial.changeCollection(collectionID) { $0.stack = tree } }
         all = SchemaTrial.collections
     }
-    private func show() { load(); if target == nil { selected = collectionID }; rebuildHead(); refresh(); onChange?() }
+    private func show() { load(); if target == nil { selected = collectionID }; refresh(); onChange?() }
 
-    // MARK: The head: two dropdowns, built afresh each time their lists change
+    // MARK: The head: Collection and Stack, each a list dropped under its hairline
 
-    private func rebuildHead() {
-        collectionDrop?.removeFromSuperview(); stackDrop?.removeFromSuperview()
-        let names = all.map { $0.name.isEmpty ? "Unnamed" : $0.name } + ["New Collection\u{2026}"]
-        let c = SwissDropdown("Collection", value: collection.name.isEmpty ? "Unnamed" : collection.name, options: names, allowsOwn: false, width: 260)
-        c.onChange = { [weak self] s in self?.collectionChosen(s, among: names) }
-        let inside = members
-        let stacks = ["Default"] + inside.map { $0.name + (SchemaTrial.hasOwn($0.id) ? "  \u{25A0}" : "") } + ["New \(member)\u{2026}"]
-        let now = stack.flatMap { id in inside.firstIndex { $0.id == id } }.map { stacks[$0 + 1] } ?? "Default"
-        let s = SwissDropdown("Stack", value: now, options: stacks, allowsOwn: false, width: 260)
-        s.onChange = { [weak self] v in self?.stackChosen(v, among: stacks, inside: inside) }
-        addSubview(c); addSubview(s)
-        collectionDrop = c; stackDrop = s
-        useDefault.isHidden = !(stack.map { SchemaTrial.hasOwn($0) } ?? false)
+    private var collectionNames: [String] { all.map { $0.name.isEmpty ? "Unnamed" : $0.name } + ["New Collection\u{2026}"] }
+    private var stackNames: [String] { ["Default"] + members.map { $0.name + (SchemaTrial.hasOwn($0.id) ? "  \u{25A0}" : "") } + ["New \(member)\u{2026}"] }
+    private var stackNow: String { stack.flatMap { id in members.firstIndex { $0.id == id } }.map { stackNames[$0 + 1] } ?? "Default" }
+
+    private func dropList(_ which: Int, under r: NSRect) {
+        guard let win = window else { return }
+        closeMenu()
+        let items = which == 0 ? collectionNames : stackNames
+        let panel = SwissDropdown.MenuPanel(items: items, chosen: which == 0 ? collection.name : stackNow, width: r.width) { [weak self] i in
+            guard let self = self else { return }
+            self.closeMenu()
+            if which == 0 { self.collectionChosen(i) } else { self.stackChosen(i) }
+        }
+        let origin = win.convertToScreen(convert(NSRect(x: r.minX, y: r.maxY, width: 1, height: 1), to: nil)).origin
+        panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
+        win.addChildWindow(panel, ordered: .above)
+        dropped = panel
+        Overlays.opened(self)
+    }
+    private func closeMenu() {
+        if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
+        dropped = nil
+        Overlays.closed(self)
     }
 
-    private func collectionChosen(_ s: String, among names: [String]) {
-        guard let i = names.firstIndex(of: s) else { return }
-        if i == names.count - 1 {
+    private func collectionChosen(_ i: Int) {
+        if i == all.count {
             SwissConfirm.name(over: window, title: "New Collection", note: "A heading in rail1 of its own, starting with the stack of \(collection.name.isEmpty ? "this collection" : collection.name).",
                               placeholder: "Clients, Our Own Work, Archive", confirm: "Create Collection", check: { ProjectField.problem(name: $0, values: [:], naming: "collection") }) { [weak self] name in
                 guard let self = self else { return }
@@ -143,15 +157,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 self.selected = self.collectionID
                 self.show()
             }
-            rebuildHead(); return
+            return
         }
+        guard all.indices.contains(i) else { return }
         collectionID = all[i].id; stack = nil
         load(); selected = collectionID; show()
     }
 
-    private func stackChosen(_ v: String, among stacks: [String], inside: [Project]) {
-        guard let i = stacks.firstIndex(of: v) else { return }
-        if i == stacks.count - 1 {
+    private func stackChosen(_ i: Int) {
+        let inside = members
+        if i == inside.count + 1 {
             SwissConfirm.name(over: window, title: "New \(member)", note: "A \(member.lowercased()) in \(collection.name), a project with files of its own, with a stack of its own to shape here.",
                               placeholder: "Client, product or piece of work", confirm: "Create \(member)", check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
                 guard let self = self, let lib = self.library else { return }
@@ -168,9 +183,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 self.stack = id
                 self.load(); self.selected = self.root.id; self.show()
             }
-            rebuildHead(); return
+            return
         }
-        stack = i == 0 ? nil : inside[i - 1].id
+        stack = i == 0 ? nil : (inside.indices.contains(i - 1) ? inside[i - 1].id : nil)
         load(); selected = root.id; show()
     }
 
@@ -226,88 +241,85 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         return out
     }
 
-    // MARK: Geometry: one walk gives the drawing, the hits and the fields their places
+    // MARK: Geometry: one walk, on the page's six columns and the unit, gives the drawing, the hits and the fields their places
 
     private struct Geometry {
+        var cw: CGFloat = 0, g: CGFloat = 0
+        var collection = NSRect.zero, stackBox = NSRect.zero, useDefault = NSRect.zero
         var left = NSRect.zero, right = NSRect.zero
         var mapTop: CGFloat = 0, mapRows: [NSRect] = []
-        var addNext = NSRect.zero, removeMember = NSRect.zero
-        var names: [NSRect] = [], customName = NSRect.zero, about = NSRect.zero
+        var addNext: CGFloat = 0
+        var nameLabel: CGFloat = 0, names: [NSRect] = [], customLabel: CGFloat = 0, customName = NSRect.zero, aboutLabel: CGFloat = 0, about = NSRect.zero
         var height: CGFloat = 0
         var leftHelp = "", rightHelp = "", levelTitle = "", offered: [String] = [], name = "", said: String?, custom = false, fixed = false
     }
 
-    private func wrapped(_ text: String, width: CGFloat) -> CGFloat {
-        Design.attributed(text, .caption, colour: Design.quiet, lineHeight: true).boundingRect(with: NSSize(width: width, height: 2000), options: [.usesLineFragmentOrigin]).height
-    }
-
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
-        let lw = ((w - Self.gutter) * 0.58).rounded(), rx = lw + Self.gutter, rw = w - rx
+        let u = Self.u, gut = Design.App.gutter
+        g.g = gut; g.cw = ((w - 5 * gut) / 6).rounded(.down)
+        let cw = g.cw
+        func col(_ i: Int) -> CGFloat { CGFloat(i - 1) * (cw + gut) }
+        func span(_ n: Int) -> CGFloat { CGFloat(n) * cw + CGFloat(n - 1) * gut }
+        // The head: rows 0 and 1. Collection on columns 1 and 2, Stack on 4 and 5, Use Default on 6.
+        g.collection = NSRect(x: col(1), y: 0, width: span(2), height: 2 * u)
+        g.stackBox = NSRect(x: col(4), y: 0, width: span(2), height: 2 * u)
+        g.useDefault = NSRect(x: col(6), y: 0, width: cw, height: 2 * u)
+        // The two columns of the page under the head: the map on columns 1 to 4, the row on 5 and 6; headers on row 3, words on rows 4 to 6, content from row 7.
+        let lw = span(4), rx = col(5), rw = span(2)
         let here = collection, inside = members, heading = here.name.isEmpty ? "this collection" : here.name
         let own = stack.map { SchemaTrial.hasOwn($0) } ?? false
         let following = inside.filter { !SchemaTrial.hasOwn($0.id) }.count
-        let others = all.filter { $0.id != here.id }.map { $0.name }
-
-        // Left: Structure, its words, the map.
-        var words = "You are in the \(heading) collection"
+        var words: String
         if let project = stack.flatMap({ lib.project($0) }) {
-            words += ", on \(project.name)'s own stack. " + (own ? "It has a stack of its own and follows nothing: what is built below is its alone. Use Default puts it back with the others."
-                                                            : "It follows Default. Change anything below and it takes a stack of its own, leaving the others as they are.")
+            words = "\(heading), on \(project.name)'s own stack. " + (own ? "It follows nothing: what is built below is its alone. Use Default puts it back with the others." : "It follows Default. Change anything below and it takes a stack of its own.")
         } else {
-            words += ". Below is its Default stack, the structure every member of \(heading) follows unless it has a stack of its own. \(following) of \(inside.count) follow it."
+            words = "\(heading)'s Default stack: what every member follows unless it has a stack of its own. \(following) of \(inside.count) follow it. Choose a member under Stack to shape it on its own, or another collection under Collection."
         }
-        words += " Each collection has a tree of its own. " + (others.isEmpty ? "To make another, choose New Collection under Collection." : "You also have \(others.joined(separator: ", ")).")
-        words += " To shape one member differently from the rest, choose it under Stack."
         g.leftHelp = words
-        var y = Self.head + 28 + wrapped(words, width: lw) + 16
+        var y = 7 * u
         g.mapTop = y
         mapRows = buildMap()
-        for _ in mapRows { g.mapRows.append(NSRect(x: 0, y: y, width: lw, height: Self.row)); y += Self.row }
-        y += 12
-        let bw = addNext.intrinsicContentSize.width
-        g.addNext = NSRect(x: lw - bw, y: y, width: bw, height: 32)
-        g.removeMember = NSRect(x: 0, y: y, width: removeMember.intrinsicContentSize.width, height: 32)
-        g.left = NSRect(x: 0, y: Self.head, width: lw, height: y + 32 - Self.head)
+        for _ in mapRows { g.mapRows.append(NSRect(x: 0, y: y, width: lw, height: u)); y += u }
+        g.addNext = y + u
+        g.left = NSRect(x: 0, y: 3 * u, width: lw, height: g.addNext + 2 * u - 3 * u)
 
-        // Right: the selected row.
-        var ry = Self.head
+        var ry = 7 * u
         if let what = target {
             let memberWord = member.lowercased(), many = SchemaTrial.plural(member).lowercased()
             switch what {
             case .collection:
                 g.levelTitle = SchemaTrial.title(forLevel: 0); g.name = here.name; g.offered = SchemaTrial.collectionNames; g.said = here.about
-                g.rightHelp = "The \(heading) collection itself: its name, which heads it in rail1, and a line on what it is for. "
-                    + (here.folderName == nil ? "Its \(many) sit straight under the heading. Add Level Beneath on its row puts a level between, to group them." : "Its \(many) are grouped under a level between, named on the next row.")
+                g.rightHelp = "Its name heads rail1; the description says what it is for. " + (here.folderName == nil ? "Its \(many) sit straight under it; Add Level Beneath groups them." : "Its \(many) are grouped under the level on the next row.")
             case .tier:
                 g.levelTitle = SchemaTrial.title(forLevel: 1); g.name = here.folderName ?? ""; g.offered = SchemaTrial.folderNames
-                g.rightHelp = "The level that groups the \(many) of \(heading). Name what one of them is. Each is made in rail1, and the \(many) inside it."
+                g.rightHelp = "The level that groups the \(many) of \(heading). Name what one of them is; each is made in rail1 with its \(many) inside."
             case .member(let project):
                 g.levelTitle = SchemaTrial.title(forLevel: 1 + offset); g.name = lib.project(project)?.name ?? ""; g.fixed = true; g.said = root.about
-                g.rightHelp = "\(g.name), one \(memberWord) in \(heading). Type over its name and press Return to rename it. The groups below are its own. Remove, under the map, takes it and all it holds away for good."
+                g.rightHelp = "One \(memberWord) in \(heading). Type over its name and press Return to rename it. The groups below are its own."
             case .node(let node, let level):
                 g.levelTitle = SchemaTrial.title(forLevel: level + offset); g.name = node.name; g.offered = SchemaTrial.names(forLevel: level); g.said = node.about
                 g.rightHelp = level == 1 ? "What a \(memberWord) of \(heading) is called. Every \(memberWord) is a project of the app's, with files of its own."
-                    : level == 2 ? "A group inside each \(memberWord) of \(heading). Information, Palettes, Typography and Tags hold what they always have, whatever they are called. Any other group is a label for now, holding nothing."
-                    : "A group \(level - 1) levels inside each \(memberWord) of \(heading). Groups this deep are labels for now."
+                    : level == 2 ? "A group in every \(memberWord) of \(heading). Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now."
+                    : "A group \(level - 1) levels inside every \(memberWord) of \(heading). Groups this deep are labels for now."
             }
             g.custom = g.fixed || renaming || !g.offered.contains(g.name)
-            ry += 28 + wrapped(g.rightHelp, width: rw) + 16
-            // Name: the label, then the names on offer, Custom Name first; a member's name is always typed.
-            ry += 20
+            g.nameLabel = ry; ry += u
             let count = g.fixed ? 0 : g.offered.count + 1
-            for _ in 0..<count { g.names.append(NSRect(x: rx, y: ry, width: rw, height: Self.nameRow)); ry += Self.nameRow }
+            for _ in 0..<count { g.names.append(NSRect(x: rx, y: ry, width: rw, height: u)); ry += u }
             if g.custom {
-                ry += 8
-                g.customName = NSRect(x: rx, y: ry, width: rw, height: 28); ry += 36
+                ry += u
+                g.customLabel = ry; ry += u
+                g.customName = NSRect(x: rx, y: ry, width: rw, height: u); ry += u
             }
             if g.said != nil {
-                ry += 8 + 20
-                g.about = NSRect(x: rx, y: ry, width: rw, height: 28); ry += 36
+                ry += u
+                g.aboutLabel = ry; ry += u
+                g.about = NSRect(x: rx, y: ry, width: rw, height: u); ry += u
             }
         }
-        g.right = NSRect(x: rx, y: Self.head, width: rw, height: ry - Self.head)
-        g.height = max(g.left.maxY, g.right.maxY) + 24 + 80 + 16
+        g.right = NSRect(x: rx, y: 3 * u, width: rw, height: ry - 3 * u)
+        g.height = max(g.left.maxY, g.right.maxY) + u + 4 * u
         return g
     }
 
@@ -315,50 +327,58 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     override func layout() {
         super.layout()
-        let g = geometry(width: bounds.width)
-        collectionDrop?.frame = NSRect(x: 0, y: 0, width: 260, height: 60)
-        stackDrop?.frame = NSRect(x: 260 + 24, y: 0, width: 260, height: 60)
-        useDefault.frame = NSRect(x: 260 + 24 + 260 + 24, y: 22, width: useDefault.intrinsicContentSize.width, height: 32)
-        // Under the map: the next group for a stack row; Remove for a member's own stack.
+        let g = geometry(width: bounds.width), u = Self.u, line = Self.line
+        // Buttons hang their words on the row's line: a 32 button's text sits 22 below its top.
+        useDefault.frame = NSRect(x: g.useDefault.minX, y: u + line - 22, width: useDefault.intrinsicContentSize.width, height: 32)
+        useDefault.isHidden = !(stack.map { SchemaTrial.hasOwn($0) } ?? false)
         var next: String?
         if case .node(_, let level)? = target { next = level == 1 ? "Add \(SchemaTrial.title(forLevel: 2 + offset))" : "Add Next Level \(level + offset) Group" }
         if case .member? = target { next = "Add \(SchemaTrial.title(forLevel: 2 + offset))" }
         addNext.isHidden = next == nil
         if let n = next, addNext.title != n { addNext.title = n; addNext.invalidateIntrinsicContentSize() }
-        addNext.frame = NSRect(x: g.left.maxX - addNext.intrinsicContentSize.width, y: g.addNext.minY, width: addNext.intrinsicContentSize.width, height: 32)
+        addNext.frame = NSRect(x: g.left.maxX - addNext.intrinsicContentSize.width, y: g.addNext + line - 22, width: addNext.intrinsicContentSize.width, height: 32)
         if let project = stack, let name = lib.project(project)?.name {
             removeMember.isHidden = false
             let t = "Remove \(name)\u{2026}"
             if removeMember.title != t { removeMember.title = t; removeMember.invalidateIntrinsicContentSize() }
-            removeMember.frame = NSRect(x: 0, y: g.removeMember.minY, width: removeMember.intrinsicContentSize.width, height: 32)
+            removeMember.frame = NSRect(x: 0, y: g.addNext + line - 22, width: removeMember.intrinsicContentSize.width, height: 32)
         } else { removeMember.isHidden = true }
+        // The fields: their text on the row's line, which for a 13 field is 15 below its top.
         customName.isHidden = !g.custom
-        customName.frame = NSRect(x: g.customName.minX, y: g.customName.minY + 4, width: g.customName.width, height: 20)
+        customName.frame = NSRect(x: g.customName.minX, y: g.customName.minY + line - 15, width: g.customName.width, height: 20)
         if customName.currentEditor() == nil { customName.stringValue = g.custom ? g.name : "" }
         about.isHidden = g.said == nil
-        about.frame = NSRect(x: g.about.minX, y: g.about.minY + 4, width: g.about.width, height: 20)
+        about.frame = NSRect(x: g.about.minX, y: g.about.minY + line - 15, width: g.about.width, height: 20)
         if about.currentEditor() == nil { about.stringValue = g.said ?? "" }
     }
 
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        let g = geometry(width: bounds.width)
-        rowRects = g.mapRows; doHits = []; nameHits = []
-        // Left: Structure.
-        Design.attributed("Structure", .section, colour: Design.quiet).draw(x: 0, baseline: Self.head + 20)
-        Design.attributed(g.leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: 0, y: Self.head + 28, width: g.left.width, height: g.mapTop - Self.head - 28))
+        let g = geometry(width: bounds.width), u = Self.u, line = Self.line
+        rowRects = g.mapRows; doHits = []; nameHits = []; headHits = []
+        // The head: a first-order caption on the first line, the value at 17 on the second, a chevron, a hairline under both.
+        for (i, (cap, value, box)) in [("Collection", collection.name.isEmpty ? "Unnamed" : collection.name, g.collection), ("Stack", stackNow, g.stackBox)].enumerated() {
+            Design.attributed(cap, .body).draw(x: box.minX, baseline: line)
+            let v = Design.attributed(value, .headline, size: 17)
+            v.draw(x: box.minX, baseline: u + line, width: box.width - 24)
+            Design.attributed(dropped != nil && headHits.count == i ? "\u{25B4}" : "\u{25BE}", .caption, colour: Design.quiet).draw(x: box.minX + min(v.size().width, box.width - 24) + 8, baseline: u + line)
+            hairline(x: box.minX, y: 2 * u - 1, width: box.width, Design.rule)
+            headHits.append((NSRect(x: box.minX, y: u, width: box.width, height: u), i))
+        }
+        // The two headers on one line, row 3; the words in a box of three units under each; nothing below them moves.
+        Design.attributed("Structure", .body).draw(x: 0, baseline: 3 * u + line)
+        Design.attributed(g.leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: 0, y: 4 * u, width: g.left.width, height: Self.helpUnits * u))
         hairline(x: 0, y: g.mapTop - 1, width: g.left.width, Design.rule)
         for (i, r) in mapRows.enumerated() {
-            let box = g.mapRows[i], b = box.minY + 21
+            let box = g.mapRows[i], b = box.minY + line
             let on = r.id == selected
             if on { fill(box, Design.mist) }
-            let x = 8 + CGFloat(r.level) * Self.step
+            let x = CGFloat(r.level) * Self.step
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
             let name = Design.attributed(r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
-            var right = box.maxX - 8
+            var right = box.maxX
             if on {
-                // The selected row carries what can be done with it, from the right edge leftwards.
                 for (title, glyph, run) in r.does.reversed() {
                     let t = Design.attributed(title, .caption, colour: Design.quiet)
                     right -= t.size().width
@@ -372,45 +392,41 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 t.draw(right: right, baseline: b)
                 right -= t.size().width + 12
             }
-            name.draw(x: x + 24, baseline: b, width: right - x - 24)
+            name.draw(x: x + 20, baseline: b, width: right - x - 20)
             hairline(x: 0, y: box.maxY - 1, width: box.width, Design.mist)
         }
         if let slot = dragSlot, let d = dragging, let i = mapRows.firstIndex(where: { $0.id == d }) {
-            // The slot a dragged group would land in: an ink line between its siblings.
             let y = slotY(slot, among: siblings(of: d), draggedLevel: mapRows[i].level)
-            fill(NSRect(x: 8 + CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: g.left.width - 8 - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
+            fill(NSRect(x: CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: g.left.width - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
         }
-        // Right: the selected row.
         guard target != nil else { return }
-        Design.attributed(g.levelTitle, .section, colour: Design.quiet).draw(x: g.right.minX, baseline: Self.head + 20)
-        let helpH = wrapped(g.rightHelp, width: g.right.width)
-        Design.attributed(g.rightHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: g.right.minX, y: Self.head + 28, width: g.right.width, height: helpH))
-        var y = Self.head + 28 + helpH + 16
-        Design.attributed(g.fixed ? "Name" : "Name, From The List Or Your Own", .label, colour: Design.quiet).draw(x: g.right.minX, baseline: y + 9)
+        let rx = g.right.minX
+        Design.attributed(g.levelTitle, .body).draw(x: rx, baseline: 3 * u + line)
+        Design.attributed(g.rightHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: 4 * u, width: g.right.width, height: Self.helpUnits * u))
+        Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
         if !g.fixed {
             let list = ["Custom Name\u{2026}"] + g.offered
             for (i, n) in list.enumerated() {
-                let box = g.names[i], b = box.minY + 18
+                let box = g.names[i], b = box.minY + line
                 let chosen = i == 0 ? g.custom : (!g.custom && n == g.name)
                 let sq = NSRect(x: box.minX, y: b - 10, width: 12, height: 12)
                 fill(sq, chosen ? Design.ink : Design.card)
                 Design.ink.setStroke()
                 let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-                Design.attributed(n, .body, colour: i == 0 && !chosen ? Design.quiet : chosen ? Design.ink : Design.quiet).draw(x: box.minX + 24, baseline: b, width: box.width - 24)
+                Design.attributed(n, .body, colour: chosen ? Design.ink : Design.quiet).draw(x: box.minX + 24, baseline: b, width: box.width - 24)
                 nameHits.append((box, i == 0 ? nil : n))
             }
         }
         if g.custom {
-            y = g.customName.minY
-            Design.attributed(g.fixed ? "Name" : "Custom Name", .label, colour: Design.quiet).draw(x: g.right.minX, baseline: y - 4)
-            hairline(x: g.right.minX, y: g.customName.maxY - 4, width: g.right.width, customName.currentEditor() != nil ? Design.ink : Design.rule)
+            Design.attributed(g.fixed ? "Name" : "Custom Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.customLabel + line)
+            hairline(x: rx, y: g.customName.maxY - 1, width: g.right.width, customName.currentEditor() != nil ? Design.ink : Design.rule)
         }
         if g.said != nil {
-            Design.attributed("Description", .label, colour: Design.quiet).draw(x: g.right.minX, baseline: g.about.minY - 4)
-            hairline(x: g.right.minX, y: g.about.maxY - 4, width: g.right.width, about.currentEditor() != nil ? Design.ink : Design.rule)
+            Design.attributed("Description", .label, colour: Design.quiet).draw(x: rx, baseline: g.aboutLabel + line)
+            hairline(x: rx, y: g.about.maxY - 1, width: g.right.width, about.currentEditor() != nil ? Design.ink : Design.rule)
         }
-        Design.attributed("A collection is a heading in rail1. Its members are the app's projects, grouped under a level between when you add one, and each follows the collection's Default stack: the groups inside a member, four filled by the app, any other a label of your own. Choose a member under Stack to give it a stack of its own. The schema is kept with the app's settings on this Mac.", .caption, colour: Design.quiet, lineHeight: true)
-            .draw(in: NSRect(x: 0, y: g.height - 80 - 16, width: min(bounds.width, 560), height: 80))
+        Design.attributed("A collection is a heading in rail1. Its members are the app's projects, grouped under a level between when you add one, and each follows the collection's Default stack: the groups inside a member, four filled by the app, any other a label of your own. Choose a member under Stack to give it a stack of its own.", .caption, colour: Design.quiet, lineHeight: true)
+            .draw(in: NSRect(x: 0, y: g.height - 4 * u, width: min(bounds.width, 560), height: 3 * u))
     }
 
     private func icon(_ which: Int, at p: NSPoint) {
@@ -431,18 +447,19 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         path.stroke()
     }
 
-    // MARK: The pointer: select, act, choose a name, drag a group among its siblings
+    // MARK: The pointer: select, act, choose a name, drop a list, drag a group among its siblings
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         window?.makeFirstResponder(self)
+        if let h = headHits.first(where: { $0.0.contains(p) }) { dropList(h.1, under: h.0); return }
         if let d = doHits.first(where: { $0.0.contains(p) }) { d.1(); return }
         if let n = nameHits.first(where: { $0.0.contains(p) }) { choose(name: n.1); return }
         if let i = rowRects.firstIndex(where: { $0.contains(p) }) {
             let r = mapRows[i]
             selected = r.id
             renaming = false
-            if let node = r.node, let level = current.map({ $0.level }) ?? SchemaTrial.rows(of: root).first(where: { $0.node.id == node.id })?.level, level > 1 { dragging = node.id; dragStart = p } else { dragging = nil }
+            if let node = r.node, let level = SchemaTrial.rows(of: root).first(where: { $0.node.id == node.id })?.level, level > 1 { dragging = node.id; dragStart = p } else { dragging = nil }
             refresh()
         }
     }
@@ -451,7 +468,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         let p = convert(event.locationInWindow, from: nil)
         guard abs(p.y - start.y) > 4 || dragSlot != nil else { return }
         let sibs = siblings(of: d)
-        // The slot: counted down the siblings' rows, by where the pointer is.
         var slot = sibs.count
         for (k, s) in sibs.enumerated() {
             if let i = mapRows.firstIndex(where: { $0.id == s }), p.y < rowRects[i].midY { slot = k; break }
@@ -474,7 +490,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     }
     private func slotY(_ slot: Int, among sibs: [UUID], draggedLevel: Int) -> CGFloat {
         if slot < sibs.count, let i = mapRows.firstIndex(where: { $0.id == sibs[slot] }) { return rowRects[i].minY }
-        // After the last sibling and everything inside it.
         if let last = sibs.last, let i = mapRows.firstIndex(where: { $0.id == last }) {
             var end = i
             while end + 1 < mapRows.count && mapRows[end + 1].level > mapRows[i].level { end += 1 }
