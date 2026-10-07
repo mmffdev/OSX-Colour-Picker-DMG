@@ -8,6 +8,7 @@
 #                                     reaches your own copy too, which asks again next time you open it
 #   tools/open.sh new 3               a new user, opened straight at setup step 3
 #   tools/open.sh me                  the installed app as you, with your catalogues
+#   tools/open.sh studio              as you, in the Studio window: the app on Colorgain's own grid
 #
 # A new user here keeps everything in the throwaway home, so it never asks for Documents; the
 # Documents question is seen as yourself, after "new permissions".
@@ -34,8 +35,11 @@ case "${1:-}" in
   me)
     open -a "$APP"
     ;;
+  studio)
+    open -n -a "$APP" --args --studio
+    ;;
   *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

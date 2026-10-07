@@ -173,6 +173,22 @@ enum Design {
         static var columnWidth: CGFloat { (size.width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
         static func span(_ from: Int, _ to: Int) -> CGFloat { CGFloat(to - from + 1) * columnWidth + CGFloat(to - from) * gutter }
     }
+    /// The app window's grid (c_c_c_design_grid_app.md): twelve columns inside 24 margins with 16 gutters,
+    /// a 64 header and a 48 footer. The window resizes, so every measure takes the width it is at.
+    enum App {
+        static let size = NSSize(width: 1440, height: 900)
+        static let least = NSSize(width: 1120, height: 680)
+        static let margin: CGFloat = 24
+        static let gutter: CGFloat = 16
+        static let columns = 12
+        static let header: CGFloat = 64
+        static let footer: CGFloat = 48
+        /// The page's clear space above its title.
+        static let pageTop: CGFloat = 34
+        static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
+        static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) }
+        static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { CGFloat(to - from + 1) * columnWidth(in: width) + CGFloat(to - from) * gutter }
+    }
     /// Every gap is a multiple of four.
     static func beat(_ n: Int) -> CGFloat { CGFloat(n) * 4 }
 

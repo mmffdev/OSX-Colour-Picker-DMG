@@ -112,7 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func revealMainWindow() {
         guard let main = main else { return }
-        main.showWindow(nil)
+        // --studio: the window on Colorgain's own grid, in place of the old one while it is built.
+        if CommandLine.arguments.contains("--studio") { StudioWindowController.show(library: library) } else { main.showWindow(nil) }
         splash?.close()
         splash = nil
         NSApp.activate(ignoringOtherApps: true)

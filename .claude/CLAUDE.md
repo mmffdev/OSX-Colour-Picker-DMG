@@ -40,6 +40,10 @@ Vector refuses titles that look like code ("cLab"), descriptions that do not ope
 
 Earlier items sit in the Colour Picker workspace `de3bfb2c-9f1b-4c4a-bf75-bc872e32b1bd`, node `R26GHQXV` (node id `e51fc096-70b2-4b42-bc06-79c70b1e08bb`): runway PR-21, objective OB-75, themes TH-242 Feature List and TH-243 Core Architecture. `.mcp.json` still names that workspace (`VECTOR_MCP_REPOSITORY_WORKSPACE` / `_NODE`). Nothing has been moved across; if the connection is ever pointed back there, decide with Rick which home wins before writing.
 
+## The Studio window (the redesign of the app itself)
+
+`StudioWindow.swift` is the main window on Colorgain's own grid (`Design.App`): header, library rail, context rail, page, history rail, footer, all placed by frame and drawn in the ten text styles. It opens in place of the old window with `--studio` (`tools/open.sh studio`); `--palettes` opens on the palettes view and `--palette "<name>"` on that palette. Built 2026-10-08 for the library and palettes views only; Lab, Contrast and the palette page's options still live in the old window.
+
 ## What the product is
 
 A full enterprise colour management and proofing system for 2D, 3D, video, graphic design and print. Hex is never the primary promise. The definition, the master colour design and the reasoning are in `COLOUR-MANAGEMENT.md` at the repository root: read it before any work on colour. The ideas list is `scratch.md`.
