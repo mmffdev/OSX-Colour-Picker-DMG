@@ -1148,16 +1148,20 @@ final class TileGrid: NSView {
     var onPick: ((String) -> Void)?
     var onOpen: ((UUID) -> Void)?
     var onResize: (() -> Void)?
-    static let block: CGFloat = 116, words: CGFloat = 52, gap: CGFloat = 16
+    /// On the beat: a block of five units, two units of words with the title and the caption on their lines, a unit between rows; across, the page's own gutter.
+    static var block: CGFloat { Design.App.unit * 5 }
+    static var words: CGFloat { Design.App.unit * 2 }
+    static var rowGap: CGFloat { Design.App.unit }
+    static let gap: CGFloat = 16
     override var isFlipped: Bool { true }
 
     private var tile: CGFloat { ((width - CGFloat(across - 1) * Self.gap) / CGFloat(across)).rounded(.down) }
     var height: CGFloat {
         let rows = (items.count + across - 1) / across
-        return CGFloat(rows) * (Self.block + Self.words + Self.gap) + 24
+        return CGFloat(rows) * (Self.block + Self.words + Self.rowGap)
     }
     private func rect(_ i: Int) -> NSRect {
-        NSRect(x: CGFloat(i % across) * (tile + Self.gap), y: CGFloat(i / across) * (Self.block + Self.words + Self.gap), width: tile, height: Self.block + Self.words)
+        NSRect(x: CGFloat(i % across) * (tile + Self.gap), y: CGFloat(i / across) * (Self.block + Self.words + Self.rowGap), width: tile, height: Self.block + Self.words)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1174,15 +1178,15 @@ final class TileGrid: NSView {
                 let bw = block.width / CGFloat(it.colours.count)
                 for (k, c) in it.colours.enumerated() { fill(NSRect(x: block.minX + CGFloat(k) * bw, y: block.minY, width: k == it.colours.count - 1 ? block.width - CGFloat(k) * bw : bw + 0.5, height: block.height), c) }
             }
-            Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 10, baseline: block.maxY + 21, width: r.width - 20)
-            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 10, baseline: block.maxY + 39, width: r.width - 20)
+            Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 10, baseline: block.maxY + Design.App.textBaseline, width: r.width - 20)
+            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 10, baseline: block.maxY + Design.App.unit + Design.App.textBaseline, width: r.width - 20)
             if let h = it.hex, h == chosenHex {
                 // The chosen tile: the one orange, a 2 ring inside the card's edge.
                 Design.orange.setStroke()
                 let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
             }
         }
-        if items.isEmpty { Design.attributed("Nothing found", .lead, colour: Design.soft).draw(x: 0, baseline: 24) }
+        if items.isEmpty { Design.attributed("Nothing found", .lead, colour: Design.soft).draw(x: 0, baseline: Design.App.textBaseline) }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1235,12 +1239,28 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     private let finderButton = SwissButton("Show In Finder", .secondary)
     private let aboutScroll = NSScrollView()
     private let about = NSTextView()
-    static let row: CGFloat = 36, square: CGFloat = 12, step: CGFloat = 24, strip: CGFloat = 40, notes: CGFloat = 72, line: CGFloat = 28, bar: CGFloat = 36
+    /// On the beat: every row a unit, the notes three, the hue strip two; text on the unit's line.
+    static var u: CGFloat { Design.App.unit }
+    static var lineY: CGFloat { Design.App.textBaseline }
+    static var row: CGFloat { u }
+    static var strip: CGFloat { u * 2 }
+    static var notes: CGFloat { u * 3 }
+    static var line: CGFloat { u }
+    static var bar: CGFloat { u }
+    static let square: CGFloat = 12, step: CGFloat = 24
     /// The catalogue row: Set Active and its circle take the first 92 points, then the square, then the name.
     private static let activeWidth: CGFloat = 92
     /// Inside the open row, top down: About and its notes on a hairline; All Colours; Directory; Contents and its rule; the lines.
-    private static let aboutLabel: CGFloat = 20, aboutBox: CGFloat = 32, coloursLabel: CGFloat = 132, coloursValue: CGFloat = 154
-    private static let directoryLabel: CGFloat = 180, directory: CGFloat = 202, contentsLabel: CGFloat = 236, contentsRule: CGFloat = 244, linesTop: CGFloat = 248, actions: CGFloat = 36
+    private static var aboutLabel: CGFloat { lineY }
+    private static var aboutBox: CGFloat { u }
+    private static var coloursLabel: CGFloat { 4 * u + lineY }
+    private static var coloursValue: CGFloat { 5 * u + lineY }
+    private static var directoryLabel: CGFloat { 6 * u + lineY }
+    private static var directory: CGFloat { 7 * u + lineY }
+    private static var contentsLabel: CGFloat { 8 * u + lineY }
+    private static var contentsRule: CGFloat { 9 * u - 1 }
+    private static var linesTop: CGFloat { 9 * u }
+    private static var actions: CGFloat { u }
     /// A line's parts: the square, then its colours as a strip, then the name.
     private static let inset: CGFloat = 16, stripWidth: CGFloat = 72, stripHeight: CGFloat = 12
     private static let coloursKey = "catalogue.colours"
@@ -1380,15 +1400,16 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
 
     // MARK: Where things are
 
-    private var rowsTop: CGFloat { 32 + 32 }
+    /// The three buttons sit in the first two units, their words on the second line; the rule closes the third.
+    private var rowsTop: CGFloat { 3 * Self.u - 1 }
     private var others: [String] { names.filter { $0 != expanded } }
     /// The panel's full height, and its height now, part way through opening or closing.
     private func fullPanelHeight(for name: String) -> CGFloat {
         var h = Self.linesTop + CGFloat(lines.count) * Self.line
         if !ticked.isEmpty { h += Self.bar }
-        h += 16
-        if name == expanded && picking { h += Self.strip + 16 }
-        return h + Self.actions + 8
+        h += Self.u
+        if name == expanded && picking { h += Self.strip + Self.u }
+        return h + Self.actions + Self.u
     }
     private func panelHeight(for name: String) -> CGFloat { (fullPanelHeight(for: name) * (openness[name] ?? 0)).rounded() }
 
@@ -1396,7 +1417,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     func height(forWidth width: CGFloat) -> CGFloat {
         var y = rowsTop + 1
         for n in names { y += Self.row + panelHeight(for: n) }
-        return y + 24 + 80 + 16
+        return y + Self.u + 3 * Self.u + Self.u
     }
 
     /// Opens or shuts rows over a quarter of a second, eased, the way a drawer moves.
@@ -1431,7 +1452,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         var x: CGFloat = 0
         for b in [openButton, newButton, finderButton] {
             let w = b.intrinsicContentSize.width
-            b.frame = NSRect(x: x, y: 0, width: w, height: 32)
+            b.frame = NSRect(x: x, y: Self.u + Self.lineY - 22, width: w, height: 32)
             x += w + 12
         }
         let open = expanded.map { openness[$0] ?? 0 } ?? 0
@@ -1452,7 +1473,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         let current = library?.catalogue
         for n in names {
             let row = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-            let b = y + 23
+            let b = y + Self.lineY
             let active = n == current
             // Set Active: a circle, filled for the open catalogue, and the word; a click here swaps without opening the row.
             let c = NSRect(x: 1, y: b - 9, width: 10, height: 10)
@@ -1483,9 +1504,9 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
                 hairline(x: 0, y: y - 1, width: bounds.width, Design.mist)
             }
         }
-        y += 24
+        y += Self.u
         Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed. Tick what a catalogue holds to relocate it to another catalogue or remove it; Remove on the catalogue moves its whole folder to the Bin.", .caption, colour: Design.quiet, lineHeight: true)
-            .draw(in: NSRect(x: 0, y: y, width: min(bounds.width, 560), height: 80))
+            .draw(in: NSRect(x: 0, y: y, width: min(bounds.width, 560), height: 3 * Self.u))
     }
 
     /// A palette's colours as a strip, every colour an equal band, the way rail2 draws one.
@@ -1502,24 +1523,24 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     /// The open row's panel, on the row's own left edge. `live` is a fully open panel, the one that takes clicks.
     private func drawPanel(_ n: String, at y: CGFloat, live: Bool, own: NSColor?) {
         let w = bounds.width
-        Design.attributed("About", .section, colour: Design.quiet).draw(x: 0, baseline: y + Self.aboutLabel)
+        Design.attributed("About", .body).draw(x: 0, baseline: y + Self.aboutLabel)
         if about.string.isEmpty {
             Design.attributed("Add catalogue notes\u{2026}", .body, colour: Design.soft).draw(at: NSPoint(x: 0, y: y + Self.aboutBox))
         }
         hairline(x: 0, y: y + Self.aboutBox + Self.notes, width: w, Design.rule)
-        Design.attributed("All Colours", .section, colour: Design.quiet).draw(x: 0, baseline: y + Self.coloursLabel)
+        Design.attributed("All Colours", .body).draw(x: 0, baseline: y + Self.coloursLabel)
         Design.attributed(contents.map { plural($0.colours.count, "colour") } ?? "", .body, colour: Design.quiet).draw(x: 0, baseline: y + Self.coloursValue)
-        Design.attributed("Directory", .section, colour: Design.quiet).draw(x: 0, baseline: y + Self.directoryLabel)
+        Design.attributed("Directory", .body).draw(x: 0, baseline: y + Self.directoryLabel)
         let dir = Catalogues.standard.directory(for: n)
         Design.attributed((dir.path as NSString).abbreviatingWithTildeInPath, .body, colour: Design.quiet).draw(x: 0, baseline: y + Self.directory, width: w)
         // Contents: the catalogue as rail1 lists it, a square before each thing that can be ticked, its colours, its name.
-        Design.attributed("Contents", .section, colour: Design.quiet).draw(x: 0, baseline: y + Self.contentsLabel)
+        Design.attributed("Contents", .body).draw(x: 0, baseline: y + Self.contentsLabel)
         hairline(x: 0, y: y + Self.contentsRule, width: w, Design.rule)
         var ly = y + Self.linesTop
         for l in lines {
-            let lb = ly + 19
+            let lb = ly + Self.lineY
             if l.heading {
-                Design.attributed(l.text, .label, colour: Design.quiet).draw(x: 0, baseline: lb)
+                Design.attributed(l.text, .body).draw(x: 0, baseline: lb)
             } else if l.warning {
                 // An empty collection: a small orange triangle and the word.
                 let t = NSBezierPath()
@@ -1567,7 +1588,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         if !ticked.isEmpty {
             // The bar for what is ticked: the count at the left, Relocate and Remove at the right.
             hairline(x: 0, y: ly, width: w, Design.mist)
-            let bb = ly + 23
+            let bb = ly + Self.lineY
             Design.attributed("\(ticked.count) Selected", .body, colour: Design.quiet).draw(x: Self.inset, baseline: bb)
             var ax = w
             for (title, glyph) in [("Remove", 2), ("Relocate", 3)] {
@@ -1581,7 +1602,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
             }
             ly += Self.bar
         }
-        var ay = ly + 16
+        var ay = ly + Self.u
         if n == expanded && picking {
             // The hue strip, the whole way across and above the actions: each click gives the catalogue that colour.
             if live { spectrum = NSRect(x: 0, y: ay, width: w, height: Self.strip) }
@@ -1589,10 +1610,10 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
                 NSColor(hue: px / w, saturation: 0.85, brightness: 0.95, alpha: 1).setFill()
                 NSRect(x: px, y: ay, width: 1.5, height: Self.strip).fill()
             }
-            ay += Self.strip + 16
+            ay += Self.strip + Self.u
         }
         // The actions from the right edge leftwards; the live one underlined, never bold, so nothing moves.
-        let ab = ay + 23
+        let ab = ay + Self.lineY
         var ax = w
         for (title, glyph) in [("Remove", 2), ("Duplicate", 1), ("Assign Colour", 0)] {
             let on = glyph == 0 && picking
