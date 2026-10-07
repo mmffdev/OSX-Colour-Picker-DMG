@@ -879,31 +879,67 @@ final class TileGrid: NSView {
 
 // MARK: - Settings: Catalogues
 
-/// The Catalogues settings on the page: where the app's home is, every catalogue on the list with a tick
-/// on the open one, and the actions: open a catalogue where it is, start a new one, show the open one in Finder.
+/// The Catalogues settings on the page. The actions along the top, then one row per catalogue: a
+/// small square before its name, ink when that catalogue is the open one, or its own colour once it
+/// has one; the pointer over a row lights the square, a click on the square opens the catalogue, and a
+/// click on the name opens the row like an accordion: its folder on the full width, then Assign Colour,
+/// Duplicate and Remove as icon-and-word actions at the right. Assign Colour drops a hue strip across the
+/// page to pick from; Remove drops the chevron track that must be slid across before anything goes.
 final class CatalogueSettings: NSView {
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     private var names: [String] = []
-    private var hits: [(NSRect, String)] = []
+    private var expanded: String?
+    private var hover: String?
+    private var picking = false
+    private var removing = false
+    private var rowHits: [(NSRect, String)] = [], squareHits: [(NSRect, String)] = [], actionHits: [(NSRect, Int)] = []
+    private var spectrum = NSRect.zero
     private let openButton = SwissButton("Open Catalogue\u{2026}", .primary)
     private let newButton = SwissButton("New Catalogue", .secondary)
     private let finderButton = SwissButton("Show In Finder", .secondary)
-    static let row: CGFloat = 36
+    private let track = ChevronTrack()
+    private let cancel = SwissButton("Keep It", .quiet)
+    static let row: CGFloat = 36, square: CGFloat = 12, step: CGFloat = 24, panel: CGFloat = 36 + 36, strip: CGFloat = 40
+    private static let coloursKey = "catalogue.colours"
 
     init() {
         super.init(frame: .zero)
         openButton.target = self; openButton.action = #selector(openCatalogue)
         newButton.target = self; newButton.action = #selector(newCatalogue)
         finderButton.target = self; finderButton.action = #selector(showInFinder)
-        for b in [openButton, newButton, finderButton] { addSubview(b) }
+        cancel.target = self; cancel.action = #selector(keepIt)
+        track.commit = "Remove"
+        track.onComplete = { [weak self] in self?.removeExpanded() }
+        track.isHidden = true
+        cancel.isHidden = true
+        for v in [openButton, newButton, finderButton, track, cancel] { addSubview(v) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
     func reload() {
         names = library?.availableCatalogues() ?? []
+        if let e = expanded, !names.contains(e) { expanded = nil; picking = false; removing = false }
+        needsLayout = true
         needsDisplay = true
+    }
+
+    // MARK: A catalogue's own colour, kept with the settings by its name.
+
+    private static var colours: [String: String] {
+        get { preferences.dictionary(forKey: coloursKey) as? [String: String] ?? [:] }
+        set { preferences.set(newValue, forKey: coloursKey) }
+    }
+    private func colour(of name: String) -> NSColor? { Self.colours[name].map { Design.hex($0) } }
+
+    // MARK: Where things are
+
+    private var rowsTop: CGFloat { 32 + 32 }
+    private func panelHeight(for name: String) -> CGFloat {
+        guard name == expanded else { return 0 }
+        return Self.panel + (picking ? Self.strip + 16 : 0) + (removing ? ChevronTrack.height + 16 : 0)
     }
 
     override func layout() {
@@ -914,46 +950,161 @@ final class CatalogueSettings: NSView {
             b.frame = NSRect(x: x, y: 0, width: w, height: 32)
             x += w + 12
         }
+        // The track sits inside the open row's panel, under its actions.
+        track.isHidden = !removing || expanded == nil
+        cancel.isHidden = track.isHidden
+        if let e = expanded, removing {
+            var y = rowsTop + 1
+            for n in names { if n == e { break }; y += Self.row + panelHeight(for: n) }
+            let top = y + Self.row + Self.panel + (picking ? Self.strip + 16 : 0)
+            let cw = cancel.intrinsicContentSize.width
+            track.frame = NSRect(x: Self.step, y: top, width: bounds.width - Self.step - cw - 16, height: ChevronTrack.height)
+            cancel.frame = NSRect(x: bounds.width - cw, y: top + (ChevronTrack.height - 32) / 2, width: cw, height: 32)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        var y: CGFloat = 32 + 32
-        Design.attributed("Home", .label, colour: Design.quiet).draw(x: 0, baseline: y)
-        y += 24
-        Design.attributed((Catalogues.standard.root.path as NSString).abbreviatingWithTildeInPath, .body).draw(x: 0, baseline: y, width: bounds.width)
-        y += 12
+        var y = rowsTop
         hairline(x: 0, y: y, width: bounds.width, Design.rule)
-        y += 32
-        Design.attributed("Catalogues", .label, colour: Design.quiet).draw(x: 0, baseline: y)
-        Design.attributed("Where", .label, colour: Design.quiet).draw(right: bounds.width, baseline: y)
-        y += 12
-        hairline(x: 0, y: y, width: bounds.width, Design.rule)
-        hits = []
+        y += 1
+        rowHits = []; squareHits = []; actionHits = []
         let current = library?.catalogue
         for n in names {
-            let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-            let on = n == current
-            if on { fill(box, Design.mist) }
+            let row = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
             let b = y + 23
-            let dir = Catalogues.standard.directory(for: n)
-            let whereText = Design.attributed((dir.path as NSString).abbreviatingWithTildeInPath, .caption, colour: Design.quiet)
-            Design.attributed(n, on ? .bodyStrong : .body).draw(x: 0, baseline: b, width: bounds.width * 0.5)
-            whereText.draw(x: bounds.width * 0.5, baseline: b, width: bounds.width * 0.5 - 24)
-            if on { Design.attributed("\u{2713}", .caption).draw(right: bounds.width, baseline: b) }
+            // The square: the catalogue's colour, or ink for the open one, or Card; Mist under the pointer.
+            let sq = NSRect(x: 0, y: b - 10, width: Self.square, height: Self.square)
+            let own = colour(of: n)
+            fill(sq, own ?? (n == current ? Design.ink : hover == n ? Design.mist : Design.card))
+            Design.ink.setStroke()
+            let edge = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
+            Design.attributed(n, n == current ? .bodyStrong : .body).draw(x: Self.step, baseline: b, width: bounds.width - Self.step)
             hairline(x: 0, y: y + Self.row - 1, width: bounds.width, Design.mist)
-            hits.append((box, n))
+            rowHits.append((row, n)); squareHits.append((NSRect(x: -6, y: y, width: Self.step, height: Self.row), n))
             y += Self.row
+            if n == expanded {
+                // The panel: the folder on the full width, then the actions at the right.
+                let dir = Catalogues.standard.directory(for: n)
+                Design.attributed((dir.path as NSString).abbreviatingWithTildeInPath, .caption, colour: Design.quiet).draw(x: Self.step, baseline: y + 23, width: bounds.width - Self.step)
+                let ab = y + 36 + 23
+                var ax = bounds.width
+                // Laid from the right edge leftwards: Remove last, Assign Colour first.
+                for (title, glyph) in [("Remove", 2), ("Duplicate", 1), ("Assign Colour", 0)] {
+                    let live = (glyph == 0 && picking) || (glyph == 2 && removing)
+                    let t = Design.attributed(title, live ? .bodyStrong : .body, colour: live ? Design.ink : Design.quiet)
+                    ax -= t.size().width
+                    t.draw(x: ax, baseline: ab)
+                    ax -= 16
+                    icon(glyph, at: NSPoint(x: ax, y: ab - 10), colour: live ? Design.ink : Design.quiet, own: own)
+                    actionHits.append((NSRect(x: ax - 4, y: y + 36, width: t.size().width + 28, height: 36), glyph))
+                    ax -= 24
+                }
+                y += Self.panel
+                if picking {
+                    // The hue strip, the whole way across: click a colour and it is the catalogue's.
+                    spectrum = NSRect(x: 0, y: y, width: bounds.width, height: Self.strip)
+                    for px in stride(from: 0, to: bounds.width, by: 1) {
+                        NSColor(hue: px / bounds.width, saturation: 0.85, brightness: 0.95, alpha: 1).setFill()
+                        NSRect(x: px, y: y, width: 1.5, height: Self.strip).fill()
+                    }
+                    y += Self.strip + 16
+                } else { spectrum = .zero }
+                if removing { y += ChevronTrack.height + 16 }
+                hairline(x: 0, y: y - 1, width: bounds.width, Design.mist)
+            }
         }
         y += 24
-        Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed.", .caption, colour: Design.quiet, lineHeight: true)
+        Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed. Remove moves a catalogue's folder to the Bin.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: 0, y: y, width: min(bounds.width, 560), height: 60))
     }
 
+    /// The three small marks: a square for a colour, two squares for a copy, a cross for the end.
+    private func icon(_ which: Int, at p: NSPoint, colour: NSColor, own: NSColor?) {
+        colour.setStroke()
+        switch which {
+        case 0:
+            let r = NSRect(x: p.x + 0.5, y: p.y + 0.5, width: 11, height: 11)
+            if let own = own { own.setFill(); r.fill() }
+            let path = NSBezierPath(rect: r); path.lineWidth = 1; path.stroke()
+        case 1:
+            for (dx, dy) in [(3, 0), (0, 3)] {
+                let r = NSRect(x: p.x + CGFloat(dx) + 0.5, y: p.y + CGFloat(dy) + 0.5, width: 8, height: 8)
+                Design.card.setFill(); r.fill()
+                let path = NSBezierPath(rect: r); path.lineWidth = 1; path.stroke()
+            }
+        default:
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: p.x + 1, y: p.y + 1)); path.line(to: NSPoint(x: p.x + 11, y: p.y + 11))
+            path.move(to: NSPoint(x: p.x + 11, y: p.y + 1)); path.line(to: NSPoint(x: p.x + 1, y: p.y + 11))
+            path.lineWidth = 1.2; path.stroke()
+        }
+    }
+
+    // MARK: The pointer
+
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let over = rowHits.first { $0.0.contains(p) }?.1
+        if over != hover { hover = over; needsDisplay = true }
+    }
+    override func mouseExited(with event: NSEvent) { hover = nil; needsDisplay = true }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        guard let h = hits.first(where: { $0.0.contains(p) }), let lib = library, h.1 != lib.catalogue else { return }
-        lib.open(catalogue: h.1)
-        onChange?()
+        if spectrum.contains(p), let e = expanded {
+            let c = NSColor(hue: max(0, min(1, p.x / spectrum.width)), saturation: 0.85, brightness: 0.95, alpha: 1)
+            var all = Self.colours
+            all[e] = hexOf(c) ?? "#000000"
+            Self.colours = all
+            picking = false
+            needsLayout = true; needsDisplay = true
+            return
+        }
+        if let a = actionHits.first(where: { $0.0.contains(p) }) {
+            switch a.1 {
+            case 0: picking.toggle(); removing = false
+            case 1: duplicateExpanded(); return
+            default: removing.toggle(); picking = false; if removing { track.start() } else { track.stop() }
+            }
+            needsLayout = true; needsDisplay = true
+            return
+        }
+        if let s = squareHits.first(where: { $0.0.contains(p) }), let lib = library {
+            if s.1 != lib.catalogue { lib.open(catalogue: s.1); onChange?() }
+            return
+        }
+        if let r = rowHits.first(where: { $0.0.contains(p) }) {
+            expanded = expanded == r.1 ? nil : r.1
+            picking = false; removing = false; track.stop()
+            needsLayout = true; needsDisplay = true
+        }
+    }
+
+    // MARK: The actions
+
+    @objc private func keepIt() { removing = false; track.stop(); needsLayout = true; needsDisplay = true }
+
+    private func duplicateExpanded() {
+        guard let e = expanded, let lib = library else { return }
+        do {
+            let copy = try Catalogues.standard.store(for: e).load()
+            let name = try Catalogues.standard.create(e + " (Copy)", holding: copy)
+            if let c = Self.colours[e] { var all = Self.colours; all[name] = c; Self.colours = all }
+        } catch { lib.show(error) }
+        reload(); onChange?()
+    }
+
+    /// Moves the catalogue's folder to the Bin and takes it off the list; the open one hands over to another first.
+    private func removeExpanded() {
+        guard let e = expanded, let lib = library else { return }
+        removing = false; track.stop()
+        let dir = Catalogues.standard.directory(for: e)
+        if lib.catalogue == e, let other = names.first(where: { $0 != e }) { lib.open(catalogue: other) }
+        Catalogues.standard.unregister(e)
+        do { try FileManager.default.trashItem(at: dir, resultingItemURL: nil) } catch { lib.show(error) }
+        var all = Self.colours; all[e] = nil; Self.colours = all
+        expanded = nil
+        reload(); onChange?()
     }
 
     @objc private func openCatalogue() {
