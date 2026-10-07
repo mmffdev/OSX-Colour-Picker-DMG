@@ -396,7 +396,9 @@ class StudioRail: NSView {
     static let top: CGFloat = 22
     let scroll = NSScrollView()
     let body: RailBody
-    var heading = "" { didSet { body.heading = heading; body.needsDisplay = true } }
+    var heading = "" { didSet { needsDisplay = true } }
+    /// The two Labels under the heading.
+    var labels: (String, String) = ("", "") { didSet { needsDisplay = true } }
 
     init(body: RailBody) {
         self.body = body
@@ -412,31 +414,29 @@ class StudioRail: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
+    /// The header stays put; only the rows scroll, under the Rule.
     override func layout() {
         super.layout()
-        scroll.frame = bounds
+        scroll.frame = NSRect(x: 0, y: AreaHeader.height, width: bounds.width, height: bounds.height - AreaHeader.height)
         body.inset = inset
-        body.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height, body.height))
+        body.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(scroll.frame.height, body.height))
         body.needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset)
     }
 
     class RailBody: NSView {
         var inset: CGFloat = 24
-        var heading = ""
         override var isFlipped: Bool { true }
         var height: CGFloat { 0 }
-        /// The area header every region shares: the Heading with the arrow on its baseline, a row of two
-        /// Labels under it, and the Rule beneath, at the same height in every area so the rule reads as
-        /// one line across the window broken only by each area's side padding. Returns the y under the rule.
-        @discardableResult
-        func drawHeader(_ left: String, _ right: String) -> CGFloat {
-            AreaHeader.draw(heading: heading, left: left, right: right, in: bounds, inset: inset)
-            return AreaHeader.height
-        }
     }
 }
 
-/// The header of an area, drawn the same in rail1, rail2, the page and the history rail.
+/// The header of an area, drawn the same in rail1, rail2, the page and the history rail: the Heading
+/// with the arrow on its baseline, a row of two Labels under it, and the Rule beneath, at one height in
+/// every area so the rule reads as one line across the window broken only by each area's side padding.
+/// It never scrolls; what is under it does.
 enum AreaHeader {
     static let headingBaseline: CGFloat = StudioRail.top + 14
     static let labelBaseline: CGFloat = headingBaseline + 33
@@ -457,7 +457,7 @@ final class LibraryRail: StudioRail {
     enum Row { case group(String), row(String, Int, StudioFrame.Place) }
     var onPick: ((StudioFrame.Place) -> Void)?
     private var list: Body { body as! Body }
-    init() { super.init(body: Body()); heading = "Library"; list.onPick = { [weak self] p in self?.onPick?(p) } }
+    init() { super.init(body: Body()); heading = "Library"; labels = ("Name", "Count"); list.onPick = { [weak self] p in self?.onPick?(p) } }
     required init?(coder: NSCoder) { fatalError() }
     func set(rows: [Row], chosen: StudioFrame.Place) { list.rows = rows; list.chosen = chosen; needsLayout = true }
 
@@ -469,14 +469,14 @@ final class LibraryRail: StudioRail {
         private var hits: [(NSRect, StudioFrame.Place)] = []
 
         override var height: CGFloat {
-            rows.reduce(AreaHeader.height) { h, r in
+            rows.reduce(0) { h, r in
                 if case .group = r { return h + Self.groupAbove + 11 + Self.groupBelow }
                 return h + Self.row + Self.gap
             } + 24
         }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeader("Name", "Count")
+            var y: CGFloat = 0
             hits = []
             let right = bounds.width - inset
             for r in rows {
@@ -514,14 +514,14 @@ final class PaletteTable: StudioRail {
     struct Row { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let chosen: Bool }
     var onPick: ((UUID) -> Void)?
     private var table: Body { body as! Body }
-    init() { super.init(body: Body()); table.onPick = { [weak self] id in self?.onPick?(id) } }
+    init() { super.init(body: Body()); labels = ("Palette", "Colours"); table.onPick = { [weak self] id in self?.onPick?(id) } }
     required init?(coder: NSCoder) { fatalError() }
     func set(heading: String, rows: [Row]) {
         self.heading = heading; table.rows = rows; needsLayout = true
         // The chosen palette is brought into view, which the eye expects when it was chosen elsewhere.
         if let i = rows.firstIndex(where: { $0.chosen }) {
             layoutSubtreeIfNeeded()
-            let y = AreaHeader.height + CGFloat(i) * Body.row
+            let y = CGFloat(i) * Body.row
             body.scrollToVisible(NSRect(x: 0, y: y - Body.row, width: 1, height: Body.row * 3))
         }
     }
@@ -531,10 +531,10 @@ final class PaletteTable: StudioRail {
         var onPick: ((UUID) -> Void)?
         static let row: CGFloat = 36
         private var hits: [(NSRect, UUID)] = []
-        override var height: CGFloat { AreaHeader.height + CGFloat(rows.count) * Self.row + 24 }
+        override var height: CGFloat { CGFloat(rows.count) * Self.row + 24 }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeader("Palette", "Colours")
+            var y: CGFloat = 0
             let right = bounds.width - inset
             hits = []
             for r in rows {
@@ -564,7 +564,7 @@ final class HistoryRail: StudioRail {
     struct Row { let hex: String; let name: String; let what: String; let time: String }
     var onPick: ((String) -> Void)?
     private var list: Body { body as! Body }
-    init() { super.init(body: Body()); heading = "History"; list.onPick = { [weak self] h in self?.onPick?(h) } }
+    init() { super.init(body: Body()); heading = "History"; labels = ("Colour", "When"); list.onPick = { [weak self] h in self?.onPick?(h) } }
     required init?(coder: NSCoder) { fatalError() }
     func set(rows: [Row]) { list.rows = rows; needsLayout = true }
 
@@ -573,10 +573,10 @@ final class HistoryRail: StudioRail {
         var onPick: ((String) -> Void)?
         static let row: CGFloat = 44
         private var hits: [(NSRect, String)] = []
-        override var height: CGFloat { AreaHeader.height + CGFloat(rows.count) * Self.row + 24 }
+        override var height: CGFloat { CGFloat(rows.count) * Self.row + 24 }
 
         override func draw(_ dirtyRect: NSRect) {
-            var y = drawHeader("Colour", "When")
+            var y: CGFloat = 0
             let right = bounds.width - inset
             hits = []
             for r in rows {
