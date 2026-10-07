@@ -1243,9 +1243,7 @@ final class TileGrid: NSView {
         for (i, it) in items.enumerated() {
             let r = rect(i)
             guard r.intersects(dirtyRect) else { continue }
-            fill(r, Design.card)
-            Design.rule.setStroke()
-            let edge = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
+            // No box: the colour block, the words on the ground beneath it, and nothing drawn around them.
             let block = NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block)
             if it.colours.isEmpty { fill(block, Design.mist) }
             else {
