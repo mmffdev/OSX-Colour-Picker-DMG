@@ -2299,8 +2299,8 @@ func runSetupTests(check: (Bool, String) -> Void) {
           "every step colour carries an ink numeral at three to one or better, the bar for large text: \(Design.steps.map { String(format: "%.1f", contrastRatio($0.hex, "#161616")) })")
     check(Design.font(13, .thin).fontName == "HelveticaNeue-Thin" && Design.font(13, .light).fontName == "HelveticaNeue-Light",
           "Helvetica Neue's thin and light weights are on this Mac")
-    check(HaloTrainer.lessons.map { $0.id } == ["open", "turn", "deeper", "confirm"], "the halo trainer teaches its four moves in order")
-    check(HaloTrainer.progress(["open", "deeper"]) == (2, 4) && HaloTrainer.progress(["open", "turn", "deeper", "confirm", "other"]) == (4, 4),
+    check(HaloTrainer.lessons.map { $0.id } == ["turn", "deeper", "confirm"], "the halo trainer teaches its three moves in order; the dial opens itself")
+    check(HaloTrainer.progress(["deeper"]) == (1, 3) && HaloTrainer.progress(["turn", "deeper", "confirm", "other"]) == (3, 3),
           "the trainer counts only its own lessons")
     let docs = URL(fileURLWithPath: "/Users/someone/Documents")
     check(DocumentsAccess.inside(docs.appendingPathComponent("Studio/Clients"), documents: docs) && DocumentsAccess.inside(docs, documents: docs)

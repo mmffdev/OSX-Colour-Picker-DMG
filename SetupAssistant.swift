@@ -127,7 +127,9 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         setup.setStep(new, of: Self.steps.count, animated: direction != 0)
         setup.go(direction: direction) {
             body.arrangedSubviews.forEach { $0.removeFromSuperview() }
-            setup.wide = step == Step.halo
+            setup.aside.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            setup.wide = false
+            setup.slim = step == Step.halo
             setup.skipSetup.isHidden = step == Step.ready || step == Step.halo
             back.isHidden = step == Step.welcome || step == Step.halo
             skip.isHidden = true
@@ -260,9 +262,10 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private func place(_ url: URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
 
-    /// A caption, the path it names, and Change on the same baseline: the design's field.
-    private func pathRow(_ label: String, _ url: URL, change: Selector) -> (row: NSView, path: NSTextField) {
-        let (row, value) = SetupFrame.field(label, place(url), action: "Change", target: self, selector: change, width: width)
+    /// A caption, the path it names, and Change on the same baseline: the design's field. Its rule
+    /// above goes when it follows a field, whose own underline is the rule between them.
+    private func pathRow(_ label: String, _ url: URL, change: Selector, afterField: Bool = false) -> (row: NSView, path: NSTextField) {
+        let (row, value) = SetupFrame.field(label, place(url), action: "Change", target: self, selector: change, width: width, rule: !afterField)
         return (row, value)
     }
 
@@ -315,13 +318,27 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private var loader: OnboardingView?
 
+    private var broughtIn: ChoiceRow?
+
     private func importStep() {
         setup.title("Bring In", "A Catalogue")
-        skip.isHidden = false
         next.isEnabled = imported != nil
-        body.addArrangedSubview(story("Already have a catalogue, from another Mac or an earlier version? Choose its .colcatalogue file and it is opened where it is, nothing copied. A library.json from an export or a backup is brought in as a new catalogue."))
-        let choose = SwissButton("Choose Catalogue File\u{2026}", .secondary, target: self, action: #selector(chooseCatalogue))
-        body.addArrangedSubview(choose)
+        body.addArrangedSubview(lead("Already have a catalogue, from another Mac or an earlier version? Open it where it is. Or start fresh."))
+        let have = ChoiceRow("I Have A Catalogue",
+                             imported.map { "\u{201C}\($0)\u{201D} is in. Continue to open it." }
+                                ?? "Choose its .colcatalogue file and it is opened where it is, nothing copied. A library.json from an export or a backup comes in as a new catalogue.",
+                             button: SwissButton("Choose File\u{2026}", .secondary, target: self, action: #selector(chooseCatalogue)), width: width)
+        have.button.trailing = imported == nil ? .none : .tick
+        broughtIn = have
+        let fresh = ChoiceRow("Start Fresh", "Make a new catalogue on the next step. Anything you have can still be brought in later, from the File menu.",
+                              button: SwissButton("Start Fresh", .secondary, target: self, action: #selector(skipStep)), width: width)
+        fresh.button.trailing = .arrow
+        let rows = NSStackView(views: [have, fresh])
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = Design.beat(3)
+        rows.identifier = SetupFrame.cascade
+        body.addArrangedSubview(rows)
         let view = OnboardingView(memberWord: memberName)
         loader = view
         body.addArrangedSubview(view)
@@ -343,6 +360,8 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
                     ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
                 self.imported = name
                 self.next.isEnabled = false
+                self.broughtIn?.set(detail: "\u{201C}\(name)\u{201D} is in. Continue to open it.")
+                self.broughtIn?.button.trailing = .tick
                 self.loader?.load(catalogue: name, over: w) { [weak self] in self?.next.isEnabled = true }
             } catch { self.complain(error.localizedDescription) }
         }
@@ -360,53 +379,51 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         if imported == nil && here.isEmpty { setup.title("Your First", "Catalogue") } else { setup.title("Which Catalogue", "To Open") }
         if imported == nil && existing == nil, let first = here.first { existing = Catalogues.currentName.isEmpty ? first : Catalogues.currentName; useImported = true }
         if imported != nil || !here.isEmpty {
-            body.addArrangedSubview(story("Open a catalogue you already have, or make a new one. A catalogue is one body of work: its members, their palettes, typography and tags, as plain files in a folder you choose."))
-            if let name = imported {
-                let use = NSButton(radioButtonWithTitle: "Open \u{201C}\(name)\u{201D}, just brought in", target: self, action: #selector(pickUseImported))
-                use.state = useImported && existing == nil ? .on : .off
-                body.addArrangedSubview(use)
+            body.addArrangedSubview(lead("Open a catalogue you already have, or make a new one. A catalogue is one body of work: its members, their palettes, typography and tags."))
+            let rows = NSStackView()
+            rows.orientation = .vertical
+            rows.alignment = .leading
+            rows.spacing = Design.beat(3)
+            rows.identifier = SetupFrame.cascade
+            var options: [(String, String, Selector)] = []
+            if let name = imported { options.append((name, "Just brought in. Opened where it is.", #selector(pickUseImported))) }
+            for name in here { options.append((name, "Already on this Mac, at \(place(Catalogues.standard.directory(for: name))).", #selector(pickExistingNamed(_:)))) }
+            for (name, detail, sel) in options {
+                let chosen = chosenCatalogue == name
+                let b = SwissButton(chosen ? "Opens" : "Open This", .secondary, target: self, action: sel)
+                b.identifier = NSUserInterfaceItemIdentifier(name)
+                b.trailing = chosen ? .tick : .none
+                rows.addArrangedSubview(ChoiceRow(name, detail, button: b, width: width))
             }
-            if !here.isEmpty {
-                let open = NSButton(radioButtonWithTitle: "Open one already on this Mac:", target: self, action: #selector(pickExisting))
-                open.state = useImported && (existing != nil || imported == nil) ? .on : .off
-                let popup = NSPopUpButton()
-                popup.addItems(withTitles: here)
-                popup.selectItem(withTitle: existing ?? here[0])
-                popup.target = self
-                popup.action = #selector(existingChosen)
-                let row = NSStackView(views: [open, popup])
-                row.orientation = .horizontal
-                row.spacing = 8
-                body.addArrangedSubview(row)
-            }
-            let make = NSButton(radioButtonWithTitle: "Make a new catalogue", target: self, action: #selector(pickMakeNew))
-            make.state = useImported ? .off : .on
-            body.addArrangedSubview(make)
+            let make = SwissButton(chosenCatalogue == nil ? "Making It" : "Make New", .secondary, target: self, action: #selector(pickMakeNew))
+            make.trailing = chosenCatalogue == nil ? .tick : .none
+            rows.addArrangedSubview(ChoiceRow("A New Catalogue", "Named and placed below.", button: make, width: width))
+            body.addArrangedSubview(rows)
         } else {
             useImported = false
-            body.addArrangedSubview(story("A catalogue is one body of work: its members, their palettes, typography and tags. It is a folder you choose, named for the catalogue, and everything in it is plain files you can open and move."))
+            body.addArrangedSubview(lead("A catalogue is one body of work: its members, their palettes, typography and tags, as plain files in a folder you choose."))
         }
         let name = field("Catalogue Name", catalogueName, action: #selector(nameTyped))
         nameField = name
-        let (row, path) = pathRow("Kept In", catalogueParent.appendingPathComponent(filesystemName(catalogueName.isEmpty ? "Catalogue Name" : catalogueName)), change: #selector(changeCatalogueParent))
+        let (row, path) = pathRow("Kept In", catalogueParent.appendingPathComponent(filesystemName(catalogueName.isEmpty ? "Catalogue Name" : catalogueName)), change: #selector(changeCatalogueParent), afterField: true)
         cataloguePath = path
         body.addArrangedSubview(row)
         #if !APPSTORE
         // Documents is macOS's to guard: kept there by default, the first touch (at Create) makes it ask once.
         // A folder chosen through the panel is granted with the choice and never asks.
-        if DocumentsAccess.inside(catalogueParent) && DocumentsAccess.current != .on {
-            let note = Design.text("macOS asks once whether \(Brand.name) may use Documents, when the catalogue is made. Choosing a folder through Change never asks.", .caption, colour: Design.quiet, wraps: true)
+        if chosenCatalogue == nil && DocumentsAccess.inside(catalogueParent) && DocumentsAccess.current != .on {
+            let note = Design.text("macOS asks once whether \(Brand.name) may use Documents, when the catalogue is made. A folder chosen through Change never asks.", .caption, colour: Design.quiet, wraps: true)
             note.preferredMaxLayoutWidth = width
             body.addArrangedSubview(note)
         }
         #endif
         name.isEnabled = chosenCatalogue == nil
+        name.superview?.alphaValue = chosenCatalogue == nil ? 1 : 0.4
         row.alphaValue = chosenCatalogue == nil ? 1 : 0.4
     }
 
     @objc private func pickUseImported() { useImported = true; existing = nil; show(step: Step.catalogue) }
-    @objc private func pickExisting() { useImported = true; existing = existing ?? alreadyHere.first; show(step: Step.catalogue) }
-    @objc private func existingChosen(_ p: NSPopUpButton) { existing = p.titleOfSelectedItem; useImported = true; show(step: Step.catalogue) }
+    @objc private func pickExistingNamed(_ b: NSButton) { existing = b.identifier?.rawValue; useImported = true; show(step: Step.catalogue) }
     @objc private func pickMakeNew() { useImported = false; show(step: Step.catalogue) }
     @objc private func nameTyped(_ f: NSTextField) {
         catalogueName = f.stringValue
@@ -426,30 +443,19 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     private func schemaStep() {
         setup.title("What You", "Call Things")
         catalogueName = nameField?.stringValue ?? catalogueName
-        body.addArrangedSubview(story("The catalogue lists its members under a heading. Call the heading what you call that body of work, and a member what one of them is. Every member holds Information, Palettes, Typography and Tags; the whole map can be shaped later in Settings \u{25B8} Schema."))
-        let collection = combo("Projects", collectionName, SchemaTrial.collectionNames, action: #selector(collectionTyped))
-        let member = combo("Project", memberName, SchemaTrial.primaryNames, action: #selector(memberTyped))
-        let grid = NSGridView(views: [[caption("The heading"), collection], [caption("One member"), member]])
-        grid.rowSpacing = 10
-        grid.columnSpacing = 12
-        grid.column(at: 0).xPlacement = .trailing
-        grid.setContentHuggingPriority(.required, for: .horizontal)
-        body.addArrangedSubview(grid)
+        body.addArrangedSubview(lead("The catalogue lists its members under a heading. Call the heading what you call that body of work, and a member what one of them is."))
+        body.addArrangedSubview(story("Every member holds Information, Palettes, Typography and Tags. The whole map can be shaped later in Settings \u{25B8} Schema."))
+        let half = (width - Design.Wizard.gutter) / 2
+        let collection = SwissDropdown("The Heading", value: collectionName, options: SchemaTrial.collectionNames, width: half)
+        collection.onChange = { [weak self] in self?.collectionName = $0 }
+        let member = SwissDropdown("One Member", value: memberName, options: SchemaTrial.primaryNames, width: half)
+        member.onChange = { [weak self] in self?.memberName = $0 }
+        let pair = NSStackView(views: [collection, member])
+        pair.orientation = .horizontal
+        pair.alignment = .top
+        pair.spacing = Design.Wizard.gutter
+        body.addArrangedSubview(pair)
     }
-
-    private func combo(_ placeholder: String, _ value: String, _ names: [String], action: Selector) -> NSComboBox {
-        let c = NSComboBox()
-        c.addItems(withObjectValues: names)
-        c.stringValue = value
-        c.placeholderString = placeholder
-        c.font = Design.font(17, .regular)
-        c.target = self
-        c.action = action
-        c.widthAnchor.constraint(equalToConstant: 240).isActive = true
-        return c
-    }
-    @objc private func collectionTyped(_ c: NSComboBox) { collectionName = c.stringValue }
-    @objc private func memberTyped(_ c: NSComboBox) { memberName = c.stringValue }
 
     // MARK: 5. The first member
 
@@ -474,10 +480,11 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         setup.title("Your First", memberName)
         skip.isHidden = false
         skip.title = "Skip For Now"
-        body.addArrangedSubview(story("A \(memberName.lowercased()) is a folder of its own holding everything in it, so it can be handed over or moved as one. It goes under the catalogue unless you put it somewhere else, such as a client's own drive."))
+        body.addArrangedSubview(lead("A \(memberName.lowercased()) is a folder of its own, so it can be handed over or moved as one."))
+        body.addArrangedSubview(story("It goes under the catalogue unless you put it somewhere else, such as a client's own drive. Skip this and make the first one in the app."))
         let name = field("\(memberName) Name", firstMember, action: #selector(memberNameTyped))
         memberField = name
-        let (row, path) = pathRow("Kept In", memberFolder(), change: #selector(changeMemberParent))
+        let (row, path) = pathRow("Kept In", memberFolder(), change: #selector(changeMemberParent), afterField: true)
         memberPath = path
         body.addArrangedSubview(row)
     }
@@ -523,17 +530,23 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     private func readyStep() {
         firstMember = memberField?.stringValue ?? firstMember
         setup.title("Ready", "To Create")
-        next.title = chosenCatalogue == nil ? "Create And Continue" : "Open And Continue"
+        next.title = chosenCatalogue == nil ? "Create" : "Open"
         hint(chosenCatalogue == nil ? "Makes the catalogue, then teaches the halo" : "Opens the catalogue, then teaches the halo")
-        var lines = ["App data: \(place(home))"]
-        if let name = chosenCatalogue { lines.append("Catalogue: \u{201C}\(name)\u{201D}, where it is") }
-        else { lines.append("Catalogue: \u{201C}\(catalogueName)\u{201D} in \(place(catalogueFolder))") }
-        lines.append("Heading: \(collectionName) \u{00B7} One member: \(memberName)")
-        if !firstMember.trimmingCharacters(in: .whitespaces).isEmpty { lines.append("First \(memberName.lowercased()): \u{201C}\(firstMember)\u{201D} in \(place(memberFolder()))") }
+        body.addArrangedSubview(lead("Everything you chose, once more. Nothing has been written yet."))
+        var rows: [(String, String)] = [("App Data", place(home))]
+        if let name = chosenCatalogue { rows.append(("Catalogue", "\u{201C}\(name)\u{201D}, where it is")) }
+        else { rows.append(("Catalogue", "\u{201C}\(catalogueName)\u{201D} in \(place(catalogueFolder))")) }
+        rows.append(("Heading And Member", "\(collectionName) \u{00B7} \(memberName)"))
+        if !firstMember.trimmingCharacters(in: .whitespaces).isEmpty { rows.append(("First \(memberName)", "\u{201C}\(firstMember)\u{201D} in \(place(memberFolder()))")) }
         let allowed = Permission.all.filter { $0.state() == .on }.map { $0.title }
-        lines.append("Allowed: " + (allowed.isEmpty ? "nothing yet. Settings \u{25B8} Permissions has every switch." : allowed.joined(separator: ", ")))
-        lines.append("All of this can be changed later in Settings.")
-        for line in lines { body.addArrangedSubview(story(line)) }
+        rows.append(("Allowed", allowed.isEmpty ? "Nothing yet. Settings has every switch." : allowed.joined(separator: ", ")))
+        let list = NSStackView()
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = Design.beat(2)
+        list.identifier = SetupFrame.cascade
+        for (i, (k, v)) in rows.enumerated() { list.addArrangedSubview(SetupFrame.field(k, v, action: nil, target: nil, selector: nil, width: width, rule: i == 0, oneLine: true).row) }
+        body.addArrangedSubview(list)
     }
 
     /// Everything the steps decided, done in order: the home first, so the catalogue lands in the
@@ -575,13 +588,21 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private func haloStep() {
         setup.title("Meet", "The Halo")
-        body.addArrangedSubview(story("Every colour, palette and project opens a halo: a dial of what you can do with it. Four quick moves and you know it. Nothing here touches your catalogue."))
         let t = trainer ?? HaloTrainer(colour: Brand.master, name: Brand.masterName, hex: Brand.masterHex)
         trainer = t
         t.onChange = { [weak self] in self?.updateHaloButtons() }
+        // The words in the title's columns, the dial whole in the words' columns: exactly its reach with the second ring open.
+        let words = Design.text("Every colour, palette and project opens a halo: a dial of what you can do with it. Three moves and you know it. Nothing here touches your catalogue.", .lead, wraps: true)
+        words.preferredMaxLayoutWidth = Design.Wizard.span(1, 5)
+        setup.aside.addArrangedSubview(words)
+        setup.aside.addArrangedSubview(t.instruction)
+        t.translatesAutoresizingMaskIntoConstraints = false
+        t.widthAnchor.constraint(equalToConstant: width).isActive = true
         body.addArrangedSubview(t)
         next.title = "Open \(Brand.name)"
         updateHaloButtons()
+        // The dial grows from the middle once the page has arrived.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self, weak t] in if self?.step == Step.halo { t?.begin() } }
     }
 
     private func updateHaloButtons() {

@@ -28,13 +28,17 @@ final class SetupFrame: NSView {
     let skip = SwissButton("Skip", .quiet)
     let primary = SwissButton("Continue", .primary)
     let body = NSStackView()
+    /// Words under the title, in its columns: for a step whose right column holds something that is not text.
+    let aside = NSStackView()
     private let band = NSView()
     private let page = NSView()
     private let titleView = NSTextField(wrappingLabelWithString: "")
     private let actions = NSStackView()
-    private var bodyLeading: NSLayoutConstraint!, bodyWidth: NSLayoutConstraint!, actionsTop: NSLayoutConstraint!
+    private var bodyLeading: NSLayoutConstraint!, bodyWidth: NSLayoutConstraint!, actionsTop: NSLayoutConstraint!, cardsHeight: NSLayoutConstraint!
     /// The words take every column and the title goes, for a step that needs the room (the halo).
     var wide = false { didSet { layoutColumns() } }
+    /// The cards shrink to a strip of their colours, for the step that needs the height (the halo).
+    var slim = false { didSet { cards.slim = slim; cardsHeight.constant = slim ? StepCards.slimHeight : StepCards.height } }
 
     init(steps: [String]) {
         cards = StepCards(names: steps)
@@ -59,10 +63,15 @@ final class SetupFrame: NSView {
         actions.setCustomSpacing(Design.beat(8), after: hint)
         page.wantsLayer = true
         page.layer?.masksToBounds = true
+        aside.orientation = .vertical
+        aside.alignment = .leading
+        aside.spacing = Design.beat(6)
 
-        for v in [band, stepLabel, skipSetup, page, cards, titleView, body, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        for v in [band, stepLabel, skipSetup, page, cards, titleView, body, actions, aside] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        translatesAutoresizingMaskIntoConstraints = false
+        cardsHeight = cards.heightAnchor.constraint(equalToConstant: StepCards.height)
         addSubview(band); addSubview(stepLabel); addSubview(skipSetup); addSubview(page); addSubview(cards)
-        page.addSubview(titleView); page.addSubview(body); page.addSubview(actions)
+        page.addSubview(titleView); page.addSubview(body); page.addSubview(actions); page.addSubview(aside)
         bodyLeading = body.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: W.column(7))
         bodyWidth = body.widthAnchor.constraint(equalToConstant: W.span(7, 12))
         // The actions sit on a row of their own, a fixed distance above the cards, the same on every step.
@@ -80,10 +89,14 @@ final class SetupFrame: NSView {
             cards.leadingAnchor.constraint(equalTo: leadingAnchor, constant: W.margin),
             cards.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -W.margin),
             cards.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -40),
-            cards.heightAnchor.constraint(equalToConstant: StepCards.height),
+            cardsHeight,
+            widthAnchor.constraint(equalToConstant: W.size.width), heightAnchor.constraint(equalToConstant: W.size.height),
             titleView.topAnchor.constraint(equalTo: page.topAnchor),
             titleView.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: W.column(1)),
             titleView.widthAnchor.constraint(equalToConstant: W.span(1, 5)),
+            aside.topAnchor.constraint(equalTo: titleView.bottomAnchor, constant: Design.beat(8)),
+            aside.leadingAnchor.constraint(equalTo: titleView.leadingAnchor),
+            aside.widthAnchor.constraint(equalToConstant: W.span(1, 5)),
             body.topAnchor.constraint(equalTo: page.topAnchor, constant: Self.capAlignment),
             bodyLeading, bodyWidth,
             actionsTop,
@@ -196,7 +209,7 @@ final class SetupFrame: NSView {
 
     /// The title, what the step put in its body (a cascade's rows one by one), then the actions.
     private func pieces() -> [NSView] {
-        var out: [NSView] = wide ? [] : [titleView]
+        var out: [NSView] = wide ? [] : [titleView] + aside.arrangedSubviews
         for v in body.arrangedSubviews where !v.isHidden {
             if let list = v as? NSStackView, list.identifier == Self.cascade { out += list.arrangedSubviews }
             else { out.append(v) }
@@ -230,22 +243,22 @@ final class SetupFrame: NSView {
     }
     /// A field as the design draws one: a hairline above, a caption label, then the value at 17 with
     /// its quiet action on the same baseline.
-    static func field(_ caption: String, _ value: String, action: String?, target: AnyObject?, selector: Selector?, width: CGFloat) -> (row: NSView, value: NSTextField) {
+    static func field(_ caption: String, _ value: String, action: String?, target: AnyObject?, selector: Selector?, width: CGFloat, rule: Bool = true, oneLine: Bool = false) -> (row: NSView, value: NSTextField) {
         let cap = Design.text(caption, .caption, colour: Design.quiet)
         let val = Design.text(value, .headline, size: 17, wraps: true)
         val.preferredMaxLayoutWidth = width - 90
+        if oneLine { val.maximumNumberOfLines = 1; val.lineBreakMode = .byTruncatingMiddle; val.cell?.truncatesLastVisibleLine = true }
         let line = NSStackView(views: [val])
         line.orientation = .horizontal
         line.alignment = .lastBaseline
         if let a = action { line.addArrangedSubview(NSView()); line.addArrangedSubview(SwissButton(a, .quiet, target: target, action: selector)) }
-        let col = NSStackView(views: [Design.hairline(), cap, line])
+        let col = NSStackView(views: (rule ? [Design.hairline()] : []) + [cap, line])
         col.orientation = .vertical
         col.alignment = .leading
         col.spacing = 6
-        col.setCustomSpacing(Design.beat(4), after: col.arrangedSubviews[0])
         col.translatesAutoresizingMaskIntoConstraints = false
         col.widthAnchor.constraint(equalToConstant: width).isActive = true
-        col.arrangedSubviews[0].widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        if rule { col.setCustomSpacing(Design.beat(4), after: col.arrangedSubviews[0]); col.arrangedSubviews[0].widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true }
         line.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
         return (col, val)
     }

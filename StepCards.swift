@@ -12,6 +12,9 @@ import QuartzCore
 final class StepCards: NSView {
     static let labelHeight: CGFloat = 58, chipHeight: CGFloat = 66, gap: CGFloat = 4
     static var height: CGFloat { labelHeight + chipHeight }
+    static let slimHeight: CGFloat = 12
+    /// A strip of the colours only, for the step that needs the height.
+    var slim = false { didSet { cards.forEach { $0.slim = slim }; needsLayout = true } }
 
     private let names: [String]
     private(set) var step = 0
@@ -83,6 +86,7 @@ final class StepCards: NSView {
         private let chip = CALayer()
         private let pole = CALayer()
         var state: State = .toCome { didSet { paint() } }
+        var slim = false { didSet { label.isHidden = slim; numeral.isHidden = slim; needsLayout = true } }
 
         init(index: Int, name: String, colour: Design.StepColour) {
             self.colour = colour
@@ -112,7 +116,7 @@ final class StepCards: NSView {
             label.frame = NSRect(x: 8, y: bounds.height - 9 - ls.height, width: max(0, bounds.width - 14), height: ls.height)
             numeral.frame = NSRect(x: 6, y: 1, width: max(0, bounds.width - 12), height: ns.height + 2)
             CATransaction.begin(); CATransaction.setDisableActions(true)
-            chip.frame = CGRect(x: 0, y: 0, width: bounds.width, height: StepCards.chipHeight)
+            chip.frame = CGRect(x: 0, y: 0, width: bounds.width, height: slim ? bounds.height : StepCards.chipHeight)
             pole.frame = CGRect(x: -40, y: StepCards.chipHeight, width: bounds.width + 80, height: StepCards.labelHeight)
             if state == .current { pole.contents = Card.stripes(colour: Design.card, width: Int(bounds.width + 80), height: Int(StepCards.labelHeight), scale: window?.backingScaleFactor ?? 2) }
             CATransaction.commit()
