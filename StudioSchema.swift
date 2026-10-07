@@ -22,9 +22,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     // MARK: State
 
     /// What a row on the map is: a collection, the level grouping its members, or a group in its stack with its level in the stack, the member being 1.
+    /// A collection; the level grouping its members; a group in its stack with its level, the member's word being 1; or one real member, a project.
     private enum Target: Hashable {
-        case collection(UUID), tier(UUID), node(UUID, UUID, Int)
-        var collection: UUID { switch self { case .collection(let c), .tier(let c), .node(let c, _, _): return c } }
+        case collection(UUID), tier(UUID), node(UUID, UUID, Int), member(UUID, UUID)
+        var collection: UUID { switch self { case .collection(let c), .tier(let c), .node(let c, _, _), .member(let c, _): return c } }
     }
     private var all: [SchemaCollection] = SchemaTrial.collections
     private var selected: Target?
@@ -133,6 +134,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection: return true
         case .tier: return c.folderName != nil
         case .node(_, let n, _): return SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
+        case .member(_, let p): return lib.project(p) != nil
         }
     }
     private func refresh() { needsLayout = true; needsDisplay = true; onResize?() }
@@ -175,15 +177,20 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 out.append(MapRow(target: .tier(cid), text: tier, level: 1, holds: c.folders.isEmpty ? nil : "\(c.folders.count) made", strong: false,
                                   does: [("Add Sibling", 4, { [weak self] in self?.addFolder(cid) }), ("Remove", 2, { [weak self] in self?.removeTier(cid) })]))
             }
+            // The template: "Every Project", the pattern each member follows, with its groups; then the members themselves.
             for (node, level) in SchemaTrial.rows(of: c.stack) {
                 let n = count(node, level: level, in: c), nid = node.id
                 var does: [(String, Int, () -> Void)] = []
-                if level == 1 { does.append(("Add Sibling", 4, { [weak self] in self?.newMember(in: cid) })) }
-                else { does.append(("Add Sibling", 4, { [weak self] in self?.add(child: false, at: nid, in: cid) })) }
+                if level > 1 { does.append(("Add Sibling", 4, { [weak self] in self?.add(child: false, at: nid, in: cid) })) }
                 does.append(("Add Inside", 5, { [weak self] in self?.add(child: true, at: nid, in: cid) }))
                 if level > 1 { does.append(("Remove", 2, { [weak self] in self?.remove(node, level: level, in: cid) })) }
-                out.append(MapRow(target: .node(cid, nid, level), text: node.name, level: level + offset(c),
-                                  holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does))
+                out.append(MapRow(target: .node(cid, nid, level), text: level == 1 ? "Every \(node.name)" : node.name, level: level + offset(c),
+                                  holds: level == 1 ? "the pattern" : n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does))
+            }
+            for p in inside {
+                let pid = p.id, own = lib.palettes(in: pid).count
+                out.append(MapRow(target: .member(cid, pid), text: p.name, level: 1 + offset(c), holds: own > 0 ? plural(own, "palette") : nil, strong: false,
+                                  does: [("Add Sibling", 4, { [weak self] in self?.newMember(in: cid) }), ("Remove", 2, { [weak self] in self?.removeMember(cid, pid) })]))
             }
         }
         return out
@@ -196,7 +203,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         var mapTop: CGFloat = 0, mapRows: [NSRect] = []
         var nameLabel: CGFloat = 0, names: [NSRect] = [], customLabel: CGFloat = 0, customName = NSRect.zero, aboutLabel: CGFloat = 0, about = NSRect.zero
         var height: CGFloat = 0
-        var leftHelp = "", rightHelp = "", levelTitle = "", offered: [String] = [], name = "", said: String?, custom = false
+        var leftHelp = "", rightHelp = "", levelTitle = "", offered: [String] = [], name = "", said: String?, custom = false, fixed = false
     }
 
     /// `w` is the width from the first column to the last; the view is `leading` wider on the left.
@@ -226,13 +233,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .node(_, let nid, let level):
                 let node = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node ?? c.stack
                 g.levelTitle = SchemaTrial.title(forLevel: level + offset(c)); g.name = node.name; g.offered = SchemaTrial.names(forLevel: level); g.said = node.about
-                g.rightHelp = level == 1 ? "What a \(memberWord) of \(heading) is called. Every \(memberWord) is a project of the app's, with files of its own; Add Sibling makes one."
+                g.rightHelp = level == 1 ? "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups under it. The \(many) themselves are listed beneath."
                     : level == 2 ? "A group in every \(memberWord) of \(heading). Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now."
                     : "A group \(level - 1) levels inside every \(memberWord) of \(heading). Groups this deep are labels for now."
+            case .member(_, let pid):
+                g.levelTitle = member(c); g.name = lib.project(pid)?.name ?? ""; g.offered = []; g.fixed = true
+                g.rightHelp = "One \(memberWord) in \(heading): a project with files of its own, following the pattern above it. Type over its name and press Return to rename it; its palettes are made in rail1."
             }
-            g.custom = renaming || !g.offered.contains(g.name)
+            g.custom = g.fixed || renaming || !g.offered.contains(g.name)
             g.nameLabel = ry; ry += u
-            for _ in 0..<(g.offered.count + 1) { g.names.append(NSRect(x: rx, y: ry, width: rw, height: u)); ry += u }
+            if !g.fixed { for _ in 0..<(g.offered.count + 1) { g.names.append(NSRect(x: rx, y: ry, width: rw, height: u)); ry += u } }
             if g.custom {
                 ry += u
                 g.customLabel = ry; ry += u
@@ -319,7 +329,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         Design.attributed(g.levelTitle, .body).draw(x: rx, baseline: line)
         Design.attributed(g.rightHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.right.width, height: Self.helpUnits * u))
         Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
-        let list = ["Custom Name\u{2026}"] + g.offered
+        let list = g.fixed ? [] : ["Custom Name\u{2026}"] + g.offered
         for (i, n) in list.enumerated() {
             let box = g.names[i], b = box.minY + line
             let chosen = i == 0 ? g.custom : (!g.custom && n == g.name)
@@ -331,7 +341,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             nameHits.append((box, i == 0 ? nil : n))
         }
         if g.custom {
-            Design.attributed("Custom Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.customLabel + line)
+            if !g.fixed { Design.attributed("Custom Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.customLabel + line) }
             hairline(x: rx, y: g.customName.maxY - 1, width: g.right.width, customName.currentEditor() != nil ? Design.ink : Design.rule)
         }
         if g.said != nil {
@@ -381,6 +391,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection: return all.count > 1
         case .tier: return false
         case .node(_, _, let level): return level > 1
+        case .member(let cid, _): return (collection(cid).map { members(of: $0).count } ?? 0) > 1
         }
     }
     /// The rows a dragged row may land among, in order, itself included.
@@ -389,6 +400,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection: return all.map { .collection($0.id) }
         case .tier: return []
         case .node(let cid, let nid, let level): return collection(cid).map { siblings(of: nid, in: $0).map { .node(cid, $0, level) } } ?? []
+        case .member(let cid, _): return collection(cid).map { members(of: $0).map { .member(cid, $0.id) } } ?? []
         }
     }
     override func mouseDragged(with event: NSEvent) {
@@ -415,6 +427,20 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                     if from < to { to -= 1 }
                     list.insert(moved, at: min(to, list.count))
                     SchemaTrial.collections = list
+                }
+            case .member(let cid, let pid):
+                // The members of this collection in their new order, among every project's order.
+                if let c = collection(cid), let lib = library {
+                    var mine = members(of: c).map { $0.id }
+                    if let from = mine.firstIndex(of: pid) {
+                        mine.remove(at: from)
+                        var to = min(max(slot, 0), mine.count + 1)
+                        if from < to { to -= 1 }
+                        mine.insert(pid, at: min(to, mine.count))
+                        var order = self.lib.orderedProjects.map { $0.id }, k = 0
+                        for i in order.indices where mine.contains(order[i]) { order[i] = mine[k]; k += 1 }
+                        lib.placeProjects(order)
+                    }
                 }
             case .tier: break
             }
@@ -498,6 +524,13 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         selected = .collection(cid)
         show()
     }
+    private func removeMember(_ cid: UUID, _ pid: UUID) {
+        guard let lib = library else { return }
+        lib.dump(project: pid, over: window) { [weak self] in
+            self?.selected = .collection(cid)
+            self?.show()
+        }
+    }
     private func removeCollection(_ cid: UUID) {
         guard cid != all[0].id, let lib = library else { return }
         lib.dump(collection: cid, over: window) { [weak self] in
@@ -548,6 +581,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = name }
         case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = name }
         case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.role = SchemaTrial.role(of: $0); $0.name = name })
+        case .member(_, let pid):
+            let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typed.isEmpty, typed != lib.project(pid)?.name else { return }
+            library?.apply("Rename Project") { _ = $0.renameProject(pid, to: typed) }
         }
         all = SchemaTrial.collections
     }
@@ -559,6 +596,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .collection: now = c.name; offered = SchemaTrial.collectionNames
             case .tier: now = c.folderName ?? ""; offered = SchemaTrial.folderNames
             case .node(_, let nid, let level): now = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node.name ?? ""; offered = SchemaTrial.names(forLevel: level)
+            case .member: return
             }
             if !offered.contains(now) { window?.makeFirstResponder(customName); return }
             renaming = true
@@ -576,13 +614,14 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, let what = selected, let c = collection(what.collection) else { return }
         if field === customName {
+            if case .member = what { return }   // a project is renamed when the typing ends, as it renames its files
             setName(field.stringValue)
             needsDisplay = true
         } else if field === about {
             let text = field.stringValue
             switch what {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
-            case .tier: break
+            case .tier, .member: break
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
             }
             all = SchemaTrial.collections

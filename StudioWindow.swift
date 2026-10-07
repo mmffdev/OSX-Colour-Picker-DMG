@@ -22,7 +22,7 @@ final class StudioWindowController: NSWindowController {
     init(library: LibraryController) {
         frame = StudioFrame(library: library)
         let w = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
-                             styleMask: [.closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = Brand.edition
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
@@ -130,13 +130,15 @@ final class StudioFrame: NSView {
     let footer = StudioFooter()
     /// Master Inner over everything: the columns and the beat, in the grid's orange, when it is on.
     let overlay = GridOverlay()
+    /// The invisible strip across the top, around the window's three buttons: a press on it drags the window, and the pointer says so.
+    let strip = TitleStrip()
 
     init(library: LibraryController) {
         self.library = library
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
-        for v in [header, rail1, rail2, page, history, footer, overlay] { addSubview(v) }
+        for v in [header, rail1, rail2, page, history, footer, strip, overlay] { addSubview(v) }
         header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : i == 3 ? .projects : .palettes) }
         header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -190,6 +192,7 @@ final class StudioFrame: NSView {
         (rail2.inset, rail2.insetRight) = edges(rail2, 3, 4)
         (page.inset, page.insetRight) = edges(page, 5, 10)
         (history.inset, history.insetRight) = edges(history, 11, 12)
+        strip.frame = NSRect(x: 0, y: 0, width: w, height: TitleStrip.height)
         overlay.frame = bounds
         overlay.isHidden = !A.masterGrid
         overlay.needsDisplay = true
@@ -1951,6 +1954,18 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         guard let lib = library else { return }
         NSWorkspace.shared.activateFileViewerSelecting([lib.store.url])
     }
+}
+
+// MARK: - The title strip
+
+/// Nothing to see: a full-width band across the top of the window, the height of the title bar, around
+/// Apple's three buttons, which keep their own menus. A press on it moves the window, and over it the
+/// pointer is the open hand.
+final class TitleStrip: NSView {
+    static let height: CGFloat = 24
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 }
 
 // MARK: - Master Inner, drawn over the window
