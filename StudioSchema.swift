@@ -16,6 +16,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     var onResize: (() -> Void)?
+    /// The page's edge to its first column: the view starts at the rail's divider so a row's ground can reach it, and the words start here.
+    var leading: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
 
     // MARK: State
 
@@ -46,6 +48,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     private struct MapRow { let target: Target; let text: String; let level: Int; let holds: String?; let strong: Bool; let does: [(String, Int, () -> Void)] }
     private var mapRows: [MapRow] = []
     private var rowRects: [NSRect] = []
+    private var gripRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
     private var nameHits: [(NSRect, String?)] = []
     /// A group being dragged among its siblings, and the slot the pointer is over.
@@ -56,7 +59,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     /// Master Inner: the unit and the line text sits on in it; the page's six columns within its width.
     private static var u: CGFloat { Design.App.unit }
     private static var line: CGFloat { Design.App.textBaseline }
-    private static let step: CGFloat = 16, helpUnits: CGFloat = 3
+    private static let step: CGFloat = 16, helpUnits: CGFloat = 3, grip: CGFloat = 14
 
     init() {
         super.init(frame: .zero)
@@ -154,20 +157,18 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         var leftHelp = "", rightHelp = "", levelTitle = "", offered: [String] = [], name = "", said: String?, custom = false
     }
 
+    /// `w` is the width from the first column to the last; the view is `leading` wider on the left.
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
-        let u = Self.u, gut = Design.App.gutter
-        let cw = ((w - 5 * gut) / 6).rounded(.down)
-        func col(_ i: Int) -> CGFloat { CGFloat(i - 1) * (cw + gut) }
-        func span(_ n: Int) -> CGFloat { CGFloat(n) * cw + CGFloat(n - 1) * gut }
-        // Both columns: a header on row 0, words on rows 1 to 3, content from row 4. The map on columns 1 to 4, the selected row on 5 and 6.
-        let lw = span(4), rx = col(5), rw = span(2)
+        let u = Self.u, gut = Design.App.gutter, l = leading
+        // Both columns: a header on row 0, words on rows 1 to 3, content from row 4. The map takes 60 of the width, the selected row 40 (Rick, 2026-10-08).
+        let lw = ((w - gut) * 0.6).rounded(), rx = l + lw + gut, rw = w - lw - gut
         g.leftHelp = "Every collection is a heading in rail1, with its members under it, grouped under a level between when it has one. Each member follows its collection's stack: the groups inside it. Add Sibling on any row makes another at that level; a group drags among its siblings."
         var y = 4 * u
         g.mapTop = y
         mapRows = buildMap()
-        for _ in mapRows { g.mapRows.append(NSRect(x: 0, y: y, width: lw, height: u)); y += u }
-        g.left = NSRect(x: 0, y: 0, width: lw, height: y + u)
+        for _ in mapRows { g.mapRows.append(NSRect(x: l, y: y, width: lw, height: u)); y += u }
+        g.left = NSRect(x: l, y: 0, width: lw, height: y + u)
 
         var ry = 4 * u
         if let what = selected, let c = collection(what.collection) {
@@ -206,11 +207,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         return g
     }
 
-    func height(forWidth width: CGFloat) -> CGFloat { geometry(width: max(width, 1)).height }
+    func height(forWidth width: CGFloat) -> CGFloat { geometry(width: max(width - leading, 1)).height }
 
     override func layout() {
         super.layout()
-        let g = geometry(width: bounds.width), line = Self.line
+        let g = geometry(width: bounds.width - leading), line = Self.line
         // A 13 field's text sits 15 below its top: on the line.
         customName.isHidden = !g.custom
         customName.frame = NSRect(x: g.customName.minX, y: g.customName.minY + line - 15, width: g.customName.width, height: 20)
@@ -223,18 +224,25 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        let g = geometry(width: bounds.width), u = Self.u, line = Self.line
-        rowRects = g.mapRows; doHits = []; nameHits = []
+        let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line, l = leading
+        rowRects = g.mapRows; doHits = []; nameHits = []; gripRects = []
         // The two first-order headers on the first line, their words in a box of three units under each.
-        Design.attributed("Structure", .body).draw(x: 0, baseline: line)
-        Design.attributed(g.leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: 0, y: u, width: g.left.width, height: Self.helpUnits * u))
-        hairline(x: 0, y: g.mapTop - 1, width: g.left.width, Design.rule)
+        Design.attributed("Structure", .body).draw(x: l, baseline: line)
+        Design.attributed(g.leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.left.width, height: Self.helpUnits * u))
+        hairline(x: l, y: g.mapTop - 1, width: g.left.width, Design.rule)
         for (i, r) in mapRows.enumerated() {
             let box = g.mapRows[i], b = box.minY + line
             let on = r.target == selected
-            if on { fill(box, Design.mist) }
-            let x = CGFloat(r.level) * Self.step
+            // The selected row's ground breaks the grid: from the rail's divider to the middle of the gutter between the panels.
+            if on { fill(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height), Design.mist) }
+            let x = l + CGFloat(r.level) * Self.step
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
+            // The grip between the level and the name: two columns of three dots; a drag from it puts the row in another order among its own.
+            let grip = NSRect(x: x + 16, y: box.minY, width: Self.grip, height: box.height)
+            if canDrag(r.target) {
+                for dx in [0, 4] as [CGFloat] { for dy in [-4, 0, 4] as [CGFloat] { fill(NSRect(x: grip.minX + 2 + dx, y: b - 5 + dy, width: 1.5, height: 1.5), on ? Design.quiet : Design.soft) } }
+                gripRects.append(grip)
+            } else { gripRects.append(.zero) }
             let name = Design.attributed(r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             var right = box.maxX
             if on {
@@ -251,12 +259,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 t.draw(right: right, baseline: b)
                 right -= t.size().width + 12
             }
-            name.draw(x: x + 20, baseline: b, width: right - x - 20)
-            hairline(x: 0, y: box.maxY - 1, width: box.width, Design.mist)
+            name.draw(x: x + 36, baseline: b, width: right - x - 36)
+            hairline(x: l, y: box.maxY - 1, width: box.width, Design.mist)
         }
-        if let slot = dragSlot, case .node(let cid, let nid, _)? = dragging, let c = collection(cid), let i = mapRows.firstIndex(where: { $0.target == dragging }) {
-            let y = slotY(slot, among: siblings(of: nid, in: c), in: cid)
-            fill(NSRect(x: CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: g.left.width - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
+        if let slot = dragSlot, let d = dragging, let i = mapRows.firstIndex(where: { $0.target == d }) {
+            let y = slotY(slot, for: d)
+            fill(NSRect(x: l + CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: g.left.width - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
         }
         guard selected != nil else { return }
         let rx = g.right.minX
@@ -313,24 +321,54 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let r = mapRows[i]
             selected = r.target
             renaming = false
-            if case .node(_, _, let level) = r.target, level > 1 { dragging = r.target; dragStart = p } else { dragging = nil }
+            dragging = gripRects[i].contains(p) && canDrag(r.target) ? r.target : nil
+            dragStart = p
             refresh()
         }
     }
+    /// What can be put in another order: a collection among the collections, a group among its siblings. The grouping level and the member stand alone.
+    private func canDrag(_ t: Target) -> Bool {
+        switch t {
+        case .collection: return all.count > 1
+        case .tier: return false
+        case .node(_, _, let level): return level > 1
+        }
+    }
+    /// The rows a dragged row may land among, in order, itself included.
+    private func peers(of t: Target) -> [Target] {
+        switch t {
+        case .collection: return all.map { .collection($0.id) }
+        case .tier: return []
+        case .node(let cid, let nid, let level): return collection(cid).map { siblings(of: nid, in: $0).map { .node(cid, $0, level) } } ?? []
+        }
+    }
     override func mouseDragged(with event: NSEvent) {
-        guard case .node(let cid, let nid, _)? = dragging, let start = dragStart, let c = collection(cid) else { return }
+        guard let d = dragging, let start = dragStart else { return }
         let p = convert(event.locationInWindow, from: nil)
         guard abs(p.y - start.y) > 4 || dragSlot != nil else { return }
-        let sibs = siblings(of: nid, in: c)
+        let sibs = peers(of: d)
         var slot = sibs.count
         for (k, s) in sibs.enumerated() {
-            if let i = rowIndex(ofNode: s, in: cid), p.y < rowRects[i].midY { slot = k; break }
+            if let i = mapRows.firstIndex(where: { $0.target == s }), p.y < rowRects[i].midY { slot = k; break }
         }
         if slot != dragSlot { dragSlot = slot; needsDisplay = true }
     }
     override func mouseUp(with event: NSEvent) {
-        if case .node(let cid, let nid, _)? = dragging, let slot = dragSlot, let c = collection(cid) {
-            keep(cid, SchemaTrial.moving(nid, to: slot, in: c.stack))
+        if let d = dragging, let slot = dragSlot {
+            switch d {
+            case .node(let cid, let nid, _):
+                if let c = collection(cid) { keep(cid, SchemaTrial.moving(nid, to: slot, in: c.stack)) }
+            case .collection(let cid):
+                var list = SchemaTrial.collections
+                if let from = list.firstIndex(where: { $0.id == cid }) {
+                    let moved = list.remove(at: from)
+                    var to = min(max(slot, 0), list.count + 1)
+                    if from < to { to -= 1 }
+                    list.insert(moved, at: min(to, list.count))
+                    SchemaTrial.collections = list
+                }
+            case .tier: break
+            }
             show()
         }
         dragging = nil; dragSlot = nil; dragStart = nil
@@ -343,9 +381,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     private func rowIndex(ofNode id: UUID, in cid: UUID) -> Int? {
         mapRows.firstIndex { if case .node(let c, let n, _) = $0.target { return c == cid && n == id }; return false }
     }
-    private func slotY(_ slot: Int, among sibs: [UUID], in cid: UUID) -> CGFloat {
-        if slot < sibs.count, let i = rowIndex(ofNode: sibs[slot], in: cid) { return rowRects[i].minY }
-        if let last = sibs.last, let i = rowIndex(ofNode: last, in: cid) {
+    /// Where the slot line goes: on the peer at that place, or under the last peer and everything inside it.
+    private func slotY(_ slot: Int, for t: Target) -> CGFloat {
+        let sibs = peers(of: t)
+        if slot < sibs.count, let i = mapRows.firstIndex(where: { $0.target == sibs[slot] }) { return rowRects[i].minY }
+        if let last = sibs.last, let i = mapRows.firstIndex(where: { $0.target == last }) {
             var end = i
             while end + 1 < mapRows.count && mapRows[end + 1].level > mapRows[i].level { end += 1 }
             return rowRects[end].maxY

@@ -1120,9 +1120,11 @@ final class StudioPage: NSView {
         let sh = settings.height(forWidth: scroll.frame.width)
         settings.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, sh))
         settingsScroll.verticalScrollElasticity = sh > scroll.frame.height ? .allowed : .none
-        schemaScroll.frame = settingsScroll.frame
-        let kh = schema.height(forWidth: scroll.frame.width)
-        schema.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, kh))
+        // The schema's scroll starts at the page's edge, so a row's ground can reach the rail's divider; its words start a column in.
+        schemaScroll.frame = NSRect(x: 0, y: top, width: inset + scroll.frame.width, height: bounds.height - top)
+        schema.leading = inset
+        let kh = schema.height(forWidth: inset + scroll.frame.width)
+        schema.frame = NSRect(x: 0, y: 0, width: inset + scroll.frame.width, height: max(schemaScroll.frame.height, kh))
         schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
         grid.width = scroll.frame.width
         grid.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, grid.height))
