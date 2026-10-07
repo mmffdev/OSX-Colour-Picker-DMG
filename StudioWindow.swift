@@ -1164,7 +1164,9 @@ final class TileGrid: NSView {
 /// other while another catalogue is on the list. Remove asks
 /// on the window's own confirm panel, with what the catalogue holds and the choice of moving all of it
 /// to another catalogue first. The page scrolls as one piece.
-final class CatalogueSettings: NSView, NSTextViewDelegate {
+final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
+    var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
+    func dismissOverlay() { closeMenu() }
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     var onResize: (() -> Void)?
@@ -1184,7 +1186,6 @@ final class CatalogueSettings: NSView, NSTextViewDelegate {
     private var lineHits: [(NSRect, Item)] = [], lineActionHits: [(NSRect, Item, Int)] = [], barHits: [(NSRect, Int)] = [], addHits: [(NSRect, UUID, String)] = []
     private var spectrum = NSRect.zero
     private var dropped: SwissDropdown.MenuPanel?
-    private var menuWatch: Any?
     private let openButton = SwissButton("Open Catalogue\u{2026}", .primary)
     private let newButton = SwissButton("New Catalogue", .secondary)
     private let finderButton = SwissButton("Show In Finder", .secondary)
@@ -1609,7 +1610,6 @@ final class CatalogueSettings: NSView, NSTextViewDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        closeMenu()
         if spectrum.contains(p), let e = expanded {
             // The strip stays open: each click is the catalogue's colour until the strip is put away.
             let c = NSColor(hue: max(0, min(1, p.x / spectrum.width)), saturation: 0.85, brightness: 0.95, alpha: 1)
@@ -1677,17 +1677,13 @@ final class CatalogueSettings: NSView, NSTextViewDelegate {
         panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
         win.addChildWindow(panel, ordered: .above)
         dropped = panel
-        // A click anywhere else puts the list away.
-        menuWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
-            if let self = self, let m = self.dropped, e.window !== m { self.closeMenu() }
-            return e
-        }
+        Overlays.opened(self)
     }
 
     private func closeMenu() {
         if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
         dropped = nil
-        if let w = menuWatch { NSEvent.removeMonitor(w); menuWatch = nil }
+        Overlays.closed(self)
     }
 
     // MARK: Moving, copying and removing what is ticked

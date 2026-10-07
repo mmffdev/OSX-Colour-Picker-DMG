@@ -2,10 +2,46 @@ import AppKit
 
 // ---------- Colorgain's own controls, beyond the buttons (the design guide, c_c_design_controls.md) ----------
 
+/// Anything that opens over the window and must be able to go: a panel, a dropdown's list, a menu.
+protocol Overlay: AnyObject {
+    /// The windows that are the overlay itself; a click in one of them is the overlay's own business.
+    var overlayWindows: [NSWindow] { get }
+    /// Goes away, letting go of whatever was in it.
+    func dismissOverlay()
+}
+
+/// The one handler for everything that opens over the window. Each overlay says when it opens and
+/// when it closes; Escape closes every one of them at once, and so does a click anywhere that is not
+/// one of them, the veil included. Nothing is kept from a closed overlay.
+enum Overlays {
+    private static var open: [Overlay] = []
+    private static var monitor: Any?
+
+    static func opened(_ o: Overlay) {
+        if !open.contains(where: { $0 === o }) { open.append(o) }
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { e in
+            guard !open.isEmpty else { return e }
+            if e.type == .keyDown { return e.keyCode == 53 ? { closeAll(); return nil }() : e }
+            if let w = e.window, open.contains(where: { $0.overlayWindows.contains { $0 === w } }) { return e }
+            closeAll()
+            return e
+        }
+    }
+    static func closed(_ o: Overlay) { open.removeAll { $0 === o } }
+    static var any: Bool { !open.isEmpty }
+    /// Everything goes, the last opened first.
+    static func closeAll() {
+        let all = open.reversed()
+        open = []
+        for o in all { o.dismissOverlay() }
+    }
+}
+
 /// A dropdown as the design draws one: a caption label above, the value at 17 Regular on a hairline,
 /// a chevron at the right. The menu is a Card with a Rule edge under the field, rows with a Mist
 /// hover and a tick on the chosen one, and "Your own word…" turns the value into a field to type in.
-final class SwissDropdown: NSView {
+final class SwissDropdown: NSView, Overlay {
     private let cap: NSTextField
     private let value = NSTextField(string: "")
     private let chevron = Design.text("\u{25BE}", .caption, colour: Design.quiet)
@@ -15,6 +51,8 @@ final class SwissDropdown: NSView {
     private var list: MenuPanel?
     var onChange: ((String) -> Void)?
     var text: String { value.stringValue }
+    var overlayWindows: [NSWindow] { list.map { [$0] } ?? [] }
+    func dismissOverlay() { close() }
 
     init(_ caption: String, value v: String, options: [String], allowsOwn: Bool = true, width: CGFloat) {
         cap = Design.text(caption, .caption, colour: Design.quiet)
@@ -69,12 +107,14 @@ final class SwissDropdown: NSView {
         panel.place(below: NSPoint(x: origin.x, y: origin.y - 6))
         win.addChildWindow(panel, ordered: .above)
         list = panel
+        Overlays.opened(self)
         chevron.attributedStringValue = Design.attributed("\u{25B4}", .caption, colour: Design.quiet)
     }
 
     private func close() {
         if let m = list { m.parent?.removeChildWindow(m); m.orderOut(nil) }
         list = nil
+        Overlays.closed(self)
         chevron.attributedStringValue = Design.attributed("\u{25BE}", .caption, colour: Design.quiet)
     }
 
@@ -290,13 +330,15 @@ enum SwissConfirm {
         panel.onEscape = { then(choices.count - 1) }
     }
 
-    /// A word that must be acted on: the one button is the act, primary, and Escape does nothing.
+    /// A word that must be acted on: the one button is the act, primary; Escape still closes it, as it closes everything.
     static func require(over window: NSWindow?, title: String, note: String, action: String, then: @escaping () -> Void) {
         let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: action)
         panel.present(over: window) { _ in then() }
     }
 
-    final class ConfirmPanel: NSPanel {
+    final class ConfirmPanel: NSPanel, Overlay {
+        var overlayWindows: [NSWindow] { [self] }
+        func dismissOverlay() { let escape = onEscape; close(then: false); escape?() }
         private var done: ((Int) -> Void)?
         private let slide = SwissSlide()
         private let choices: ChoiceRows?
@@ -395,9 +437,8 @@ enum SwissConfirm {
             close(then: go)
         }
 
-        override func cancelOperation(_ sender: Any?) {
-            if escapes { close(then: false); onEscape?() } else if must == nil { close(then: false) }
-        }
+        /// Escape: every panel and list goes, through the one handler, and what was in them is let go.
+        override func cancelOperation(_ sender: Any?) { Overlays.closeAll() }
         override var canBecomeKey: Bool { true }
 
         /// The veil over the host while the panel is up: a half-ink window that takes every click.
@@ -406,6 +447,7 @@ enum SwissConfirm {
         func present(over window: NSWindow?, then: @escaping (Int) -> Void) {
             done = then
             host = window
+            Overlays.opened(self)
             guard let w = window else { center(); makeKeyAndOrderFront(nil); return }
             // Not an AppKit sheet, which rounds its corners: a veil over the host, and the panel centred above it.
             let v = NSWindow(contentRect: w.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -423,6 +465,7 @@ enum SwissConfirm {
         }
 
         private func close(then go: Bool) {
+            Overlays.closed(self)
             if let w = host {
                 w.removeChildWindow(self)
                 if let v = veil { w.removeChildWindow(v); v.orderOut(nil); veil = nil }
