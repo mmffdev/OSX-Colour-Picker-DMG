@@ -2,6 +2,21 @@
 
 macOS colour picker app (MMFFDev Colour 3). The source is at the repository root; the two earlier apps were removed on 2026-10-02 and live only in git history. Build: `./build.sh` (compiles, runs the self-test, installs); installers: `./make_dmg.sh`, `./make_pkg.sh`. Day to day, open `Colorgain.xcodeproj` at the root in Xcode and Cmd+R: it builds a real signed bundle (Info.plist, icon, Sparkle, the helper, the commit stamped) into DerivedData and runs it, rebuilding only what changed; the installed app still comes from `./build.sh`. The project is generated from `project.yml` by XcodeGen and committed: after adding or removing a `.swift` file, run `xcodegen` at the root and commit the project with the file. `Package.swift` stays the definition `build.sh` compiles. To see the app as a brand-new user, launch it with `--new-user` (in Xcode: Product ▸ Scheme ▸ Edit Scheme ▸ Run ▸ Arguments, tick it for the run) or run `tools/open.sh new` for the installed app (a throwaway home, never your data; add `permissions` to make macOS ask again); `tools/open.sh me` opens it as you. Xcode's Cmd+R copy is signed with the Developer ID like the installed one, so permissions and chosen folders hold between builds; the scheme carries `--new-user`, `--studio` and `--self-test` unticked under Edit Scheme ▸ Run ▸ Arguments.
 
+## Two build targets
+
+Since 2026-10-06 the app ships two ways from the same sources. Know which one a branch is for before touching anything in the second list.
+
+| | Direct download | Mac App Store |
+|---|---|---|
+| Branches | `redesign-001`, `v3-palettes-projects-sync` | `osx-appstore-build` |
+| Signing | Developer ID, notarised, Sparkle updates | Apple Distribution, App Sandbox, hardened runtime, Store updates |
+| Build | `./build.sh`, `./make_dmg.sh`, `./make_pkg.sh` | `./make_appstore.sh` (ad hoc, self-test) and `./make_appstore.sh archive` (Apple Distribution, exports the `.pkg`); project generated from `appstore/project.yml` by XcodeGen, sources compiled with `APPSTORE` set |
+| Editions | One | Standard and Pro, both paid through Apple (price and split undecided) |
+
+The Store build cannot carry: Sparkle (`main.swift`, `Package.swift`, the `SU*` keys in `Info.plist`), the Adobe root helper (`AdobeHelper.swift`, `helper/`, the LaunchDaemons plist), `runAsAdministrator` and the ACL unlock in `Helpers.swift` and `AdobeHelper.swift`, git push from the design pack, and `afplay`. Every remembered folder (`syncFolder`, `projectsFolder`, `appHome`, catalogue entries, project folders) must be a security-scoped bookmark, not a path. Press profiles come from ColorSync's installed-profile list, not folder scans. The backlog for this is in Vector under OB-88 Mac App Store Edition (themes TH-284 Sandbox And Store Build, TH-285 Store Purchases And Editions, TH-286 Store Submission); read it before any Store work. The footer of a Store build reads "AS Release" so a Store copy can be told from a direct one.
+
+Keep the direct-download build working on its branches. A change that only serves the sandbox goes behind a build flag or stays on `osx-appstore-build`.
+
 ## The name is Colorgain
 
 Since 2026-10-07 the app is called **Colorgain**, spelled exactly so: one word, capital C, American "Color". Every new piece of user-facing text says Colorgain. "MMFFDev Colour 3" is the old name; it survives only where renaming is a migration (the bundle and executable names, the Application Support folder, the bundle identifier, the Sparkle feed, the installers, the Store product identifiers) and goes when the rename feature in Vector is done. The rest of the app's own words keep British spelling ("colour"); only the name is American.
@@ -10,7 +25,10 @@ Since 2026-10-07 the app is called **Colorgain**, spelled exactly so: one word, 
 
 Since 2026-10-07 the app is being redesigned in a Swiss style it owns: Helvetica Neue, a 12-column grid, big light type over small dense type, ink on warm paper, no macOS control drawn where the guide draws its own. Before any screen, read `.claude/c_design_guide.md` and only the child it points to for the part in hand; its five laws, baseline justification first, apply to every screen.
 
-## Build after every commit
+## Build after every commit: both editions
+
+`./build.sh` installs the direct download; `./make_appstore.sh` installs the Store edition as `/Applications/MMFFDev - Colorgain.app` and opens it as a brand-new user, so what Rick sees after every build is the Colorgain setup, not the main window of his existing data. Run both after a commit that touches Swift. In Xcode the Store project's default scheme, Colorgain, also runs as a new user; the Colorgain As Me scheme opens the Store container as Rick. The main window has not been redesigned yet: once setup is done the app looks like MMFFDev Colour 3, and that is current code, not an old build. The footer says which build is running.
+
 
 After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.
 
@@ -21,8 +39,8 @@ Since 2026-10-02 this repo's work lives in the workspace the local Vector connec
 | | |
 |---|---|
 | Runway | PR-23 — MMFFDev - Colour Picker |
-| Objectives | OB-80 Colour Lab (cLab) · OB-81 Colour Tools · OB-82 Export And Handover · First Run And Permissions · Launch And Sales · History And Project Files · Colour Management And Proofing |
-| Themes | TH-260 Colour Lab Tools · TH-261 Colour Lab Foundations · TH-262 Colour Lab Future Ideas · TH-263 Contrast And Typography · TH-264 Export Templates (also holds the app-format and Adobe work) · Setup And Permissions · Selling And Licensing · Updates And Health · Launch Page And Help · Project Files · History Rail · History Storage And Settings · Project Overview And Swatch Notes · The Master Colour · Channels And Proofs · Print Conditions And Approved Values · Video, Three-Dimensional Work And Delivery · Image Files, Gamma And Lookup Tables · Palette Pages And Views (under Colour Tools) |
+| Objectives | OB-80 Colour Lab (cLab) · OB-81 Colour Tools · OB-82 Export And Handover · OB-88 Mac App Store Edition · First Run And Permissions · Launch And Sales · History And Project Files · Colour Management And Proofing |
+| Themes | TH-260 Colour Lab Tools · TH-261 Colour Lab Foundations · TH-262 Colour Lab Future Ideas · TH-263 Contrast And Typography · TH-264 Export Templates (also holds the app-format and Adobe work) · TH-284 Sandbox And Store Build · TH-285 Store Purchases And Editions · TH-286 Store Submission · Setup And Permissions · Selling And Licensing · Updates And Health · Launch Page And Help · Project Files · History Rail · History Storage And Settings · Project Overview And Swatch Notes · The Master Colour · Channels And Proofs · Print Conditions And Approved Values · Video, Three-Dimensional Work And Delivery · Image Files, Gamma And Lookup Tables · Palette Pages And Views (under Colour Tools) |
 | Node | `c9b6ca76-522d-44dc-9402-ec797f49ec97` |
 
 A new area of the app gets a new objective under PR-23, never a new runway.

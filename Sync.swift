@@ -250,6 +250,13 @@ struct Catalogues {
     let legacyURL: URL?
     var previousURL: URL? = nil
 
+    /// The user's own home folder, even under the sandbox, where the usual call gives the app's container instead.
+    static var realHome: URL {
+        if let dir = getpwuid(getuid())?.pointee.pw_dir { return URL(fileURLWithPath: String(cString: dir), isDirectory: true) }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+    static var realApplicationSupport: URL { realHome.appendingPathComponent("Library/Application Support") }
+
     /// Application Support, which is where the app's data starts; the seed the setup assistant offers to move.
     static var seedRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("MMFFDev Colour 3")

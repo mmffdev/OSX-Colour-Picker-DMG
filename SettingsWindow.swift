@@ -290,7 +290,9 @@ final class ExportPanel: SettingsPanel, NSTextFieldDelegate, NSTextViewDelegate 
             [label("Example:"), preview],
             [blank, note("Used by the CSS, SCSS and Android formats. Tailwind always uses --color-, as Tailwind expects.")],
             [heading("Adobe apps"), blank],
-            [blank, note("Add To Adobe Apps puts a palette where Photoshop, Illustrator or InDesign keeps its libraries. Doing that without a password each time is set up under Permissions.")],
+            [blank, note(Permission.all.isEmpty
+                ? "Add To Adobe Apps writes a palette in the form Photoshop, Illustrator or InDesign expects, for you to put in that app's library folder."
+                : "Add To Adobe Apps puts a palette where Photoshop, Illustrator or InDesign keeps its libraries. Doing that without a password each time is set up under Permissions.")],
             [heading("Design pack licence"), blank],
             [label("Owner:"), owner],
             [label("Licence text:"), licenceBox()],
@@ -467,6 +469,8 @@ final class SyncPanel: SettingsPanel {
         if let current = SyncSettings.folder { panel.directoryURL = current }
         panel.beginSheetModal(for: w) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
+            if let old = SyncSettings.folder, old != url { FolderAccess.forget(old) }
+            FolderAccess.remember(url)
             SyncSettings.folder = url
             self?.library.syncNow()
             self?.refresh()
@@ -474,6 +478,7 @@ final class SyncPanel: SettingsPanel {
     }
 
     @objc private func turnOffSync() {
+        if let old = SyncSettings.folder { FolderAccess.forget(old) }
         SyncSettings.folder = nil
         library.syncTurnedOff()
         refresh()
@@ -1077,8 +1082,10 @@ final class SettingsWindowController: NSWindowController {
             ColourPanel(library: library, title: "Colour", icon: "dial.medium"),
             ThemePanel(library: library, title: "Theme", icon: "paintpalette"),
             HaloSettingsPanel(library: library, title: "Halo", icon: "circle.circle"),
-            PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield"),
-        ]
+        ] + (Permission.all.isEmpty ? [] : [PermissionsPanel(library: library, title: "Permissions", icon: "lock.shield")])
+        #if APPSTORE
+        panels.append(EditionPanel(library: library, title: "Edition", icon: "bag"))
+        #endif
         tabs.tabStyle = .toolbar
         for p in panels {
             let item = NSTabViewItem(viewController: p)

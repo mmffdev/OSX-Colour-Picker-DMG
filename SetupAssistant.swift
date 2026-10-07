@@ -71,8 +71,14 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     /// Documents, unless this is a trial run (MMFFDEV_COLOUR3_HOME set), which keeps everything in its own home.
     private var catalogueParent = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"].map { URL(fileURLWithPath: $0) }
         ?? SetupAssistant.usualCatalogueParent
-    /// Documents. The welcome step asks macOS for it up front, so its question never arrives out of nowhere.
-    static var usualCatalogueParent: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents") }
+    /// Documents, which the welcome step asks macOS for up front; under the sandbox (the Store build) the app's own Catalogues folder, since Documents is out of reach until chosen.
+    static var usualCatalogueParent: URL {
+        #if APPSTORE
+        return Catalogues.standard.folder
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
+        #endif
+    }
     private var collectionName = SchemaTrial.collections[0].name
     private var memberName = SchemaTrial.memberName(of: SchemaTrial.collections[0])
     private var firstMember = ""
@@ -302,7 +308,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         panel.directoryURL = start
         panel.prompt = "Use This Folder"
         panel.message = message
-        panel.beginSheetModal(for: w) { r in if r == .OK, let u = panel.url { done(u) } }
+        panel.beginSheetModal(for: w) { r in if r == .OK, let u = panel.url { FolderAccess.remember(u); done(u) } }
     }
 
     // MARK: 1. Where the app's data lives
@@ -364,8 +370,21 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue) ?? .data, .json]
         panel.prompt = "Bring In"
+        #if APPSTORE
+        // The sandbox grants what is picked: a catalogue is its folder, so the folder is what is picked.
+        panel.canChooseDirectories = true
+        panel.message = "Choose a catalogue's folder (the one holding its .\(ColourFiles.catalogue) file), or a library file to copy in"
+        // The download edition's data, if this Mac had it: opened where it is, nothing copied or moved.
+        panel.directoryURL = Catalogues.realApplicationSupport.appendingPathComponent("MMFFDev Colour 3")
+        #endif
         panel.beginSheetModal(for: w) { [weak self] r in
-            guard let self = self, r == .OK, let url = panel.url else { return }
+            guard let self = self, r == .OK, var url = panel.url else { return }
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                guard let index = CatalogueFiles.index(in: url) else { self.complain("That folder holds no catalogue."); return }
+                FolderAccess.remember(url)
+                url = index
+            }
             do {
                 let name = url.pathExtension.lowercased() == ColourFiles.catalogue
                     ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
@@ -847,6 +866,7 @@ final class OnboardingView: NSView {
             guard let root = try? ProjectFiles.adopt(url, for: stub),
                   var doc = (try? Data(contentsOf: index)).flatMap({ try? ColourFiles.decoder().decode(CatalogueDocument.self, from: $0) }),
                   let at = doc.projects.firstIndex(where: { $0.id == miss.ref.id }) else { return }
+            FolderAccess.remember(root)
             doc.projects[at].folder = ProjectFiles.keep(root, beside: index)
             if let data = try? ColourFiles.encoder().encode(doc) { try? data.write(to: index, options: .atomic) }
             self.resolved(miss, foundIt: true)

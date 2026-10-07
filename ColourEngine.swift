@@ -1,4 +1,5 @@
 import AppKit
+import ColorSync
 
 // ---------- The colour engine ----------
 //
@@ -363,21 +364,42 @@ enum PressProfiles {
     /// The profile every Mac has, used until the user chooses a press.
     static let generic = "Generic CMYK"
 
-    /// Every CMYK profile found, by its own name, sorted.
+    /// Every CMYK profile found, by its own name, sorted. ColorSync is asked first, since it knows every
+    /// profile installed wherever it sits, which matters under the sandbox where the folders above cannot
+    /// all be looked in; the folders are then walked as well, for a profile ColorSync has yet to notice.
     static let all: [Profile] = {
         var found: [String: Profile] = [:]
         let fm = FileManager.default
+        func consider(_ path: String) {
+            guard path.lowercased().hasSuffix(".icc") || path.lowercased().hasSuffix(".icm"),
+                  let data = fm.contents(atPath: path), let space = CGColorSpace(iccData: data as CFData), space.model == .cmyk,
+                  let name = NSColorSpace(cgColorSpace: space)?.localizedName, found[name] == nil else { return }
+            found[name] = Profile(name: name, path: path)
+        }
+        for path in installedProfilePaths() { consider(path) }
         for folder in folders {
-            guard let items = try? fm.contentsOfDirectory(atPath: folder) else { continue }
-            for item in items where item.lowercased().hasSuffix(".icc") || item.lowercased().hasSuffix(".icm") {
-                let path = folder + "/" + item
-                guard let data = fm.contents(atPath: path), let space = CGColorSpace(iccData: data as CFData), space.model == .cmyk,
-                      let name = NSColorSpace(cgColorSpace: space)?.localizedName, found[name] == nil else { continue }
-                found[name] = Profile(name: name, path: path)
-            }
+            for item in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] { consider(folder + "/" + item) }
         }
         return found.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }()
+
+    /// The file of every profile ColorSync has installed, CMYK ones only.
+    private static func installedProfilePaths() -> [String] {
+        final class Found { var paths: [String] = [] }
+        let found = Found()
+        var seed: UInt32 = 0
+        ColorSyncIterateInstalledProfiles({ info, user in
+            guard let info = info as? [String: Any], let user = user else { return true }
+            let found = Unmanaged<Found>.fromOpaque(user).takeUnretainedValue()
+            if let space = info[kColorSyncProfileColorSpace.takeUnretainedValue() as String] as? String,
+               space == kColorSyncSigCmykData.takeUnretainedValue() as String,
+               let url = info[kColorSyncProfileURL.takeUnretainedValue() as String] as? URL {
+                found.paths.append(url.path)
+            }
+            return true
+        }, &seed, Unmanaged.passUnretained(found).toOpaque(), nil)
+        return found.paths
+    }
 
     private static var spaces: [String: CGColorSpace] = [:]
     private static var whites: [String: XYZ] = [:]

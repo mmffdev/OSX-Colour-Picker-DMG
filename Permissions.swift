@@ -69,6 +69,7 @@ struct Permission {
         },
         act: { DocumentsAccess.current == .off ? DocumentsAccess.ask() : DocumentsAccess.openSettings() })
 
+    #if !APPSTORE
     static let adobe = Permission(
         title: "Adobe apps",
         state: {
@@ -103,6 +104,7 @@ struct Permission {
             case .nothingToDo: break
             }
         })
+    #endif
 }
 
 extension Notification.Name {

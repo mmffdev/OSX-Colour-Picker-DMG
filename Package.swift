@@ -25,7 +25,7 @@ let package = Package(
                 "Claude outputs", ".build", ".swiftpm", ".idea", ".vscode", ".claude",
                 "appstore", "project.yml", "Colorgain.xcodeproj", "Colorgain Style Sheet.html",
                 "AppIcon.icns", "Info.plist",
-                "build.sh", "make_dmg.sh", "make_pkg.sh", "signing.sh", "store_notary_credentials.sh",
+                "build.sh", "make_dmg.sh", "make_pkg.sh", "make_appstore.sh", "signing.sh", "store_notary_credentials.sh",
                 "COLOUR-MANAGEMENT.md", "HANDOVER.md", "PALETTE-PAGE-DESIGNS.md", "README.md", "scratch.md",
                 "Colour Management App Product Vision and Feature Deep Dive.md", "Research Software.md",
                 "MMFFDev-Colour-3.dmg", "MMFFDev-Colour-3.pkg",

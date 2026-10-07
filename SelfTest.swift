@@ -785,6 +785,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
         .allSatisfy { refused($0, books) }, "the helper refuses anything not named as a swatch file")
     check(refused("Brand.acb", books, 0) && refused("Brand.acb", books, AdobeHelperRules.maxBytes + 1) && !refused("Brand.acb", books, AdobeHelperRules.maxBytes),
           "the helper refuses an empty file and one too large to be a swatch file")
+    #if !APPSTORE
     check(AdobeHelper.state != .on || Bundle.main.bundlePath.hasPrefix("/Applications/"), "the helper is never on for a copy of the app outside Applications")
     let rules = "!#acl 1\nuser:BC476802-9355-40E5-862A-6A6DC80FA551:rick:501:allow,file_inherit,directory_inherit:write,delete_child\n"
     check(AdobeAccess.grantsAdding(rules, user: "rick", uid: 501) && !AdobeAccess.grantsAdding(rules, user: "rick", uid: 502)
@@ -795,6 +796,22 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(AdobeAccess.state == .nothingToDo || !AdobeAccess.folders.isEmpty, "Adobe access has nothing to set up where no Adobe app is installed")
     let permissionTitles = Permission.all.map { $0.title }
     check(permissionTitles == ["Screen Recording"], "the setup asks up front for Screen Recording alone; Documents is asked on the catalogue step")
+    #else
+    let kept = fm.temporaryDirectory.appendingPathComponent("mmffdev-colour3-kept-\(UUID().uuidString)")
+    try! fm.createDirectory(at: kept, withIntermediateDirectories: true)
+    FolderAccess.remember(kept)
+    check(FolderAccess.covers(kept) && FolderAccess.covers(kept.appendingPathComponent("inside/deeper")) && !FolderAccess.covers(fm.temporaryDirectory),
+          "a folder the user chose is kept hold of, and everything inside it with it")
+    FolderAccess.forget(kept)
+    check(!FolderAccess.covers(kept), "a folder let go of is not kept")
+    try? fm.removeItem(at: kept)
+    check(Store.allows(.none) && !Store.allows(.standard) && !Store.allows(.pro), "the Store build starts with no edition until one is bought")
+    #endif
+    #if !APPSTORE
+    check(Store.allows(.pro) && Store.edition == .pro, "the direct download is Pro throughout")
+    #endif
+    check(Edition.none < .standard && .standard < .pro && Store.edition(of: Store.proID) == .pro && Store.edition(of: "x") == .none,
+          "Pro includes Standard, and an unknown product gives nothing")
 
     print("project files")
     var projLib = Library()

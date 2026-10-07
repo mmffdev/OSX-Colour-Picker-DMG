@@ -288,6 +288,7 @@ final class LibraryController: NSObject {
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
                 let root = try ProjectFiles.adopt(url, for: p)
+                FolderAccess.remember(root)
                 let under = ProjectFiles.master(library: self.store.url, master: ProjectFiles.folder)
                 let inMaster = root.deletingLastPathComponent().resolvingSymlinksInPath() == under.resolvingSymlinksInPath()
                 let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : ProjectFiles.keep(root, beside: self.store.url)
@@ -321,6 +322,8 @@ final class LibraryController: NSObject {
         if let current = ProjectFiles.folder { panel.directoryURL = current }
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
+            if let old = ProjectFiles.folder, old != url { FolderAccess.forget(old) }
+            FolderAccess.remember(url)
             ProjectFiles.folder = url
             self.projectFilesWritten = [:]
             self.writeProjectFiles()
@@ -341,6 +344,7 @@ final class LibraryController: NSObject {
         panel.directoryURL = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder).deletingLastPathComponent()
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard r == .OK, let url = panel.url else { return }
+            FolderAccess.remember(url)
             self?.setProjectFolder(id, url.appendingPathComponent(filesystemName(p.name)))
             self?.flash("\u{201C}\(p.name)\u{201D} is kept in \(url.lastPathComponent)")
         }
@@ -997,10 +1001,33 @@ final class LibraryController: NSObject {
     }
 
     @objc func importFromV2() {
+        #if APPSTORE
+        // The sandbox cannot see the earlier app's folder: the user picks its library file.
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.json]
+        panel.prompt = "Import"
+        panel.message = "Choose the earlier app's library.json, in Library \u{25B8} Application Support \u{25B8} MMFFDev Colour 2"
+        panel.directoryURL = Catalogues.realApplicationSupport.appendingPathComponent("MMFFDev Colour 2")
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self = self, r == .OK, let url = panel.url else { return }
+            guard let data = try? Data(contentsOf: url), let previous = try? JSONDecoder.library.decode(Library.self, from: data) else {
+                self.flash("That is not an MMFFDev Colour 2 library"); return
+            }
+            self.importEarlier(previous)
+        }
+        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+        #else
         guard let previous = store.loadPrevious() ?? Catalogues.standard.store(for: Catalogues.mainName).loadPrevious() else {
             flash("No MMFFDev Colour 2 library found")
             return
         }
+        importEarlier(previous)
+        #endif
+    }
+
+    private func importEarlier(_ previous: Library) {
         var gained = LibraryChange()
         apply("Import Earlier Library") { lib in
             let merged = mergeLibraries(local: lib, remote: previous)
@@ -1162,7 +1189,33 @@ final class LibraryController: NSObject {
 
     /// Saves the palette where the system colour panel looks, so it shows up in every Mac app.
     func addToColourPanel(_ palettes: [ExportPalette]) {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Colors")
+        #if APPSTORE
+        // The sandbox turns ~/Library/Colors into the app's own copy, which no other app reads. The user
+        // points at the real one once; from then on it is remembered and the files go straight in.
+        let real = Catalogues.realHome.appendingPathComponent("Library/Colors")
+        if !FolderAccess.covers(real) {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.directoryURL = real
+            panel.prompt = "Add Here"
+            panel.message = "Choose the Colors folder in your Library, where the colour panel of every app looks"
+            let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+                guard let self = self, r == .OK, let url = panel.url else { return }
+                FolderAccess.remember(url)
+                self.writeColourLists(palettes, into: url)
+            }
+            if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
+            return
+        }
+        writeColourLists(palettes, into: real)
+        #else
+        writeColourLists(palettes, into: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Colors"))
+        #endif
+    }
+
+    private func writeColourLists(_ palettes: [ExportPalette], into dir: URL) {
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             for p in palettes where !p.colours.isEmpty {
@@ -1198,9 +1251,14 @@ final class LibraryController: NSObject {
                 flash("Added to \(destination.app) \u{2014} restart it to see \(files.count == 1 ? "the library" : "the libraries")")
             case .cancelled:
                 // Nothing was written. Finder can ask for the password itself if the files are dragged across.
+                // In the Store build this is the only way in: the sandbox cannot write to a folder the system owns.
                 NSWorkspace.shared.open(destination.folder)
                 NSWorkspace.shared.activateFileViewerSelecting(files)
+                #if APPSTORE
+                flash("Drag \(what) into \u{201C}\(destination.folder.lastPathComponent)\u{201D} of \(destination.app) \u{2014} Finder will ask for your password")
+                #else
                 flash("Not added \u{2014} drag \(what) into \u{201C}\(destination.folder.lastPathComponent)\u{201D} and Finder will ask for your password")
+                #endif
             }
         } catch {
             show(error)

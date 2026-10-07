@@ -52,7 +52,12 @@ final class ContentViewController: NSViewController {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
         let commit = info["ColourBuildCommit"] as? String
-        return "Release v\(version)" + (commit.map { "  \($0)" } ?? "")
+        #if APPSTORE
+        let edition = "AS Release"
+        #else
+        let edition = "Release"
+        #endif
+        return "\(edition) v\(version)" + (commit.map { "  \($0)" } ?? "")
     }
     /// The footer: a hairline, then the status line. Placed by the window, full width.
     let footer = NSView()
