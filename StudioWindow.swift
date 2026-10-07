@@ -142,7 +142,7 @@ final class StudioFrame: NSView {
         header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : i == 3 ? .projects : .palettes) }
         header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
-        header.onAcross = { [weak self] n in self?.page.grid.across = n }
+        page.onAcross = { [weak self] n in self?.page.grid.across = n }
         rail1.onPick = { [weak self] p in self?.go(p) }
         // A palette dropped on a member moves into its Palettes, and rail2 turns to that member to show it there.
         rail1.onDrop = { [weak self] palette, member in
@@ -520,7 +520,6 @@ final class StudioHeader: NSView, Overlay {
     private let tabs = ["Library", "Palettes", "Lab", "Projects"]
     private var tabRects: [NSRect] = []
     private let field = NSTextField(string: "")
-    private let slider = MiniSlider()
     static let baseline: CGFloat = 40
 
     init() {
@@ -537,8 +536,6 @@ final class StudioHeader: NSView, Overlay {
         field.action = #selector(searched)
         (field.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
         addSubview(field)
-        slider.onChange = { [weak self] v in self?.onAcross?(4 + Int((v * 4).rounded())) }
-        addSubview(slider)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -549,9 +546,8 @@ final class StudioHeader: NSView, Overlay {
         let g = Design.App.gutter
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        // Law 1: the field's text on the baseline, the slider's and the chip's bottoms on it.
+        // Law 1: the field's text on the baseline.
         field.frame = NSRect(x: col(7) - 2, y: Self.baseline - 16, width: span(3) + 4, height: 20)
-        slider.frame = NSRect(x: col(11), y: Self.baseline - 16, width: grid.column, height: 16)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -573,10 +569,10 @@ final class StudioHeader: NSView, Overlay {
         }
         // Search on a hairline across columns 7 to 9.
         hairline(x: col(7), y: b + 7, width: span(3), field.currentEditor() != nil ? Design.ink : Design.rule)
-        // Settings as a quiet word before the slider.
+        // Settings as a quiet word before the window marks.
         let right = col(12) + grid.column
         let settings = Design.attributed("Settings", live == nil ? .bodyStrong : .body, colour: live == nil ? Design.ink : Design.quiet)
-        let sx = col(11) - 24 - settings.size().width
+        let sx = right - 24 - 2 * 36 - 24 - settings.size().width
         settings.draw(x: sx, baseline: b)
         settingsRect = NSRect(x: sx - 8, y: 0, width: settings.size().width + 16, height: bounds.height)
         // The three window marks at the right end, each a clean 24 glyph hung from the baseline, no box: the arrow that
@@ -1105,6 +1101,9 @@ final class StudioPage: NSView {
     /// The way to make a member, under the header when the page lists members.
     private let newButton = SwissButton("New Project", .primary)
     var onNew: (() -> Void)?
+    /// How many tiles sit across: the slider in the page's header, right-aligned before the arrow and centred on it, shown with the tiles.
+    private let slider = MiniSlider()
+    var onAcross: ((Int) -> Void)?
     enum Section { case tiles, catalogues, schema }
     private var section = Section.tiles
     private var title = ""
@@ -1139,6 +1138,8 @@ final class StudioPage: NSView {
         newButton.isHidden = true
         newButton.target = self; newButton.action = #selector(makeNew)
         addSubview(newButton)
+        slider.onChange = { [weak self] v in self?.onAcross?(4 + Int((v * 4).rounded())) }
+        addSubview(slider)
         grid.onResize = { [weak self] in self?.needsLayout = true }
         settings.onResize = { [weak self] in self?.needsLayout = true }
         schema.onResize = { [weak self] in self?.needsLayout = true }
@@ -1176,6 +1177,11 @@ final class StudioPage: NSView {
         super.layout()
         var top = Self.headerHeight
         let u = Design.App.unit
+        // The slider: one column wide, its track through the arrow's centre, ending a step before the arrow.
+        slider.isHidden = section != .tiles
+        let arrowCentre = AreaHeader.headingBaseline - 5
+        let column = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
+        slider.frame = NSRect(x: bounds.width - insetRight - 16 - 24 - column, y: arrowCentre - 8, width: column, height: 16)
         if !newButton.isHidden {
             // The button's words on the first row's line; the tiles two units down.
             newButton.frame = NSRect(x: inset, y: top + Design.App.textBaseline - 22, width: newButton.intrinsicContentSize.width, height: 32)
