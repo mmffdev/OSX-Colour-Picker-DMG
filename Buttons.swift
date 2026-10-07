@@ -286,3 +286,116 @@ final class ToggleBar: NSControl {
         sendAction(action, to: target)
     }
 }
+
+// ---------- Colorgain's own buttons (the design guide, c_c_design_controls.md) ----------
+
+/// A button drawn to the design: ink fill for the one primary action on a screen, an ink outline for
+/// a secondary one, underlined text for a quiet one. Helvetica Neue Medium 13, 32 high, radius 4.
+/// The primary carries the arrow on its right behind a hairline.
+final class SwissButton: NSButton {
+    enum Kind { case primary, secondary, quiet }
+    let kind: Kind
+    enum Trailing { case none, arrow, tick, cross }
+    /// What sits in the cell at the right end, behind a hairline: the arrow for "go on", a tick or a cross for a state.
+    var trailing = Trailing.none { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    var arrow: Bool { get { trailing == .arrow } set { trailing = newValue ? .arrow : .none } }
+    /// A set width, so two buttons on different rows line up; nil takes the title's width.
+    var fixedWidth: CGFloat? { didSet { invalidateIntrinsicContentSize() } }
+    /// The diagonal arrow in front of the title: "go there", for a quiet button that leaves the page.
+    var leadingArrow = false { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    private static let arrowSize: CGFloat = 14, arrowGap: CGFloat = 6
+    private var hovering = false
+    private var tracking: NSTrackingArea?
+    static let height: CGFloat = 32
+
+    init(_ title: String, _ kind: Kind, target: AnyObject? = nil, action: Selector? = nil) {
+        self.kind = kind
+        super.init(frame: .zero)
+        self.title = title
+        self.target = target
+        self.action = action
+        isBordered = false
+        font = Design.Text.action.font()
+        setButtonType(.momentaryChange)
+        if kind == .primary { arrow = true }
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            setContentHuggingPriority(.required, for: axis)
+            setContentCompressionResistancePriority(.required, for: axis)
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+    override var fittingSize: NSSize { intrinsicContentSize }
+    override var isEnabled: Bool { didSet { needsDisplay = true } }
+
+    private var label: NSAttributedString { Design.attributed(title, .action, colour: ink) }
+    private var ink: NSColor {
+        if !isEnabled { return Design.ink.withAlphaComponent(0.35) }
+        return kind == .primary ? Design.paper : Design.ink
+    }
+    /// The baseline sits where the text's does, so a row of these aligns with text beside it.
+    override var firstBaselineOffsetFromTop: CGFloat { (Self.height - label.size().height) / 2 + Design.Text.action.font().ascender + 1 }
+    override var lastBaselineOffsetFromBottom: CGFloat { Self.height - firstBaselineOffsetFromTop }
+
+    override var intrinsicContentSize: NSSize {
+        let text = ceil(label.size().width)
+        switch kind {
+        case .quiet: return NSSize(width: text + (leadingArrow ? Self.arrowSize + Self.arrowGap : 0), height: Self.height)
+        case .secondary, .primary:
+            return NSSize(width: fixedWidth ?? (text + 28 + (trailing != .none ? 22 + 10 : 0)), height: Self.height)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t); tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds
+        let box = NSBezierPath(rect: r)
+        switch kind {
+        case .primary:
+            let fill = !isEnabled ? Design.ink.withAlphaComponent(0.35) : isHighlighted ? NSColor.black : hovering ? Design.hex("#2C2C2C") : Design.ink
+            fill.setFill(); box.fill()
+        case .secondary:
+            if hovering && isEnabled { Design.mist.setFill(); box.fill() }
+            Design.ink.withAlphaComponent(isEnabled ? 1 : 0.35).setStroke(); box.lineWidth = 1
+            NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)).stroke()
+        case .quiet: break
+        }
+        let text = label
+        let size = text.size()
+        let y = (r.height - size.height) / 2
+        let lead: CGFloat = kind == .quiet && leadingArrow ? Self.arrowSize + Self.arrowGap : 0
+        let x: CGFloat = (kind == .quiet ? 0 : 14) + lead
+        text.draw(at: NSPoint(x: x, y: y))
+        if kind == .quiet {
+            if leadingArrow {
+                Design.arrow(Self.arrowSize, colour: ink).draw(in: NSRect(x: 0, y: (r.height - Self.arrowSize) / 2, width: Self.arrowSize, height: Self.arrowSize),
+                                                              from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
+            ink.setStroke()
+            let u = NSBezierPath(); u.move(to: NSPoint(x: lead, y: y + size.height + 1.5)); u.line(to: NSPoint(x: lead + size.width, y: y + size.height + 1.5)); u.lineWidth = 1; u.stroke()
+        }
+        if kind != .quiet && trailing != .none {
+            let cell = NSRect(x: r.maxX - 22, y: 0, width: 22, height: r.height)
+            (kind == .primary ? Design.paper.withAlphaComponent(0.18) : Design.ink.withAlphaComponent(0.18)).setStroke()
+            let l = NSBezierPath(); l.move(to: NSPoint(x: cell.minX, y: 8)); l.line(to: NSPoint(x: cell.minX, y: r.height - 8)); l.lineWidth = 1; l.stroke()
+            let glyph = trailing == .arrow ? "\u{2192}" : trailing == .tick ? "\u{2713}" : "\u{2715}"
+            let a = Design.attributed(glyph, .action, colour: ink)
+            let s = a.size()
+            a.draw(at: NSPoint(x: cell.midX - s.width / 2, y: (r.height - s.height) / 2))
+        }
+        if window?.firstResponder === self, NSApp.isFullKeyboardAccessEnabled {
+            Design.orange.setStroke()
+            let f = NSBezierPath(rect: r.insetBy(dx: -2, dy: -2)); f.lineWidth = 2; f.stroke()
+        }
+    }
+}

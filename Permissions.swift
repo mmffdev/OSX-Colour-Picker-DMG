@@ -17,15 +17,10 @@ struct Permission {
     /// What the button does. Throws to show an error.
     let act: () throws -> Void
 
-    /// The Store build reaches folders through the open panel and stages Adobe files for a drag, so
-    /// Screen Recording is the one thing it has to ask macOS for.
-    static var all: [Permission] {
-        #if APPSTORE
-        return [screenRecording]
-        #else
-        return [screenRecording, documents, adobe]
-        #endif
-    }
+    /// What the setup asks up front: Screen Recording alone, since it needs a restart. Documents is
+    /// asked where it belongs, on the catalogue step; the Adobe helper is leaving both editions
+    /// (Rick, 2026-10-07) and its row went with it.
+    static var all: [Permission] { [screenRecording] }
 
     /// Sample reads the screen through ScreenCaptureKit. macOS asks once, and only applies the
     /// answer to a fresh copy of the app, so a grant made now needs a restart.
@@ -37,19 +32,19 @@ struct Permission {
         },
         detail: {
             if ScreenAccess.granted {
-                return ScreenAccess.restartNeeded ? "Allowed. macOS applies it when \(Brand.name) restarts."
-                    : "On. Sample turns any part of the screen into a palette."
+                return ScreenAccess.restartNeeded ? "Allowed. It applies when \(Brand.name) restarts. Turn it off again under Screen Recording in System Settings."
+                    : "On. Sample turns any part of the screen into a palette. Turn it off again under Screen Recording in System Settings."
             }
             return ScreenAccess.asked
-                ? "Switch \(Brand.name) on in System Settings \u{25B8} Privacy & Security \u{25B8} Screen & System Audio Recording. macOS applies it after a restart."
-                : "Lets Sample turn any part of the screen into a palette. macOS needs \(Brand.name) restarted once it is allowed."
+                ? "Switch \(Brand.name) on under Screen Recording in System Settings, then restart it once."
+                : "Lets Sample turn any part of the screen into a palette. macOS asks once, then needs one restart."
         },
         button: {
-            if ScreenAccess.granted { return ScreenAccess.restartNeeded ? "Restart Now" : nil }
+            if ScreenAccess.granted { return ScreenAccess.restartNeeded ? "Restart Now" : "Turn Off\u{2026}" }
             return ScreenAccess.asked ? "Open System Settings" : "Allow\u{2026}"
         },
         act: {
-            if ScreenAccess.granted { if ScreenAccess.restartNeeded { Relaunch.now() }; return }
+            if ScreenAccess.granted { if ScreenAccess.restartNeeded { Relaunch.now() } else { ScreenAccess.openSettings() }; return }
             if ScreenAccess.asked { ScreenAccess.openSettings() } else { ScreenAccess.ask() }
         })
 
@@ -57,15 +52,22 @@ struct Permission {
     /// here, the question comes while the user is reading why, instead of out of nowhere later.
     static let documents = Permission(
         title: "Documents Folder",
-        state: { DocumentsAccess.allowed ? .on : DocumentsAccess.refused ? .waiting : .off },
+        state: { DocumentsAccess.current },
         detail: {
-            if DocumentsAccess.allowed { return "On. Catalogues and \(Brand.name)'s files can live in Documents." }
-            return DocumentsAccess.refused
-                ? "Switch \(Brand.name) on in System Settings \u{25B8} Privacy & Security \u{25B8} Files & Folders, or keep your catalogue somewhere else."
-                : "Your catalogue goes in Documents unless you choose another folder. macOS asks once whether \(Brand.name) may use it."
+            switch DocumentsAccess.current {
+            case .on: return "On. Your catalogue can live in Documents. Turn it off again under Files & Folders in System Settings."
+            case .waiting: return "Switch \(Brand.name) on under Files & Folders in System Settings, or keep your catalogue elsewhere."
+            default: return "Your catalogue goes in Documents unless you choose elsewhere. macOS asks once whether \(Brand.name) may use it."
+            }
         },
-        button: { DocumentsAccess.allowed ? nil : DocumentsAccess.refused ? "Open System Settings" : "Allow\u{2026}" },
-        act: { DocumentsAccess.refused ? DocumentsAccess.openSettings() : DocumentsAccess.ask() })
+        button: {
+            switch DocumentsAccess.current {
+            case .on: return "Turn Off\u{2026}"
+            case .waiting: return "Open System Settings"
+            default: return "Allow\u{2026}"
+            }
+        },
+        act: { DocumentsAccess.current == .off ? DocumentsAccess.ask() : DocumentsAccess.openSettings() })
 
     #if !APPSTORE
     static let adobe = Permission(
@@ -80,13 +82,10 @@ struct Permission {
         },
         detail: {
             switch AdobeAccess.state {
-            case .on: return "On. Palettes go into Photoshop, Illustrator and InDesign's library folders without a password."
-            case .waiting: return "Waiting for you to allow MMFFDev Colour 3 in System Settings \u{25B8} General \u{25B8} Login Items."
-            case .off where AdobeAccess.way == .helper:
-                return "Adding a palette to an Adobe app asks for your password each time. Allow it once and it never asks again: a small helper that can only write swatch files into Adobe's library folders."
-            case .off:
-                return "Adding a palette to an Adobe app asks for your password each time. Allow it once and it never asks again: your account is given leave to add files to Adobe's library folders. Needs doing again after an Adobe upgrade."
-            case .nothingToDo: return "No Adobe apps were found on this Mac. Nothing to set up."
+            case .on: return "On. Palettes go into Adobe's library folders without a password. Turn Off takes that back."
+            case .waiting: return "Allow \(Brand.name) under Login Items in System Settings, and it never asks for a password again."
+            case .off: return "Adding a palette to an Adobe app asks for your password. Allow it once and it never asks again."
+            case .nothingToDo: return "No Adobe apps were found on this Mac. There is nothing to set up."
             }
         },
         button: {
@@ -171,6 +170,15 @@ enum DocumentsAccess {
         get { preferences.bool(forKey: "documentsRefused") }
         set { preferences.set(newValue, forKey: "documentsRefused") }
     }
+    /// Where things stand now. Once macOS has been asked, reading the folder answers without a prompt,
+    /// so the answer is read afresh each time: a switch flipped in System Settings shows at once.
+    static var current: PermissionState {
+        guard allowed || refused else { return .off }
+        let ok = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) != nil
+        allowed = ok; refused = !ok
+        return ok ? .on : .waiting
+    }
+
     /// Reading the folder is what makes macOS ask, and it waits for the answer, so it is read off the main thread.
     static func ask() {
         let path = folder.path
@@ -185,7 +193,6 @@ enum DocumentsAccess {
     }
     static func openSettings() {
         if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") { NSWorkspace.shared.open(u) }
-        refused = false   // read again on the next press, once the switch may have been turned on
         NotificationCenter.default.post(name: .permissionsChanged, object: nil)
     }
 }
@@ -193,53 +200,52 @@ enum DocumentsAccess {
 /// One permission as a row. `refresh()` reads the state again.
 final class PermissionRow: NSView {
     private let permission: Permission
-    private let light = NSTextField(labelWithString: "\u{25CF}")
+    private let line = NSView()
     private let detail = NSTextField(wrappingLabelWithString: "")
-    private let button = NSButton(title: "", target: nil, action: nil)
+    private let button = SwissButton("", .secondary)
+    /// The width of the setup's lead button, so the two line up on the right.
+    static let buttonWidth: CGFloat = 176
     var onError: ((Error) -> Void)?
 
     init(_ p: Permission, textWidth: CGFloat = 330) {
         permission = p
         super.init(frame: .zero)
-        let title = NSTextField(labelWithString: p.title)
-        title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        detail.font = NSFont.systemFont(ofSize: 11)
-        detail.textColor = .secondaryLabelColor
+        let title = Design.text(p.title, .heading)
+        detail.font = Design.Text.caption.font()
+        detail.textColor = Design.quiet
         detail.preferredMaxLayoutWidth = textWidth
-        light.font = NSFont.systemFont(ofSize: 14)
-        light.setContentHuggingPriority(.required, for: .horizontal)
-        button.bezelStyle = .rounded
+        line.wantsLayer = true
+        button.fixedWidth = Self.buttonWidth
         button.target = self
         button.action = #selector(pressed)
-        button.setContentHuggingPriority(.required, for: .horizontal)
         let words = NSStackView(views: [title, detail])
         words.orientation = .vertical
         words.alignment = .leading
         words.spacing = 3
-        let row = NSStackView(views: [light, words, button])
+        let row = NSStackView(views: [words, NSView(), button])
         row.orientation = .horizontal
-        row.alignment = .top
+        row.alignment = .centerY
         row.spacing = 10
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        for v in [row, line] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
-            row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
             words.widthAnchor.constraint(equalToConstant: textWidth),
+            line.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 12),
+            line.leadingAnchor.constraint(equalTo: leadingAnchor), line.trailingAnchor.constraint(equalTo: trailingAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1), line.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
 
     func refresh() {
-        switch permission.state() {
-        case .on: light.textColor = .systemGreen
-        case .waiting: light.textColor = .systemOrange
-        case .off: light.textColor = .systemRed
-        case .unavailable: light.textColor = .tertiaryLabelColor
-        }
-        detail.stringValue = permission.detail()
+        // The hairline under the row says where things stand: ink when allowed, the quiet grey when not,
+        // the accent while macOS is being asked.
+        line.layer?.backgroundColor = Design.ink.cgColor
+        detail.attributedStringValue = Design.attributed(permission.detail(), .caption, colour: Design.quiet)
         if let t = permission.button() { button.title = t; button.isHidden = false } else { button.isHidden = true }
+        button.trailing = permission.state() == .on ? .tick : .cross
     }
 
     @objc private func pressed() {

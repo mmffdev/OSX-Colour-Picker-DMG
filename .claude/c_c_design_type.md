@@ -18,7 +18,7 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 | Display | 200 | 88 / 0.92 | −4.5% | one per screen at most |
 | Title | 300 | 48 / 1.0 | −3% | two-tone: first line ink, second line soft grey |
 | Headline | 400 | 30 / 1.1 | −1.8% | |
-| Heading | 500 | 17 / 1.25 | −0.5% | the target glyph in front |
+| Heading | 500 | 17 / 1.25 | −0.5% | |
 | Lead | 300 | 20 / 1.38 | −1% | at most 34em wide |
 | Body | 400 | 13 / 1.55 | 0 | 60 characters wide; Body Strong is 500 |
 | Caption | 400 | 11 / 1.45 | 0 | quiet grey; paths and metadata |
@@ -28,8 +28,8 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 
 11 is the floor. In the app's `TextSize`, `caption` 11, `body` 13, `title` stays the page title; the wizard's larger sizes are its own.
 
-## Two marks
+## One mark
 
-**The target** ⌖: a 6.5-radius ring, a filled 2.2 centre, hairline cross through both. Sits in front of every heading in the wizard, at 0.62em, 0.32em gap. Says "you are here".
+No target glyph: tried on 2026-10-07 and dropped, it read as a crosshair.
 
 **The diagonal arrow** ↗: one thin stroke at 45°, Müller-Brockmann's "go there". Top right of a section, the Open button, the go-mark on headers and rails. Stroke 1.1 at 24pt and above, 1.3 at 16.

@@ -14,6 +14,7 @@ Every gap is a multiple of 4: 4, 8, 12, 16, 24, 32, 48, 64, 96. Within a group 8
 2. **Left to the column.** Text starts on a column edge, never indented inside it.
 3. **Right to the column.** Numerals and actions sit flush to their block's right edge.
 4. **One axis per row.** A row is either text on a baseline or blocks on a bottom edge; never mixed heights centred.
+5. **Across the top, between columns.** Where a title sits beside a column of words, the capitals of the words' first line sit level with the capitals of the title, measured from the fonts, not the line boxes.
 
 ## Three page layouts
 
