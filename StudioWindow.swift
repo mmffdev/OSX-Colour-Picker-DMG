@@ -45,10 +45,24 @@ final class StudioWindowController: NSWindowController {
         let project = args.firstIndex(of: "--project").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
-        else { c.frame.go(args.contains("--settings") ? .settings : args.contains("--palettes") ? .palettes : .catalogue) }
+        else { c.frame.go(args.contains("--settings") ? .settings : args.contains("--schema") ? .schema : args.contains("--projects") ? .projects : args.contains("--palettes") ? .palettes : .catalogue) }
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        // The controller's questions come up on the window's own panels, not the old window's.
+        library.onPrompt = { [weak c] p in
+            SwissConfirm.name(over: c?.window, title: p.title, note: p.message, placeholder: p.placeholder, confirm: p.confirm, check: p.check) { p.done($0) }
+        }
+        library.onAsk = { [weak c] title, message, choices in
+            SwissConfirm.choose(over: c?.window, title: title, note: message, choices: choices.map { $0.title }) { i in if choices.indices.contains(i) { choices[i].run() } }
+        }
+        library.onShow = { [weak c] s, _ in
+            switch s {
+            case .overview(let id): c?.frame.go(.project(id))
+            case .palette(let id): c?.frame.go(.palette(id))
+            default: break
+            }
+        }
         c.window?.makeFirstResponder(c.frame)   // not the search field: nothing blinks until it is wanted
     }
 }
@@ -57,7 +71,7 @@ final class StudioWindowController: NSWindowController {
 
 /// Text is placed by its baseline, never its box, so a row of different sizes sits level (the
 /// guide's first law). All the window's views are flipped: y grows downwards, as the grid reads.
-private extension NSAttributedString {
+extension NSAttributedString {
     var baselineFont: NSFont { length > 0 ? attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? Design.Text.body.font() : Design.Text.body.font() }
     func draw(x: CGFloat, baseline: CGFloat) { if length > 0 { draw(at: NSPoint(x: x, y: baseline - baselineFont.ascender)) } }
     func draw(right: CGFloat, baseline: CGFloat) { draw(x: right - size().width, baseline: baseline) }
@@ -72,8 +86,8 @@ private extension NSAttributedString {
     }
 }
 
-private func fill(_ r: NSRect, _ c: NSColor) { c.setFill(); r.fill() }
-private func hairline(x: CGFloat, y: CGFloat, width: CGFloat, _ c: NSColor = Design.rule) { fill(NSRect(x: x, y: y, width: width, height: 1), c) }
+func fill(_ r: NSRect, _ c: NSColor) { c.setFill(); r.fill() }
+func hairline(x: CGFloat, y: CGFloat, width: CGFloat, _ c: NSColor = Design.rule) { fill(NSRect(x: x, y: y, width: width, height: 1), c) }
 
 /// "Just now", "12 min", "3 hr", "Yesterday", then the day.
 private func when(_ d: Date) -> String {
@@ -94,7 +108,7 @@ final class StudioFrame: NSView {
 
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
-    enum Place: Equatable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), palette(UUID), palettes, settings }
+    enum Place: Equatable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), palette(UUID), palettes, projects, settings, schema }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -111,7 +125,7 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [header, rail1, rail2, page, history, footer] { addSubview(v) }
-        header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : .palettes) }
+        header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : i == 3 ? .projects : .palettes) }
         header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
         header.onAcross = { [weak self] n in self?.page.grid.across = n }
@@ -124,9 +138,15 @@ final class StudioFrame: NSView {
         }
         rail2.onPick = { [weak self] p in self?.go(p) }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
-        page.grid.onOpen = { [weak self] id in self?.go(.palette(id)) }
+        page.grid.onOpen = { [weak self] id in
+            guard let self = self else { return }
+            self.go(self.library.library.project(id) != nil ? .project(id) : .palette(id))
+        }
         page.settings.library = library
         page.settings.onChange = { [weak self] in self?.reload() }
+        page.schema.library = library
+        page.schema.onChange = { [weak self] in self?.reload() }
+        page.onNew = { [weak self] in self?.newMember() }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -193,10 +213,25 @@ final class StudioFrame: NSView {
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings: return nil; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema: return nil; case .projects: return 3; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
+
+    /// A member made where the page stands: in the collection or folder in view, else the first collection; named on the window's own panel.
+    private func newMember() {
+        let all = SchemaTrial.collections
+        var c = all[0], folder: UUID? = nil
+        switch place {
+        case .collection(let id): c = all.first { $0.id == id } ?? c
+        case .folder(let id, let f): c = all.first { $0.id == id } ?? c; folder = f
+        default: break
+        }
+        library.startProject(moving: nil, called: SchemaTrial.memberName(of: c), in: c) { [weak self] id in
+            SchemaTrial.place(id, in: c.id, folder: folder)
+            self?.go(.project(id))
+        }
+    }
 
     /// The members of a collection, in rail1's order; with `folder`, those in that folder, or those in none when nil.
     private func members(of c: SchemaCollection, folder: UUID?? = .none) -> [Project] {
@@ -271,9 +306,18 @@ final class StudioFrame: NSView {
         case .project(let id):
             guard let project = lib.project(id) else { return }
             return fillStack(of: project, in: lib)
-        case .settings:
+        case .settings, .schema:
             heading = "Settings"; labels = ("Section", "")
-            rows = [.item("Catalogues", nil, 0, .settings, true)]
+            rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema)]
+        case .projects:
+            heading = "Members"; labels = ("Collection", "Palettes")
+            for c in SchemaTrial.collections {
+                rows.append(.group(c.name, 0))
+                if c.folderName != nil {
+                    for f in c.folders { rows.append(.group(f.name, 1)); rows += memberRows(members(of: c, folder: .some(f.id))) }
+                }
+                rows += memberRows(members(of: c, folder: .some(nil)))
+            }
         }
         rail2.set(heading: heading, labels: labels, rows: rows)
     }
@@ -343,8 +387,27 @@ final class StudioFrame: NSView {
             return (cards(list), list.reduce(0) { $0 + $1.entries.count })
         }
         var items: [TileGrid.Item] = [], title = "", meta = ("", "")
-        page.showSettings(false)
+        page.show(.tiles)
+        // A new member can be made wherever members are listed: the Members view, a collection, a folder.
+        func newWord(_ c: SchemaCollection) -> String { "New " + SchemaTrial.memberName(of: c) }
+        func memberCards(_ list: [Project]) -> [TileGrid.Item] {
+            list.compactMap { p in
+                let own = palettes(lib.palettes(in: p.id))
+                var seen = Set<String>(), hexes: [String] = []
+                for h in own.flatMap({ $0.entries.map { $0.hex } }) where !seen.contains(h) { seen.insert(h); hexes.append(h) }
+                return keep(p.name, nil) ? TileGrid.Item(title: p.name, caption: plural(own.count, "palette"), colours: hexes.prefix(8).map { Design.hex($0) }, hex: nil, id: p.id) : nil
+            }
+        }
         switch place {
+        case .projects:
+            let all = SchemaTrial.collections
+            items = memberCards(lib.orderedProjects)
+            title = "Members"; meta = (plural(items.count, "member"), plural(all.count, "collection"))
+            page.showNew(newWord(all[0]))
+        case .schema:
+            let all = SchemaTrial.collections
+            title = "Schema"; meta = (plural(all.count, "collection"), plural(lib.projects.count, "member"))
+            page.show(.schema)
         case .catalogue:
             items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
             title = "All Colours"; meta = ("\(items.count) colours", library.paletteSort.title)
@@ -377,7 +440,12 @@ final class StudioFrame: NSView {
         case .settings:
             let n = library.availableCatalogues().count
             title = "Catalogues"; meta = (library.catalogue, "\(n) " + (n == 1 ? "catalogue" : "catalogues"))
-            page.showSettings(true)
+            page.show(.catalogues)
+        }
+        switch place {
+        case .collection(let id): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)) }
+        case .folder(let id, _): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)) }
+        default: break
         }
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
@@ -463,7 +531,7 @@ final class StudioHeader: NSView {
         var x = col(3)
         tabRects = []
         for (i, t) in tabs.enumerated() {
-            let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : i < 2 ? Design.quiet : Design.soft)
+            let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : i == 2 ? Design.soft : Design.quiet)
             a.draw(x: x, baseline: b)
             let w = a.size().width
             tabRects.append(NSRect(x: x - 8, y: 0, width: w + 16, height: bounds.height))
@@ -487,7 +555,7 @@ final class StudioHeader: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if let i = tabRects.firstIndex(where: { $0.contains(p) }), i < 2 { onTab?(i); return }
+        if let i = tabRects.firstIndex(where: { $0.contains(p) }), i != 2 { onTab?(i); return }
         if settingsRect.contains(p) { onSettings?(); return }
         super.mouseDown(with: event)
     }
@@ -922,9 +990,15 @@ final class StudioPage: NSView {
     var inset: CGFloat = 8 { didSet { needsLayout = true } }
     let grid = TileGrid()
     let settings = CatalogueSettings()
+    let schema = SchemaSettings()
     private let scroll = NSScrollView()
     /// The settings scroll as one piece, the open accordion and all, when they outgrow the page.
-    private let settingsScroll = NSScrollView()
+    private let settingsScroll = NSScrollView(), schemaScroll = NSScrollView()
+    /// The way to make a member, under the header when the page lists members.
+    private let newButton = SwissButton("New Project", .primary)
+    var onNew: (() -> Void)?
+    enum Section { case tiles, catalogues, schema }
+    private var section = Section.tiles
     private var title = ""
     private var meta: (String, String) = ("", "")
     /// The area header, then 16 clear before the tiles.
@@ -947,17 +1021,39 @@ final class StudioPage: NSView {
         settingsScroll.documentView = settings
         settingsScroll.isHidden = true
         addSubview(settingsScroll)
+        schemaScroll.drawsBackground = false
+        schemaScroll.hasVerticalScroller = true
+        schemaScroll.autohidesScrollers = true
+        schemaScroll.scrollerStyle = .overlay
+        schemaScroll.documentView = schema
+        schemaScroll.isHidden = true
+        addSubview(schemaScroll)
+        newButton.isHidden = true
+        newButton.target = self; newButton.action = #selector(makeNew)
+        addSubview(newButton)
         grid.onResize = { [weak self] in self?.needsLayout = true }
         settings.onResize = { [weak self] in self?.needsLayout = true }
+        schema.onResize = { [weak self] in self?.needsLayout = true }
     }
 
-    /// The Catalogues settings take the page in place of the tiles.
-    func showSettings(_ on: Bool) {
-        settingsScroll.isHidden = !on
-        scroll.isHidden = on
-        if on { settings.reload() }
+    /// What the page shows: the tiles, the Catalogues settings or the Schema settings, one in place of the others.
+    func show(_ s: Section) {
+        section = s
+        scroll.isHidden = s != .tiles
+        settingsScroll.isHidden = s != .catalogues
+        schemaScroll.isHidden = s != .schema
+        if s == .catalogues { settings.reload() }
+        if s == .schema { schema.reload() }
+        newButton.isHidden = true
         needsLayout = true
     }
+    /// The New button under the header, with its word; nil takes it away.
+    func showNew(_ title: String?) {
+        newButton.isHidden = title == nil
+        if let t = title { newButton.title = t; newButton.invalidateIntrinsicContentSize() }
+        needsLayout = true
+    }
+    @objc private func makeNew() { onNew?() }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
@@ -970,12 +1066,20 @@ final class StudioPage: NSView {
 
     override func layout() {
         super.layout()
-        let top = Self.headerHeight
+        var top = Self.headerHeight
+        if !newButton.isHidden {
+            newButton.frame = NSRect(x: inset, y: top, width: newButton.intrinsicContentSize.width, height: 32)
+            top += 32 + 16
+        }
         scroll.frame = NSRect(x: inset, y: top, width: bounds.width - 2 * inset, height: bounds.height - top)
         settingsScroll.frame = scroll.frame
         let sh = settings.height(forWidth: scroll.frame.width)
         settings.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, sh))
         settingsScroll.verticalScrollElasticity = sh > scroll.frame.height ? .allowed : .none
+        schemaScroll.frame = scroll.frame
+        let kh = schema.height(forWidth: scroll.frame.width)
+        schema.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, kh))
+        schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
         grid.width = scroll.frame.width
         grid.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none

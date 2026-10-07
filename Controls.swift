@@ -277,6 +277,19 @@ enum SwissConfirm {
         panel.present(over: window) { _ in }
     }
 
+    /// A name asked for: a field on a hairline, the one button primary, a word under the field when the name will not do.
+    static func name(over window: NSWindow?, title: String, note: String, placeholder: String, confirm: String, check: @escaping (String) -> String?, then: @escaping (String) -> Void) {
+        let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: confirm, naming: (placeholder, check))
+        panel.present(over: window) { _ in then(panel.text) }
+    }
+
+    /// A choice between ways on: rows to pick from, Go as the one button; Escape is the last way, the one that changes nothing.
+    static func choose(over window: NSWindow?, title: String, note: String, choices: [String], then: @escaping (Int) -> Void) {
+        let panel = ConfirmPanel(title: title, note: note, commit: nil, options: choices, must: "Go", escapes: true)
+        panel.present(over: window) { i in then(i) }
+        panel.onEscape = { then(choices.count - 1) }
+    }
+
     /// A word that must be acted on: the one button is the act, primary, and Escape does nothing.
     static func require(over window: NSWindow?, title: String, note: String, action: String, then: @escaping () -> Void) {
         let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: action)
@@ -290,11 +303,29 @@ enum SwissConfirm {
         private let button: SwissButton
         private let commit: String?
         private let must: String?
+        private let escapes: Bool
+        private let field: NSTextField?
+        private let problem = Design.text("", .caption, colour: Design.orange)
+        private let check: ((String) -> String?)?
+        var onEscape: (() -> Void)?
+        var text: String { field?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
         private weak var host: NSWindow?
 
-        init(title: String, note: String, commit: String?, options: [String], must: String? = nil) {
+        init(title: String, note: String, commit: String?, options: [String], must: String? = nil, escapes: Bool = false, naming: (String, (String) -> String?)? = nil) {
             self.commit = commit
             self.must = must
+            self.escapes = escapes
+            self.check = naming?.1
+            if let (placeholder, _) = naming {
+                let f = NSTextField(string: "")
+                f.isBordered = false
+                f.drawsBackground = false
+                f.focusRingType = .none
+                f.font = Design.font(17, .regular)
+                f.textColor = Design.ink
+                f.placeholderAttributedString = Design.attributed(placeholder, .headline, size: 17, colour: Design.soft)
+                field = f
+            } else { field = nil }
             button = must.map { SwissButton($0, .primary) } ?? SwissButton(commit == nil ? "Close" : "Keep It", .secondary)
             choices = options.isEmpty ? nil : ChoiceRows(options)
             let w: CGFloat = 560, margin: CGFloat = 40
@@ -316,12 +347,20 @@ enum SwissConfirm {
             button.fixedWidth = bw
             for v in [heading, words, slide, button] { card.addSubview(v) }
             if let c = choices { card.addSubview(c) }
+            if let f = field { f.target = self; f.action = #selector(pressed); card.addSubview(f); card.addSubview(problem); card.addSubview(Design.hairline(Design.rule)) }
             // Placed by frame, top down: the title, the note, the choices, the slide, the button on its own row.
             let hs = heading.attributedStringValue.size()
             heading.frame = NSRect(x: margin, y: margin, width: w - 2 * margin, height: hs.height + 2)
             let wh = words.attributedStringValue.boundingRect(with: NSSize(width: w - 2 * margin, height: 400), options: [.usesLineFragmentOrigin]).height
             words.frame = NSRect(x: margin, y: heading.frame.maxY + 12, width: w - 2 * margin, height: wh + 4)
             var y = words.frame.maxY + 28
+            if let f = field, let line = card.subviews.last {
+                // The field at 17 on a hairline, the problem's line under it.
+                f.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: 24)
+                line.frame = NSRect(x: margin, y: y + 28, width: w - 2 * margin, height: 1)
+                problem.frame = NSRect(x: margin, y: y + 34, width: w - 2 * margin, height: 16)
+                y += 28 + 22 + 16
+            }
             if let c = choices {
                 c.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: c.height)
                 y = c.frame.maxY + 28
@@ -344,11 +383,21 @@ enum SwissConfirm {
         }
 
         @objc private func pressed() {
+            if let check = check {
+                // The name must do before the panel goes: the problem is said under the field, and the field keeps the focus.
+                if let wrong = check(text) ?? (text.isEmpty ? "Give it a name." : nil) {
+                    problem.attributedStringValue = Design.attributed(wrong, .caption, colour: Design.orange)
+                    makeFirstResponder(field)
+                    return
+                }
+            }
             let go = must != nil || (commit != nil && slide.armed)
             close(then: go)
         }
 
-        override func cancelOperation(_ sender: Any?) { if must == nil { close(then: false) } }
+        override func cancelOperation(_ sender: Any?) {
+            if escapes { close(then: false); onEscape?() } else if must == nil { close(then: false) }
+        }
         override var canBecomeKey: Bool { true }
 
         /// The veil over the host while the panel is up: a half-ink window that takes every click.
@@ -370,6 +419,7 @@ enum SwissConfirm {
             setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.midY - frame.height / 2))
             w.addChildWindow(self, ordered: .above)
             makeKeyAndOrderFront(nil)
+            if let f = field { makeFirstResponder(f) }
         }
 
         private func close(then go: Bool) {
