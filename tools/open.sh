@@ -6,6 +6,7 @@
 #   tools/open.sh new permissions     the same, and macOS also forgets every permission it gave the
 #                                     app (Screen Recording, Documents), so it asks again; this one
 #                                     reaches your own copy too, which asks again next time you open it
+#   tools/open.sh new 3               a new user, opened straight at setup step 3
 #   tools/open.sh me                  the installed app as you, with your catalogues
 #
 # A new user here keeps everything in the throwaway home, so it never asks for Documents; the
@@ -26,7 +27,8 @@ case "${1:-}" in
     fi
     # Through Launch Services, as a customer opens it, so macOS asks in the app's own name. The app's
     # own --new-user wipes and makes the throwaway home, the same as ticking it in Xcode's scheme.
-    open -n -a "$APP" --args --new-user
+    STEP=""; case "${2:-}" in [1-9]) STEP="--step $2";; esac
+    open -n -a "$APP" --args --new-user $STEP
     echo "Opened as a new user, in a throwaway home that is wiped on the next new-user open."
     ;;
   me)

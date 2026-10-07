@@ -1,4 +1,7 @@
 import AppKit
+#if DEBUG
+import SwiftUI
+#endif
 import UniformTypeIdentifiers
 
 // ---------- The setup assistant ----------
@@ -23,6 +26,15 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     /// Called once the assistant has done its work, with the catalogue to open.
     private let completion: (String) -> Void
     private static var keep: SetupAssistant?
+
+    /// The setup's frame at one step, for Xcode's canvas: open this file, show the canvas
+    /// (Editor ▸ Canvas), and every edit renders there without relaunching the app.
+    static func preview(step: Int) -> NSView {
+        let c = SetupAssistant(completion: { _ in })
+        keep = c
+        c.show(step: max(0, min(step - 1, Step.halo)))
+        return c.window!.contentView!
+    }
 
     static func show(completion: @escaping (String) -> Void) {
         let c = SetupAssistant(completion: completion)
@@ -72,25 +84,31 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     // MARK: The window
 
-    private let setup = SetupFrame(steps: SetupAssistant.steps, ink: Brand.master)
-    private var titleLabel: NSTextField { setup.titleLabel }
+    private let setup = SetupFrame(steps: SetupAssistant.steps)
     private var body: NSStackView { setup.body }
-    private var back: ThemedButton { setup.back }
-    private var next: ThemedButton { setup.primary }
-    private var skip: ThemedButton { setup.skip }
+    /// The width the words column gives a step's pieces.
+    private var width: CGFloat { setup.wide ? Design.Wizard.span(1, 12) : Design.Wizard.span(7, 12) }
+    private var back: SwissButton { setup.back }
+    private var next: SwissButton { setup.primary }
+    private var skip: SwissButton { setup.skip }
 
     private init(completion: @escaping (String) -> Void) {
         self.completion = completion
-        let win = NSWindow(contentRect: NSRect(origin: .zero, size: SetupFrame.size), styleMask: [.titled], backing: .buffered, defer: false)
-        win.title = "Set Up \(Brand.name)"
+        let win = SetupWindow(contentRect: NSRect(origin: .zero, size: Design.Wizard.size), styleMask: [.borderless], backing: .buffered, defer: false)
+        win.title = "Set Up \(Brand.edition)"
         win.isReleasedWhenClosed = false
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = true
+        win.isMovableByWindowBackground = true
         super.init(window: win)
         win.contentView = setup
-        for b in [back, next, skip] { b.target = self }
+        for b in [back, next, skip, setup.skipSetup] { b.target = self }
         back.action = #selector(goBack)
         next.action = #selector(goOn)
         skip.action = #selector(skipStep)
-        setup.strip.onPick = { [weak self] i in
+        setup.skipSetup.action = #selector(skipSetup)
+        setup.cards.onPick = { [weak self] i in
             guard let self = self, self.step != Step.halo else { return }
             self.show(step: i)
         }
@@ -98,6 +116,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(permissionsChanged), name: NSApplication.didBecomeActiveNotification, object: nil)
         step = restoreDraft()
         show(step: step)
+        DispatchQueue.main.async { [weak self] in self?.setup.cards.enter() }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -105,16 +124,18 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         let direction = new == step ? 0 : (new > step ? 1 : -1)
         if step == Step.halo && new != Step.halo { trainer?.stop() }
         step = new
-        setup.strip.set(step: new, animated: direction != 0)
+        setup.setStep(new, of: Self.steps.count, animated: direction != 0)
         setup.go(direction: direction) {
             body.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            setup.wide = step == Step.halo
+            setup.skipSetup.isHidden = step == Step.ready || step == Step.halo
             back.isHidden = step == Step.welcome || step == Step.halo
             skip.isHidden = true
             skip.title = "Skip"
             next.isEnabled = true
             next.title = "Continue"
             next.keyEquivalent = "\r"
-            setup.hint.stringValue = Self.steps[step]
+            hint("")
             switch step {
             case Step.welcome: welcomeStep()
             case Step.home: homeStep()
@@ -132,6 +153,9 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     }
 
     @objc private func goBack() { if step > 0 && step != Step.halo { show(step: step - 1) } }
+    /// Skip Setup: straight to Ready with the defaults, so the app can be made and opened.
+    @objc private func skipSetup() { if step < Step.ready { show(step: Step.ready) } }
+    private func hint(_ s: String) { setup.hint.attributedStringValue = Design.attributed(s, .caption, colour: Design.quiet) }
     @objc private func skipStep() {
         switch step {
         case Step.bringIn: imported = nil
@@ -198,8 +222,15 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
                               memberName: memberName, firstMember: firstMember, firstMemberParent: firstMemberParent), key: Self.draftKey)
     }
 
-    /// Takes up a draft left by a relaunch; returns the step to open on.
+    /// Takes up a draft left by a relaunch; returns the step to open on. "--step 3" on the command
+    /// line opens on that step with the defaults, for looking at one screen without clicking through.
     private func restoreDraft() -> Int {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--step"), args.indices.contains(i + 1), let n = Int(args[i + 1]) {
+            if catalogueName.isEmpty { catalogueName = "Studio" }
+            if n - 1 >= Step.halo { created = Catalogues.currentName }
+            return max(Step.welcome, min(n - 1, Step.halo))
+        }
         guard let d = SetupDraft.load(Draft.self, key: Self.draftKey) else { return Step.welcome }
         home = d.home
         imported = d.imported.flatMap { Catalogues.standard.names().contains($0) ? $0 : nil }
@@ -222,42 +253,23 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     // MARK: Pieces every step is built from
 
-    private func story(_ text: String) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.font = NSFont.systemFont(ofSize: TextSize.body)
-        l.preferredMaxLayoutWidth = 584
-        return l
-    }
+    /// The first words of a step, in the Lead style.
+    private func lead(_ text: String) -> NSTextField { SetupFrame.lead(text, width: width) }
+    /// A paragraph in the Body style.
+    private func story(_ text: String) -> NSTextField { SetupFrame.body(text, width: width) }
 
     private func place(_ url: URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
 
-    /// A caption, the path it names in full, and a button to change it.
+    /// A caption, the path it names, and Change on the same baseline: the design's field.
     private func pathRow(_ label: String, _ url: URL, change: Selector) -> (row: NSView, path: NSTextField) {
-        let cap = caption(label)
-        let path = NSTextField(wrappingLabelWithString: place(url))
-        path.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
-        path.preferredMaxLayoutWidth = 440
-        let button = NSButton(title: "Change\u{2026}", target: self, action: change)
-        button.bezelStyle = .rounded
-        let text = NSStackView(views: [cap, path])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        let row = NSStackView(views: [text, NSView(), button])
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.widthAnchor.constraint(equalToConstant: 584).isActive = true
-        return (row, path)
+        let (row, value) = SetupFrame.field(label, place(url), action: "Change", target: self, selector: change, width: width)
+        return (row, value)
     }
 
     private func field(_ placeholder: String, _ value: String, action: Selector) -> NSTextField {
-        let f = NSTextField(string: value)
-        f.placeholderString = placeholder
-        f.font = NSFont.systemFont(ofSize: TextSize.body)
-        f.target = self
-        f.action = action
+        let (row, f) = SetupFrame.entry(placeholder, value, placeholder: placeholder, width: min(320, width), target: self, action: action)
         f.delegate = self
-        f.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        body.addArrangedSubview(row)
         return f
     }
 
@@ -284,9 +296,10 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     private var homePath: NSTextField?
 
     private func homeStep() {
-        titleLabel.stringValue = "Where The App Keeps Its Data"
-        body.addArrangedSubview(story("Its settings, colour profiles and the list of your catalogues. It starts in Application Support, which is fine for most people. Choose a folder of your own and everything there moves to it, catalogues included."))
-        let (row, path) = pathRow("App data", home, change: #selector(changeHome))
+        setup.title("Where Your Data", "Lives")
+        body.addArrangedSubview(lead("Settings, colour profiles and the list of your catalogues. Application Support suits most people."))
+        body.addArrangedSubview(story("Choose a folder of your own and everything moves to it, catalogues included."))
+        let (row, path) = pathRow("App Data Folder", home, change: #selector(changeHome))
         homePath = path
         body.addArrangedSubview(row)
     }
@@ -303,18 +316,16 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     private var loader: OnboardingView?
 
     private func importStep() {
-        titleLabel.stringValue = "Bring In A Catalogue"
+        setup.title("Bring In", "A Catalogue")
         skip.isHidden = false
         next.isEnabled = imported != nil
         body.addArrangedSubview(story("Already have a catalogue, from another Mac or an earlier version? Choose its .colcatalogue file and it is opened where it is, nothing copied. A library.json from an export or a backup is brought in as a new catalogue."))
-        let choose = NSButton(title: "Choose Catalogue File\u{2026}", target: self, action: #selector(chooseCatalogue))
-        choose.bezelStyle = .rounded
-        choose.controlSize = .large
+        let choose = SwissButton("Choose Catalogue File\u{2026}", .secondary, target: self, action: #selector(chooseCatalogue))
         body.addArrangedSubview(choose)
         let view = OnboardingView(memberWord: memberName)
         loader = view
         body.addArrangedSubview(view)
-        view.widthAnchor.constraint(equalToConstant: 584).isActive = true
+        view.widthAnchor.constraint(equalToConstant: width).isActive = true
         if let name = imported { view.finished(summaryFor: name) }
     }
 
@@ -346,7 +357,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private func catalogueStep() {
         let here = alreadyHere
-        titleLabel.stringValue = imported == nil && here.isEmpty ? "Your First Catalogue" : "Which Catalogue To Open"
+        if imported == nil && here.isEmpty { setup.title("Your First", "Catalogue") } else { setup.title("Which Catalogue", "To Open") }
         if imported == nil && existing == nil, let first = here.first { existing = Catalogues.currentName.isEmpty ? first : Catalogues.currentName; useImported = true }
         if imported != nil || !here.isEmpty {
             body.addArrangedSubview(story("Open a catalogue you already have, or make a new one. A catalogue is one body of work: its members, their palettes, typography and tags, as plain files in a folder you choose."))
@@ -375,12 +386,20 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
             useImported = false
             body.addArrangedSubview(story("A catalogue is one body of work: its members, their palettes, typography and tags. It is a folder you choose, named for the catalogue, and everything in it is plain files you can open and move."))
         }
-        let name = field("Catalogue name", catalogueName, action: #selector(nameTyped))
+        let name = field("Catalogue Name", catalogueName, action: #selector(nameTyped))
         nameField = name
-        let (row, path) = pathRow("Kept in", catalogueParent.appendingPathComponent(filesystemName(catalogueName.isEmpty ? "Catalogue Name" : catalogueName)), change: #selector(changeCatalogueParent))
+        let (row, path) = pathRow("Kept In", catalogueParent.appendingPathComponent(filesystemName(catalogueName.isEmpty ? "Catalogue Name" : catalogueName)), change: #selector(changeCatalogueParent))
         cataloguePath = path
-        body.addArrangedSubview(name)
         body.addArrangedSubview(row)
+        #if !APPSTORE
+        // Documents is macOS's to guard: kept there by default, the first touch (at Create) makes it ask once.
+        // A folder chosen through the panel is granted with the choice and never asks.
+        if DocumentsAccess.inside(catalogueParent) && DocumentsAccess.current != .on {
+            let note = Design.text("macOS asks once whether \(Brand.name) may use Documents, when the catalogue is made. Choosing a folder through Change never asks.", .caption, colour: Design.quiet, wraps: true)
+            note.preferredMaxLayoutWidth = width
+            body.addArrangedSubview(note)
+        }
+        #endif
         name.isEnabled = chosenCatalogue == nil
         row.alphaValue = chosenCatalogue == nil ? 1 : 0.4
     }
@@ -405,7 +424,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     // MARK: 4. The schema
 
     private func schemaStep() {
-        titleLabel.stringValue = "What You Call Things"
+        setup.title("What You", "Call Things")
         catalogueName = nameField?.stringValue ?? catalogueName
         body.addArrangedSubview(story("The catalogue lists its members under a heading. Call the heading what you call that body of work, and a member what one of them is. Every member holds Information, Palettes, Typography and Tags; the whole map can be shaped later in Settings \u{25B8} Schema."))
         let collection = combo("Projects", collectionName, SchemaTrial.collectionNames, action: #selector(collectionTyped))
@@ -423,7 +442,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         c.addItems(withObjectValues: names)
         c.stringValue = value
         c.placeholderString = placeholder
-        c.font = NSFont.systemFont(ofSize: TextSize.body)
+        c.font = Design.font(17, .regular)
         c.target = self
         c.action = action
         c.widthAnchor.constraint(equalToConstant: 240).isActive = true
@@ -452,15 +471,14 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     }
 
     private func firstMemberStep() {
-        titleLabel.stringValue = "Your First \(memberName)"
+        setup.title("Your First", memberName)
         skip.isHidden = false
         skip.title = "Skip For Now"
         body.addArrangedSubview(story("A \(memberName.lowercased()) is a folder of its own holding everything in it, so it can be handed over or moved as one. It goes under the catalogue unless you put it somewhere else, such as a client's own drive."))
-        let name = field("\(memberName) name", firstMember, action: #selector(memberNameTyped))
+        let name = field("\(memberName) Name", firstMember, action: #selector(memberNameTyped))
         memberField = name
-        let (row, path) = pathRow("Kept in", memberFolder(), change: #selector(changeMemberParent))
+        let (row, path) = pathRow("Kept In", memberFolder(), change: #selector(changeMemberParent))
         memberPath = path
-        body.addArrangedSubview(name)
         body.addArrangedSubview(row)
     }
 
@@ -476,56 +494,16 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     // MARK: 0. Welcome
 
     private func welcomeStep() {
-        titleLabel.stringValue = "Set Up \(Brand.name)"
-        body.addArrangedSubview(story("Seven short steps after this one. You choose where your data lives, bring in anything you already have and name your first catalogue, which is only made when you press Create on the Ready step. The last step teaches you the halo."))
-
-        let list = NSStackView()
-        list.orientation = .vertical
-        list.alignment = .leading
-        list.spacing = 7
-        for (i, name) in Self.steps.enumerated().dropFirst() {
-            let n = NSTextField(labelWithString: String(format: "%02d", i + 1))
-            n.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
-            n.textColor = .secondaryLabelColor
-            n.widthAnchor.constraint(equalToConstant: 20).isActive = true
-            let title = NSTextField(labelWithString: name)
-            title.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
-            let why = NSTextField(wrappingLabelWithString: Self.reasons[i])
-            why.font = NSFont.systemFont(ofSize: TextSize.caption)
-            why.textColor = .secondaryLabelColor
-            why.preferredMaxLayoutWidth = 206
-            let words = NSStackView(views: [title, why])
-            words.orientation = .vertical
-            words.alignment = .leading
-            words.spacing = 1
-            let row = NSStackView(views: [n, words])
-            row.orientation = .horizontal
-            row.alignment = .top
-            row.spacing = 8
-            list.addArrangedSubview(row)
-        }
-        let left = NSStackView(views: [caption("The Steps"), list])
-        left.orientation = .vertical
-        left.alignment = .leading
-        left.spacing = 10
-        left.widthAnchor.constraint(equalToConstant: 236).isActive = true
-
-        let perms = PermissionsView(textWidth: 300, spacing: 16) { [weak self] e in self?.complain(e.localizedDescription) }
-        let note = NSTextField(wrappingLabelWithString: "Each is optional. Settings \u{25B8} Permissions has the same switches later.")
-        note.font = NSFont.systemFont(ofSize: TextSize.caption)
-        note.textColor = .secondaryLabelColor
-        let right = NSStackView(views: [caption("What macOS Will Ask"), perms, note])
-        right.orientation = .vertical
-        right.alignment = .leading
-        right.spacing = 10
-        right.setCustomSpacing(16, after: perms)
-
-        let cols = NSStackView(views: [left, right])
-        cols.orientation = .horizontal
-        cols.alignment = .top
-        cols.spacing = 28
-        cols.identifier = SetupFrame.cascade
-        body.addArrangedSubview(cols)
+        setup.title("Set Up", Brand.edition)
+        body.addArrangedSubview(lead("Eight short steps. Nothing is written until you press Create, and the last one teaches you the halo."))
+        body.addArrangedSubview(story("\(Brand.edition) manages colour for design, print, video and three-dimensional work. A catalogue holds your clients, their palettes, typography and tags, as plain files you can open, move and hand over. Everything here can be changed later in Settings."))
+        // The row is the words column: the text takes what the button and one gutter leave.
+        let perms = PermissionsView(textWidth: width - PermissionRow.buttonWidth - Design.Wizard.gutter, spacing: Design.beat(3)) { [weak self] e in self?.complain(e.localizedDescription) }
+        perms.translatesAutoresizingMaskIntoConstraints = false
+        perms.widthAnchor.constraint(equalToConstant: width).isActive = true
+        perms.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: perms.widthAnchor).isActive = true }
+        perms.identifier = SetupFrame.cascade
+        body.addArrangedSubview(perms)
         updateWelcomeButtons()
     }
 
@@ -535,7 +513,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         next.title = restart ? "Restart And Continue" : "Begin Setup"
         skip.isHidden = !restart
         skip.title = "Continue Without Restarting"
-        setup.hint.stringValue = restart ? "\(Brand.name) reopens here, at step 2" : Self.steps[Step.welcome]
+        hint(restart ? "\(Brand.name) reopens here, at step 2" : "")
     }
 
     @objc private func permissionsChanged() { if step == Step.welcome { updateWelcomeButtons() } }
@@ -544,9 +522,9 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private func readyStep() {
         firstMember = memberField?.stringValue ?? firstMember
-        titleLabel.stringValue = "Ready To Create"
+        setup.title("Ready", "To Create")
         next.title = chosenCatalogue == nil ? "Create And Continue" : "Open And Continue"
-        setup.hint.stringValue = chosenCatalogue == nil ? "Makes the catalogue, then teaches the halo" : "Opens the catalogue, then teaches the halo"
+        hint(chosenCatalogue == nil ? "Makes the catalogue, then teaches the halo" : "Opens the catalogue, then teaches the halo")
         var lines = ["App data: \(place(home))"]
         if let name = chosenCatalogue { lines.append("Catalogue: \u{201C}\(name)\u{201D}, where it is") }
         else { lines.append("Catalogue: \u{201C}\(catalogueName)\u{201D} in \(place(catalogueFolder))") }
@@ -596,7 +574,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     // MARK: 7. The halo
 
     private func haloStep() {
-        titleLabel.stringValue = "Meet The Halo"
+        setup.title("Meet", "The Halo")
         body.addArrangedSubview(story("Every colour, palette and project opens a halo: a dial of what you can do with it. Four quick moves and you know it. Nothing here touches your catalogue."))
         let t = trainer ?? HaloTrainer(colour: Brand.master, name: Brand.masterName, hex: Brand.masterHex)
         trainer = t
@@ -613,7 +591,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         // Return chooses on the halo while it is being learned, so it must not also close the setup.
         next.keyEquivalent = t.allLearned ? "\r" : ""
         skip.title = "Skip"
-        setup.hint.stringValue = t.allLearned ? "You know the halo" : "\(p.done) of \(p.of) learned"
+        hint(t.allLearned ? "You know the halo" : "\(p.done) of \(p.of) learned")
     }
 
     private func finishAndOpen() {
@@ -843,3 +821,16 @@ final class OnboardingView: NSView {
         }
     }
 }
+
+// MARK: - Xcode canvas
+// Only Xcode's toolchain has the preview macros; build.sh compiles Release with the command-line tools.
+#if DEBUG
+#Preview("Setup 01 Welcome", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 1) }
+#Preview("Setup 02 App Data", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 2) }
+#Preview("Setup 03 Bring In", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 3) }
+#Preview("Setup 04 Catalogue", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 4) }
+#Preview("Setup 05 Schema", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 5) }
+#Preview("Setup 06 First One", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 6) }
+#Preview("Setup 07 Ready", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 7) }
+#Preview("Setup 08 The Halo", traits: .fixedLayout(width: Design.Wizard.size.width, height: Design.Wizard.size.height)) { SetupAssistant.preview(step: 8) }
+#endif

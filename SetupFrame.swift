@@ -3,79 +3,151 @@ import QuartzCore
 
 // ---------- The setup frame ----------
 //
-// The window every version of the app sets itself up in: the proof strip across the top, a page
-// for the step being worked, and a bar along the bottom with the step's hint on the left and its
-// buttons on the right. Moving to another step is animated: the page rolls out, and the new one
-// rolls in with its pieces arriving one after another, quickly. Reduce Motion shows each step with
-// no movement. The steps themselves belong to whoever uses the frame (SetupAssistant, for this app).
+// The borderless panel every version of the app sets itself up in, to the design guide's wizard
+// frame (c_c_c_design_grid_wizard.md): the band in the step's colour across the top, the step line
+// under it, the title in columns 1 to 5, the words in 7 to 12, the actions
+// on one baseline at the right, and the step cards settling together along the bottom. Moving to
+// another step is animated: the page rolls out and the new one rolls in with its pieces arriving
+// one after another, quickly. Reduce Motion shows each step with no movement. The steps belong to
+// whoever uses the frame (SetupAssistant, for this app).
+
+/// A borderless window that still takes the keyboard.
+final class SetupWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
 
 final class SetupFrame: NSView {
-    static let size = NSSize(width: 760, height: 728)
-    static let side: CGFloat = 28
-    /// The width a step's own content may take.
-    static let pageWidth: CGFloat = size.width - 2 * side
+    typealias W = Design.Wizard
 
-    let strip: ProofStrip
-    let titleLabel = NSTextField(labelWithString: "")
+    let cards: StepCards
+    let stepLabel = Design.text("", .label, colour: Design.quiet)
+    let skipSetup = SwissButton("Skip Setup", .quiet)
+    let hint = Design.text("", .caption, colour: Design.quiet)
+    let back = SwissButton("Back", .quiet)
+    let skip = SwissButton("Skip", .quiet)
+    let primary = SwissButton("Continue", .primary)
     let body = NSStackView()
-    let hint = NSTextField(labelWithString: "")
-    let back = ThemedButton(title: "Back", image: nil, target: nil, action: nil)
-    let skip = ThemedButton(title: "Skip", image: nil, target: nil, action: nil)
-    let primary = ThemedButton(title: "Continue", image: nil, target: nil, action: nil)
+    private let band = NSView()
     private let page = NSView()
-    private let column: NSStackView
+    private let titleView = NSTextField(wrappingLabelWithString: "")
+    private let actions = NSStackView()
+    private var bodyLeading: NSLayoutConstraint!, bodyWidth: NSLayoutConstraint!, actionsTop: NSLayoutConstraint!
+    /// The words take every column and the title goes, for a step that needs the room (the halo).
+    var wide = false { didSet { layoutColumns() } }
 
-    init(steps: [String], ink: NSColor) {
-        strip = ProofStrip(names: steps, ink: ink)
-        column = NSStackView(views: [titleLabel, body])
-        super.init(frame: NSRect(origin: .zero, size: Self.size))
+    init(steps: [String]) {
+        cards = StepCards(names: steps)
+        super.init(frame: NSRect(origin: .zero, size: W.size))
+        wantsLayer = true
+        layer?.backgroundColor = Design.paper.cgColor
+        layer?.cornerRadius = W.radius
+        layer?.masksToBounds = true
 
-        titleLabel.font = PageStyle.titleFont
+        band.wantsLayer = true
+        band.layer?.backgroundColor = Design.active.cgColor
+        skipSetup.leadingArrow = true
+        primary.fixedWidth = PermissionRow.buttonWidth
+        titleView.maximumNumberOfLines = 3
         body.orientation = .vertical
         body.alignment = .leading
-        body.spacing = 14
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = 18
-        hint.font = NSFont.systemFont(ofSize: TextSize.caption)
-        hint.textColor = .secondaryLabelColor
-        hint.lineBreakMode = .byTruncatingTail
-        primary.prominent = ink
-        primary.keyEquivalent = "\r"
-
+        body.spacing = Design.beat(6)
+        actions.orientation = .horizontal
+        actions.alignment = .lastBaseline
+        actions.spacing = Design.beat(6)
+        actions.setViews([hint, back, skip, primary], in: .leading)
+        actions.setCustomSpacing(Design.beat(8), after: hint)
         page.wantsLayer = true
         page.layer?.masksToBounds = true
-        let rule = NSBox()
-        rule.boxType = .separator
-        let bar = ActionBar(leading: [hint], trailing: [back, skip, primary])
-        bar.setGap(10, after: back)
 
-        for v in [strip, page, rule, bar, column] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
-        addSubview(strip); addSubview(page); addSubview(rule); addSubview(bar)
-        page.addSubview(column)
-        let s = Self.side
+        for v in [band, stepLabel, skipSetup, page, cards, titleView, body, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        addSubview(band); addSubview(stepLabel); addSubview(skipSetup); addSubview(page); addSubview(cards)
+        page.addSubview(titleView); page.addSubview(body); page.addSubview(actions)
+        bodyLeading = body.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: W.column(7))
+        bodyWidth = body.widthAnchor.constraint(equalToConstant: W.span(7, 12))
+        // The actions sit on a row of their own, a fixed distance above the cards, the same on every step.
+        actionsTop = actions.bottomAnchor.constraint(equalTo: page.bottomAnchor)   // the page ends one gutter above the cards
         NSLayoutConstraint.activate([
-            strip.topAnchor.constraint(equalTo: topAnchor, constant: 22),
-            strip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s),
-            strip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s),
-            strip.heightAnchor.constraint(equalToConstant: ProofStrip.height),
-            page.topAnchor.constraint(equalTo: strip.bottomAnchor, constant: 6),
-            page.leadingAnchor.constraint(equalTo: leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: trailingAnchor),
-            page.bottomAnchor.constraint(equalTo: rule.topAnchor),
-            column.topAnchor.constraint(equalTo: page.topAnchor, constant: 12),
-            column.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: s),
-            column.widthAnchor.constraint(equalToConstant: Self.pageWidth),
-            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            rule.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -14),
-            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s),
-            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s),
-            bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
-            hint.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+            band.topAnchor.constraint(equalTo: topAnchor), band.leadingAnchor.constraint(equalTo: leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: trailingAnchor), band.heightAnchor.constraint(equalToConstant: W.band),
+            stepLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: W.margin),
+            stepLabel.lastBaselineAnchor.constraint(equalTo: topAnchor, constant: 44),
+            skipSetup.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -W.margin),
+            skipSetup.lastBaselineAnchor.constraint(equalTo: stepLabel.lastBaselineAnchor),
+            page.topAnchor.constraint(equalTo: topAnchor, constant: 96),
+            page.leadingAnchor.constraint(equalTo: leadingAnchor), page.trailingAnchor.constraint(equalTo: trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: cards.topAnchor, constant: -Design.beat(6)),
+            cards.leadingAnchor.constraint(equalTo: leadingAnchor, constant: W.margin),
+            cards.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -W.margin),
+            cards.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -40),
+            cards.heightAnchor.constraint(equalToConstant: StepCards.height),
+            titleView.topAnchor.constraint(equalTo: page.topAnchor),
+            titleView.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: W.column(1)),
+            titleView.widthAnchor.constraint(equalToConstant: W.span(1, 5)),
+            body.topAnchor.constraint(equalTo: page.topAnchor, constant: Self.capAlignment),
+            bodyLeading, bodyWidth,
+            actionsTop,
+            actions.topAnchor.constraint(greaterThanOrEqualTo: body.bottomAnchor, constant: Design.beat(6)),
+            actions.trailingAnchor.constraint(equalTo: page.trailingAnchor, constant: -W.margin),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// How far below the title's top the words start, so the capitals of their first line sit level
+    /// with the capitals of the title: the two line boxes hold their letters at different heights.
+    static var capAlignment: CGFloat {
+        func capTop(_ style: Design.Text, _ size: CGFloat) -> CGFloat {
+            let f = style.font(size), line = (size * style.lineHeight).rounded()
+            return (line - (f.ascender - f.descender)) / 2 + (f.ascender - f.capHeight)
+        }
+        return (capTop(.title, 44) - capTop(.lead, 20)).rounded()
+    }
+
+    private func layoutColumns() {
+        titleView.isHidden = wide
+        bodyLeading.constant = wide ? W.column(1) : W.column(7)
+        bodyWidth.constant = wide ? W.span(1, 12) : W.span(7, 12)
+    }
+
+    /// The two-tone title: the first line in ink, the second in soft grey.
+    func title(_ first: String, _ second: String?) {
+        let s = NSMutableAttributedString()
+        let size: CGFloat = 44
+        s.append(Design.attributed(first, .title, size: size, lineHeight: true))
+        if let second = second, !second.isEmpty {
+            s.append(Design.attributed("\n" + second, .title, size: size, colour: Design.soft, lineHeight: true))
+        }
+        titleView.attributedStringValue = s
+    }
+
+    func setStep(_ i: Int, of n: Int, animated: Bool) {
+        stepLabel.attributedStringValue = Design.attributed(String(format: "Step %02d of %02d", i + 1, n), .label, colour: Design.quiet)
+        let colour = Design.active
+        if animated && !reduceMotion && window?.isVisible == true {
+            // The new colour slides in the direction of travel and pushes the old one off.
+            let dir: CGFloat = i >= cards.step ? 1 : -1
+            let old = NSView(frame: band.bounds); old.wantsLayer = true; old.layer?.backgroundColor = band.layer?.backgroundColor
+            old.autoresizingMask = [.width, .height]
+            band.addSubview(old)
+            band.layer?.backgroundColor = colour.cgColor
+            let w = band.bounds.width
+            band.layer?.sublayerTransform = CATransform3DIdentity
+            let slide = CABasicAnimation(keyPath: "transform.translation.x")
+            slide.fromValue = 0; slide.toValue = w * dir; slide.duration = 0.55
+            slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.7, 0, 0.2, 1)
+            slide.fillMode = .forwards; slide.isRemovedOnCompletion = false
+            CATransaction.begin(); CATransaction.setCompletionBlock { old.removeFromSuperview() }
+            old.layer?.add(slide, forKey: "off")
+            let arrive = CABasicAnimation(keyPath: "transform.translation.x")
+            arrive.fromValue = -w * dir; arrive.toValue = 0; arrive.duration = 0.55
+            arrive.timingFunction = slide.timingFunction
+            band.layer?.add(arrive, forKey: "in")
+            CATransaction.commit()
+        } else {
+            band.layer?.backgroundColor = colour.cgColor
+        }
+        cards.set(step: i, animated: animated)
+    }
 
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
@@ -98,7 +170,6 @@ final class SetupFrame: NSView {
         layoutSubtreeIfNeeded()
         guard motion, let old = shot, let oldLayer = old.layer else { return }
         let d = CGFloat(direction)
-
         page.addSubview(old)
         CATransaction.begin()
         CATransaction.setCompletionBlock { old.removeFromSuperview() }
@@ -110,7 +181,6 @@ final class SetupFrame: NSView {
         out.isRemovedOnCompletion = false
         oldLayer.add(out, forKey: "rollOut")
         CATransaction.commit()
-
         let now = CACurrentMediaTime()
         for (i, piece) in pieces().enumerated() {
             piece.wantsLayer = true
@@ -124,27 +194,82 @@ final class SetupFrame: NSView {
         }
     }
 
-    /// The title and what the step put in its body, with the rows of a list taken one by one, so each arrives in turn.
+    /// The title, what the step put in its body (a cascade's rows one by one), then the actions.
     private func pieces() -> [NSView] {
-        var out: [NSView] = [titleLabel]
+        var out: [NSView] = wide ? [] : [titleView]
         for v in body.arrangedSubviews where !v.isHidden {
-            if let list = v as? NSStackView, list.identifier == Self.cascade { out += list.arrangedSubviews.flatMap { ($0 as? NSStackView)?.identifier == Self.cascade ? ($0 as! NSStackView).arrangedSubviews : [$0] } }
+            if let list = v as? NSStackView, list.identifier == Self.cascade { out += list.arrangedSubviews }
             else { out.append(v) }
         }
+        out.append(actions)
         return out
     }
     /// Marks a stack whose rows should arrive one after another rather than as one piece.
     static let cascade = NSUserInterfaceItemIdentifier("setupCascade")
 
     private static func slide(from: CGFloat, to: CGFloat) -> CABasicAnimation {
-        let a = CABasicAnimation(keyPath: "transform.translation.x")
-        a.fromValue = from; a.toValue = to
-        return a
+        let a = CABasicAnimation(keyPath: "transform.translation.x"); a.fromValue = from; a.toValue = to; return a
     }
     private static func fade(from: CGFloat, to: CGFloat) -> CABasicAnimation {
-        let a = CABasicAnimation(keyPath: "opacity")
-        a.fromValue = from; a.toValue = to
-        return a
+        let a = CABasicAnimation(keyPath: "opacity"); a.fromValue = from; a.toValue = to; return a
+    }
+
+    // MARK: Pieces a step is built from, to the design
+
+    /// A paragraph in the Lead style, the first words of a step.
+    static func lead(_ s: String, width: CGFloat) -> NSTextField {
+        let l = Design.text(s, .lead, wraps: true)
+        l.preferredMaxLayoutWidth = width
+        return l
+    }
+    /// A paragraph in the Body style.
+    static func body(_ s: String, width: CGFloat) -> NSTextField {
+        let l = Design.text(s, .body, wraps: true)
+        l.preferredMaxLayoutWidth = width
+        return l
+    }
+    /// A field as the design draws one: a hairline above, a caption label, then the value at 17 with
+    /// its quiet action on the same baseline.
+    static func field(_ caption: String, _ value: String, action: String?, target: AnyObject?, selector: Selector?, width: CGFloat) -> (row: NSView, value: NSTextField) {
+        let cap = Design.text(caption, .caption, colour: Design.quiet)
+        let val = Design.text(value, .headline, size: 17, wraps: true)
+        val.preferredMaxLayoutWidth = width - 90
+        let line = NSStackView(views: [val])
+        line.orientation = .horizontal
+        line.alignment = .lastBaseline
+        if let a = action { line.addArrangedSubview(NSView()); line.addArrangedSubview(SwissButton(a, .quiet, target: target, action: selector)) }
+        let col = NSStackView(views: [Design.hairline(), cap, line])
+        col.orientation = .vertical
+        col.alignment = .leading
+        col.spacing = 6
+        col.setCustomSpacing(Design.beat(4), after: col.arrangedSubviews[0])
+        col.translatesAutoresizingMaskIntoConstraints = false
+        col.widthAnchor.constraint(equalToConstant: width).isActive = true
+        col.arrangedSubviews[0].widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        line.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        return (col, val)
+    }
+    /// A text field as the design draws one: a caption label, the text at 17, a hairline under.
+    static func entry(_ caption: String, _ value: String, placeholder: String, width: CGFloat, target: AnyObject?, action: Selector?) -> (row: NSView, field: NSTextField) {
+        let cap = Design.text(caption, .caption, colour: Design.quiet)
+        let f = NSTextField(string: value)
+        f.isBordered = false
+        f.drawsBackground = false
+        f.focusRingType = .none
+        f.font = Design.font(17, .regular)
+        f.textColor = Design.ink
+        f.placeholderAttributedString = Design.attributed(placeholder, .headline, size: 17, colour: Design.soft)
+        f.target = target
+        f.action = action
+        let col = NSStackView(views: [cap, f, Design.hairline(Design.ink)])
+        col.orientation = .vertical
+        col.alignment = .leading
+        col.spacing = 6
+        col.translatesAutoresizingMaskIntoConstraints = false
+        col.widthAnchor.constraint(equalToConstant: width).isActive = true
+        f.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        col.arrangedSubviews[2].widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        return (col, f)
     }
 }
 

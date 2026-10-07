@@ -6,7 +6,7 @@ Load only the child a screen touches:
 
 | Child | Holds |
 |---|---|
-| `c_c_design_type.md` | the family, six weights, the ten text styles, the target glyph, the diagonal arrow |
+| `c_c_design_type.md` | the family, six weights, the ten text styles, the diagonal arrow |
 | `c_c_design_colour.md` | the six neutrals, the eight step colours, where colour may and may not go |
 | `c_c_design_layout.md` | the 12-column grid, the four-point space beat, the alignment laws, the three page layouts |
 | `c_c_design_controls.md` | buttons, slider, dropdown, field, tabs, choice, check, with their states |

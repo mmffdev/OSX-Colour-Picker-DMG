@@ -794,8 +794,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "a folder counts as unlocked only when its rules let this very account add and replace files")
     check(AdobeAccess.state == .nothingToDo || !AdobeAccess.folders.isEmpty, "Adobe access has nothing to set up where no Adobe app is installed")
     let permissionTitles = Permission.all.map { $0.title }
-    check(permissionTitles == ["Screen Recording", "Documents Folder", "Adobe apps"] && Set(permissionTitles).count == permissionTitles.count,
-          "the first-open setup lists each permission once: Screen Recording, Documents, Adobe")
+    check(permissionTitles == ["Screen Recording"], "the setup asks up front for Screen Recording alone; Documents is asked on the catalogue step")
 
     print("project files")
     var projLib = Library()
@@ -2294,14 +2293,12 @@ func runSetupTests(check: (Bool, String) -> Void) {
     SetupDraft.clear(key: "draft", in: defaults)
     check(SetupDraft.load(Sample.self, key: "draft", in: defaults) == nil, "a draft is gone once the setup has made things")
 
-    let paper = NSColor.white, ink = Brand.master
-    let first = ProofStrip.tone(step: 0, of: steps.count, ink: ink, paper: paper).usingColorSpace(.sRGB)!
-    let last = ProofStrip.tone(step: steps.count - 1, of: steps.count, ink: ink, paper: paper).usingColorSpace(.sRGB)!
-    let master = ink.usingColorSpace(.sRGB)!
-    check(abs(last.redComponent - master.redComponent) < 0.01 && abs(last.blueComponent - master.blueComponent) < 0.01,
-          "the proof strip's last patch is the master colour at full strength")
-    check(first.redComponent > last.redComponent + 0.3, "the first patch is a pale tone of it, so the strip reads as a ramp")
-
+    check(Design.steps.count == steps.count && Set(Design.steps.map { $0.name }).count == steps.count,
+          "the design has one step colour per setup step, each with its own name")
+    check(Design.steps.allSatisfy { contrastRatio($0.hex, "#161616") >= 3 },
+          "every step colour carries an ink numeral at three to one or better, the bar for large text: \(Design.steps.map { String(format: "%.1f", contrastRatio($0.hex, "#161616")) })")
+    check(Design.font(13, .thin).fontName == "HelveticaNeue-Thin" && Design.font(13, .light).fontName == "HelveticaNeue-Light",
+          "Helvetica Neue's thin and light weights are on this Mac")
     check(HaloTrainer.lessons.map { $0.id } == ["open", "turn", "deeper", "confirm"], "the halo trainer teaches its four moves in order")
     check(HaloTrainer.progress(["open", "deeper"]) == (2, 4) && HaloTrainer.progress(["open", "turn", "deeper", "confirm", "other"]) == (4, 4),
           "the trainer counts only its own lessons")
