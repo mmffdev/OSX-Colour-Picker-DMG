@@ -3,8 +3,8 @@
 #
 #   ./make_appstore.sh            builds a sandboxed Release app, checks its entitlements, runs the
 #                                 self-test inside it, installs it as /Applications/MMFFDev - Colorgain.app
-#                                 and opens it as a brand-new user, so the Colorgain setup is what you
-#                                 see every time. COLORGAIN_OPEN=0 skips the opening.
+#                                 and opens it as a brand-new user on the Studio window, so the Colorgain
+#                                 setup and window are what you see every time. COLORGAIN_OPEN=0 skips the opening.
 #   ./make_appstore.sh archive    archives with the Apple Distribution identity and exports the .pkg
 #                                 that App Store Connect takes. Needs the Store certificates in the keychain.
 #
@@ -77,5 +77,5 @@ echo "installed: $COLORGAIN ($(/usr/libexec/PlistBuddy -c 'Print :ColourBuildCom
 
 if [ "${COLORGAIN_OPEN:-1}" = "1" ]; then
     echo "opening as a new user..."
-    open -n -a "$COLORGAIN" --args --new-user
+    open -n -a "$COLORGAIN" --args --new-user --studio
 fi

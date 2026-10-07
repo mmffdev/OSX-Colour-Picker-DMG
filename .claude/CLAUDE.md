@@ -8,7 +8,7 @@ Since 2026-10-06 the app ships two ways from the same sources. Know which one a 
 
 | | Direct download | Mac App Store |
 |---|---|---|
-| Branches | `redesign-001`, `v3-palettes-projects-sync` | `osx-appstore-build` |
+| Branches | both editions live together on `studio-window` since the merge of 2026-10-07 (`osx-appstore-build` and `redesign-001` are its parents) | same branch |
 | Signing | Developer ID, notarised, Sparkle updates | Apple Distribution, App Sandbox, hardened runtime, Store updates |
 | Build | `./build.sh`, `./make_dmg.sh`, `./make_pkg.sh` | `./make_appstore.sh` (ad hoc, self-test) and `./make_appstore.sh archive` (Apple Distribution, exports the `.pkg`); project generated from `appstore/project.yml` by XcodeGen, sources compiled with `APPSTORE` set |
 | Editions | One | Standard and Pro, both paid through Apple (price and split undecided) |
@@ -27,7 +27,7 @@ Since 2026-10-07 the app is being redesigned in a Swiss style it owns: Helvetica
 
 ## Build after every commit: both editions
 
-`./build.sh` installs the direct download; `./make_appstore.sh` installs the Store edition as `/Applications/MMFFDev - Colorgain.app` and opens it as a brand-new user, so what Rick sees after every build is the Colorgain setup, not the main window of his existing data. Run both after a commit that touches Swift. In Xcode the Store project's default scheme, Colorgain, also runs as a new user; the Colorgain As Me scheme opens the Store container as Rick. The main window has not been redesigned yet: once setup is done the app looks like MMFFDev Colour 3, and that is current code, not an old build. The footer says which build is running.
+`./build.sh` installs the direct download and opens it on the Studio window (`OPEN=0` to skip); `./make_appstore.sh` installs the Store edition as `/Applications/MMFFDev - Colorgain.app` and opens it as a brand-new user on the Studio window (`COLORGAIN_OPEN=0` to skip). So what Rick sees after every build, from either script or from Cmd+R in either Xcode project, is Colorgain's own setup and window, never the old window. Run both after a commit that touches Swift. In Xcode the Store project's default scheme, Colorgain, also runs as a new user; the Colorgain As Me scheme opens the Store container as Rick. The main window has not been redesigned yet: once setup is done the app looks like MMFFDev Colour 3, and that is current code, not an old build. The footer says which build is running.
 
 
 After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.
