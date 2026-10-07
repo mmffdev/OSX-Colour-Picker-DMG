@@ -25,7 +25,10 @@ Since 2026-10-07 the app is called **Colorgain**, spelled exactly so: one word, 
 
 Since 2026-10-07 the app is being redesigned in a Swiss style it owns: Helvetica Neue, a 12-column grid, big light type over small dense type, ink on warm paper, no macOS control drawn where the guide draws its own. Before any screen, read `.claude/c_design_guide.md` and only the child it points to for the part in hand; its five laws, baseline justification first, apply to every screen.
 
-## Build after every commit
+## Build after every commit: both editions
+
+`./build.sh` installs the direct download; `./make_appstore.sh` installs the Store edition as `/Applications/MMFFDev - Colorgain.app` and opens it as a brand-new user, so what Rick sees after every build is the Colorgain setup, not the main window of his existing data. Run both after a commit that touches Swift. In Xcode the Store project's default scheme, Colorgain, also runs as a new user; the Colorgain As Me scheme opens the Store container as Rick. The main window has not been redesigned yet: once setup is done the app looks like MMFFDev Colour 3, and that is current code, not an old build. The footer says which build is running.
+
 
 After every commit, run `./build.sh` so the installed app is the last commit. Commit first, then build: the build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right as "Release v3.0  3f48079". A "+" after the hash means the build was made with uncommitted Swift changes. If Rick cannot see a change, compare that hash with `git log -1` before anything else.
 

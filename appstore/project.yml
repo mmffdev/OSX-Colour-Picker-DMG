@@ -41,7 +41,12 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: $(SRCROOT)/../Info.plist
         CODE_SIGN_ENTITLEMENTS: $(SRCROOT)/MMFFDevColour3.entitlements
-        CODE_SIGN_STYLE: Automatic
+        # Developer ID by hand, so Cmd+B and Cmd+R work with the one certificate this Mac has; the sandbox
+        # still applies, and bookmarks hold since the identity is real. The archive switches to automatic
+        # signing with Apple Distribution (make_appstore.sh archive).
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Developer ID Application
+        PROVISIONING_PROFILE_SPECIFIER: ""
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: APPSTORE
@@ -79,11 +84,27 @@ targets:
               /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$plist"
           fi
 schemes:
-  MMFFDev Colour 3:
+  # The default: Cmd+R opens the app as a brand-new user, in a throwaway home wiped each time, so the
+  # Colorgain setup is what you see, every time. Untick --new-user under Edit Scheme to open it as
+  # yourself instead, or add "--step 3" to open straight at a step.
+  Colorgain:
     build:
       targets:
         MMFFDev Colour 3: all
     run:
       config: Debug
+      commandLineArguments:
+        "--new-user": true
+    archive:
+      config: Release
+  # As yourself: the Store container with its own settings and catalogues, setup already done.
+  Colorgain As Me:
+    build:
+      targets:
+        MMFFDev Colour 3: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "--new-user": false
     archive:
       config: Release
