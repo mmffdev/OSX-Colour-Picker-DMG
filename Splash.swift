@@ -25,6 +25,8 @@ final class SplashWindowController: NSWindowController {
 
     func present(completion: @escaping () -> Void) {
         self.completion = completion
+        // Turned off: straight on to the window, the way the toggle in Prefs says.
+        if !Prefs.splash { DispatchQueue.main.async(execute: completion); return }
         let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let content = NSView(frame: NSRect(origin: .zero, size: Self.size))
         content.wantsLayer = true

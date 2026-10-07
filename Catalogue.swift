@@ -54,6 +54,8 @@ struct CatalogueDocument: Codable, Equatable {
     var activePalette: UUID? = nil
     /// What was deleted and when, so that a sync does not bring it back.
     var deleted: [Tombstone]
+    /// The user's notes on the catalogue, kept in its own file so they travel with it.
+    var about: String? = nil
 }
 
 /// "Brand.coldata": what a project holds besides its palettes. For Unfiled it is the home of
@@ -108,7 +110,9 @@ enum CatalogueFiles {
         // Where an earlier version kept the same, loose in the folder.
         try? fm.removeItem(at: folder.appendingPathComponent("\(unfiled).\(ColourFiles.data)"))
 
-        let doc = CatalogueDocument(library: lib.version,
+        // The notes are the file's own, not the library's, so they are carried over from the file as it stands.
+        let kept = (try? ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index)))?.about
+        var doc = CatalogueDocument(library: lib.version,
                                     // Every member's folder is written, so the catalogue says where its members are
                                     // without this Mac's settings: relative when inside the catalogue, in full otherwise.
                                     projects: lib.projects.map { ProjectRef(id: $0.id, name: $0.name, createdAt: $0.createdAt,
@@ -116,8 +120,21 @@ enum CatalogueFiles {
                                     palettes: lib.swatches.map { $0.id }, colours: lib.colours.map { $0.hex },
                                     tags: lib.tagInfo.map { TagKey(name: $0.name, project: $0.projectID) },
                                     activePalette: lib.activeSwatchID, deleted: lib.deleted)
+        doc.about = kept
         // Always written, changed or not: its date is how another copy of the app sees there is something new.
         do { try e.encode(doc).write(to: index, options: .atomic) } catch { throw StoreError.saveFailed(index, error) }
+    }
+
+    /// The catalogue's notes, from its file.
+    static func about(index: URL) -> String {
+        (try? ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index)))?.about ?? ""
+    }
+
+    /// Writes the catalogue's notes into its file, touching nothing else in it.
+    static func setAbout(_ text: String, index: URL) throws {
+        var doc = try ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index))
+        doc.about = text.isEmpty ? nil : text
+        try ColourFiles.encoder().encode(doc).write(to: index, options: .atomic)
     }
 
     /// Loads a catalogue: the index, then every project it lists, then Unfiled, joined into one library.

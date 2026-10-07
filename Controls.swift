@@ -186,3 +186,238 @@ final class ChoiceRow: NSView {
 
     func set(detail: String) { text.attributedStringValue = Design.attributed(detail, .caption, colour: Design.quiet, lineHeight: true) }
 }
+
+// MARK: - Slide to confirm, Colorgain's own
+
+/// The track for anything that cannot be undone: light chevrons on the Card ground inside a one-point
+/// Rule, "Slide To Remove" across it, and a Mist handle that is dragged to the far right. Let go short
+/// of the end and it springs home; at the end it is armed, and whoever holds it turns its way out into
+/// the way through.
+final class SwissSlide: NSView {
+    static let height: CGFloat = 40
+    private static let handle: CGFloat = 40, tile: CGFloat = 24, band: CGFloat = 8, slant: CGFloat = 9
+    var words = "Slide To Remove" { didSet { needsDisplay = true } }
+    var onArmed: ((Bool) -> Void)?
+    private(set) var armed = false
+    private var offset: CGFloat = 0 { didSet { needsDisplay = true } }
+    private var grabbed: CGFloat?
+
+    override var isFlipped: Bool { true }
+    private var span: CGFloat { max(0, bounds.width - Self.handle) }
+    private var grip: NSRect { NSRect(x: offset, y: 0, width: Self.handle, height: bounds.height) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let h = bounds.height
+        Design.card.setFill(); bounds.fill()
+        NSBezierPath(rect: bounds).addClip()
+        // The chevrons, pointing the way, in Mist.
+        Design.mist.setFill()
+        var x: CGFloat = Self.handle + 6
+        while x < bounds.width {
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: x, y: 8)); p.line(to: NSPoint(x: x + Self.band, y: 8)); p.line(to: NSPoint(x: x + Self.band + Self.slant, y: h / 2))
+            p.line(to: NSPoint(x: x + Self.band, y: h - 8)); p.line(to: NSPoint(x: x, y: h - 8)); p.line(to: NSPoint(x: x + Self.slant, y: h / 2))
+            p.close(); p.fill()
+            x += Self.tile
+        }
+        // The words, centred in the track, behind a small clear ground.
+        let t = Design.attributed(words, .action, colour: Design.quiet)
+        let ts = t.size()
+        let tx = (bounds.width - ts.width) / 2
+        Design.card.setFill(); NSRect(x: tx - 8, y: 0, width: ts.width + 16, height: h).fill()
+        t.draw(at: NSPoint(x: tx, y: (h - ts.height) / 2))
+        // The handle: a Mist block carrying an ink chevron.
+        let g = grip
+        Design.mist.setFill(); g.fill()
+        Design.ink.setStroke()
+        let glyph = NSBezierPath()
+        glyph.lineWidth = 1.2
+        glyph.move(to: NSPoint(x: g.midX - 3, y: g.midY - 5)); glyph.line(to: NSPoint(x: g.midX + 3, y: g.midY)); glyph.line(to: NSPoint(x: g.midX - 3, y: g.midY + 5))
+        glyph.stroke()
+        Design.rule.setStroke()
+        let edge = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        grabbed = grip.contains(p) ? p.x - offset : nil
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let g = grabbed else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        offset = max(0, min(span, p.x - g))
+        let now = offset >= span - 1
+        if now != armed { armed = now; onArmed?(armed) }
+    }
+    override func mouseUp(with event: NSEvent) {
+        grabbed = nil
+        if !armed { offset = 0 }
+    }
+    func reset() { armed = false; offset = 0; onArmed?(false) }
+}
+
+/// The confirm panel as the design draws it: a Card over the window on the wizard's grid, the title
+/// and the note in the words' columns, a choice where there is one, the slide across, and the one
+/// button at the right that is Keep It until the slide is home, then becomes the act itself.
+enum SwissConfirm {
+    static func ask(over window: NSWindow?, title: String, note: String, commit: String, then: @escaping () -> Void) {
+        ask(over: window, title: title, note: note, commit: commit, options: []) { _ in then() }
+    }
+
+    /// With `options`, rows to choose one of before sliding; the first is chosen to begin with, and the
+    /// chosen one's index comes back with the act.
+    static func ask(over window: NSWindow?, title: String, note: String, commit: String, options: [String], then: @escaping (Int) -> Void) {
+        let panel = ConfirmPanel(title: title, note: note, commit: commit, options: options)
+        panel.present(over: window, then: then)
+    }
+
+    /// A plain word with one way out: no slide, nothing to confirm.
+    static func tell(over window: NSWindow?, title: String, note: String) {
+        let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [])
+        panel.present(over: window) { _ in }
+    }
+
+    /// A word that must be acted on: the one button is the act, primary, and Escape does nothing.
+    static func require(over window: NSWindow?, title: String, note: String, action: String, then: @escaping () -> Void) {
+        let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: action)
+        panel.present(over: window) { _ in then() }
+    }
+
+    final class ConfirmPanel: NSPanel {
+        private var done: ((Int) -> Void)?
+        private let slide = SwissSlide()
+        private let choices: ChoiceRows?
+        private let button: SwissButton
+        private let commit: String?
+        private let must: String?
+        private weak var host: NSWindow?
+
+        init(title: String, note: String, commit: String?, options: [String], must: String? = nil) {
+            self.commit = commit
+            self.must = must
+            button = must.map { SwissButton($0, .primary) } ?? SwissButton(commit == nil ? "Close" : "Keep It", .secondary)
+            choices = options.isEmpty ? nil : ChoiceRows(options)
+            let w: CGFloat = 560, margin: CGFloat = 40
+            super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+            isOpaque = false
+            backgroundColor = .clear
+            hasShadow = true
+            let card = Card(frame: NSRect(x: 0, y: 0, width: w, height: 300))
+            contentView = card
+            let heading = Design.text(title, .headline, size: 24)
+            let words = Design.text(note, .body, colour: Design.quiet, wraps: true)
+            words.preferredMaxLayoutWidth = w - 2 * margin
+            slide.words = "Slide To " + (commit ?? "")
+            slide.onArmed = { [weak self] armed in self?.arm(armed) }
+            slide.isHidden = commit == nil
+            button.target = self
+            button.action = #selector(pressed)
+            let bw: CGFloat = must == nil ? 132 : button.intrinsicContentSize.width
+            button.fixedWidth = bw
+            for v in [heading, words, slide, button] { card.addSubview(v) }
+            if let c = choices { card.addSubview(c) }
+            // Placed by frame, top down: the title, the note, the choices, the slide, the button on its own row.
+            let hs = heading.attributedStringValue.size()
+            heading.frame = NSRect(x: margin, y: margin, width: w - 2 * margin, height: hs.height + 2)
+            let wh = words.attributedStringValue.boundingRect(with: NSSize(width: w - 2 * margin, height: 400), options: [.usesLineFragmentOrigin]).height
+            words.frame = NSRect(x: margin, y: heading.frame.maxY + 12, width: w - 2 * margin, height: wh + 4)
+            var y = words.frame.maxY + 28
+            if let c = choices {
+                c.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: c.height)
+                y = c.frame.maxY + 28
+            }
+            if commit != nil {
+                slide.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: SwissSlide.height)
+                y = slide.frame.maxY + 28
+            }
+            button.frame = NSRect(x: w - margin - bw, y: y, width: bw, height: 32)
+            let h = button.frame.maxY + margin
+            setContentSize(NSSize(width: w, height: h))
+            card.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        }
+
+        private func arm(_ armed: Bool) {
+            guard let commit = commit else { return }
+            button.title = armed ? commit : "Keep It"
+            button.setKind(armed ? .primary : .secondary)
+            button.arrow = armed
+        }
+
+        @objc private func pressed() {
+            let go = must != nil || (commit != nil && slide.armed)
+            close(then: go)
+        }
+
+        override func cancelOperation(_ sender: Any?) { if must == nil { close(then: false) } }
+        override var canBecomeKey: Bool { true }
+
+        /// The veil over the host while the panel is up: a half-ink window that takes every click.
+        private var veil: NSWindow?
+
+        func present(over window: NSWindow?, then: @escaping (Int) -> Void) {
+            done = then
+            host = window
+            guard let w = window else { center(); makeKeyAndOrderFront(nil); return }
+            // Not an AppKit sheet, which rounds its corners: a veil over the host, and the panel centred above it.
+            let v = NSWindow(contentRect: w.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            v.isOpaque = false
+            v.backgroundColor = Design.ink.withAlphaComponent(0.45)
+            v.hasShadow = false
+            v.ignoresMouseEvents = false
+            w.addChildWindow(v, ordered: .above)
+            veil = v
+            let f = w.frame
+            setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.midY - frame.height / 2))
+            w.addChildWindow(self, ordered: .above)
+            makeKeyAndOrderFront(nil)
+        }
+
+        private func close(then go: Bool) {
+            if let w = host {
+                w.removeChildWindow(self)
+                if let v = veil { w.removeChildWindow(v); v.orderOut(nil); veil = nil }
+                w.makeKey()
+            }
+            orderOut(nil)
+            if go { done?(choices?.chosen ?? 0) }
+            done = nil
+        }
+
+        /// The choice rows: a square before each word, ink-filled on the chosen one, 28 to a row.
+        final class ChoiceRows: NSView {
+            private let options: [String]
+            private(set) var chosen = 0
+            static let row: CGFloat = 28, square: CGFloat = 12, step: CGFloat = 24
+            var height: CGFloat { CGFloat(options.count) * Self.row }
+            init(_ options: [String]) { self.options = options; super.init(frame: .zero) }
+            required init?(coder: NSCoder) { fatalError() }
+            override var isFlipped: Bool { true }
+            override func draw(_ dirtyRect: NSRect) {
+                for (i, o) in options.enumerated() {
+                    let y = CGFloat(i) * Self.row, b = y + 19
+                    let sq = NSRect(x: 0, y: b - 10, width: Self.square, height: Self.square)
+                    (i == chosen ? Design.ink : Design.card).setFill(); sq.fill()
+                    Design.ink.setStroke()
+                    let edge = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
+                    let t = Design.attributed(o, .body, colour: i == chosen ? Design.ink : Design.quiet)
+                    t.draw(at: NSPoint(x: Self.step, y: b - Design.Text.body.font().ascender))
+                }
+            }
+            override func mouseDown(with event: NSEvent) {
+                let p = convert(event.locationInWindow, from: nil)
+                let i = Int(p.y / Self.row)
+                if options.indices.contains(i) { chosen = i; needsDisplay = true }
+            }
+        }
+
+        /// The Card: the panel's ground with its one-point Rule edge, flipped so the frames read top down.
+        final class Card: NSView {
+            override var isFlipped: Bool { true }
+            override func draw(_ dirtyRect: NSRect) {
+                Design.card.setFill(); bounds.fill()
+                Design.rule.setStroke()
+                let edge = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
+            }
+        }
+    }
+}

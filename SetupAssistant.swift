@@ -44,6 +44,17 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// The assistant opened part way in: at the Catalogue step when the app finds no catalogue to work in.
+    static func show(from step: Int, completion: @escaping (String) -> Void) {
+        let c = SetupAssistant(completion: completion)
+        keep = c
+        if c.catalogueName.isEmpty { c.catalogueName = "Studio" }
+        c.show(step: step)
+        c.window?.center()
+        c.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: What the user has chosen
 
     private var home: URL = Catalogues.standard.root

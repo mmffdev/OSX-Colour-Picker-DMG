@@ -294,7 +294,9 @@ final class ToggleBar: NSControl {
 /// The primary carries the arrow on its right behind a hairline.
 final class SwissButton: NSButton {
     enum Kind { case primary, secondary, quiet }
-    let kind: Kind
+    private(set) var kind: Kind
+    /// A button that turns into another, as Keep It becomes Remove once the slide is home.
+    func setKind(_ k: Kind) { kind = k; invalidateIntrinsicContentSize(); needsDisplay = true }
     enum Trailing { case none, arrow, tick, cross }
     /// What sits in the cell at the right end, behind a hairline: the arrow for "go on", a tick or a cross for a state.
     var trailing = Trailing.none { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
@@ -311,6 +313,8 @@ final class SwissButton: NSButton {
     init(_ title: String, _ kind: Kind, target: AnyObject? = nil, action: Selector? = nil) {
         self.kind = kind
         super.init(frame: .zero)
+        // Every boxed button carries the arrow cell unless given a state instead; a quiet one is text alone.
+        if kind != .quiet { trailing = .arrow }
         self.title = title
         self.target = target
         self.action = action
@@ -333,7 +337,7 @@ final class SwissButton: NSButton {
     private var label: NSAttributedString { Design.attributed(title, .action, colour: ink) }
     private var ink: NSColor {
         if !isEnabled { return Design.ink.withAlphaComponent(0.35) }
-        return kind == .primary ? Design.paper : Design.ink
+        return kind == .primary ? Design.card : Design.ink
     }
     /// The baseline sits where the text's does, so a row of these aligns with text beside it.
     override var firstBaselineOffsetFromTop: CGFloat { (Self.height - label.size().height) / 2 + Design.Text.action.font().ascender + 1 }

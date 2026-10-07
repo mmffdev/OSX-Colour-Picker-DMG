@@ -266,10 +266,11 @@ struct Catalogues {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         // MMFFDEV_COLOUR3_HOME points the app at another folder, for trying things without touching real data.
         let override = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"].map { URL(fileURLWithPath: $0) }
+        // A trial home is a brand-new Mac: it never seeds Main from the earlier versions' libraries here.
         return Catalogues(
             root: override ?? home ?? seedRoot,
-            legacyURL: support.appendingPathComponent("MMFFDev Colour").appendingPathComponent("library.json"),
-            previousURL: support.appendingPathComponent("MMFFDev Colour 2").appendingPathComponent("library.json"))
+            legacyURL: override == nil ? support.appendingPathComponent("MMFFDev Colour").appendingPathComponent("library.json") : nil,
+            previousURL: override == nil ? support.appendingPathComponent("MMFFDev Colour 2").appendingPathComponent("library.json") : nil)
     }
 
     /// Moves the app's data to a folder of the user's choosing, catalogues inside it and all, and
@@ -346,6 +347,17 @@ struct Catalogues {
     }
 
     private var hasMain: Bool { Catalogues.holdsCatalogue(root) }
+    /// No catalogue on this Mac at all: nothing at the root, nothing under Catalogues, nothing registered.
+    var isEmpty: Bool { !hasMain && others().isEmpty }
+
+    /// Takes away a Main at the root that holds nothing: no colours, palettes or members. Anything in it stays.
+    func dropEmptyMain() {
+        guard hasMain, let lib = try? store(for: Catalogues.mainName).load(), lib.colours.isEmpty, lib.swatches.isEmpty, lib.projects.isEmpty else { return }
+        let fm = FileManager.default
+        for item in [CatalogueFiles.index(in: root)?.lastPathComponent, "library.json", "library.history.json", CatalogueFiles.unfiled].compactMap({ $0 }) {
+            try? fm.removeItem(at: root.appendingPathComponent(item))
+        }
+    }
 
     /// Whether a folder holds a catalogue: its file, or the one file of an earlier version.
     static func holdsCatalogue(_ dir: URL) -> Bool {
@@ -357,7 +369,13 @@ struct Catalogues {
     /// Every catalogue but Main: those found under Catalogues, and those registered elsewhere whose folder is reachable.
     private func others() -> [String] {
         var names = Catalogues.subfoldersHoldingLibraries(in: folder)
-        for entry in registry where Catalogues.holdsCatalogue(URL(fileURLWithPath: entry.path)) && !names.contains(entry.name) { names.append(entry.name) }
+        // A registered name for a folder already on the list, under Catalogues or by another entry, is a ghost: one folder, one name.
+        var dirs = Set(names.map { folder.appendingPathComponent(filesystemName($0)).standardizedFileURL.path })
+        for entry in registry where Catalogues.holdsCatalogue(URL(fileURLWithPath: entry.path)) && !names.contains(entry.name) {
+            let dir = URL(fileURLWithPath: entry.path).standardizedFileURL.path
+            guard !dirs.contains(dir) else { continue }
+            dirs.insert(dir); names.append(entry.name)
+        }
         return names.filter { $0 != Catalogues.mainName }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
@@ -366,6 +384,31 @@ struct Catalogues {
     func names() -> [String] {
         let rest = others()
         return hasMain || rest.isEmpty ? [Catalogues.mainName] + rest : rest
+    }
+
+    /// Moves a catalogue to the Bin and takes it off the list. Main keeps its files at the home's root,
+    /// so they are gathered into a folder of their own under Catalogues first and that folder goes; the
+    /// home itself, and a folder another listed catalogue still points at, are never binned.
+    func bin(_ name: String) throws {
+        let fm = FileManager.default
+        let home = root.standardizedFileURL
+        var dir = directory(for: name).standardizedFileURL
+        if dir == home {
+            var dest = folder.appendingPathComponent(filesystemName(name))
+            var n = 2
+            while fm.fileExists(atPath: dest.path) { dest = folder.appendingPathComponent(filesystemName(name) + " \(n)"); n += 1 }
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            let index = CatalogueFiles.index(in: root)?.lastPathComponent
+            for item in [index, "library.json", "library.history.json", "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
+                let from = root.appendingPathComponent(item)
+                if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
+            }
+            dir = dest.standardizedFileURL
+        }
+        let shared = names().contains { $0 != name && directory(for: $0).standardizedFileURL == dir }
+        unregister(name)
+        guard dir != home, !home.path.hasPrefix(dir.path + "/"), !shared, Catalogues.holdsCatalogue(dir) else { return }
+        try fm.trashItem(at: dir, resultingItemURL: nil)
     }
 
     /// Moves the catalogue's folder. Main lives at the root, so renaming it moves its files into a
@@ -436,7 +479,8 @@ struct Catalogues {
     func adopt(_ index: URL) throws -> String {
         let dir = index.deletingLastPathComponent()
         guard Catalogues.holdsCatalogue(dir) else { throw SyncError.unreadable(index) }
-        if let already = registry.first(where: { URL(fileURLWithPath: $0.path) == dir }) { return already.name }
+        // Already on the list, by the registry or by sitting under Catalogues: that name, not a second one for the same folder.
+        if let already = names().first(where: { directory(for: $0).standardizedFileURL == dir.standardizedFileURL }) { return already }
         let name = uniqueName(filesystemName(index.deletingPathExtension().lastPathComponent), among: names())
         register(name, at: dir)
         return name

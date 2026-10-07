@@ -74,14 +74,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Whether this Mac had no catalogue at all when the app opened, read before the library seeds Main at the root.
+    private var noCatalogueAtLaunch = false
+
     /// The splash, then the main window, or the setup assistant on a first open.
     private func openUp() {
+        noCatalogueAtLaunch = Catalogues.standard.isEmpty
         let splash = SplashWindowController()
         self.splash = splash
         if Prefs.assistantDone {
+            // With no splash the window must exist before the reveal, which comes straight back.
+            if !Prefs.splash { prepareMainWindow() }
             splash.present { [weak self] in self?.revealMainWindow() }
             // Let the launch artwork reach the screen before loading the library and editor.
-            DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() }
+            if Prefs.splash { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
         } else {
             // The first open: the assistant settles where everything lives before any of it is loaded.
             splash.present { [weak self] in
@@ -122,6 +128,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
         rehearse(main)
+        // No catalogue on this Mac, the setup skipped or every one removed, and nothing seeded from an earlier
+        // version either: nothing works without one, so it is asked for now.
+        let lib = library.library
+        if noCatalogueAtLaunch && lib.colours.isEmpty && lib.swatches.isEmpty && lib.projects.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.askForCatalogue() }
+        }
+    }
+
+    /// The word that there is no catalogue, with one way on: the assistant from its Catalogue step, which makes one.
+    private func askForCatalogue() {
+        SwissConfirm.require(over: NSApp.keyWindow ?? NSApp.mainWindow, title: "No Catalogue Yet",
+                             note: "Colorgain keeps everything, colours, palettes and members, in a catalogue, and there is none on this Mac. Make one now: its name, where it lives and how it is organised.",
+                             action: "Create Catalogue") { [weak self] in
+            SetupAssistant.show(from: SetupAssistant.Step.catalogue) { name in
+                guard let self = self else { return }
+                if name != self.library.catalogue { self.library.open(catalogue: name) } else { self.library.reload() }
+                // The empty Main the launch seeded at the root is not wanted beside the catalogue just made.
+                if name != Catalogues.mainName { Catalogues.standard.dropEmptyMain() }
+            }
+        }
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be

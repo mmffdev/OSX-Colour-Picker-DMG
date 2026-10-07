@@ -40,7 +40,7 @@ enum Design {
 
     /// The ten styles: size, weight, line height as a multiple, tracking as a fraction of the size.
     enum Text {
-        case display, title, headline, heading, lead, body, bodyStrong, caption, label, numeral, action
+        case display, title, headline, heading, lead, body, bodyStrong, caption, label, section, numeral, action
         var size: CGFloat {
             switch self {
             case .display: return 88
@@ -50,6 +50,7 @@ enum Design {
             case .lead: return 20
             case .body, .bodyStrong, .action: return 13
             case .caption, .label: return 11
+            case .section: return 13
             case .numeral: return 64
             }
         }
@@ -58,7 +59,7 @@ enum Design {
             case .display, .numeral: return .thin
             case .title, .lead: return .light
             case .headline, .body, .caption: return .regular
-            case .heading, .bodyStrong, .label, .action: return .medium
+            case .heading, .bodyStrong, .label, .section, .action: return .medium
             }
         }
         var lineHeight: CGFloat {
@@ -70,7 +71,7 @@ enum Design {
             case .lead: return 1.38
             case .body, .bodyStrong: return 1.55
             case .caption: return 1.45
-            case .label: return 1.2
+            case .label, .section: return 1.2
             case .numeral: return 0.9
             case .action: return 1.2
             }
@@ -83,7 +84,7 @@ enum Design {
             case .heading: return -0.005
             case .lead: return -0.01
             case .numeral: return -0.04
-            case .label: return 0.06
+            case .label, .section: return 0.06
             default: return 0
             }
         }
@@ -114,7 +115,7 @@ enum Design {
         if style == .numeral || style == .caption || style == .label {
             attrs[.font] = NSFont(descriptor: style.font(sz).fontDescriptor.addingAttributes([.featureSettings: [[NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType, .selectorIdentifier: kMonospacedNumbersSelector]]]), size: sz) ?? style.font(sz)
         }
-        let text = style == .label ? s.uppercased() : s
+        let text = style == .label || style == .section ? s.uppercased() : s
         return NSAttributedString(string: text, attributes: attrs)
     }
 

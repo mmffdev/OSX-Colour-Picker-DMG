@@ -126,6 +126,13 @@ enum Prefs {
         set { d.set(newValue, forKey: "assistantDone") }
     }
 
+    /// The launch artwork before the window. Off for now while the window is being built (Rick, 2026-10-08);
+    /// `defaults write com.mmffdev.mmffdevcolour3 splash -bool true` brings it back.
+    static var splash: Bool {
+        get { bool("splash", false) }
+        set { d.set(newValue, forKey: "splash") }
+    }
+
     static var sounds: Bool {
         get { bool("sounds", true) }
         set { d.set(newValue, forKey: "sounds") }

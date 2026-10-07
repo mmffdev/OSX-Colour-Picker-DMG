@@ -11,7 +11,7 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 | Medium 500 | heading, label, body strong, buttons |
 | Bold 700 | the wordmark only |
 
-## The ten styles
+## The eleven styles
 
 | Style | Weight | Size / line | Tracking | Notes |
 |---|---|---|---|---|
@@ -22,7 +22,8 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 | Lead | 300 | 20 / 1.38 | −1% | at most 34em wide |
 | Body | 400 | 13 / 1.55 | 0 | 60 characters wide; Body Strong is 500 |
 | Caption | 400 | 11 / 1.45 | 0 | quiet grey; paths and metadata |
-| Label | 500 | 11 / 1.2 | +6% | capitals, a 6pt dot in front: "● OPEN POSITIONS" |
+| Label | 500 | 11 / 1.2 | +6% | capitals, a 6pt dot in front: "● OPEN POSITIONS"; groups the rows under it |
+| Section | 500 | 13 / 1.2 | +6% | capitals; the headings inside a page or an open row, About, Directory, Contents, one step above the Labels that group rows beneath (Rick, 2026-10-08) |
 | Numeral | 200 | 64 / 0.9 | −4% | tabular, right-aligned in its block |
 | Action | 500 | 13 | 0 | buttons |
 

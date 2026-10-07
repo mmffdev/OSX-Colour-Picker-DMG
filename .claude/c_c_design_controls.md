@@ -4,8 +4,10 @@ Every control is drawn by the app, in the family and the greys. No `NSButton` be
 
 | Control | Shape | States |
 |---|---|---|
-| Primary button | ink fill, paper text, square, 14 side padding, arrow on the right behind a hairline | hover #2C2C2C; pressed #000 and down 1pt; disabled 35% |
-| Secondary | 1pt ink outline, no fill | hover Mist fill |
+| Primary button | ink fill, Card text, square, 14 side padding, the arrow on the right behind a hairline | hover #2C2C2C; pressed #000 and down 1pt; disabled 35% |
+| Secondary | 1pt ink outline, no fill, the same arrow cell on the right | hover Mist fill |
+
+Every boxed button carries the icon cell on its right, the arrow unless it shows a state (tick, cross): the primary is the guide, the secondary its outline twin (Rick, 2026-10-08). A quiet button is text and carries no cell.
 | Quiet | underlined text, 3pt offset, no box | hover darker |
 | Icon | 32 square, Card fill, Rule outline, the arrow or a glyph | hover ink outline |
 
