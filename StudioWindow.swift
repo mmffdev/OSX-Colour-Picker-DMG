@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 // ---------- The Studio window: the app itself on Colorgain's own grid ----------
 //
@@ -41,10 +42,13 @@ final class StudioWindowController: NSWindowController {
         // --palettes opens on the palettes view, --palette "<name>" on that palette, for looking at a screen straight away.
         let args = CommandLine.arguments
         let named = args.firstIndex(of: "--palette").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+        let project = args.firstIndex(of: "--project").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
-        else { c.frame.go(args.contains("--palettes") ? .palettes : .catalogue) }
+        else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
+        else { c.frame.go(args.contains("--settings") ? .settings : args.contains("--palettes") ? .palettes : .catalogue) }
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
+        library.window = c.window   // errors and prompts come up on this window
         c.window?.makeFirstResponder(c.frame)   // not the search field: nothing blinks until it is wanted
     }
 }
@@ -54,8 +58,8 @@ final class StudioWindowController: NSWindowController {
 /// Text is placed by its baseline, never its box, so a row of different sizes sits level (the
 /// guide's first law). All the window's views are flipped: y grows downwards, as the grid reads.
 private extension NSAttributedString {
-    var baselineFont: NSFont { attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? Design.Text.body.font() }
-    func draw(x: CGFloat, baseline: CGFloat) { draw(at: NSPoint(x: x, y: baseline - baselineFont.ascender)) }
+    var baselineFont: NSFont { length > 0 ? attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? Design.Text.body.font() : Design.Text.body.font() }
+    func draw(x: CGFloat, baseline: CGFloat) { if length > 0 { draw(at: NSPoint(x: x, y: baseline - baselineFont.ascender)) } }
     func draw(right: CGFloat, baseline: CGFloat) { draw(x: right - size().width, baseline: baseline) }
     /// Draws on one line, cut with an ellipsis where it would pass `width`.
     func draw(x: CGFloat, baseline: CGFloat, width: CGFloat) {
@@ -88,8 +92,9 @@ final class StudioFrame: NSView {
     typealias A = Design.App
     let library: LibraryController
 
-    /// What the page shows and the rails point at.
-    enum Place: Equatable { case catalogue, project(UUID), palette(UUID), palettes }
+    /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
+    /// in it where it groups its members, a member (the app's project), and the palettes inside.
+    enum Place: Equatable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), palette(UUID), palettes, settings }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -107,15 +112,19 @@ final class StudioFrame: NSView {
         layer?.backgroundColor = Design.paper.cgColor
         for v in [header, rail1, rail2, page, history, footer] { addSubview(v) }
         header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : .palettes) }
+        header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
         header.onAcross = { [weak self] n in self?.page.grid.across = n }
         rail1.onPick = { [weak self] p in self?.go(p) }
-        rail2.onPick = { [weak self] id in self?.go(.palette(id)) }
+        rail2.onPick = { [weak self] p in self?.go(p) }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
         page.grid.onOpen = { [weak self] id in self?.go(.palette(id)) }
+        page.settings.library = library
+        page.settings.onChange = { [weak self] in self?.reload() }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .schemaDidChange, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
@@ -162,58 +171,142 @@ final class StudioFrame: NSView {
         fillFooter()
     }
 
-    /// Rebuilds every region from the library. Cheap enough to do whole on any change.
+    /// Rebuilds every region from the library and the schema. Cheap enough to do whole on any change.
     func reload() {
         let lib = library.library
-        // A palette that is gone goes back to the catalogue.
-        if case .palette(let id) = place, lib.swatch(id) == nil { place = .catalogue }
-        if case .project(let id) = place, lib.project(id) == nil { place = .catalogue }
+        // A place that is gone goes back to the catalogue.
+        switch place {
+        case .palette(let id) where lib.swatch(id) == nil: place = .catalogue
+        case .project(let id) where lib.project(id) == nil: place = .catalogue
+        case .collection(let id) where !SchemaTrial.collections.contains(where: { $0.id == id }): place = .catalogue
+        case .folder(let c, let f) where !(SchemaTrial.collections.first { $0.id == c }?.folders.contains { $0.id == f } ?? false): place = .catalogue
+        default: break
+        }
         fillLibraryRail()
-        fillPaletteTable()
+        fillContextRail()
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = isTiles ? 0 : 1
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings: return nil; default: return 1 } }()
     }
 
-    private var isTiles: Bool { if case .palettes = place { return false }; if case .project = place { return false }; return true }
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
+
+    /// The members of a collection, in rail1's order; with `folder`, those in that folder, or those in none when nil.
+    private func members(of c: SchemaCollection, folder: UUID?? = .none) -> [Project] {
+        let all = SchemaTrial.collections, places = SchemaTrial.places
+        return library.library.orderedProjects.filter { p in
+            guard SchemaTrial.collection(of: p.id, among: all, places: places).id == c.id else { return false }
+            if case .some(let f) = folder { return SchemaTrial.folder(of: p.id, among: all, places: places) == f }
+            return true
+        }
+    }
 
     private func fillLibraryRail() {
         let lib = library.library
-        var rows: [LibraryRail.Row] = [.group("Catalogue"), .row("All Colours", lib.colours.count, .catalogue)]
+        var rows: [LibraryRail.Row] = [.group("Catalogue"), .row("All Colours", lib.colours.count, .catalogue, 0)]
         let favourites = palettes(lib.orderedFavourites)
         if !favourites.isEmpty {
             rows.append(.group("Favourites"))
-            rows += favourites.map { .row($0.name, $0.entries.count, .palette($0.id)) }
+            rows += favourites.map { .row($0.name, $0.entries.count, .palette($0.id), 0) }
         }
-        let projects = lib.orderedProjects
-        if !projects.isEmpty {
-            rows.append(.group("Projects"))
-            rows += projects.map { .row($0.name, palettes(lib.palettes(in: $0.id)).count, .project($0.id)) }
+        // Level 0: each collection is a heading. Level 1: its folders, where it has them, each holding its
+        // members. Then the member itself, the app's project, with its palettes counted.
+        for c in SchemaTrial.collections {
+            rows.append(.group(c.name))
+            if c.folderName != nil {
+                for f in c.folders {
+                    let inside = members(of: c, folder: .some(f.id))
+                    rows.append(.row(f.name, inside.count, .folder(c.id, f.id), 0))
+                    rows += inside.map { .row($0.name, palettes(lib.palettes(in: $0.id)).count, .project($0.id), 1) }
+                }
+            }
+            rows += members(of: c, folder: .some(nil)).map { .row($0.name, palettes(lib.palettes(in: $0.id)).count, .project($0.id), 0) }
         }
         let loose = palettes(lib.palettes(in: nil))
         rows.append(.group("Palettes"))
-        rows += loose.map { .row($0.name, $0.entries.count, .palette($0.id)) }
-        rows.append(.row("All Palettes", palettes(lib.swatches).count, .palettes))
+        rows += loose.map { .row($0.name, $0.entries.count, .palette($0.id), 0) }
+        rows.append(.row("All Palettes", palettes(lib.swatches).count, .palettes, 0))
         rail1.set(rows: rows, chosen: place)
     }
 
-    private func fillPaletteTable() {
+    /// rail2 follows the place: the palettes of the catalogue or a project's level, or, for a member, its
+    /// whole stack as the schema lays it out: Information, Palettes, Typography, Tags and any group of its own.
+    private func fillContextRail() {
         let lib = library.library
-        let heading: String, list: [Swatch]
-        switch place {
-        case .catalogue, .palettes: heading = "Palettes"; list = palettes(lib.listedPalettes)
-        case .project(let id): heading = lib.project(id)?.name ?? "Project"; list = palettes(lib.palettes(in: id))
-        case .palette(let id):
-            let p = lib.swatch(id)?.projectID
-            heading = p.flatMap { lib.project($0)?.name } ?? "Palettes"
-            list = palettes(lib.palettes(in: p))
+        func paletteRow(_ s: Swatch, indent: Int = 0) -> PaletteTable.Row {
+            .palette(s.id, s.name, s.entries.count, s.entries.map { Design.hex($0.hex) }, place == .palette(s.id), indent)
         }
-        let chosen: UUID? = { if case .palette(let id) = place { return id }; return nil }()
-        rail2.set(heading: heading, rows: list.map { s in
-            PaletteTable.Row(id: s.id, name: s.name, count: s.entries.count, colours: s.entries.prefix(3).map { Design.hex($0.hex) }, chosen: s.id == chosen)
-        })
+        func memberRows(_ list: [Project]) -> [PaletteTable.Row] {
+            list.map { .item($0.name, "\(palettes(lib.palettes(in: $0.id)).count)", 0, .project($0.id), place == .project($0.id)) }
+        }
+        var heading = "Palettes", labels = ("Palette", "Colours"), rows: [PaletteTable.Row] = []
+        switch place {
+        case .catalogue, .palettes:
+            rows = palettes(lib.listedPalettes).map { paletteRow($0) }
+        case .palette(let id):
+            if let p = lib.swatch(id)?.projectID, let project = lib.project(p) { return fillStack(of: project, in: lib) }
+            rows = palettes(lib.palettes(in: nil)).map { paletteRow($0) }
+        case .collection(let id):
+            guard let c = SchemaTrial.collections.first(where: { $0.id == id }) else { return }
+            heading = c.name; labels = (SchemaTrial.memberName(of: c), "Palettes")
+            if c.folderName != nil {
+                for f in c.folders {
+                    rows.append(.group(f.name, 0))
+                    rows += memberRows(members(of: c, folder: .some(f.id)))
+                }
+            }
+            rows += memberRows(members(of: c, folder: .some(nil)))
+        case .folder(let cid, let fid):
+            guard let c = SchemaTrial.collections.first(where: { $0.id == cid }), let f = c.folders.first(where: { $0.id == fid }) else { return }
+            heading = f.name; labels = (SchemaTrial.memberName(of: c), "Palettes")
+            rows = memberRows(members(of: c, folder: .some(fid)))
+        case .project(let id):
+            guard let project = lib.project(id) else { return }
+            return fillStack(of: project, in: lib)
+        case .settings:
+            heading = "Settings"; labels = ("Section", "")
+            rows = [.item("Catalogues", nil, 0, .settings, true)]
+        }
+        rail2.set(heading: heading, labels: labels, rows: rows)
+    }
+
+    /// A member's stack in rail2: each group of the schema in its order, the app's own four holding
+    /// what they always have, any other a label with its own groups inside it.
+    private func fillStack(of project: Project, in lib: Library) {
+        let schema = SchemaTrial.schema(for: project.id)
+        let held = lib.palettes(in: project.id)
+        let own = lib.allTags.filter { lib.project(ofTag: $0) == project.id }
+        var rows: [PaletteTable.Row] = []
+        func label(_ group: SchemaNode, _ indent: Int) {
+            rows.append(.group(group.name, indent))
+            for child in group.children { label(child, indent + 1) }
+        }
+        for group in schema.children {
+            switch SchemaTrial.role(of: group) {
+            case .information?:
+                rows.append(.group(group.name.isEmpty ? "Information" : group.name, 0))
+                rows.append(.item("Overview", nil, 0, .project(project.id), place == .project(project.id)))
+            case .palettes?:
+                rows.append(.group(group.name.isEmpty ? "Palettes" : group.name, 0))
+                let colours = held.filter { !$0.isTypography }
+                rows += colours.map { .palette($0.id, $0.name, $0.entries.count, $0.entries.map { Design.hex($0.hex) }, place == .palette($0.id), 0) }
+                if colours.isEmpty { rows.append(.item("None yet", nil, 0, nil, false)) }
+            case .typography?:
+                rows.append(.group(group.name.isEmpty ? "Typography" : group.name, 0))
+                let type = held.filter { $0.isTypography }
+                rows += type.map { .item($0.name, "\($0.styles?.count ?? 0)", 0, nil, false) }
+                if type.isEmpty { rows.append(.item("None yet", nil, 0, nil, false)) }
+            case .tags?:
+                rows.append(.group(group.name.isEmpty ? "Tags" : group.name, 0))
+                rows += own.map { .item($0, nil, 0, nil, false) }
+                if own.isEmpty { rows.append(.item("None yet", nil, 0, nil, false)) }
+            case nil:
+                label(group, 0)
+            }
+        }
+        let c = SchemaTrial.collection(of: project.id)
+        rail2.set(heading: project.name, labels: (SchemaTrial.memberName(of: c), "Items"), rows: rows)
     }
 
     private func fillPage() {
@@ -231,7 +324,12 @@ final class StudioFrame: NSView {
                 keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: "\(s.entries.count) " + (s.entries.count == 1 ? "colour" : "colours"), colours: s.entries.prefix(8).map { Design.hex($0.hex) }, hex: nil, id: s.id) : nil
             }
         }
-        let items: [TileGrid.Item], title: String, meta: (String, String)
+        func cardsOf(_ projects: [Project]) -> ([TileGrid.Item], Int) {
+            let list = projects.flatMap { palettes(lib.palettes(in: $0.id)) }
+            return (cards(list), list.reduce(0) { $0 + $1.entries.count })
+        }
+        var items: [TileGrid.Item] = [], title = "", meta = ("", "")
+        page.showSettings(false)
         switch place {
         case .catalogue:
             items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
@@ -246,10 +344,26 @@ final class StudioFrame: NSView {
             items = cards(list)
             title = lib.project(id)?.name ?? "Project"
             meta = ("\(items.count) palettes", "\(list.reduce(0) { $0 + $1.entries.count }) colours")
+        case .collection(let id):
+            guard let c = SchemaTrial.collections.first(where: { $0.id == id }) else { return }
+            let m = members(of: c)
+            let (made, colours) = cardsOf(m)
+            items = made; title = c.name
+            meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
+        case .folder(let cid, let fid):
+            guard let c = SchemaTrial.collections.first(where: { $0.id == cid }), let f = c.folders.first(where: { $0.id == fid }) else { return }
+            let m = members(of: c, folder: .some(fid))
+            let (made, colours) = cardsOf(m)
+            items = made; title = f.name
+            meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
         case .palettes:
             let list = palettes(lib.listedPalettes)
             items = cards(list)
             title = "All Palettes"; meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
+        case .settings:
+            let n = library.availableCatalogues().count
+            title = "Catalogues"; meta = (library.catalogue, "\(n) " + (n == 1 ? "catalogue" : "catalogues"))
+            page.showSettings(true)
         }
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
@@ -283,8 +397,10 @@ final class StudioFrame: NSView {
 /// The wordmark, the tabs, Search, the tile-size slider and the avatar, all on one baseline.
 final class StudioHeader: NSView {
     var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { needsLayout = true; needsDisplay = true } }
-    var live = 0 { didSet { needsDisplay = true } }
+    var live: Int? = 0 { didSet { needsDisplay = true } }
+    private var settingsRect = NSRect.zero
     var onTab: ((Int) -> Void)?
+    var onSettings: (() -> Void)?
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
@@ -342,8 +458,13 @@ final class StudioHeader: NSView {
         }
         // Search on a hairline across columns 7 to 9.
         hairline(x: col(7), y: b + 7, width: span(3), field.currentEditor() != nil ? Design.ink : Design.rule)
-        // The avatar: a 24 square at the right edge carrying the user's initial.
+        // Settings as a quiet word before the slider.
         let right = col(12) + grid.column
+        let settings = Design.attributed("Settings", live == nil ? .bodyStrong : .body, colour: live == nil ? Design.ink : Design.quiet)
+        let sx = col(11) - 24 - settings.size().width
+        settings.draw(x: sx, baseline: b)
+        settingsRect = NSRect(x: sx - 8, y: 0, width: settings.size().width + 16, height: bounds.height)
+        // The avatar: a 24 square at the right edge carrying the user's initial.
         let box = NSRect(x: right - 24, y: b - 17, width: 24, height: 24)
         fill(box, Design.mist)
         let initial = Design.attributed(String(NSFullUserName().prefix(1)).uppercased(), .bodyStrong)
@@ -353,6 +474,7 @@ final class StudioHeader: NSView {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if let i = tabRects.firstIndex(where: { $0.contains(p) }), i < 2 { onTab?(i); return }
+        if settingsRect.contains(p) { onSettings?(); return }
         super.mouseDown(with: event)
     }
     @objc private func searched() { onSearch?(field.stringValue) }
@@ -420,6 +542,8 @@ class StudioRail: NSView {
         scroll.frame = NSRect(x: 0, y: AreaHeader.height, width: bounds.width, height: bounds.height - AreaHeader.height)
         body.inset = inset
         body.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(scroll.frame.height, body.height))
+        // Rows that fit do not scroll at all; only a longer list moves under the header.
+        scroll.verticalScrollElasticity = body.height > scroll.frame.height ? .allowed : .none
         body.needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
@@ -452,9 +576,10 @@ enum AreaHeader {
     }
 }
 
-/// The library rail: groups of rows, the name left and a tabular count right.
+/// The library rail: groups of rows, the name left and a tabular count right; a row one step in sits
+/// inside the row above it, as a member sits in its folder.
 final class LibraryRail: StudioRail {
-    enum Row { case group(String), row(String, Int, StudioFrame.Place) }
+    enum Row { case group(String), row(String, Int, StudioFrame.Place, Int) }
     var onPick: ((StudioFrame.Place) -> Void)?
     private var list: Body { body as! Body }
     init() { super.init(body: Body()); heading = "Library"; labels = ("Name", "Count"); list.onPick = { [weak self] p in self?.onPick?(p) } }
@@ -465,7 +590,7 @@ final class LibraryRail: StudioRail {
         var rows: [Row] = []
         var chosen: StudioFrame.Place = .catalogue
         var onPick: ((StudioFrame.Place) -> Void)?
-        static let row: CGFloat = 20, gap: CGFloat = 6, groupAbove: CGFloat = 24, groupBelow: CGFloat = 10
+        static let row: CGFloat = 20, gap: CGFloat = 6, groupAbove: CGFloat = 24, groupBelow: CGFloat = 10, step: CGFloat = 16
         private var hits: [(NSRect, StudioFrame.Place)] = []
 
         override var height: CGFloat {
@@ -485,16 +610,16 @@ final class LibraryRail: StudioRail {
                     y += Self.groupAbove
                     Design.attributed(title, .label, colour: Design.quiet).draw(x: inset, baseline: y + 9)
                     y += 11 + Self.groupBelow
-                case .row(let name, let count, let place):
+                case .row(let name, let count, let place, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let on = place == chosen
                     if on { fill(box, Design.mist) }
-                    let b = y + 14
+                    let b = y + 14, x = inset + CGFloat(indent) * Self.step
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
                     let countW = countText.size().width
                     let nameText = Design.attributed(name, on ? .bodyStrong : .body)
-                    nameText.draw(x: inset, baseline: b, width: right - inset - countW - 12 - (on ? 10 : 0))
-                    if on { fill(NSRect(x: inset + min(nameText.size().width, right - inset - countW - 22) + 6, y: b - 6, width: 4, height: 4), Design.ink) }
+                    nameText.draw(x: x, baseline: b, width: right - x - countW - 12 - (on ? 10 : 0))
+                    if on { fill(NSRect(x: x + min(nameText.size().width, right - x - countW - 22) + 6, y: b - 6, width: 4, height: 4), Design.ink) }
                     countText.draw(right: right, baseline: b)
                     hits.append((box, place))
                     y += Self.row + Self.gap
@@ -508,49 +633,83 @@ final class LibraryRail: StudioRail {
     }
 }
 
-/// The context rail: a table of palettes, Quiet column titles on a Rule, rows on Mist hairlines,
-/// a strip of three swatches before each name, counts right.
+/// The context rail: a table. A palette row carries a strip of every colour in it before its name and
+/// its count at the right; a group row is a Label, one step in for each level down; an item row is a
+/// name with a detail at the right, going somewhere when it has a place.
 final class PaletteTable: StudioRail {
-    struct Row { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let chosen: Bool }
-    var onPick: ((UUID) -> Void)?
+    enum Row {
+        case group(String, Int)
+        case palette(UUID, String, Int, [NSColor], Bool, Int)
+        case item(String, String?, Int, StudioFrame.Place?, Bool)
+    }
+    var onPick: ((StudioFrame.Place) -> Void)?
     private var table: Body { body as! Body }
-    init() { super.init(body: Body()); labels = ("Palette", "Colours"); table.onPick = { [weak self] id in self?.onPick?(id) } }
+    init() { super.init(body: Body()); labels = ("Palette", "Colours"); table.onPick = { [weak self] p in self?.onPick?(p) } }
     required init?(coder: NSCoder) { fatalError() }
-    func set(heading: String, rows: [Row]) {
-        self.heading = heading; table.rows = rows; needsLayout = true
-        // The chosen palette is brought into view, which the eye expects when it was chosen elsewhere.
-        if let i = rows.firstIndex(where: { $0.chosen }) {
-            layoutSubtreeIfNeeded()
-            let y = CGFloat(i) * Body.row
-            body.scrollToVisible(NSRect(x: 0, y: y - Body.row, width: 1, height: Body.row * 3))
+    func set(heading: String, labels: (String, String), rows: [Row]) {
+        self.heading = heading; self.labels = labels; table.rows = rows; needsLayout = true
+        // The chosen row is brought into view, which the eye expects when it was chosen elsewhere.
+        var y: CGFloat = 0
+        for r in rows {
+            let h = Body.height(of: r)
+            switch r {
+            case .palette(_, _, _, _, true, _), .item(_, _, _, _, true):
+                layoutSubtreeIfNeeded()
+                body.scrollToVisible(NSRect(x: 0, y: max(0, y - h), width: 1, height: h * 3))
+                return
+            default: y += h
+            }
         }
     }
 
     final class Body: RailBody {
         var rows: [Row] = []
-        var onPick: ((UUID) -> Void)?
-        static let row: CGFloat = 36
-        private var hits: [(NSRect, UUID)] = []
-        override var height: CGFloat { CGFloat(rows.count) * Self.row + 24 }
+        var onPick: ((StudioFrame.Place) -> Void)?
+        static let row: CGFloat = 36, group: CGFloat = 34, step: CGFloat = 16, strip: CGFloat = 44
+        private var hits: [(NSRect, StudioFrame.Place)] = []
+        static func height(of r: Row) -> CGFloat { if case .group = r { return group }; return row }
+        override var height: CGFloat { rows.reduce(0) { $0 + Self.height(of: $1) } + 24 }
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
             let right = bounds.width - inset
             hits = []
             for r in rows {
-                let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                if r.chosen { fill(box, Design.mist) }
-                let b = y + 22
-                // Three 10 squares, 2 apart; a palette short of three leaves the rest Mist.
-                for i in 0..<3 { fill(NSRect(x: inset + CGFloat(i) * 12, y: b - 9, width: 10, height: 10), i < r.colours.count ? r.colours[i] : Design.mist) }
-                let count = Design.attributed(String(r.count), .caption, colour: Design.quiet)
-                Design.attributed(r.name, r.chosen ? .bodyStrong : .body).draw(x: inset + 44, baseline: b, width: right - inset - 44 - count.size().width - 12)
-                count.draw(right: right, baseline: b)
-                hairline(x: inset, y: y + Self.row - 1, width: right - inset, Design.mist)
-                hits.append((box, r.id))
-                y += Self.row
+                switch r {
+                case .group(let name, let indent):
+                    Design.attributed(name, .label, colour: Design.quiet).draw(x: inset + CGFloat(indent) * Self.step, baseline: y + 25)
+                    y += Self.group
+                case .palette(let id, let name, let count, let colours, let chosen, let indent):
+                    let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
+                    if chosen { fill(box, Design.mist) }
+                    let b = y + 22, x = inset + CGFloat(indent) * Self.step
+                    // The whole palette as a strip, each colour an equal band; an empty one is Mist.
+                    let strip = NSRect(x: x, y: b - 9, width: Self.strip, height: 10)
+                    if colours.isEmpty { fill(strip, Design.mist) }
+                    else {
+                        let bw = strip.width / CGFloat(colours.count)
+                        for (k, c) in colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
+                    }
+                    let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
+                    Design.attributed(name, chosen ? .bodyStrong : .body).draw(x: x + Self.strip + 10, baseline: b, width: right - x - Self.strip - 10 - countText.size().width - 12)
+                    countText.draw(right: right, baseline: b)
+                    hairline(x: inset, y: y + Self.row - 1, width: right - inset, Design.mist)
+                    hits.append((box, .palette(id)))
+                    y += Self.row
+                case .item(let name, let detail, let indent, let place, let chosen):
+                    let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
+                    if chosen { fill(box, Design.mist) }
+                    let b = y + 22, x = inset + CGFloat(indent) * Self.step
+                    let detailText = Design.attributed(detail ?? "", .caption, colour: Design.quiet)
+                    let dim = place == nil && detail == nil && name == "None yet"
+                    Design.attributed(name, chosen ? .bodyStrong : .body, colour: dim ? Design.soft : Design.ink).draw(x: x, baseline: b, width: right - x - detailText.size().width - 12)
+                    if detail != nil { detailText.draw(right: right, baseline: b) }
+                    hairline(x: inset, y: y + Self.row - 1, width: right - inset, Design.mist)
+                    if let p = place { hits.append((box, p)) }
+                    y += Self.row
+                }
             }
-            if rows.isEmpty { Design.attributed("No palettes yet", .caption, colour: Design.soft).draw(x: inset, baseline: y + 22) }
+            if rows.isEmpty { Design.attributed("Nothing here yet", .caption, colour: Design.soft).draw(x: inset, baseline: y + 22) }
         }
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
@@ -604,6 +763,7 @@ final class HistoryRail: StudioRail {
 final class StudioPage: NSView {
     var inset: CGFloat = 8 { didSet { needsLayout = true } }
     let grid = TileGrid()
+    let settings = CatalogueSettings()
     private let scroll = NSScrollView()
     private var title = ""
     private var meta: (String, String) = ("", "")
@@ -620,7 +780,17 @@ final class StudioPage: NSView {
         scroll.scrollerStyle = .overlay
         scroll.documentView = grid
         addSubview(scroll)
+        settings.isHidden = true
+        addSubview(settings)
         grid.onResize = { [weak self] in self?.needsLayout = true }
+    }
+
+    /// The Catalogues settings take the page in place of the tiles.
+    func showSettings(_ on: Bool) {
+        settings.isHidden = !on
+        scroll.isHidden = on
+        if on { settings.reload() }
+        needsLayout = true
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
@@ -636,8 +806,10 @@ final class StudioPage: NSView {
         super.layout()
         let top = Self.headerHeight
         scroll.frame = NSRect(x: inset, y: top, width: bounds.width - 2 * inset, height: bounds.height - top)
+        settings.frame = scroll.frame
         grid.width = scroll.frame.width
         grid.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, grid.height))
+        scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
         grid.needsDisplay = true
     }
 
@@ -702,6 +874,118 @@ final class TileGrid: NSView {
         if let h = items[i].hex { onPick?(h) }
         else if let id = items[i].id, event.clickCount == 2 { onOpen?(id) }
         else if let id = items[i].id { onOpen?(id) }
+    }
+}
+
+// MARK: - Settings: Catalogues
+
+/// The Catalogues settings on the page: where the app's home is, every catalogue on the list with a tick
+/// on the open one, and the actions: open a catalogue where it is, start a new one, show the open one in Finder.
+final class CatalogueSettings: NSView {
+    weak var library: LibraryController?
+    var onChange: (() -> Void)?
+    private var names: [String] = []
+    private var hits: [(NSRect, String)] = []
+    private let openButton = SwissButton("Open Catalogue\u{2026}", .primary)
+    private let newButton = SwissButton("New Catalogue", .secondary)
+    private let finderButton = SwissButton("Show In Finder", .secondary)
+    static let row: CGFloat = 36
+
+    init() {
+        super.init(frame: .zero)
+        openButton.target = self; openButton.action = #selector(openCatalogue)
+        newButton.target = self; newButton.action = #selector(newCatalogue)
+        finderButton.target = self; finderButton.action = #selector(showInFinder)
+        for b in [openButton, newButton, finderButton] { addSubview(b) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+
+    func reload() {
+        names = library?.availableCatalogues() ?? []
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        var x: CGFloat = 0
+        for b in [openButton, newButton, finderButton] {
+            let w = b.intrinsicContentSize.width
+            b.frame = NSRect(x: x, y: 0, width: w, height: 32)
+            x += w + 12
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        var y: CGFloat = 32 + 32
+        Design.attributed("Home", .label, colour: Design.quiet).draw(x: 0, baseline: y)
+        y += 24
+        Design.attributed((Catalogues.standard.root.path as NSString).abbreviatingWithTildeInPath, .body).draw(x: 0, baseline: y, width: bounds.width)
+        y += 12
+        hairline(x: 0, y: y, width: bounds.width, Design.rule)
+        y += 32
+        Design.attributed("Catalogues", .label, colour: Design.quiet).draw(x: 0, baseline: y)
+        Design.attributed("Where", .label, colour: Design.quiet).draw(right: bounds.width, baseline: y)
+        y += 12
+        hairline(x: 0, y: y, width: bounds.width, Design.rule)
+        hits = []
+        let current = library?.catalogue
+        for n in names {
+            let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
+            let on = n == current
+            if on { fill(box, Design.mist) }
+            let b = y + 23
+            let dir = Catalogues.standard.directory(for: n)
+            let whereText = Design.attributed((dir.path as NSString).abbreviatingWithTildeInPath, .caption, colour: Design.quiet)
+            Design.attributed(n, on ? .bodyStrong : .body).draw(x: 0, baseline: b, width: bounds.width * 0.5)
+            whereText.draw(x: bounds.width * 0.5, baseline: b, width: bounds.width * 0.5 - 24)
+            if on { Design.attributed("\u{2713}", .caption).draw(right: bounds.width, baseline: b) }
+            hairline(x: 0, y: y + Self.row - 1, width: bounds.width, Design.mist)
+            hits.append((box, n))
+            y += Self.row
+        }
+        y += 24
+        Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed.", .caption, colour: Design.quiet, lineHeight: true)
+            .draw(in: NSRect(x: 0, y: y, width: min(bounds.width, 560), height: 60))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let h = hits.first(where: { $0.0.contains(p) }), let lib = library, h.1 != lib.catalogue else { return }
+        lib.open(catalogue: h.1)
+        onChange?()
+    }
+
+    @objc private func openCatalogue() {
+        guard let lib = library, let w = window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue), .json].compactMap { $0 }
+        panel.prompt = "Open"
+        panel.message = "Choose a catalogue's .colcatalogue file to open it where it is, or a library.json to make a catalogue from it."
+        panel.beginSheetModal(for: w) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let name = url.pathExtension.lowercased() == ColourFiles.catalogue ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
+                lib.open(catalogue: name)
+            } catch { lib.show(error) }
+            self?.onChange?()
+        }
+    }
+
+    @objc private func newCatalogue() {
+        guard let lib = library else { return }
+        let taken = Catalogues.standard.names()
+        var n = 1
+        while taken.contains("Catalogue \(n)") { n += 1 }
+        do { lib.open(catalogue: try Catalogues.standard.create("Catalogue \(n)")) } catch { lib.show(error) }
+        onChange?()
+    }
+
+    @objc private func showInFinder() {
+        guard let lib = library else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([lib.store.url])
     }
 }
 
