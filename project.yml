@@ -34,7 +34,7 @@ targets:
           - project.yml
           - Colorgain.xcodeproj
           - appstore
-          - helper
+          - "helper/**"
           - vendor
           - tools
           - help
@@ -128,7 +128,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "--new-user": false
-        "--studio": false
+        "--studio": true
         "--self-test": false
     archive:
       config: Release
