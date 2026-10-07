@@ -68,7 +68,9 @@ typealias Matrix3 = [[Double]]
 func multiply(_ m: Matrix3, _ v: [Double]) -> [Double] { m.map { $0[0] * v[0] + $0[1] * v[1] + $0[2] * v[2] } }
 
 func multiply(_ a: Matrix3, _ b: Matrix3) -> Matrix3 {
-    (0..<3).map { i in (0..<3).map { j in a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] } }
+    (0..<3).map { i -> [Double] in
+        (0..<3).map { j -> Double in a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] }
+    }
 }
 
 func inverse(_ m: Matrix3) -> Matrix3 {
