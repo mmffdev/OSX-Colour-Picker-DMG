@@ -60,7 +60,7 @@ Earlier items sit in the Colour Picker workspace `de3bfb2c-9f1b-4c4a-bf75-bc872e
 
 ## The Studio window (the redesign of the app itself)
 
-`StudioWindow.swift` is the main window on Colorgain's own grid (`Design.App`): header, library rail, context rail, page, history rail, footer, all placed by frame and drawn in the ten text styles. It opens in place of the old window with `--studio` (`tools/open.sh studio`); `--palettes` opens on the palettes view and `--palette "<name>"` on that palette. Built 2026-10-08 for the library and palettes views only; Lab, Contrast and the palette page's options still live in the old window.
+`StudioWindow.swift` is the main window on Colorgain's own grid (`Design.App`): header, library rail, context rail, page, history rail, footer, all placed by frame and drawn in the ten text styles. It opens in place of the old window with `--studio` (`tools/open.sh studio`); `--palettes` opens on the palettes view, `--palette "<name>"` on that palette, `--project "<name>"` on that member, and `--settings`, `--schema`, `--shortcuts`, `--halo`, `--lab`, `--contrast` or `--projects` on those views. The backslash key draws Master Inner, the grid, over the window. Built 2026-10-08 for the library and palettes views only; Lab, Contrast and the palette page's options still live in the old window.
 
 ## What the product is
 
