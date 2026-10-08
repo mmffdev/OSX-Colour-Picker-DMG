@@ -10,7 +10,30 @@ import AppKit
 // and a template, the ones its siblings already have locked. The map and the types each scroll under their
 // header; the headers and the words stay.
 
-final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
+final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
+    /// The template menu open over a type row, if any.
+    private var dropped: SwissDropdown.MenuPanel?
+    var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
+    func dismissOverlay() { closeMenu() }
+    private func closeMenu() {
+        if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
+        dropped = nil
+        Overlays.closed(self)
+    }
+    /// Opens a menu under a rect of one of the views here, in that view's coordinates.
+    private func openMenu(under rect: NSRect, in view: NSView, items: [String], chosen: String, pick: @escaping (Int) -> Void) {
+        guard let win = window else { return }
+        closeMenu()
+        let panel = SwissDropdown.MenuPanel(items: items, chosen: chosen, width: max(200, rect.width)) { [weak self] i in self?.closeMenu(); pick(i) }
+        let s = win.convertToScreen(view.convert(rect, to: nil))
+        panel.place(below: NSPoint(x: s.maxX - max(200, rect.width), y: s.minY - 4))
+        win.addChildWindow(panel, ordered: .above)
+        dropped = panel
+        Overlays.opened(self)
+    }
+    /// The types a group may be, at any level beneath the member: the app's own four, Projects, and every other word on offer.
+    private static var groupTypes: [String] { Array(Set(SchemaTrial.nestedNames + SchemaRole.allCases.map { $0.title } + ["Projects"])).sorted() }
+    private static func isRole(_ t: String) -> Bool { SchemaRole.allCases.contains { $0.title == t } }
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     var onResize: (() -> Void)?
@@ -77,6 +100,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
     private var gripRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
     private var typeHits: [(NSRect, String)] = []
+    /// The template at the right of each type row, and the one on the Custom Name row.
+    private var templateHits: [(NSRect, String)] = []
+    private var customTemplateHit = NSRect.zero
     /// The rollover: what is under the pointer, and how far each pane has flown out, 0 to 1, driven by the clock.
     private var hover: Key?
     private var reveal: [Key: CGFloat] = [:]
@@ -279,6 +305,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
 
     private struct Form {
         var title = "", help = "", name = "", said: String?, offered: [String] = [], chosen: String?, locked: Set<String> = [], canName = false, symbol = "square.dashed"
+        /// Whether the name is one of the types on offer; when it is not, the Custom Name row holds it with the type it follows.
+        var custom: Bool { !offered.isEmpty && !offered.contains(name) }
     }
     private func symbol(forType t: String) -> String {
         switch SchemaRole.allCases.first(where: { $0.title == t }) {
@@ -311,18 +339,18 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
                 f.symbol = "folder"
                 f.help = "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups beneath it. Add Child makes a group in every \(memberWord); Add Sibling makes a \(memberWord)."
             } else {
-                f.offered = SchemaTrial.nestedNames.sorted(); f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
+                f.offered = Self.groupTypes; f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
                 // The types its siblings already hold are locked: one of each to a level. A second can always be made under a name of its own.
                 if let p = parent(of: nid, in: c), let pn = node(p, in: c) { f.locked = Set(pn.children.filter { $0.id != nid }.map { SchemaTrial.type(of: $0) }) }
                 f.help = "A group in every \(memberWord) of \(heading). Choose its type, then name it as you like. Information, Palettes, Typography and Tags hold what they always have; any other type is a label for now."
             }
         case .member(_, let pid):
-            f.title = member(c); f.name = lib.project(pid)?.name ?? ""; f.canName = true; f.symbol = "folder"
+            f.title = member(c); f.name = lib.project(pid)?.name ?? ""; f.canName = true; f.symbol = "folder"; f.said = lib.project(pid)?.details?[ProjectField.notes.rawValue] ?? ""
             f.help = "One \(memberWord) in \(heading): a project with files of its own, following the Master Template. Its palettes are made in rail1."
         case .instance(_, let pid, let nid, let level):
             let root = tree(of: pid), n = node(nid, of: pid) ?? root
             f.title = SchemaTrial.title(forLevel: level + offset(c)); f.name = n.name; f.said = n.about; f.canName = true
-            f.offered = SchemaTrial.nestedNames.sorted(); f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
+            f.offered = Self.groupTypes; f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
             if let p = parent(of: nid, in: root), let pn = SchemaTrial.rows(of: root).first(where: { $0.node.id == p })?.node { f.locked = Set(pn.children.filter { $0.id != nid }.map { SchemaTrial.type(of: $0) }) }
             f.help = (SchemaTrial.hasOwn(pid) ? "A group of \(lib.project(pid)?.name ?? memberWord)'s own: its tree began as the Master Template and is now its own to shape." : "A group in \(lib.project(pid)?.name ?? memberWord), following the Master Template; the first change here gives the \(memberWord) a tree of its own.")
                 + " Choose its type, then name it as you like."
@@ -334,7 +362,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
 
     private struct Geometry {
         var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0
-        var mapTop: CGFloat = 0, formTop: CGFloat = 0, nameRow = NSRect.zero, aboutRow: NSRect?, typesTop: CGFloat = 0
+        var mapTop: CGFloat = 0, formTop: CGFloat = 0, nameRow = NSRect.zero, aboutRow: NSRect?, customRow: NSRect?, typesTop: CGFloat = 0
         var form = Form()
     }
     private func geometry(width w: CGFloat) -> Geometry {
@@ -345,10 +373,15 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         g.mapTop = 5 * u
         g.form = form()
         g.formTop = 5 * u
-        // The name is the right column's header, on the first line with its icon and template; under the Type rule comes the description alone, then the types.
-        g.nameRow = NSRect(x: g.rx, y: 0, width: g.rw, height: u)
+        // Under the Type rule: a member or folder has its name and description; a typed row has its description, then the Custom Name row with the type it follows, then the types.
         var y = g.formTop
-        if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
+        if g.form.offered.isEmpty {
+            if g.form.canName { g.nameRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
+            if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
+        } else {
+            if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
+            g.customRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); g.nameRow = g.customRow!; y += u
+        }
         g.typesTop = y
         return g
     }
@@ -378,8 +411,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         typeScroll.isHidden = typeRows.isEmpty
         // A 13 field's text sits 15 below its top: on the line.
         nameField.isHidden = selected == nil || !g.form.canName
-        nameField.font = Design.Text.body.font()
-        nameField.frame = NSRect(x: g.nameRow.minX - 2, y: g.nameRow.minY + line - 15, width: g.nameRow.width - 150, height: 20)
+        let nameLeft = g.customRow == nil ? g.nameRow.minX : g.nameRow.minX + 24
+        nameField.frame = NSRect(x: nameLeft - 2, y: g.nameRow.minY + line - 15, width: g.nameRow.maxX - 150 - nameLeft, height: 20)
         if nameField.currentEditor() == nil { nameField.stringValue = g.form.name }
         about.isHidden = g.aboutRow == nil
         if let r = g.aboutRow { about.frame = NSRect(x: r.minX, y: r.minY + line - 15, width: r.width, height: 20) }
@@ -397,28 +430,42 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         hairline(x: l, y: g.mapTop - 1, width: g.lw, Design.rule)
         guard selected != nil else { return }
         let rx = g.rx
-        // The header line: the name itself, typed over where it stands, with its icon and template at the right; the title where there is no name to type.
-        if g.form.canName {
-            trailing(in: NSRect(x: rx, y: 0, width: g.rw - 16, height: u), baseline: line, symbol: g.form.symbol)
-            if nameField.currentEditor() != nil { hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw - 150, Design.ink) }
-        } else {
-            Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
-        }
+        Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
         Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
         Design.attributed("Type", .body).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
+        customTemplateHit = .zero
+        if let r = g.customRow {
+            // The Custom Name row: its square, filled when the name is the row's own; the name; and the type it follows, chosen on its menu.
+            let b = r.minY + line
+            let sq = NSRect(x: r.minX, y: b - 10, width: 12, height: 12)
+            fill(sq, g.form.custom ? Design.ink : Design.card)
+            Design.ink.setStroke()
+            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+            let follows = g.form.custom ? (g.form.chosen ?? "Template") : "Template"
+            customTemplateHit = trailing(in: NSRect(x: r.minX, y: r.minY, width: r.width - 16, height: u), baseline: b, symbol: g.form.symbol, word: follows)
+            hairline(x: rx, y: r.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
+        } else if g.form.canName {
+            hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
+        }
         if let r = g.aboutRow { hairline(x: rx, y: r.maxY - 1, width: g.rw, about.currentEditor() != nil ? Design.ink : Design.mist) }
     }
-    /// The icon and the template at the right of a row on the Type side: the icon picker and the template to come, shown for now.
-    private func trailing(in box: NSRect, baseline b: CGFloat, symbol: String) {
-        let t = Design.attributed("Template", .caption, colour: Design.soft)
-        t.draw(right: box.maxX - 14, baseline: b)
-        // The chevron after it.
-        Design.soft.setStroke()
-        let p = NSBezierPath(); p.lineWidth = 1
-        p.move(to: NSPoint(x: box.maxX - 9, y: b - 6)); p.line(to: NSPoint(x: box.maxX - 5, y: b - 2)); p.line(to: NSPoint(x: box.maxX - 1, y: b - 6))
-        p.stroke()
-        RowMark.draw(symbol, x: box.maxX - 14 - t.size().width - 30, baseline: b, colour: Design.soft)
+    /// The icon and the template at the right of a row on the Type side: the icon picker to come, and the template's word with its
+    /// menu, which the app's own four types do without. Returns the rect a click opens the menu from.
+    @discardableResult
+    private func trailing(in box: NSRect, baseline b: CGFloat, symbol: String, word: String? = "Template") -> NSRect {
+        var hit = NSRect.zero
+        if let word = word {
+            let t = Design.attributed(word, .caption, colour: Design.quiet)
+            t.draw(right: box.maxX - 14, baseline: b)
+            Design.quiet.setStroke()
+            let p = NSBezierPath(); p.lineWidth = 1
+            p.move(to: NSPoint(x: box.maxX - 9, y: b - 6)); p.line(to: NSPoint(x: box.maxX - 5, y: b - 2)); p.line(to: NSPoint(x: box.maxX - 1, y: b - 6))
+            p.stroke()
+            hit = NSRect(x: box.maxX - 14 - t.size().width - 8, y: box.minY, width: t.size().width + 22, height: box.height)
+        }
+        RowMark.draw(symbol, x: box.maxX - 120, baseline: b, colour: Design.soft)
+        return hit
     }
 
     private func drawMap() {
@@ -481,7 +528,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
 
     private func drawTypes() {
         let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.gutter / 2, air: CGFloat = 16
-        typeHits = []
+        typeHits = []; templateHits = []
         for (i, t) in typeRows.enumerated() {
             let box = NSRect(x: 0, y: CGFloat(i) * u, width: w, height: u), b = box.minY + line
             if t.chosen { fill(NSRect(x: 0, y: box.minY - 1, width: w, height: u + 1), Design.mist) }
@@ -497,9 +544,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
             Design.ink.setStroke()
             let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
             name.draw(x: lead + 24, baseline: b, width: w - lead - 24 - 150)
-            trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol)
+            let menuRect = trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol, word: Self.isRole(t.name) ? nil : "Template")
             hairline(x: lead, y: box.maxY - 1, width: w - lead - air, Design.mist)
-            if !t.locked { typeHits.append((box, t.name)) }
+            if !t.locked {
+                if !menuRect.isEmpty { templateHits.append((menuRect, t.name)) }
+                typeHits.append((box, t.name))
+            }
         }
     }
 
@@ -538,7 +588,45 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         }
     }
     private func typesDown(at p: NSPoint) {
+        if let h = templateHits.first(where: { $0.0.contains(p) }) { openTemplates(for: h.1, under: h.0, in: types); return }
         if let h = typeHits.first(where: { $0.0.contains(p) }) { choose(type: h.1) }
+    }
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if !customTemplateHit.isEmpty, customTemplateHit.contains(p) { openCustomTemplate(under: customTemplateHit); return }
+        window?.makeFirstResponder(self)
+    }
+    /// A type's menu: the type itself, Customise, which takes the type and opens the name, and the templates saved for it, none yet.
+    private func openTemplates(for type: String, under rect: NSRect, in view: NSView) {
+        let M = SwissDropdown.MenuPanel.self
+        let items = [type, M.divider, "Customise", M.divider, M.heading("Templates"), M.heading("None saved yet")]
+        openMenu(under: rect, in: view, items: items, chosen: type) { [weak self] i in
+            guard let self = self else { return }
+            if i == 0 { self.choose(type: type) }
+            if i == 2 { self.choose(type: type); self.customise() }
+        }
+    }
+    /// The Custom Name row's menu: every type of the level, so a group called Lego can follow Assets.
+    private func openCustomTemplate(under rect: NSRect) {
+        let f = form()
+        openMenu(under: rect, in: self, items: f.offered, chosen: f.chosen ?? "") { [weak self] i in self?.follow(type: f.offered[i]) }
+    }
+    /// The name becomes the row's own: the field takes the typing with the type's word selected, ready to be replaced.
+    private func customise() {
+        window?.makeFirstResponder(nameField)
+        nameField.currentEditor()?.selectAll(nil)
+    }
+    /// The type a custom-named group follows, changed without touching its name.
+    private func follow(type: String) {
+        guard let what = selected, let c = collection(what.collection) else { return }
+        switch what {
+        case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.kind = type; $0.role = SchemaRole.allCases.first { $0.title == type } })
+        case .instance(_, let pid, let nid, _): shape(pid) { SchemaTrial.changing(nid, in: $0) { $0.kind = type; $0.role = SchemaRole.allCases.first { $0.title == type } } }
+        case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = type }
+        case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = type }
+        case .folder, .member: return
+        }
+        show()
     }
     /// What can be put in another order: a collection among the collections, a folder among the folders, a group among its siblings, a member among the members.
     private func canDrag(_ t: Target) -> Bool {
@@ -828,7 +916,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
             case .instance(_, let pid, let nid, _): shape(pid) { SchemaTrial.changing(nid, in: $0) { $0.about = text } }
-            case .tier, .member, .folder: break
+            case .member(_, let pid):
+                var details = lib.project(pid)?.details ?? [:]
+                details[ProjectField.notes.rawValue] = text
+                library?.apply("Describe Project") { $0.setProjectDetails(pid, details) }
+            case .tier, .folder: break
             }
             all = SchemaTrial.collections
         }

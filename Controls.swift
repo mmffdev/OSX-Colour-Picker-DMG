@@ -139,9 +139,15 @@ final class SwissDropdown: NSView, Overlay {
 
     /// The menu: a Card under the field, rows at 13 with a Mist hover, a tick on the chosen one.
     final class MenuPanel: NSPanel {
+        /// An item that is a hairline between runs of rows, and one that is a heading over a run: neither can be picked.
+        static let divider = "\u{2014}"
+        static func heading(_ s: String) -> String { "#" + s }
+        static func kind(_ s: String) -> Int { s == divider ? 1 : s.hasPrefix("#") ? 2 : 0 }
+
         init(items: [String], chosen: String, width: CGFloat, pick: @escaping (Int) -> Void) {
-            let rowHeight: CGFloat = 30
-            let h = CGFloat(items.count) * rowHeight + 12
+            let rowHeight: CGFloat = 30, thin: CGFloat = 12
+            let heights = items.map { MenuPanel.kind($0) == 1 ? thin : rowHeight }
+            let h = heights.reduce(0, +) + 12
             super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: h), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             isOpaque = false
             backgroundColor = .clear
@@ -151,8 +157,10 @@ final class SwissDropdown: NSView, Overlay {
             card.layer?.backgroundColor = Design.card.cgColor
             card.layer?.borderColor = Design.rule.cgColor
             card.layer?.borderWidth = 1
+            var y = h - 6
             for (i, s) in items.enumerated() {
-                let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: h - 6 - CGFloat(i + 1) * rowHeight, width: width, height: rowHeight)) { pick(i) }
+                y -= heights[i]
+                let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
                 card.addSubview(r)
             }
             contentView = card
@@ -169,10 +177,17 @@ final class SwissDropdown: NSView, Overlay {
                 addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
             }
             required init?(coder: NSCoder) { fatalError() }
-            override func mouseEntered(with event: NSEvent) { hover = true; needsDisplay = true }
+            private var kind: Int { MenuPanel.kind(title) }
+            override func mouseEntered(with event: NSEvent) { if kind == 0 { hover = true; needsDisplay = true } }
             override func mouseExited(with event: NSEvent) { hover = false; needsDisplay = true }
-            override func mouseUp(with event: NSEvent) { act() }
+            override func mouseUp(with event: NSEvent) { if kind == 0 { act() } }
             override func draw(_ dirtyRect: NSRect) {
+                if kind == 1 { Design.rule.setFill(); NSRect(x: 14, y: bounds.midY, width: bounds.width - 28, height: 1).fill(); return }
+                if kind == 2 {
+                    let t = Design.attributed(String(title.dropFirst()), .label, colour: Design.quiet)
+                    t.draw(at: NSPoint(x: 14, y: (bounds.height - t.size().height) / 2))
+                    return
+                }
                 if hover { Design.mist.setFill(); bounds.fill() }
                 let t = Design.attributed(title, .body)
                 t.draw(at: NSPoint(x: 14, y: (bounds.height - t.size().height) / 2))
