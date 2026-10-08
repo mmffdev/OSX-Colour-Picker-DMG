@@ -30,6 +30,8 @@ final class StudioWindowController: NSWindowController {
         w.collectionBehavior = [.fullScreenPrimary, .managed]   // a borderless window goes full screen only when told it may
         w.backgroundColor = Design.paper
         w.minSize = Design.App.least
+        // A resize moves by whole units, so the rows always end on the beat above the footer.
+        w.resizeIncrements = NSSize(width: 1, height: Design.App.unit)
         w.contentView = frame
         w.center()
         w.setFrameAutosaveName("StudioWindow")
@@ -1121,6 +1123,33 @@ final class LibraryRail: StudioRail {
                 Design.ink.setStroke()
                 let e = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
             }
+            // The grounds first, then the tree's lines over them, then every row's mark and words.
+            var grounds: [(NSRect, NSColor)] = [], tree: [TreeLines.Row] = []
+            var yy: CGFloat = 0
+            for (i, r) in rows.enumerated() {
+                switch r {
+                case .group:
+                    if i > 0 { yy += Self.groupAbove }
+                    tree.append(TreeLines.Row(top: yy, height: Self.row, level: 0, anchor: inset + 5, markLeft: inset, baseline: Self.line))
+                    yy += Self.row
+                case .row(_, _, let place, let indent):
+                    if place == chosen { grounds.append((NSRect(x: 0, y: yy, width: bounds.width, height: Self.row), Design.mist)) }
+                    let mx = inset + 12 + CGFloat(indent) * Self.step
+                    tree.append(TreeLines.Row(top: yy, height: Self.row, level: indent + 1, anchor: mx + 7, markLeft: mx, baseline: Self.line))
+                    yy += Self.row
+                case .node(_, _, _, let indent, _):
+                    let mx = inset + 12 + CGFloat(indent) * Self.step
+                    tree.append(TreeLines.Row(top: yy, height: Self.row, level: indent + 1, anchor: mx + 7, markLeft: mx, baseline: Self.line))
+                    yy += Self.row
+                case .palette(let pr):
+                    if .palette(pr.id) == chosen { grounds.append((NSRect(x: 0, y: yy, width: bounds.width, height: Self.two), Design.mist)) }
+                    let mx = inset + 12 + CGFloat(pr.indent) * Self.step
+                    tree.append(TreeLines.Row(top: yy, height: Self.two, level: pr.indent + 1, anchor: mx + 7, markLeft: mx, baseline: Self.line))
+                    yy += Self.two
+                }
+            }
+            for (box, colour) in grounds { fill(box, colour) }
+            TreeLines.draw(tree, colour: Design.rule)
             for (i, r) in rows.enumerated() {
                 switch r {
                 case .group(let title):
@@ -1131,9 +1160,17 @@ final class LibraryRail: StudioRail {
                 case .row(let name, let count, let place, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let on = place == chosen
-                    if on { fill(Design.App.ground(box), Design.mist) }
-                    // Rows sit one small step in from their group's header, so the groups read as groups.
-                    let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
+                    // Rows sit one small step in from their group's header, so the groups read as groups; the mark, then the words.
+                    let b = y + Self.line, mx = inset + 12 + CGFloat(indent) * Self.step, x = mx + 20
+                    let mark: String
+                    switch place {
+                    case .folder: mark = "building.2"
+                    case .project: mark = "folder"
+                    case .catalogue: mark = "square.grid.2x2"
+                    case .palettes: mark = "swatchpalette"
+                    default: mark = "folder"
+                    }
+                    RowMark.draw(mark, x: mx, baseline: b, colour: on ? Design.ink : Design.quiet)
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
                     let countW = countText.size().width
                     let nameText = Design.attributed(name, on ? .bodyStrong : .body), nameW = right - x - countW - 12
@@ -1151,7 +1188,11 @@ final class LibraryRail: StudioRail {
                     y += Self.row
                 case .node(let name, let count, let pid, let indent, let drop):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                    let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
+                    let b = y + Self.line, mx = inset + 12 + CGFloat(indent) * Self.step, x = mx + 20
+                    // The old sidebar's marks for a member's groups: palettes, information, typography, tags, and a dashed square for one of your own.
+                    let role = SchemaTrial.role(of: SchemaNode(name: name))
+                    let mark = role == .palettes ? "swatchpalette" : role == .information ? "info.circle" : role == .typography ? "textformat" : role == .tags ? "tag" : "square.dashed"
+                    RowMark.draw(mark, x: mx, baseline: b, colour: Design.quiet)
                     let countText = Design.attributed(count > 0 ? String(count) : "", .caption, colour: Design.quiet)
                     Design.attributed(name, .body).draw(x: x, baseline: b, width: right - x - countText.size().width - 12)
                     countText.draw(right: right, baseline: b)
@@ -1162,8 +1203,8 @@ final class LibraryRail: StudioRail {
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
                     let place = StudioFrame.Place.palette(pr.id)
                     let on = place == chosen
-                    if on { fill(Design.App.ground(box), Design.mist) }
-                    let x = inset + 12 + CGFloat(pr.indent) * Self.step
+                    let mx = inset + 12 + CGFloat(pr.indent) * Self.step, x = mx + 20
+                    RowMark.draw("swatchpalette", x: mx, baseline: y + Self.line, colour: on ? Design.ink : Design.quiet)
                     let nameText = Design.attributed(pr.name, on ? .bodyStrong : .body)
                     if renaming != place {
                         nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))

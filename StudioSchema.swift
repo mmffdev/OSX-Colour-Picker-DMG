@@ -24,9 +24,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     /// What a row on the map is: a collection, the level grouping its members, or a group in its stack with its level in the stack, the member being 1.
     /// A collection; the level grouping its members; a group in its stack with its level, the member's word being 1; or one real member, a project.
     /// ... or one folder on the grouping level, a client, holding members.
+    /// ... or one group inside one member, as the pattern lays it out: shown, not edited here.
     private enum Target: Hashable {
-        case collection(UUID), tier(UUID), folder(UUID, UUID), node(UUID, UUID, Int), member(UUID, UUID)
-        var collection: UUID { switch self { case .collection(let c), .tier(let c), .folder(let c, _), .node(let c, _, _), .member(let c, _): return c } }
+        case collection(UUID), tier(UUID), folder(UUID, UUID), node(UUID, UUID, Int), member(UUID, UUID), instance(UUID, UUID, UUID, Int)
+        var collection: UUID { switch self { case .collection(let c), .tier(let c), .folder(let c, _), .node(let c, _, _), .member(let c, _), .instance(let c, _, _, _): return c } }
     }
     private var all: [SchemaCollection] = SchemaTrial.collections
     private var selected: Target?
@@ -146,6 +147,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .folder(_, let f): return c.folders.contains { $0.id == f }
         case .node(_, let n, _): return SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
         case .member(_, let p): return lib.project(p) != nil
+        case .instance(_, let p, let n, _): return lib.project(p) != nil && SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
         }
     }
     private func refresh() { needsLayout = true; needsDisplay = true; onResize?() }
@@ -203,6 +205,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 let pid = p.id, own = lib.palettes(in: pid).count
                 out.append(MapRow(target: .member(cid, pid), text: p.name, level: 1 + offset(c), holds: own > 0 ? plural(own, "palette") : nil, strong: false,
                                   does: [("Add Sibling", 4, { [weak self] in self?.newMember(in: cid, folder: folder) }), ("Remove", 2, { [weak self] in self?.removeMember(cid, pid) })]))
+                // The member's groups beneath it, as the pattern lays them out and as rail1 lists them.
+                for (node, level) in SchemaTrial.rows(of: c.stack) where level >= 2 {
+                    out.append(MapRow(target: .instance(cid, pid, node.id, level), text: node.name, level: level + offset(c), holds: nil, strong: false, does: []))
+                }
             }
             if c.folderName != nil {
                 for f in c.folders {
@@ -267,6 +273,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .member(_, let pid):
                 g.levelTitle = member(c); g.name = lib.project(pid)?.name ?? ""; g.offered = []; g.fixed = true
                 g.rightHelp = "One \(memberWord) in \(heading): a project with files of its own, following the pattern above it. Type over its name and press Return to rename it; its palettes are made in rail1."
+            case .instance(_, let pid, let nid, let level):
+                let node = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node
+                g.levelTitle = SchemaTrial.title(forLevel: level + offset(c)); g.name = node?.name ?? ""; g.offered = []; g.fixed = true
+                g.rightHelp = "A group in \(lib.project(pid)?.name ?? memberWord), as the pattern lays it out. Change it on Every \(member(c)) above and every \(memberWord) follows; it is filled in rail1."
             }
             g.custom = g.fixed || renaming || !g.offered.contains(g.name)
             g.nameLabel = ry; ry += u
@@ -322,6 +332,13 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 let full = x + 36 + name.size().width + Self.step
                 let eased = 1 - pow(1 - v, 3)
                 fill(Design.App.ground(NSRect(x: 0, y: box.minY, width: (full * eased).rounded(), height: box.height)), Design.App.gridColour)
+            }
+            if i == 0 {
+                // The tree's lines, once, under every row's number: a stem from under the parent's number, a tee or an elbow into each child.
+                TreeLines.draw(mapRows.enumerated().map { k, m in
+                    TreeLines.Row(top: g.mapRows[k].minY, height: g.mapRows[k].height, level: m.level, anchor: l + CGFloat(m.level) * Self.step + 3.5,
+                                  markLeft: l + CGFloat(m.level) * Self.step, baseline: line)
+                }, colour: Design.rule)
             }
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
             // The grip between the level and the name: two columns of three dots; a drag from it puts the row in another order among its own.
@@ -421,6 +438,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .folder(let cid, _): return (collection(cid)?.folders.count ?? 0) > 1
         case .node(_, _, let level): return level > 1
         case .member(let cid, _): return (collection(cid).map { members(of: $0).count } ?? 0) > 1
+        case .instance: return false
         }
     }
     /// The rows a dragged row may land among, in order, itself included.
@@ -429,6 +447,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection: return all.map { .collection($0.id) }
         case .tier: return []
         case .folder(let cid, _): return collection(cid).map { $0.folders.map { .folder(cid, $0.id) } } ?? []
+        case .instance: return []
         case .node(let cid, let nid, let level): return collection(cid).map { siblings(of: nid, in: $0).map { .node(cid, $0, level) } } ?? []
         case .member(let cid, _): return collection(cid).map { members(of: $0).map { .member(cid, $0.id) } } ?? []
         }
@@ -480,7 +499,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                     if from < to { to -= 1 }
                     col.folders.insert(moved, at: min(to, col.folders.count))
                 }
-            case .tier: break
+            case .tier, .instance: break
             }
             show()
         }
@@ -635,6 +654,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !typed.isEmpty, typed != lib.project(pid)?.name else { return }
             library?.apply("Rename Project") { _ = $0.renameProject(pid, to: typed) }
+        case .instance: return
         }
         all = SchemaTrial.collections
     }
@@ -646,7 +666,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .collection: now = c.name; offered = SchemaTrial.collectionNames
             case .tier: now = c.folderName ?? ""; offered = SchemaTrial.folderNames
             case .node(_, let nid, let level): now = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node.name ?? ""; offered = SchemaTrial.names(forLevel: level)
-            case .member, .folder: return
+            case .member, .folder, .instance: return
             }
             if !offered.contains(now) { window?.makeFirstResponder(customName); return }
             renaming = true
@@ -675,7 +695,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let text = field.stringValue
             switch what {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
-            case .tier, .member, .folder: break
+            case .tier, .member, .folder, .instance: break
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
             }
             all = SchemaTrial.collections

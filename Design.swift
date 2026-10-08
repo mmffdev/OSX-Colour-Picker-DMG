@@ -177,8 +177,9 @@ enum Design {
     /// The app window's grid (c_c_c_design_grid_app.md): twelve columns inside 24 margins with 16 gutters,
     /// a 64 header and a 48 footer. The window resizes, so every measure takes the width it is at.
     enum App {
-        static let size = NSSize(width: 1440, height: 900)
-        static let least = NSSize(width: 1120, height: 680)
+        /// The height is chosen so the rows, from under the areas' rule to the footer, come to whole units: 25 at first, 17 at least.
+        static let size = NSSize(width: 1440, height: 893)      // 64 + 1 + 80, then 25 units, then 48
+        static let least = NSSize(width: 1120, height: 669)     // the same with 17 units
         static let margin: CGFloat = 24
         static let gutter: CGFloat = 16
         static let columns = 12
@@ -189,11 +190,12 @@ enum Design {
         /// Master Inner: the beat every row under an area's rule keeps, and where a line of text sits in a
         /// row. Every row is a multiple of the unit, so a row in one area shares its baseline with a row in
         /// another; a two-line row is two units, a header row one. The overlay draws it (Rick, 2026-10-08).
-        static let unit: CGFloat = 24
+        /// The beat: 28 since 2026-10-08, the height a 24 unit plus the band's four points turned out to be; every row, every
+        /// list and the grid itself stand on it. The text sits on the line 17 in, so capitals are centred and the descenders have air.
+        static let unit: CGFloat = 28
         static let textBaseline: CGFloat = 17
-        /// A row's ground reaches this far below its unit: with the baseline at 17, capitals sit centred in the unit, but the
-        /// descenders leave the bottom tight to the eye, so the band runs on to sit even around the whole word. Nothing moves for it.
-        static let groundBelow: CGFloat = 4
+        /// A row's ground is its unit, no more; kept as the one place to say so.
+        static let groundBelow: CGFloat = 0
         static func ground(_ box: NSRect) -> NSRect { NSRect(x: box.minX, y: box.minY, width: box.width, height: box.height + groundBelow) }
         /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
         static var masterGrid = false
@@ -233,5 +235,58 @@ enum Design {
         v.translatesAutoresizingMaskIntoConstraints = false
         v.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return v
+    }
+}
+
+/// The lines that tie a tree's rows to their parents, all right angles: a stem down from under the parent's mark, starting
+/// just below the parent's words; a tee into a child that has siblings after it, an elbow into the last; the stems of
+/// ancestors with later siblings passing straight through. Each row says where its mark's centre is and where the mark begins.
+enum TreeLines {
+    struct Row {
+        var top: CGFloat, height: CGFloat, level: Int
+        /// The centre of the row's own mark, the level number or the icon, where a stem to its children hangs from.
+        var anchor: CGFloat
+        /// Where the mark begins, which a tail from the parent's stem reaches, two points short.
+        var markLeft: CGFloat
+        var baseline: CGFloat
+    }
+    static func draw(_ rows: [Row], colour: NSColor) {
+        colour.setFill()
+        func stem(_ x: CGFloat, from y0: CGFloat, to y1: CGFloat) { NSRect(x: x.rounded() - 1, y: y0, width: 1, height: y1 - y0).fill() }
+        /// Whether a row at `level` comes after row `i` before any row shallower than it: a later sibling of the row at that level.
+        func later(_ level: Int, after i: Int) -> Bool {
+            for k in rows.indices where k > i { if rows[k].level < level { return false }; if rows[k].level == level { return true } }
+            return false
+        }
+        for (i, r) in rows.enumerated() where r.level > 0 {
+            guard let p = rows[..<i].lastIndex(where: { $0.level == r.level - 1 }) else { continue }
+            let x = rows[p].anchor, tailY = (r.top + r.baseline - 4).rounded()
+            stem(x, from: r.top, to: later(r.level, after: i) ? r.top + r.height : tailY)
+            NSRect(x: x.rounded() - 1, y: tailY - 1, width: r.markLeft - 2 - (x.rounded() - 1), height: 1).fill()
+            // The ancestors' stems, where an ancestor still has a sibling to come.
+            var at = p, level = r.level - 1
+            while level >= 1, let gp = rows[..<at].lastIndex(where: { $0.level == level - 1 }) {
+                if later(level, after: i) { stem(rows[gp].anchor, from: r.top, to: r.top + r.height) }
+                at = gp; level -= 1
+            }
+        }
+        for (i, r) in rows.enumerated() where i + 1 < rows.count && rows[i + 1].level == r.level + 1 {
+            stem(r.anchor, from: (r.top + r.baseline + 4).rounded(), to: r.top + r.height)
+        }
+    }
+}
+
+/// A row's mark on rail1: the old sidebar's icons, drawn 12 high in the given colour.
+enum RowMark {
+    static func image(_ name: String, colour: NSColor) -> NSImage {
+        let base = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+        let c = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular).applying(NSImage.SymbolConfiguration(paletteColors: [colour]))
+        return base.withSymbolConfiguration(c) ?? base
+    }
+    /// Drawn with its centre on the row's text line, in a 14 box starting at `x`.
+    static func draw(_ name: String, x: CGFloat, baseline: CGFloat, colour: NSColor) {
+        let img = image(name, colour: colour), size = img.size
+        let r = NSRect(x: x + (14 - size.width) / 2, y: baseline - 5 - size.height / 2, width: size.width, height: size.height)
+        img.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }
