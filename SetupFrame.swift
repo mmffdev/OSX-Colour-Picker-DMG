@@ -21,6 +21,7 @@ final class SetupFrame: NSView {
     typealias W = Design.Wizard
 
     let cards: StepCards
+    let logo = Logo()
     let stepLabel = Design.text("", .label, colour: Design.quiet)
     let skipSetup = SwissButton("Skip Setup", .quiet)
     let hint = Design.text("", .caption, colour: Design.quiet)
@@ -70,7 +71,7 @@ final class SetupFrame: NSView {
         for v in [band, stepLabel, skipSetup, page, cards, titleView, body, actions, aside] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
         translatesAutoresizingMaskIntoConstraints = false
         cardsHeight = cards.heightAnchor.constraint(equalToConstant: StepCards.height)
-        addSubview(band); addSubview(stepLabel); addSubview(skipSetup); addSubview(page); addSubview(cards)
+        addSubview(band); addSubview(logo); addSubview(stepLabel); addSubview(skipSetup); addSubview(page); addSubview(cards)
         page.addSubview(titleView); page.addSubview(body); page.addSubview(actions); page.addSubview(aside)
         bodyLeading = body.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: W.column(7))
         bodyWidth = body.widthAnchor.constraint(equalToConstant: W.span(7, 12))
@@ -79,8 +80,11 @@ final class SetupFrame: NSView {
         NSLayoutConstraint.activate([
             band.topAnchor.constraint(equalTo: topAnchor), band.leadingAnchor.constraint(equalTo: leadingAnchor),
             band.trailingAnchor.constraint(equalTo: trailingAnchor), band.heightAnchor.constraint(equalToConstant: W.band),
-            stepLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: W.margin),
-            stepLabel.lastBaselineAnchor.constraint(equalTo: topAnchor, constant: 44),
+            // The top line: the mark at column 1, the step label one gutter after it, Skip Setup at the right, one baseline.
+            logo.leadingAnchor.constraint(equalTo: leadingAnchor, constant: W.margin),
+            logo.lastBaselineAnchor.constraint(equalTo: topAnchor, constant: 44),
+            stepLabel.leadingAnchor.constraint(equalTo: logo.trailingAnchor, constant: W.gutter),
+            stepLabel.lastBaselineAnchor.constraint(equalTo: logo.lastBaselineAnchor),
             skipSetup.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -W.margin),
             skipSetup.lastBaselineAnchor.constraint(equalTo: stepLabel.lastBaselineAnchor),
             page.topAnchor.constraint(equalTo: topAnchor, constant: 96),

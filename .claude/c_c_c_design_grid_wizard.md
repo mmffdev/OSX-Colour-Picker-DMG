@@ -5,7 +5,7 @@ Borderless: no title bar, no button bar, a seamless 1040 × 660 panel, square co
 | Part | Place |
 |---|---|
 | Band | top edge, full width, 10 high, the current step's colour; a step change slides the new colour in the direction of travel and pushes the old one off |
-| Top line | y 34, margins 48: "STEP 02 OF 08" Label left, Skip Setup quiet button right, one baseline |
+| Top line | baseline 44, margins 48: the mark (`Logo`, the wordmark until the logo) at column 1, "STEP 02 OF 08" Label one gutter after it, Skip Setup quiet button right, one baseline. The gate before the app opens carries the same line, so the mark is in one place on every frame |
 | Title | from y 96, columns 1 to 5, Title style at 44, two-tone |
 | Words | columns 7 to 12, the capitals of the first line level with the title's capitals: Lead, then fields each on a hairline Rule with a caption label above and the value at 17 with its quiet action on the same baseline |
 | Actions | right margin, on a row of their own one gutter (24) above the cards whatever the step: Back quiet, Continue primary, one baseline |

@@ -747,8 +747,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         let g = Design.App.gutter, b = Self.baseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        // The wordmark: bold lowercase, until there is a logo.
-        NSAttributedString(string: Brand.wordmark, attributes: [.font: Design.font(18, .bold), .foregroundColor: Design.ink, .kern: -0.4]).draw(x: col(1), baseline: b)
+        Logo.draw(x: col(1), baseline: b)   // the mark, as everywhere
         // The tabs from column 3, 24 apart; the live one Medium in ink, the rest quiet. Lab and Projects wait for their redesign.
         var x = col(3)
         tabRects = []

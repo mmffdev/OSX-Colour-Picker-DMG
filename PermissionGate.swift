@@ -57,6 +57,7 @@ final class PermissionGate: NSWindowController {
         let band = NSView()
         band.wantsLayer = true
         band.layer?.backgroundColor = Design.active.cgColor
+        let logo = Logo()
         let label = Design.text(String(format: "Permission 01 of %02d", permissions.count), .label, colour: Design.quiet)
 
         let title = NSTextField(wrappingLabelWithString: "")
@@ -84,12 +85,15 @@ final class PermissionGate: NSWindowController {
         actions.orientation = .horizontal
         actions.alignment = .lastBaseline
 
-        for v in [band, label, title, words, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; frame.addSubview(v) }
+        for v in [band, logo, label, title, words, actions] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; frame.addSubview(v) }
         NSLayoutConstraint.activate([
             band.topAnchor.constraint(equalTo: frame.topAnchor), band.leadingAnchor.constraint(equalTo: frame.leadingAnchor),
             band.trailingAnchor.constraint(equalTo: frame.trailingAnchor), band.heightAnchor.constraint(equalToConstant: W.band),
-            label.leadingAnchor.constraint(equalTo: frame.leadingAnchor, constant: W.margin),
-            label.lastBaselineAnchor.constraint(equalTo: frame.topAnchor, constant: 44),
+            // The top line as the wizard's: the mark at column 1, the label one gutter after it, one baseline.
+            logo.leadingAnchor.constraint(equalTo: frame.leadingAnchor, constant: W.margin),
+            logo.lastBaselineAnchor.constraint(equalTo: frame.topAnchor, constant: 44),
+            label.leadingAnchor.constraint(equalTo: logo.trailingAnchor, constant: W.gutter),
+            label.lastBaselineAnchor.constraint(equalTo: logo.lastBaselineAnchor),
             title.topAnchor.constraint(equalTo: frame.topAnchor, constant: 96),
             title.leadingAnchor.constraint(equalTo: frame.leadingAnchor, constant: W.column(1)),
             title.widthAnchor.constraint(equalToConstant: W.span(1, 5)),
