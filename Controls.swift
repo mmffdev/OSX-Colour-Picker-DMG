@@ -534,13 +534,15 @@ final class InlineName: NSTextField, NSTextFieldDelegate {
         f.cell?.wraps = false
         f.cell?.isScrollable = true
         f.delegate = f
-        let font = style.font()
-        // The cell draws its text two points in from the top and the left; the frame is set so the field's baseline is the drawn one.
-        f.frame = NSRect(x: x - 2, y: baseline - font.ascender - 2, width: width + 4, height: font.ascender - font.descender + 4)
+        // Measured: a borderless field puts its baseline twelve points below its frame's top, whatever the frame's height,
+        // and its text two points in from the left; the frame is set so the typed words sit exactly on the drawn ones.
+        f.frame = NSRect(x: x - 2, y: baseline - 12, width: width + 4, height: 20)
         host.addSubview(f)
         host.window?.makeFirstResponder(f)
         if let tv = f.currentEditor() as? NSTextView {
             tv.insertionPointColor = Design.ink
+            // Selected words are paper on ink, not the system's blue.
+            tv.selectedTextAttributes = [.backgroundColor: Design.ink, .foregroundColor: Design.paper]
             let i = tv.characterIndexForInsertion(at: tv.convert(p, from: host))
             tv.setSelectedRange(NSRange(location: min(i, (name as NSString).length), length: 0))
         }
