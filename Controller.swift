@@ -779,7 +779,7 @@ final class LibraryController: NSObject {
         apply("Describe Colour") { $0.setNote(note, of: hex, in: palette) }
     }
 
-    func setTag(_ name: String, colour: String?, project: UUID?) { apply("Edit Tag") { $0.setTag(name, colour: colour, project: project) } }
+    func setTag(_ name: String, colour: String?, project: UUID?, group: UUID?? = nil) { apply("Edit Tag") { $0.setTag(name, colour: colour, project: project, group: group) } }
     func renameTag(_ old: String, to new: String) { apply("Rename Tag") { $0.renameTag(old, to: new) } }
     func deleteTag(_ name: String) { apply("Delete Tag") { $0.deleteTag(name) } }
     func deleteTags(_ names: [String]) { apply("Delete Tags") { lib in for name in names { lib.deleteTag(name) } } }

@@ -7,97 +7,98 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		003EB97D0E9E5C27696747F0 /* ColourEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_38481573-50C0-4D33-A1AF-A01143EFED77" /* ColourEngine.swift */; };
-		0147CBCF94AC62C2336B3801 /* LabContrast.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_121B24AA-6D0A-4011-A0CE-CD276BE0F19D" /* LabContrast.swift */; };
-		04A73EF2D98B00159B333D6A /* SetupFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_0E8CDEB4-F5BA-45F1-B3B8-629F851BB927" /* SetupFrame.swift */; };
+		032643CA9538BEA8C6D9D3D5 /* Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DEDB2DC5-0FF3-4C0E-9270-988070A153D2" /* Shortcuts.swift */; };
+		05C94BA7F7393360FFA128A7 /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_AE2D608A-5B2B-4A9C-A63F-5943F6DE6E33" /* Model.swift */; };
 		0613910D216007B45089A830 /* colvideo.icns in Resources */ = {isa = PBXBuildFile; fileRef = 338C98F6E21A0383CB98B85E /* colvideo.icns */; };
-		0F0E8619FF74CF58E0C9EBC2 /* Histogram.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_AE7B4EA1-9390-4352-93AF-20A1459C48B8" /* Histogram.swift */; };
-		12EA8314D3BB84C741EB88F2 /* StudioContrast.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_CFAC685E-B6CA-4DCE-BB10-8C642CB4CDE1" /* StudioContrast.swift */; };
-		160179AE93AF0ED95BD646FA /* Importers.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_409F6709-2C2A-4D60-969C-8E81F109541F" /* Importers.swift */; };
-		16133AD2C55FD49426177661 /* Catalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B6F2676B-71A4-4EC0-8B95-4E6146AD808E" /* Catalogue.swift */; };
-		184C414F44701F983F529BBC /* Overview.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_6DDEA4AE-8CE9-4C1C-962F-8E519D01B01E" /* Overview.swift */; };
+		06B84989B007206F578E5F14 /* HaloMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7D2B8381-33E8-4CA6-A0BE-8FADB053FEC4" /* HaloMenu.swift */; };
+		0AFAFA7A3975089BA49D2ABE /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_C935A448-CC06-47B3-B5A8-0EEA10518296" /* Permissions.swift */; };
+		0B346BEE5C4C03000C1CCD65 /* GamutMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_48C3C6F1-A956-494C-B3B7-B6F7ABB8558A" /* GamutMap.swift */; };
+		0B87DCBFBFD00CAD4EA753D8 /* PaneGrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4D060ECE-B268-45B6-82AA-5D61CD613433" /* PaneGrip.swift */; };
+		0F1E68BA4C75E4F76FEAC8A1 /* StudioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_40651E42-6818-4D09-BCB0-E323D1824034" /* StudioSettings.swift */; };
+		10C94515875DEF61C2F9B0E2 /* ProjectFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_2FDE2F07-8DD2-4FCB-AF6E-8F75D2178306" /* ProjectFile.swift */; };
+		1600790B84557CC6C8DC924F /* AllSwatchesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_FDB83E04-0AC1-4876-B2FC-C88FA7FD393C" /* AllSwatchesView.swift */; };
+		17C01F2B9CAC0D632195CA24 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4A30E845-1050-4E84-9DAF-A0148E39A94A" /* Brand.swift */; };
+		19761CD426ABFF9ED67FE33E /* ColourFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_79A335A0-FC03-4A8E-A79F-7A300A0CD598" /* ColourFormats.swift */; };
 		19ED95443E90D119D82CF625 /* Sparkle.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 762E95D1E3CB1042B906C99B /* Sparkle.framework */; };
-		1ADFF1FE798920DAE248D158 /* ColourScience.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_597373FC-05FF-49AC-861C-605B45812774" /* ColourScience.swift */; };
-		1D383D58672CA834758C7AFD /* PermissionGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_479A575C-FFEC-4535-B2A9-4821A9072697" /* PermissionGate.swift */; };
+		1A0F9F91E8771F1949113CEF /* Buttons.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_CC60FA5D-665F-4BA8-990C-76C88C6E2438" /* Buttons.swift */; };
 		1E29FF53B99072A61D148A00 /* colweb.icns in Resources */ = {isa = PBXBuildFile; fileRef = 5762AC825EB9609956BC1D0C /* colweb.icns */; };
-		205A63B0FA644D1FA0F2117B /* Dump.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4957F905-F0C8-44F7-A7BF-28DCD90686DF" /* Dump.swift */; };
-		244C70EF4363C4935BEC7DC4 /* Sampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B37F12B6-CA3B-48D6-A112-7FCD0AC0377F" /* Sampler.swift */; };
-		27D04AB211E7CBB35945DC2C /* PaneGrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5FF0A9E3-7BC5-4D02-8DD1-4A337C03B9FA" /* PaneGrip.swift */; };
-		303E42841946B68E122E74B9 /* Splash.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_08F03062-299F-4B66-927F-653A68C2678D" /* Splash.swift */; };
-		31B594C161B47CCBD6FAE6EB /* Purposes.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E9EE13B6-C814-451B-8D14-F0CF083D2A9D" /* Purposes.swift */; };
-		333D1C03434A8001C4D5602F /* PageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_351AB0C2-3400-4B98-AB56-429990004645" /* PageHeader.swift */; };
-		35148B80640D084E31B8A84B /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_86A9E836-1612-4849-A0DD-4037B2B14255" /* Schema.swift */; };
+		21C8794069AA891F31EAACAB /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_55E63D36-01DC-4F51-946A-7811A0E4DFAD" /* Schema.swift */; };
+		2240C4C8528005C63512EC83 /* ColourIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_950C510E-0839-4EBA-A7CF-1835735C8AEB" /* ColourIdentity.swift */; };
+		26CB8837A065861C69B3E110 /* Exporters.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_08D1C150-01CC-421E-B4EB-4CEBC8D98565" /* Exporters.swift */; };
+		295DC7CE6EBEC21F3DF5A244 /* Sampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_EC3FB282-A01F-4AFD-B033-0C405E987667" /* Sampler.swift */; };
+		33BE7812C115DDF0BEF81B88 /* Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_39A2135B-A3EC-40E8-8944-E6CECB5FAE86" /* Sidebar.swift */; };
 		39315CEC9E1BFD8007005D65 /* colcine.icns in Resources */ = {isa = PBXBuildFile; fileRef = E81369EB61078CE37CDC9ED4 /* colcine.icns */; };
-		3DC0AAC3820444AAF4F48B2E /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_C82487D8-CD47-4B6C-B41D-A534FC4A271C" /* Brand.swift */; };
-		3E27339778B8F4059B8FE24D /* SwatchList.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_BEB7AEFD-9F20-4A79-9D57-3BF39F098515" /* SwatchList.swift */; };
+		3AD0E58F458898A842BA3E6E /* Analysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_88192388-5806-43EF-BE13-1C9C21F22548" /* Analysis.swift */; };
+		40DCC7220EFD7C580740BABD /* PickIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DEA6CFEA-920A-41E5-86CC-95D2EFD9A6BE" /* PickIntent.swift */; };
 		439D756CAE4AB5233371B415 /* colproject.icns in Resources */ = {isa = PBXBuildFile; fileRef = 16355B29A0F4A6768C99D1C0 /* colproject.icns */; };
-		44C750515F353881AD21FCC6 /* Analysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5C021D89-6920-40AA-BE41-29FC187B5EE4" /* Analysis.swift */; };
-		456E8F3E6D4025957E3A0B0B /* SelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4A92998C-5175-4FD0-9B3C-0B4726D58F9B" /* SelfTest.swift */; };
-		475353376F6242AD3058D184 /* Modal.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_32619D66-D3F0-4D88-A57A-A26DE0FFC35F" /* Modal.swift */; };
+		443E2B21FAEA32943CBF9E2E /* ColourScience.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_455F7A9A-EDD2-4B32-A843-A38C596A6878" /* ColourScience.swift */; };
+		44546D8833C1AA4D0BAC3E88 /* StudioContrast.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DB96FABD-F7B6-4403-BA6B-0C160BC8CEDF" /* StudioContrast.swift */; };
+		467C4808B52B536CBA1C8372 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_BFE3A16B-28D9-4845-B256-C2EB7B737BC4" /* Store.swift */; };
+		4752CE2B15573FFE01BF077F /* LostProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E6504A9B-6EAD-41B9-B2B0-6CC44DE916EC" /* LostProject.swift */; };
 		4B0A52C533A0CC8D1B228303 /* colpalette.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9A4B61E80722813E7F86E917 /* colpalette.icns */; };
-		4C04722EFCA458253B2F30FC /* StudioSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B4EE917F-EC8E-478F-8EC6-F674B0E9B65C" /* StudioSchema.swift */; };
-		5004188D3FEAFE9BA806FAF3 /* ProjectFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5EEA358E-EF84-42BC-A0E4-51D1AE8A217C" /* ProjectFile.swift */; };
-		50C410B7C28077916A4EE22A /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_D1AE84AF-8D1A-460B-88A1-29B6B1A932E0" /* Sync.swift */; };
-		55BE3C358CACF9E9B250E4F1 /* SetupAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_33EFB923-966D-4594-95DA-92A40D0DB4BC" /* SetupAssistant.swift */; };
-		55D0B26E52454F4DC9C1EE06 /* ColourFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_994D53F0-EAAC-4896-9A55-F500654FFF03" /* ColourFormats.swift */; };
+		4FCE4C55033CFBF3BB9F1F6A /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_9F6FAD53-2330-4F2C-B386-DF6A4BBA1055" /* History.swift */; };
+		51A7CD69FA7E83A491720CC3 /* Purposes.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_0BBE6FC0-44DA-4112-9AB3-FEB256BFD51D" /* Purposes.swift */; };
+		51E19D6FEC5B7CF7C7A7ADE8 /* StudioSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_1009FEDE-9B50-45B7-8EC1-52E921EC336A" /* StudioSchema.swift */; };
+		5766F62A8B25A541D80C2D4C /* Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5D08285A-E525-4EFE-8A29-39167DF50B85" /* Helpers.swift */; };
+		59C50C9A281C866CDFDCB14E /* HaloTrainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DC045F23-D99F-4E4D-85F8-922C78EF5E41" /* HaloTrainer.swift */; };
+		5DD88997E45E324F761EF142 /* SetupFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7FFE6EC5-8366-4AB2-B4F8-A9FF98CCD88E" /* SetupFrame.swift */; };
+		5F2558286D555B42F1923489 /* SlideConfirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_69FCAA9E-B0FC-4A3F-BFBA-2AFA3BBC6504" /* SlideConfirm.swift */; };
+		6082573F580D297C61F245B1 /* HistoryRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_33D24ED7-8175-4CEE-9AD0-10A3E204F47C" /* HistoryRail.swift */; };
+		6341C81392E957C3E2C9B8F1 /* SelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_EA8B6B8C-6337-445D-9911-897F9B090FA9" /* SelfTest.swift */; };
 		64A3E4BA6582B9CEACD138EF /* colcatalogue.icns in Resources */ = {isa = PBXBuildFile; fileRef = EB6E49A3BE04926823CB4646 /* colcatalogue.icns */; };
-		6525361752B69AFDB5915F0B /* AllSwatchesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B5C7AF06-2581-44AF-BF55-657639B4A005" /* AllSwatchesView.swift */; };
-		658D55BE442139A7AB5CE807 /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4E1B7FB7-EEC2-4091-96D1-6F37838FC06E" /* History.swift */; };
-		662ADFC4B3FF61C94905228A /* AdobeHelperRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_88E86008-846A-4ED5-AD1E-807C76B897BE" /* AdobeHelperRules.swift */; };
-		6C8C3ACFD0642FFF9A58DCDD /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_3DE7C1CE-5249-4792-8F73-5F4C88B08F11" /* Model.swift */; };
-		6E1F0BF79887C5868FB6F553 /* Exporters.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_91A7DD69-4785-4F83-8911-A8665F8E6D2F" /* Exporters.swift */; };
 		721252012F19045BC90B96B9 /* colprint.icns in Resources */ = {isa = PBXBuildFile; fileRef = 541D52D82EC97CBE186A7E0D /* colprint.icns */; };
-		72C410AA8BA7DF9B37BA59A5 /* Logo.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_C1777BED-A376-435F-B884-A5D274AC958C" /* Logo.swift */; };
-		74FAFF59B4B74814083DD754 /* ColourProfiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_C7600259-9979-4BFE-95B4-1E917CA42F82" /* ColourProfiles.swift */; };
-		7ECC95890D99F35EF11FB12B /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_8A0D061C-8320-4EAA-9EC4-C284DBF83B5C" /* Palette.swift */; };
-		80F21F2B7368E55DE375A334 /* StudioLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_07DDED35-383A-4215-B356-0D8CC2CE03DC" /* StudioLab.swift */; };
-		867AEECFA8E73E26C0EA453B /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_D1F9F96A-3282-4F17-85E9-8BFFCD248CA0" /* Typography.swift */; };
-		87AE696BC91BE36F2E1B4E7A /* Projects.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_0D0F11A6-C6FA-42CB-BAE0-3964D541E207" /* Projects.swift */; };
-		88F102F4BE0AC50C6BA6480B /* Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_EAFB14E8-71F6-4A91-BDA0-FD38C6229B03" /* Sidebar.swift */; };
-		88F896B331B73CF042905A82 /* Buttons.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_3E6BE9B1-094F-4AE3-ABA4-672FC9002007" /* Buttons.swift */; };
-		89B3DA38BB629F5FCB710D67 /* ContextRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_9755C789-3F8A-41B8-AB4B-49091FA98E5E" /* ContextRail.swift */; };
-		9151C3184DFA16247DEC9E49 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_FEFBFADC-B170-4E82-A9B4-822DA920A066" /* Controller.swift */; };
+		762F92AA06018B232FA3003E /* Dump.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B0565E1C-0400-4075-9796-403C5FF4B221" /* Dump.swift */; };
+		7C45CC6B9266EA703EA76590 /* ColourEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_083EBD16-1A4A-479B-AE1C-E677E8CAA9EB" /* ColourEngine.swift */; };
+		7E6E4998291B4B8B5DA2736B /* Histogram.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7F7B6FB6-B2BE-40E7-87B6-0AB714FEC5CC" /* Histogram.swift */; };
+		8A66338034D866D9BA062F41 /* Projects.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_6EABC318-063D-49F0-AC33-47F6DB74F1CE" /* Projects.swift */; };
+		8BCFC7492B7733E3E8D76520 /* Importers.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_CAEDC846-3EDB-44CF-8188-C51768B59F1B" /* Importers.swift */; };
+		8D01309212F932D163A918D8 /* HaloDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_96BF62D9-6708-45EE-9551-DB2503DAF084" /* HaloDemo.swift */; };
+		92C0A3B505EF2AA7BD3CDA20 /* Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_39670AD0-B183-4153-9823-1579F9855335" /* Controls.swift */; };
+		93E9356AD889CF89A5B746F3 /* SetupAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5E3D8681-100D-4AC9-9758-D2CE5C6EB9C4" /* SetupAssistant.swift */; };
+		957BC1CCC4644BF10C2DCDCA /* ColourProfiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_92CF00C2-0B7E-4368-A352-003F41D8BE2A" /* ColourProfiles.swift */; };
+		973EE214062137A9598F2E02 /* PageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_8D049E86-1FB5-4554-BC0C-150746950D9E" /* PageHeader.swift */; };
 		977B382E03DD3DE3BC12F5E7 /* colphoto.icns in Resources */ = {isa = PBXBuildFile; fileRef = 66C74BEE330EDC88F61EEE94 /* colphoto.icns */; };
 		9AD660CCACFC33DBDCB2F721 /* col3d.icns in Resources */ = {isa = PBXBuildFile; fileRef = 2DFCDC69130255E5982DD713 /* col3d.icns */; };
-		9B938C089E75301943B96556 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5B3A718A-FAB5-435B-AA63-438D10D4124F" /* Store.swift */; };
-		9C92AAEE9766BE7829B40157 /* Lab.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DAF1370D-B2B3-40C0-A098-62EA7360B4DD" /* Lab.swift */; };
-		9D1C7F8F2A23387854A12DA9 /* HaloTrainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_12D493DE-22A3-4B67-9F2C-BDA824A70CB6" /* HaloTrainer.swift */; };
-		9F953810B0F92585CA3CBE79 /* PaletteGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_A3061396-2CF9-43DE-9595-53A98325915C" /* PaletteGroups.swift */; };
-		A0EA4FE67734AB289F8DC424 /* StudioWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_6DB155BD-64DF-4A22-B90E-D44513803AD5" /* StudioWindow.swift */; };
+		9CCB072A23BA69B37A4B4FC9 /* StudioLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4299BE97-C270-484B-A0EC-FFCDF147932C" /* StudioLab.swift */; };
+		A1B9A931602F6AFA903ACE12 /* ContextRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_9D5B2622-19AF-4397-A425-459596E5EFC1" /* ContextRail.swift */; };
 		A36D8F31E2CF838FEFBEC626 /* Sparkle.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 762E95D1E3CB1042B906C99B /* Sparkle.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		A43FA839D3CB9B7A1A99FD73 /* PickIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B3ED774E-F767-4490-8AF7-E672F99A5C19" /* PickIntent.swift */; };
-		A6E52507E9AC8FABEFA37EF1 /* NewColour.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_757841ED-E0E5-4808-92A1-F8F3A343AE5C" /* NewColour.swift */; };
-		AB9E340AC1EAC2A8AA34E0D9 /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_FFCE32E5-76A6-4E0D-A3B7-0BFD05D6E9BF" /* SettingsWindow.swift */; };
-		ABB8EB76ADA9607C7DE1A9F1 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_8786DA58-E338-4CC3-B6A8-170582BF7521" /* Design.swift */; };
+		A39E3660D0C31CEBC03F5CEE /* Splash.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E5BED4DD-78C3-4257-B649-755CE7E6D905" /* Splash.swift */; };
+		A49E6C5661D26203460255C5 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_17A5BEB7-EADC-4F97-ABA5-A9433B5ED0A7" /* Design.swift */; };
+		A5B6AFF290088B2A60A3E905 /* AdobeHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_1B56CE93-30C6-4572-BE20-EE601ED0FD09" /* AdobeHelper.swift */; };
+		A78C3A680265FC29F35E2B3A /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_9B318076-2069-40B9-B0E8-54BA4A299098" /* Controller.swift */; };
+		A92DEB92F839D4B6FBE21002 /* FormMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_DA5E93AA-B826-47AE-973D-33BC855CDF86" /* FormMemory.swift */; };
+		AB6250E729F6439C1D9F9072 /* StepCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E3704A98-318C-464A-BA5C-8F3F3457A8AD" /* StepCards.swift */; };
+		AF935513FD075AB4253BD706 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7A7D39B2-7E2C-4296-B281-6FB562710195" /* main.swift */; };
 		B3956637F61DBAF44531D4F9 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 82DB9851BEC354A92C16A016 /* AppIcon.icns */; };
-		B839D6F622ECA462CC8D9747 /* HaloDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_FBA711CE-2863-4CC9-B7EE-51982ED82CA5" /* HaloDemo.swift */; };
-		BAECFED70C862A54AD5FE8FB /* Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_A8F7DD02-33AB-43F2-A495-E1A8A0198C3D" /* Helpers.swift */; };
-		C046DCA5E0FF0F455B408439 /* ColourNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_4325C3C9-1666-4D51-AA31-37123B8679B9" /* ColourNames.swift */; };
-		C18DEA9EAC91FC602E3D413E /* SlideConfirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_09A572F0-0B30-4A54-AE94-F1D7E65C8448" /* SlideConfirm.swift */; };
-		C781F790409746BC7C510072 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B097A8CB-6C3D-4640-A7E3-15F7EF86FC7B" /* main.swift */; };
+		B3F973FF4965E663645A4BE5 /* SwatchList.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_04947EDA-612C-4DD3-845D-AB81D74BC36B" /* SwatchList.swift */; };
+		BA990D53FAE50970BFD8D579 /* Catalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_02441052-EDFE-4DE0-AC6E-AD2895B03008" /* Catalogue.swift */; };
+		BE9012F34EDFB5B6F91F978E /* StudioTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7460014B-600B-4B73-A841-92C111821746" /* StudioTags.swift */; };
+		BEC51AE7C67D069A04D901C7 /* Modal.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_F32DA605-C4F4-4FEE-A176-5431EB6B86AC" /* Modal.swift */; };
+		C19063E406FA19E762D3301E /* NewColour.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_0989DFD8-7B8C-4D44-B45F-02A529FE6DB6" /* NewColour.swift */; };
+		C55914C978B28F3A4F08F9DE /* ColourNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B2E1B9DB-C1A9-4499-904A-0D5BBA2F7FDA" /* ColourNames.swift */; };
+		C5795ECBDD5CF4A49204F1AD /* StudioWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_59ED6EDD-16C1-4BFD-9FF8-2A04F5BC6C43" /* StudioWindow.swift */; };
 		C943AD7C36482C540AA463EF /* colsyncproject.icns in Resources */ = {isa = PBXBuildFile; fileRef = 610EBEF9E60397D933438011 /* colsyncproject.icns */; };
 		CA3F9CA0EADA529352948602 /* colsynccatalogue.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9641714EF252949898FB6418 /* colsynccatalogue.icns */; };
-		CB18D1389F96CFA715FCD8DE /* HaloMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_95118E34-5315-4B04-825E-FFEFA0FE7ADA" /* HaloMenu.swift */; };
 		CBB80274DBD545DC1FA26152 /* coldata.icns in Resources */ = {isa = PBXBuildFile; fileRef = 7AB0BCF553AF31C8C7ED04BF /* coldata.icns */; };
-		CC018A9DE3A42C44B524E9D9 /* LostProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_AF69F4EF-CE26-424A-A0D3-64F45506A2BB" /* LostProject.swift */; };
-		CCDA280E3FA05ACD87F61602 /* StudioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_1360B356-68F3-4492-BF89-99472E03F662" /* StudioSettings.swift */; };
-		CDAF28FF3E256902CE42C60B /* FormMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_1574F08F-6AEC-4515-9AC8-DC9E85FC3017" /* FormMemory.swift */; };
-		CE6CAD49FA8572B79809D3A4 /* ColourIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_70CFC6E9-F086-42E7-8E16-64853C099639" /* ColourIdentity.swift */; };
-		D2ECF249DED6C2EA9B335FA4 /* Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_1E49C83B-603F-4A82-AFA8-4A4C61C9E58B" /* Controls.swift */; };
-		D3653CB1EAED23672876065C /* HistoryRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E94B421C-5B90-4115-8AB9-CB2DB93D6674" /* HistoryRail.swift */; };
-		D652E6734B223451AB3230F7 /* PaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_325E64BC-D84F-452C-A295-D8F4E43FFAA7" /* PaletteView.swift */; };
-		D6EC043D336AFB90B171E0FF /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E573692B-0E04-4B53-B17D-0FCF6766B72D" /* MainWindow.swift */; };
-		D794778EC5257E606AC4F719 /* Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_72D3814A-D3D1-4390-BC6B-406FA81B75E1" /* Shortcuts.swift */; };
+		D6EB5AAE6379C986215E1F93 /* Logo.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_2ABEBC77-2C12-4B13-9B99-86C92CB104CE" /* Logo.swift */; };
+		D95D690F8941F14206680A0A /* LabContrast.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_958548E7-88CF-4926-A7FE-8DE05B255953" /* LabContrast.swift */; };
+		DDC9CF18B6B60328176B9FC7 /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_8B9EE89E-99A9-4806-8A7D-8A515D5605E9" /* Palette.swift */; };
 		E147AD10EE94D82A47303550 /* colspace.icns in Resources */ = {isa = PBXBuildFile; fileRef = 77A9E531BD3021E56D38F9B8 /* colspace.icns */; };
 		E3E4610CD681F4779936467F /* colhistory.icns in Resources */ = {isa = PBXBuildFile; fileRef = 3B2C8245EBDF362A2D6314C1 /* colhistory.icns */; };
-		E42967A1A47022F8DAE8266C /* Bookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_25C6A7FC-5E0E-44C7-BA4E-94B489483421" /* Bookmarks.swift */; };
-		ED022548E4D445759EAA9023 /* Prefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_71221C26-0648-4D70-BC08-9DE967CB4ACD" /* Prefs.swift */; };
-		F40B8F1F53F9EA6E3A38261D /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_6C60B1FA-658E-49C0-AFF6-ACD88CAB99DD" /* Permissions.swift */; };
+		E85AD30DC8E853305215116F /* Overview.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_CB9F9DB1-57CF-440E-83A9-8276387FB456" /* Overview.swift */; };
+		EB947059E5A88437920D400A /* Tags.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_753CED9B-E0C2-4B04-8DB7-B9375D4619C0" /* Tags.swift */; };
+		EBA83DB3411737EB5763EDAC /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_D44CCC5A-71A5-416E-B232-0AFE74D89E60" /* MainWindow.swift */; };
+		EC9E5684CBD245A2738C6DA5 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7B61E215-3903-4768-B4AE-AB2AEF0B3DEB" /* Typography.swift */; };
+		EE1730A88A68DB094CBAB50D /* PaletteGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_7C06B517-911A-46C2-9EC3-D1CE690F1416" /* PaletteGroups.swift */; };
+		EF147938F0BAFAFE59829E63 /* PaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_FE456799-BC0B-4570-A0CF-16E5D3433CB3" /* PaletteView.swift */; };
+		F441D58D308F724929D1BDAF /* Lab.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_369F696A-02B3-4E3C-9823-DE3F1A676545" /* Lab.swift */; };
 		F5B7AABA6446ABF161DF70BE /* colswatch.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9A4DCCCC19843E293EC4DE90 /* colswatch.icns */; };
-		FB2B022FE49E5D739F4FE310 /* Tags.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_A08BBDAF-7C1A-4403-A186-85FAFA476929" /* Tags.swift */; };
-		FB306AB278C27A5EC8BE3150 /* AdobeHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_08201ED8-810A-4C4B-9D48-F6007EAF65FA" /* AdobeHelper.swift */; };
-		FB49069EDCFBC1972A08577B /* GamutMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_2AF89CCB-197F-4550-938F-07D09BE95A7A" /* GamutMap.swift */; };
-		FE1BA8490CEE8F6763A69C22 /* StepCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_2B6FD275-9CB3-43E6-99D1-3358BB6EE108" /* StepCards.swift */; };
+		F79CF21F6F8DDADF6EF292C6 /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_AD4902E6-85BA-4DC1-B0FE-62E1E0B33154" /* SettingsWindow.swift */; };
+		F8AF607E28AB0BB3CE9EA678 /* Bookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_A57D77F9-1447-4077-BD3A-9CB60122988D" /* Bookmarks.swift */; };
+		FAAF3A708533E3D8FCEA72F4 /* PermissionGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_E6EFFF4F-9931-4700-8217-8ADB4F75DB2B" /* PermissionGate.swift */; };
+		FC908513AE348AAAC106A5AA /* AdobeHelperRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B02EE8F4-467F-45B2-AF73-CD5075E6ED3A" /* AdobeHelperRules.swift */; };
+		FD2BC39F1A6080367D6D068A /* Prefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_096F5011-DE95-4D8B-9474-32FD7B47808E" /* Prefs.swift */; };
+		FF05447667C3D3488169173C /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5DC66764-8470-4522-BE52-6106D4FADDCF" /* Sync.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -133,79 +134,80 @@
 		CCF4348E40E2E5057567D4AB /* Colorgain.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Colorgain.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E81369EB61078CE37CDC9ED4 /* colcine.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colcine.icns; sourceTree = "<group>"; };
 		EB6E49A3BE04926823CB4646 /* colcatalogue.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colcatalogue.icns; sourceTree = "<group>"; };
-		"TEMP_07DDED35-383A-4215-B356-0D8CC2CE03DC" /* StudioLab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioLab.swift; sourceTree = "<group>"; };
-		"TEMP_08201ED8-810A-4C4B-9D48-F6007EAF65FA" /* AdobeHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelper.swift; sourceTree = "<group>"; };
-		"TEMP_08F03062-299F-4B66-927F-653A68C2678D" /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
-		"TEMP_09A572F0-0B30-4A54-AE94-F1D7E65C8448" /* SlideConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideConfirm.swift; sourceTree = "<group>"; };
-		"TEMP_0D0F11A6-C6FA-42CB-BAE0-3964D541E207" /* Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Projects.swift; sourceTree = "<group>"; };
-		"TEMP_0E8CDEB4-F5BA-45F1-B3B8-629F851BB927" /* SetupFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupFrame.swift; sourceTree = "<group>"; };
-		"TEMP_121B24AA-6D0A-4011-A0CE-CD276BE0F19D" /* LabContrast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabContrast.swift; sourceTree = "<group>"; };
-		"TEMP_12D493DE-22A3-4B67-9F2C-BDA824A70CB6" /* HaloTrainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloTrainer.swift; sourceTree = "<group>"; };
-		"TEMP_1360B356-68F3-4492-BF89-99472E03F662" /* StudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSettings.swift; sourceTree = "<group>"; };
-		"TEMP_1574F08F-6AEC-4515-9AC8-DC9E85FC3017" /* FormMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormMemory.swift; sourceTree = "<group>"; };
-		"TEMP_1E49C83B-603F-4A82-AFA8-4A4C61C9E58B" /* Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controls.swift; sourceTree = "<group>"; };
-		"TEMP_25C6A7FC-5E0E-44C7-BA4E-94B489483421" /* Bookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmarks.swift; sourceTree = "<group>"; };
-		"TEMP_2AF89CCB-197F-4550-938F-07D09BE95A7A" /* GamutMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamutMap.swift; sourceTree = "<group>"; };
-		"TEMP_2B6FD275-9CB3-43E6-99D1-3358BB6EE108" /* StepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCards.swift; sourceTree = "<group>"; };
-		"TEMP_325E64BC-D84F-452C-A295-D8F4E43FFAA7" /* PaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteView.swift; sourceTree = "<group>"; };
-		"TEMP_32619D66-D3F0-4D88-A57A-A26DE0FFC35F" /* Modal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Modal.swift; sourceTree = "<group>"; };
-		"TEMP_33EFB923-966D-4594-95DA-92A40D0DB4BC" /* SetupAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupAssistant.swift; sourceTree = "<group>"; };
-		"TEMP_351AB0C2-3400-4B98-AB56-429990004645" /* PageHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageHeader.swift; sourceTree = "<group>"; };
-		"TEMP_38481573-50C0-4D33-A1AF-A01143EFED77" /* ColourEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourEngine.swift; sourceTree = "<group>"; };
-		"TEMP_3DE7C1CE-5249-4792-8F73-5F4C88B08F11" /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
-		"TEMP_3E6BE9B1-094F-4AE3-ABA4-672FC9002007" /* Buttons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Buttons.swift; sourceTree = "<group>"; };
-		"TEMP_409F6709-2C2A-4D60-969C-8E81F109541F" /* Importers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Importers.swift; sourceTree = "<group>"; };
-		"TEMP_4325C3C9-1666-4D51-AA31-37123B8679B9" /* ColourNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourNames.swift; sourceTree = "<group>"; };
-		"TEMP_479A575C-FFEC-4535-B2A9-4821A9072697" /* PermissionGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGate.swift; sourceTree = "<group>"; };
-		"TEMP_4957F905-F0C8-44F7-A7BF-28DCD90686DF" /* Dump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dump.swift; sourceTree = "<group>"; };
-		"TEMP_4A92998C-5175-4FD0-9B3C-0B4726D58F9B" /* SelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfTest.swift; sourceTree = "<group>"; };
-		"TEMP_4E1B7FB7-EEC2-4091-96D1-6F37838FC06E" /* History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = History.swift; sourceTree = "<group>"; };
-		"TEMP_597373FC-05FF-49AC-861C-605B45812774" /* ColourScience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourScience.swift; sourceTree = "<group>"; };
-		"TEMP_5B3A718A-FAB5-435B-AA63-438D10D4124F" /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
-		"TEMP_5C021D89-6920-40AA-BE41-29FC187B5EE4" /* Analysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analysis.swift; sourceTree = "<group>"; };
-		"TEMP_5EEA358E-EF84-42BC-A0E4-51D1AE8A217C" /* ProjectFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFile.swift; sourceTree = "<group>"; };
-		"TEMP_5FF0A9E3-7BC5-4D02-8DD1-4A337C03B9FA" /* PaneGrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneGrip.swift; sourceTree = "<group>"; };
-		"TEMP_6C60B1FA-658E-49C0-AFF6-ACD88CAB99DD" /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
-		"TEMP_6DB155BD-64DF-4A22-B90E-D44513803AD5" /* StudioWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioWindow.swift; sourceTree = "<group>"; };
-		"TEMP_6DDEA4AE-8CE9-4C1C-962F-8E519D01B01E" /* Overview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Overview.swift; sourceTree = "<group>"; };
-		"TEMP_70CFC6E9-F086-42E7-8E16-64853C099639" /* ColourIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourIdentity.swift; sourceTree = "<group>"; };
-		"TEMP_71221C26-0648-4D70-BC08-9DE967CB4ACD" /* Prefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prefs.swift; sourceTree = "<group>"; };
-		"TEMP_72D3814A-D3D1-4390-BC6B-406FA81B75E1" /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
-		"TEMP_757841ED-E0E5-4808-92A1-F8F3A343AE5C" /* NewColour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewColour.swift; sourceTree = "<group>"; };
-		"TEMP_86A9E836-1612-4849-A0DD-4037B2B14255" /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
-		"TEMP_8786DA58-E338-4CC3-B6A8-170582BF7521" /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
-		"TEMP_88E86008-846A-4ED5-AD1E-807C76B897BE" /* AdobeHelperRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelperRules.swift; sourceTree = "<group>"; };
-		"TEMP_8A0D061C-8320-4EAA-9EC4-C284DBF83B5C" /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
-		"TEMP_91A7DD69-4785-4F83-8911-A8665F8E6D2F" /* Exporters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Exporters.swift; sourceTree = "<group>"; };
-		"TEMP_95118E34-5315-4B04-825E-FFEFA0FE7ADA" /* HaloMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloMenu.swift; sourceTree = "<group>"; };
-		"TEMP_9755C789-3F8A-41B8-AB4B-49091FA98E5E" /* ContextRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextRail.swift; sourceTree = "<group>"; };
-		"TEMP_994D53F0-EAAC-4896-9A55-F500654FFF03" /* ColourFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourFormats.swift; sourceTree = "<group>"; };
-		"TEMP_A08BBDAF-7C1A-4403-A186-85FAFA476929" /* Tags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tags.swift; sourceTree = "<group>"; };
-		"TEMP_A3061396-2CF9-43DE-9595-53A98325915C" /* PaletteGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteGroups.swift; sourceTree = "<group>"; };
-		"TEMP_A8F7DD02-33AB-43F2-A495-E1A8A0198C3D" /* Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Helpers.swift; sourceTree = "<group>"; };
-		"TEMP_AE7B4EA1-9390-4352-93AF-20A1459C48B8" /* Histogram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Histogram.swift; sourceTree = "<group>"; };
-		"TEMP_AF69F4EF-CE26-424A-A0D3-64F45506A2BB" /* LostProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LostProject.swift; sourceTree = "<group>"; };
-		"TEMP_B097A8CB-6C3D-4640-A7E3-15F7EF86FC7B" /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		"TEMP_B37F12B6-CA3B-48D6-A112-7FCD0AC0377F" /* Sampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sampler.swift; sourceTree = "<group>"; };
-		"TEMP_B3ED774E-F767-4490-8AF7-E672F99A5C19" /* PickIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickIntent.swift; sourceTree = "<group>"; };
-		"TEMP_B4EE917F-EC8E-478F-8EC6-F674B0E9B65C" /* StudioSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSchema.swift; sourceTree = "<group>"; };
-		"TEMP_B5C7AF06-2581-44AF-BF55-657639B4A005" /* AllSwatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllSwatchesView.swift; sourceTree = "<group>"; };
-		"TEMP_B6F2676B-71A4-4EC0-8B95-4E6146AD808E" /* Catalogue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalogue.swift; sourceTree = "<group>"; };
-		"TEMP_BEB7AEFD-9F20-4A79-9D57-3BF39F098515" /* SwatchList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwatchList.swift; sourceTree = "<group>"; };
-		"TEMP_C1777BED-A376-435F-B884-A5D274AC958C" /* Logo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logo.swift; sourceTree = "<group>"; };
-		"TEMP_C7600259-9979-4BFE-95B4-1E917CA42F82" /* ColourProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourProfiles.swift; sourceTree = "<group>"; };
-		"TEMP_C82487D8-CD47-4B6C-B41D-A534FC4A271C" /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
-		"TEMP_CFAC685E-B6CA-4DCE-BB10-8C642CB4CDE1" /* StudioContrast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioContrast.swift; sourceTree = "<group>"; };
-		"TEMP_D1AE84AF-8D1A-460B-88A1-29B6B1A932E0" /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
-		"TEMP_D1F9F96A-3282-4F17-85E9-8BFFCD248CA0" /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
-		"TEMP_DAF1370D-B2B3-40C0-A098-62EA7360B4DD" /* Lab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lab.swift; sourceTree = "<group>"; };
-		"TEMP_E573692B-0E04-4B53-B17D-0FCF6766B72D" /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
-		"TEMP_E94B421C-5B90-4115-8AB9-CB2DB93D6674" /* HistoryRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRail.swift; sourceTree = "<group>"; };
-		"TEMP_E9EE13B6-C814-451B-8D14-F0CF083D2A9D" /* Purposes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Purposes.swift; sourceTree = "<group>"; };
-		"TEMP_EAFB14E8-71F6-4A91-BDA0-FD38C6229B03" /* Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar.swift; sourceTree = "<group>"; };
-		"TEMP_FBA711CE-2863-4CC9-B7EE-51982ED82CA5" /* HaloDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloDemo.swift; sourceTree = "<group>"; };
-		"TEMP_FEFBFADC-B170-4E82-A9B4-822DA920A066" /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
-		"TEMP_FFCE32E5-76A6-4E0D-A3B7-0BFD05D6E9BF" /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
+		"TEMP_02441052-EDFE-4DE0-AC6E-AD2895B03008" /* Catalogue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalogue.swift; sourceTree = "<group>"; };
+		"TEMP_04947EDA-612C-4DD3-845D-AB81D74BC36B" /* SwatchList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwatchList.swift; sourceTree = "<group>"; };
+		"TEMP_083EBD16-1A4A-479B-AE1C-E677E8CAA9EB" /* ColourEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourEngine.swift; sourceTree = "<group>"; };
+		"TEMP_08D1C150-01CC-421E-B4EB-4CEBC8D98565" /* Exporters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Exporters.swift; sourceTree = "<group>"; };
+		"TEMP_096F5011-DE95-4D8B-9474-32FD7B47808E" /* Prefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prefs.swift; sourceTree = "<group>"; };
+		"TEMP_0989DFD8-7B8C-4D44-B45F-02A529FE6DB6" /* NewColour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewColour.swift; sourceTree = "<group>"; };
+		"TEMP_0BBE6FC0-44DA-4112-9AB3-FEB256BFD51D" /* Purposes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Purposes.swift; sourceTree = "<group>"; };
+		"TEMP_1009FEDE-9B50-45B7-8EC1-52E921EC336A" /* StudioSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSchema.swift; sourceTree = "<group>"; };
+		"TEMP_17A5BEB7-EADC-4F97-ABA5-A9433B5ED0A7" /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		"TEMP_1B56CE93-30C6-4572-BE20-EE601ED0FD09" /* AdobeHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelper.swift; sourceTree = "<group>"; };
+		"TEMP_2ABEBC77-2C12-4B13-9B99-86C92CB104CE" /* Logo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logo.swift; sourceTree = "<group>"; };
+		"TEMP_2FDE2F07-8DD2-4FCB-AF6E-8F75D2178306" /* ProjectFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFile.swift; sourceTree = "<group>"; };
+		"TEMP_33D24ED7-8175-4CEE-9AD0-10A3E204F47C" /* HistoryRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRail.swift; sourceTree = "<group>"; };
+		"TEMP_369F696A-02B3-4E3C-9823-DE3F1A676545" /* Lab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lab.swift; sourceTree = "<group>"; };
+		"TEMP_39670AD0-B183-4153-9823-1579F9855335" /* Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controls.swift; sourceTree = "<group>"; };
+		"TEMP_39A2135B-A3EC-40E8-8944-E6CECB5FAE86" /* Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar.swift; sourceTree = "<group>"; };
+		"TEMP_40651E42-6818-4D09-BCB0-E323D1824034" /* StudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSettings.swift; sourceTree = "<group>"; };
+		"TEMP_4299BE97-C270-484B-A0EC-FFCDF147932C" /* StudioLab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioLab.swift; sourceTree = "<group>"; };
+		"TEMP_455F7A9A-EDD2-4B32-A843-A38C596A6878" /* ColourScience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourScience.swift; sourceTree = "<group>"; };
+		"TEMP_48C3C6F1-A956-494C-B3B7-B6F7ABB8558A" /* GamutMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamutMap.swift; sourceTree = "<group>"; };
+		"TEMP_4A30E845-1050-4E84-9DAF-A0148E39A94A" /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
+		"TEMP_4D060ECE-B268-45B6-82AA-5D61CD613433" /* PaneGrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneGrip.swift; sourceTree = "<group>"; };
+		"TEMP_55E63D36-01DC-4F51-946A-7811A0E4DFAD" /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
+		"TEMP_59ED6EDD-16C1-4BFD-9FF8-2A04F5BC6C43" /* StudioWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioWindow.swift; sourceTree = "<group>"; };
+		"TEMP_5D08285A-E525-4EFE-8A29-39167DF50B85" /* Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Helpers.swift; sourceTree = "<group>"; };
+		"TEMP_5DC66764-8470-4522-BE52-6106D4FADDCF" /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
+		"TEMP_5E3D8681-100D-4AC9-9758-D2CE5C6EB9C4" /* SetupAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupAssistant.swift; sourceTree = "<group>"; };
+		"TEMP_69FCAA9E-B0FC-4A3F-BFBA-2AFA3BBC6504" /* SlideConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideConfirm.swift; sourceTree = "<group>"; };
+		"TEMP_6EABC318-063D-49F0-AC33-47F6DB74F1CE" /* Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Projects.swift; sourceTree = "<group>"; };
+		"TEMP_7460014B-600B-4B73-A841-92C111821746" /* StudioTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioTags.swift; sourceTree = "<group>"; };
+		"TEMP_753CED9B-E0C2-4B04-8DB7-B9375D4619C0" /* Tags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tags.swift; sourceTree = "<group>"; };
+		"TEMP_79A335A0-FC03-4A8E-A79F-7A300A0CD598" /* ColourFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourFormats.swift; sourceTree = "<group>"; };
+		"TEMP_7A7D39B2-7E2C-4296-B281-6FB562710195" /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		"TEMP_7B61E215-3903-4768-B4AE-AB2AEF0B3DEB" /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		"TEMP_7C06B517-911A-46C2-9EC3-D1CE690F1416" /* PaletteGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteGroups.swift; sourceTree = "<group>"; };
+		"TEMP_7D2B8381-33E8-4CA6-A0BE-8FADB053FEC4" /* HaloMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloMenu.swift; sourceTree = "<group>"; };
+		"TEMP_7F7B6FB6-B2BE-40E7-87B6-0AB714FEC5CC" /* Histogram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Histogram.swift; sourceTree = "<group>"; };
+		"TEMP_7FFE6EC5-8366-4AB2-B4F8-A9FF98CCD88E" /* SetupFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupFrame.swift; sourceTree = "<group>"; };
+		"TEMP_88192388-5806-43EF-BE13-1C9C21F22548" /* Analysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analysis.swift; sourceTree = "<group>"; };
+		"TEMP_8B9EE89E-99A9-4806-8A7D-8A515D5605E9" /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
+		"TEMP_8D049E86-1FB5-4554-BC0C-150746950D9E" /* PageHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageHeader.swift; sourceTree = "<group>"; };
+		"TEMP_92CF00C2-0B7E-4368-A352-003F41D8BE2A" /* ColourProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourProfiles.swift; sourceTree = "<group>"; };
+		"TEMP_950C510E-0839-4EBA-A7CF-1835735C8AEB" /* ColourIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourIdentity.swift; sourceTree = "<group>"; };
+		"TEMP_958548E7-88CF-4926-A7FE-8DE05B255953" /* LabContrast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabContrast.swift; sourceTree = "<group>"; };
+		"TEMP_96BF62D9-6708-45EE-9551-DB2503DAF084" /* HaloDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloDemo.swift; sourceTree = "<group>"; };
+		"TEMP_9B318076-2069-40B9-B0E8-54BA4A299098" /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
+		"TEMP_9D5B2622-19AF-4397-A425-459596E5EFC1" /* ContextRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextRail.swift; sourceTree = "<group>"; };
+		"TEMP_9F6FAD53-2330-4F2C-B386-DF6A4BBA1055" /* History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = History.swift; sourceTree = "<group>"; };
+		"TEMP_A57D77F9-1447-4077-BD3A-9CB60122988D" /* Bookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmarks.swift; sourceTree = "<group>"; };
+		"TEMP_AD4902E6-85BA-4DC1-B0FE-62E1E0B33154" /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
+		"TEMP_AE2D608A-5B2B-4A9C-A63F-5943F6DE6E33" /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		"TEMP_B02EE8F4-467F-45B2-AF73-CD5075E6ED3A" /* AdobeHelperRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelperRules.swift; sourceTree = "<group>"; };
+		"TEMP_B0565E1C-0400-4075-9796-403C5FF4B221" /* Dump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dump.swift; sourceTree = "<group>"; };
+		"TEMP_B2E1B9DB-C1A9-4499-904A-0D5BBA2F7FDA" /* ColourNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourNames.swift; sourceTree = "<group>"; };
+		"TEMP_BFE3A16B-28D9-4845-B256-C2EB7B737BC4" /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		"TEMP_C935A448-CC06-47B3-B5A8-0EEA10518296" /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
+		"TEMP_CAEDC846-3EDB-44CF-8188-C51768B59F1B" /* Importers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Importers.swift; sourceTree = "<group>"; };
+		"TEMP_CB9F9DB1-57CF-440E-83A9-8276387FB456" /* Overview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Overview.swift; sourceTree = "<group>"; };
+		"TEMP_CC60FA5D-665F-4BA8-990C-76C88C6E2438" /* Buttons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Buttons.swift; sourceTree = "<group>"; };
+		"TEMP_D44CCC5A-71A5-416E-B232-0AFE74D89E60" /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
+		"TEMP_DA5E93AA-B826-47AE-973D-33BC855CDF86" /* FormMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormMemory.swift; sourceTree = "<group>"; };
+		"TEMP_DB96FABD-F7B6-4403-BA6B-0C160BC8CEDF" /* StudioContrast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioContrast.swift; sourceTree = "<group>"; };
+		"TEMP_DC045F23-D99F-4E4D-85F8-922C78EF5E41" /* HaloTrainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaloTrainer.swift; sourceTree = "<group>"; };
+		"TEMP_DEA6CFEA-920A-41E5-86CC-95D2EFD9A6BE" /* PickIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickIntent.swift; sourceTree = "<group>"; };
+		"TEMP_DEDB2DC5-0FF3-4C0E-9270-988070A153D2" /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
+		"TEMP_E3704A98-318C-464A-BA5C-8F3F3457A8AD" /* StepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCards.swift; sourceTree = "<group>"; };
+		"TEMP_E5BED4DD-78C3-4257-B649-755CE7E6D905" /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
+		"TEMP_E6504A9B-6EAD-41B9-B2B0-6CC44DE916EC" /* LostProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LostProject.swift; sourceTree = "<group>"; };
+		"TEMP_E6EFFF4F-9931-4700-8217-8ADB4F75DB2B" /* PermissionGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGate.swift; sourceTree = "<group>"; };
+		"TEMP_EA8B6B8C-6337-445D-9911-897F9B090FA9" /* SelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfTest.swift; sourceTree = "<group>"; };
+		"TEMP_EC3FB282-A01F-4AFD-B033-0C405E987667" /* Sampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sampler.swift; sourceTree = "<group>"; };
+		"TEMP_F32DA605-C4F4-4FEE-A176-5431EB6B86AC" /* Modal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Modal.swift; sourceTree = "<group>"; };
+		"TEMP_FDB83E04-0AC1-4876-B2FC-C88FA7FD393C" /* AllSwatchesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllSwatchesView.swift; sourceTree = "<group>"; };
+		"TEMP_FE456799-BC0B-4570-A0CF-16E5D3433CB3" /* PaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,82 +271,83 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_D17C4349-42DA-4B99-84B8-04011102579A" /* . */ = {
+		"TEMP_F53C05A0-BD56-4C11-9EB2-4238542B776E" /* . */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_25C6A7FC-5E0E-44C7-BA4E-94B489483421" /* Bookmarks.swift */,
-				"TEMP_D1F9F96A-3282-4F17-85E9-8BFFCD248CA0" /* Typography.swift */,
-				"TEMP_4325C3C9-1666-4D51-AA31-37123B8679B9" /* ColourNames.swift */,
-				"TEMP_121B24AA-6D0A-4011-A0CE-CD276BE0F19D" /* LabContrast.swift */,
-				"TEMP_FFCE32E5-76A6-4E0D-A3B7-0BFD05D6E9BF" /* SettingsWindow.swift */,
-				"TEMP_351AB0C2-3400-4B98-AB56-429990004645" /* PageHeader.swift */,
-				"TEMP_8A0D061C-8320-4EAA-9EC4-C284DBF83B5C" /* Palette.swift */,
-				"TEMP_12D493DE-22A3-4B67-9F2C-BDA824A70CB6" /* HaloTrainer.swift */,
-				"TEMP_479A575C-FFEC-4535-B2A9-4821A9072697" /* PermissionGate.swift */,
-				"TEMP_3DE7C1CE-5249-4792-8F73-5F4C88B08F11" /* Model.swift */,
-				"TEMP_5C021D89-6920-40AA-BE41-29FC187B5EE4" /* Analysis.swift */,
-				"TEMP_3E6BE9B1-094F-4AE3-ABA4-672FC9002007" /* Buttons.swift */,
-				"TEMP_994D53F0-EAAC-4896-9A55-F500654FFF03" /* ColourFormats.swift */,
-				"TEMP_5EEA358E-EF84-42BC-A0E4-51D1AE8A217C" /* ProjectFile.swift */,
-				"TEMP_B5C7AF06-2581-44AF-BF55-657639B4A005" /* AllSwatchesView.swift */,
-				"TEMP_1574F08F-6AEC-4515-9AC8-DC9E85FC3017" /* FormMemory.swift */,
-				"TEMP_E94B421C-5B90-4115-8AB9-CB2DB93D6674" /* HistoryRail.swift */,
-				"TEMP_325E64BC-D84F-452C-A295-D8F4E43FFAA7" /* PaletteView.swift */,
-				"TEMP_E9EE13B6-C814-451B-8D14-F0CF083D2A9D" /* Purposes.swift */,
-				"TEMP_C1777BED-A376-435F-B884-A5D274AC958C" /* Logo.swift */,
-				"TEMP_9755C789-3F8A-41B8-AB4B-49091FA98E5E" /* ContextRail.swift */,
-				"TEMP_597373FC-05FF-49AC-861C-605B45812774" /* ColourScience.swift */,
-				"TEMP_07DDED35-383A-4215-B356-0D8CC2CE03DC" /* StudioLab.swift */,
-				"TEMP_08201ED8-810A-4C4B-9D48-F6007EAF65FA" /* AdobeHelper.swift */,
-				"TEMP_6DB155BD-64DF-4A22-B90E-D44513803AD5" /* StudioWindow.swift */,
-				"TEMP_08F03062-299F-4B66-927F-653A68C2678D" /* Splash.swift */,
-				"TEMP_409F6709-2C2A-4D60-969C-8E81F109541F" /* Importers.swift */,
-				"TEMP_32619D66-D3F0-4D88-A57A-A26DE0FFC35F" /* Modal.swift */,
-				"TEMP_4957F905-F0C8-44F7-A7BF-28DCD90686DF" /* Dump.swift */,
-				"TEMP_D1AE84AF-8D1A-460B-88A1-29B6B1A932E0" /* Sync.swift */,
-				"TEMP_AE7B4EA1-9390-4352-93AF-20A1459C48B8" /* Histogram.swift */,
-				"TEMP_A8F7DD02-33AB-43F2-A495-E1A8A0198C3D" /* Helpers.swift */,
-				"TEMP_B4EE917F-EC8E-478F-8EC6-F674B0E9B65C" /* StudioSchema.swift */,
-				"TEMP_6C60B1FA-658E-49C0-AFF6-ACD88CAB99DD" /* Permissions.swift */,
-				"TEMP_C7600259-9979-4BFE-95B4-1E917CA42F82" /* ColourProfiles.swift */,
-				"TEMP_FEFBFADC-B170-4E82-A9B4-822DA920A066" /* Controller.swift */,
-				"TEMP_33EFB923-966D-4594-95DA-92A40D0DB4BC" /* SetupAssistant.swift */,
-				"TEMP_DAF1370D-B2B3-40C0-A098-62EA7360B4DD" /* Lab.swift */,
-				"TEMP_0E8CDEB4-F5BA-45F1-B3B8-629F851BB927" /* SetupFrame.swift */,
-				"TEMP_09A572F0-0B30-4A54-AE94-F1D7E65C8448" /* SlideConfirm.swift */,
-				"TEMP_5FF0A9E3-7BC5-4D02-8DD1-4A337C03B9FA" /* PaneGrip.swift */,
-				"TEMP_6DDEA4AE-8CE9-4C1C-962F-8E519D01B01E" /* Overview.swift */,
-				"TEMP_91A7DD69-4785-4F83-8911-A8665F8E6D2F" /* Exporters.swift */,
-				"TEMP_95118E34-5315-4B04-825E-FFEFA0FE7ADA" /* HaloMenu.swift */,
-				"TEMP_70CFC6E9-F086-42E7-8E16-64853C099639" /* ColourIdentity.swift */,
-				"TEMP_A3061396-2CF9-43DE-9595-53A98325915C" /* PaletteGroups.swift */,
-				"TEMP_2AF89CCB-197F-4550-938F-07D09BE95A7A" /* GamutMap.swift */,
-				"TEMP_4A92998C-5175-4FD0-9B3C-0B4726D58F9B" /* SelfTest.swift */,
-				"TEMP_A08BBDAF-7C1A-4403-A186-85FAFA476929" /* Tags.swift */,
-				"TEMP_0D0F11A6-C6FA-42CB-BAE0-3964D541E207" /* Projects.swift */,
-				"TEMP_CFAC685E-B6CA-4DCE-BB10-8C642CB4CDE1" /* StudioContrast.swift */,
-				"TEMP_E573692B-0E04-4B53-B17D-0FCF6766B72D" /* MainWindow.swift */,
-				"TEMP_EAFB14E8-71F6-4A91-BDA0-FD38C6229B03" /* Sidebar.swift */,
-				"TEMP_38481573-50C0-4D33-A1AF-A01143EFED77" /* ColourEngine.swift */,
-				"TEMP_5B3A718A-FAB5-435B-AA63-438D10D4124F" /* Store.swift */,
-				"TEMP_88E86008-846A-4ED5-AD1E-807C76B897BE" /* AdobeHelperRules.swift */,
-				"TEMP_86A9E836-1612-4849-A0DD-4037B2B14255" /* Schema.swift */,
-				"TEMP_1E49C83B-603F-4A82-AFA8-4A4C61C9E58B" /* Controls.swift */,
-				"TEMP_AF69F4EF-CE26-424A-A0D3-64F45506A2BB" /* LostProject.swift */,
-				"TEMP_C82487D8-CD47-4B6C-B41D-A534FC4A271C" /* Brand.swift */,
-				"TEMP_B6F2676B-71A4-4EC0-8B95-4E6146AD808E" /* Catalogue.swift */,
-				"TEMP_BEB7AEFD-9F20-4A79-9D57-3BF39F098515" /* SwatchList.swift */,
-				"TEMP_757841ED-E0E5-4808-92A1-F8F3A343AE5C" /* NewColour.swift */,
-				"TEMP_4E1B7FB7-EEC2-4091-96D1-6F37838FC06E" /* History.swift */,
-				"TEMP_B097A8CB-6C3D-4640-A7E3-15F7EF86FC7B" /* main.swift */,
-				"TEMP_FBA711CE-2863-4CC9-B7EE-51982ED82CA5" /* HaloDemo.swift */,
-				"TEMP_72D3814A-D3D1-4390-BC6B-406FA81B75E1" /* Shortcuts.swift */,
-				"TEMP_2B6FD275-9CB3-43E6-99D1-3358BB6EE108" /* StepCards.swift */,
-				"TEMP_B37F12B6-CA3B-48D6-A112-7FCD0AC0377F" /* Sampler.swift */,
-				"TEMP_B3ED774E-F767-4490-8AF7-E672F99A5C19" /* PickIntent.swift */,
-				"TEMP_71221C26-0648-4D70-BC08-9DE967CB4ACD" /* Prefs.swift */,
-				"TEMP_8786DA58-E338-4CC3-B6A8-170582BF7521" /* Design.swift */,
-				"TEMP_1360B356-68F3-4492-BF89-99472E03F662" /* StudioSettings.swift */,
+				"TEMP_A57D77F9-1447-4077-BD3A-9CB60122988D" /* Bookmarks.swift */,
+				"TEMP_7B61E215-3903-4768-B4AE-AB2AEF0B3DEB" /* Typography.swift */,
+				"TEMP_B2E1B9DB-C1A9-4499-904A-0D5BBA2F7FDA" /* ColourNames.swift */,
+				"TEMP_958548E7-88CF-4926-A7FE-8DE05B255953" /* LabContrast.swift */,
+				"TEMP_AD4902E6-85BA-4DC1-B0FE-62E1E0B33154" /* SettingsWindow.swift */,
+				"TEMP_8D049E86-1FB5-4554-BC0C-150746950D9E" /* PageHeader.swift */,
+				"TEMP_8B9EE89E-99A9-4806-8A7D-8A515D5605E9" /* Palette.swift */,
+				"TEMP_DC045F23-D99F-4E4D-85F8-922C78EF5E41" /* HaloTrainer.swift */,
+				"TEMP_E6EFFF4F-9931-4700-8217-8ADB4F75DB2B" /* PermissionGate.swift */,
+				"TEMP_AE2D608A-5B2B-4A9C-A63F-5943F6DE6E33" /* Model.swift */,
+				"TEMP_88192388-5806-43EF-BE13-1C9C21F22548" /* Analysis.swift */,
+				"TEMP_CC60FA5D-665F-4BA8-990C-76C88C6E2438" /* Buttons.swift */,
+				"TEMP_79A335A0-FC03-4A8E-A79F-7A300A0CD598" /* ColourFormats.swift */,
+				"TEMP_2FDE2F07-8DD2-4FCB-AF6E-8F75D2178306" /* ProjectFile.swift */,
+				"TEMP_FDB83E04-0AC1-4876-B2FC-C88FA7FD393C" /* AllSwatchesView.swift */,
+				"TEMP_DA5E93AA-B826-47AE-973D-33BC855CDF86" /* FormMemory.swift */,
+				"TEMP_33D24ED7-8175-4CEE-9AD0-10A3E204F47C" /* HistoryRail.swift */,
+				"TEMP_FE456799-BC0B-4570-A0CF-16E5D3433CB3" /* PaletteView.swift */,
+				"TEMP_0BBE6FC0-44DA-4112-9AB3-FEB256BFD51D" /* Purposes.swift */,
+				"TEMP_2ABEBC77-2C12-4B13-9B99-86C92CB104CE" /* Logo.swift */,
+				"TEMP_9D5B2622-19AF-4397-A425-459596E5EFC1" /* ContextRail.swift */,
+				"TEMP_455F7A9A-EDD2-4B32-A843-A38C596A6878" /* ColourScience.swift */,
+				"TEMP_4299BE97-C270-484B-A0EC-FFCDF147932C" /* StudioLab.swift */,
+				"TEMP_1B56CE93-30C6-4572-BE20-EE601ED0FD09" /* AdobeHelper.swift */,
+				"TEMP_59ED6EDD-16C1-4BFD-9FF8-2A04F5BC6C43" /* StudioWindow.swift */,
+				"TEMP_E5BED4DD-78C3-4257-B649-755CE7E6D905" /* Splash.swift */,
+				"TEMP_CAEDC846-3EDB-44CF-8188-C51768B59F1B" /* Importers.swift */,
+				"TEMP_F32DA605-C4F4-4FEE-A176-5431EB6B86AC" /* Modal.swift */,
+				"TEMP_B0565E1C-0400-4075-9796-403C5FF4B221" /* Dump.swift */,
+				"TEMP_5DC66764-8470-4522-BE52-6106D4FADDCF" /* Sync.swift */,
+				"TEMP_7F7B6FB6-B2BE-40E7-87B6-0AB714FEC5CC" /* Histogram.swift */,
+				"TEMP_5D08285A-E525-4EFE-8A29-39167DF50B85" /* Helpers.swift */,
+				"TEMP_1009FEDE-9B50-45B7-8EC1-52E921EC336A" /* StudioSchema.swift */,
+				"TEMP_C935A448-CC06-47B3-B5A8-0EEA10518296" /* Permissions.swift */,
+				"TEMP_92CF00C2-0B7E-4368-A352-003F41D8BE2A" /* ColourProfiles.swift */,
+				"TEMP_9B318076-2069-40B9-B0E8-54BA4A299098" /* Controller.swift */,
+				"TEMP_5E3D8681-100D-4AC9-9758-D2CE5C6EB9C4" /* SetupAssistant.swift */,
+				"TEMP_369F696A-02B3-4E3C-9823-DE3F1A676545" /* Lab.swift */,
+				"TEMP_7FFE6EC5-8366-4AB2-B4F8-A9FF98CCD88E" /* SetupFrame.swift */,
+				"TEMP_69FCAA9E-B0FC-4A3F-BFBA-2AFA3BBC6504" /* SlideConfirm.swift */,
+				"TEMP_4D060ECE-B268-45B6-82AA-5D61CD613433" /* PaneGrip.swift */,
+				"TEMP_CB9F9DB1-57CF-440E-83A9-8276387FB456" /* Overview.swift */,
+				"TEMP_08D1C150-01CC-421E-B4EB-4CEBC8D98565" /* Exporters.swift */,
+				"TEMP_7D2B8381-33E8-4CA6-A0BE-8FADB053FEC4" /* HaloMenu.swift */,
+				"TEMP_950C510E-0839-4EBA-A7CF-1835735C8AEB" /* ColourIdentity.swift */,
+				"TEMP_7C06B517-911A-46C2-9EC3-D1CE690F1416" /* PaletteGroups.swift */,
+				"TEMP_48C3C6F1-A956-494C-B3B7-B6F7ABB8558A" /* GamutMap.swift */,
+				"TEMP_EA8B6B8C-6337-445D-9911-897F9B090FA9" /* SelfTest.swift */,
+				"TEMP_753CED9B-E0C2-4B04-8DB7-B9375D4619C0" /* Tags.swift */,
+				"TEMP_6EABC318-063D-49F0-AC33-47F6DB74F1CE" /* Projects.swift */,
+				"TEMP_DB96FABD-F7B6-4403-BA6B-0C160BC8CEDF" /* StudioContrast.swift */,
+				"TEMP_D44CCC5A-71A5-416E-B232-0AFE74D89E60" /* MainWindow.swift */,
+				"TEMP_39A2135B-A3EC-40E8-8944-E6CECB5FAE86" /* Sidebar.swift */,
+				"TEMP_083EBD16-1A4A-479B-AE1C-E677E8CAA9EB" /* ColourEngine.swift */,
+				"TEMP_BFE3A16B-28D9-4845-B256-C2EB7B737BC4" /* Store.swift */,
+				"TEMP_B02EE8F4-467F-45B2-AF73-CD5075E6ED3A" /* AdobeHelperRules.swift */,
+				"TEMP_55E63D36-01DC-4F51-946A-7811A0E4DFAD" /* Schema.swift */,
+				"TEMP_39670AD0-B183-4153-9823-1579F9855335" /* Controls.swift */,
+				"TEMP_E6504A9B-6EAD-41B9-B2B0-6CC44DE916EC" /* LostProject.swift */,
+				"TEMP_4A30E845-1050-4E84-9DAF-A0148E39A94A" /* Brand.swift */,
+				"TEMP_02441052-EDFE-4DE0-AC6E-AD2895B03008" /* Catalogue.swift */,
+				"TEMP_04947EDA-612C-4DD3-845D-AB81D74BC36B" /* SwatchList.swift */,
+				"TEMP_0989DFD8-7B8C-4D44-B45F-02A529FE6DB6" /* NewColour.swift */,
+				"TEMP_9F6FAD53-2330-4F2C-B386-DF6A4BBA1055" /* History.swift */,
+				"TEMP_7A7D39B2-7E2C-4296-B281-6FB562710195" /* main.swift */,
+				"TEMP_96BF62D9-6708-45EE-9551-DB2503DAF084" /* HaloDemo.swift */,
+				"TEMP_DEDB2DC5-0FF3-4C0E-9270-988070A153D2" /* Shortcuts.swift */,
+				"TEMP_E3704A98-318C-464A-BA5C-8F3F3457A8AD" /* StepCards.swift */,
+				"TEMP_EC3FB282-A01F-4AFD-B033-0C405E987667" /* Sampler.swift */,
+				"TEMP_DEA6CFEA-920A-41E5-86CC-95D2EFD9A6BE" /* PickIntent.swift */,
+				"TEMP_7460014B-600B-4B73-A841-92C111821746" /* StudioTags.swift */,
+				"TEMP_096F5011-DE95-4D8B-9474-32FD7B47808E" /* Prefs.swift */,
+				"TEMP_17A5BEB7-EADC-4F97-ABA5-A9433B5ED0A7" /* Design.swift */,
+				"TEMP_40651E42-6818-4D09-BCB0-E323D1824034" /* StudioSettings.swift */,
 			);
 			name = .;
 			path = .;
@@ -463,79 +466,80 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FB306AB278C27A5EC8BE3150 /* AdobeHelper.swift in Sources */,
-				662ADFC4B3FF61C94905228A /* AdobeHelperRules.swift in Sources */,
-				6525361752B69AFDB5915F0B /* AllSwatchesView.swift in Sources */,
-				44C750515F353881AD21FCC6 /* Analysis.swift in Sources */,
-				E42967A1A47022F8DAE8266C /* Bookmarks.swift in Sources */,
-				3DC0AAC3820444AAF4F48B2E /* Brand.swift in Sources */,
-				88F896B331B73CF042905A82 /* Buttons.swift in Sources */,
-				16133AD2C55FD49426177661 /* Catalogue.swift in Sources */,
-				003EB97D0E9E5C27696747F0 /* ColourEngine.swift in Sources */,
-				55D0B26E52454F4DC9C1EE06 /* ColourFormats.swift in Sources */,
-				CE6CAD49FA8572B79809D3A4 /* ColourIdentity.swift in Sources */,
-				C046DCA5E0FF0F455B408439 /* ColourNames.swift in Sources */,
-				74FAFF59B4B74814083DD754 /* ColourProfiles.swift in Sources */,
-				1ADFF1FE798920DAE248D158 /* ColourScience.swift in Sources */,
-				89B3DA38BB629F5FCB710D67 /* ContextRail.swift in Sources */,
-				9151C3184DFA16247DEC9E49 /* Controller.swift in Sources */,
-				D2ECF249DED6C2EA9B335FA4 /* Controls.swift in Sources */,
-				ABB8EB76ADA9607C7DE1A9F1 /* Design.swift in Sources */,
-				205A63B0FA644D1FA0F2117B /* Dump.swift in Sources */,
-				6E1F0BF79887C5868FB6F553 /* Exporters.swift in Sources */,
-				CDAF28FF3E256902CE42C60B /* FormMemory.swift in Sources */,
-				FB49069EDCFBC1972A08577B /* GamutMap.swift in Sources */,
-				B839D6F622ECA462CC8D9747 /* HaloDemo.swift in Sources */,
-				CB18D1389F96CFA715FCD8DE /* HaloMenu.swift in Sources */,
-				9D1C7F8F2A23387854A12DA9 /* HaloTrainer.swift in Sources */,
-				BAECFED70C862A54AD5FE8FB /* Helpers.swift in Sources */,
-				0F0E8619FF74CF58E0C9EBC2 /* Histogram.swift in Sources */,
-				658D55BE442139A7AB5CE807 /* History.swift in Sources */,
-				D3653CB1EAED23672876065C /* HistoryRail.swift in Sources */,
-				160179AE93AF0ED95BD646FA /* Importers.swift in Sources */,
-				9C92AAEE9766BE7829B40157 /* Lab.swift in Sources */,
-				0147CBCF94AC62C2336B3801 /* LabContrast.swift in Sources */,
-				72C410AA8BA7DF9B37BA59A5 /* Logo.swift in Sources */,
-				CC018A9DE3A42C44B524E9D9 /* LostProject.swift in Sources */,
-				D6EC043D336AFB90B171E0FF /* MainWindow.swift in Sources */,
-				475353376F6242AD3058D184 /* Modal.swift in Sources */,
-				6C8C3ACFD0642FFF9A58DCDD /* Model.swift in Sources */,
-				A6E52507E9AC8FABEFA37EF1 /* NewColour.swift in Sources */,
-				184C414F44701F983F529BBC /* Overview.swift in Sources */,
-				333D1C03434A8001C4D5602F /* PageHeader.swift in Sources */,
-				7ECC95890D99F35EF11FB12B /* Palette.swift in Sources */,
-				9F953810B0F92585CA3CBE79 /* PaletteGroups.swift in Sources */,
-				D652E6734B223451AB3230F7 /* PaletteView.swift in Sources */,
-				27D04AB211E7CBB35945DC2C /* PaneGrip.swift in Sources */,
-				1D383D58672CA834758C7AFD /* PermissionGate.swift in Sources */,
-				F40B8F1F53F9EA6E3A38261D /* Permissions.swift in Sources */,
-				A43FA839D3CB9B7A1A99FD73 /* PickIntent.swift in Sources */,
-				ED022548E4D445759EAA9023 /* Prefs.swift in Sources */,
-				5004188D3FEAFE9BA806FAF3 /* ProjectFile.swift in Sources */,
-				87AE696BC91BE36F2E1B4E7A /* Projects.swift in Sources */,
-				31B594C161B47CCBD6FAE6EB /* Purposes.swift in Sources */,
-				244C70EF4363C4935BEC7DC4 /* Sampler.swift in Sources */,
-				35148B80640D084E31B8A84B /* Schema.swift in Sources */,
-				456E8F3E6D4025957E3A0B0B /* SelfTest.swift in Sources */,
-				AB9E340AC1EAC2A8AA34E0D9 /* SettingsWindow.swift in Sources */,
-				55BE3C358CACF9E9B250E4F1 /* SetupAssistant.swift in Sources */,
-				04A73EF2D98B00159B333D6A /* SetupFrame.swift in Sources */,
-				D794778EC5257E606AC4F719 /* Shortcuts.swift in Sources */,
-				88F102F4BE0AC50C6BA6480B /* Sidebar.swift in Sources */,
-				C18DEA9EAC91FC602E3D413E /* SlideConfirm.swift in Sources */,
-				303E42841946B68E122E74B9 /* Splash.swift in Sources */,
-				FE1BA8490CEE8F6763A69C22 /* StepCards.swift in Sources */,
-				9B938C089E75301943B96556 /* Store.swift in Sources */,
-				12EA8314D3BB84C741EB88F2 /* StudioContrast.swift in Sources */,
-				80F21F2B7368E55DE375A334 /* StudioLab.swift in Sources */,
-				4C04722EFCA458253B2F30FC /* StudioSchema.swift in Sources */,
-				CCDA280E3FA05ACD87F61602 /* StudioSettings.swift in Sources */,
-				A0EA4FE67734AB289F8DC424 /* StudioWindow.swift in Sources */,
-				3E27339778B8F4059B8FE24D /* SwatchList.swift in Sources */,
-				50C410B7C28077916A4EE22A /* Sync.swift in Sources */,
-				FB2B022FE49E5D739F4FE310 /* Tags.swift in Sources */,
-				867AEECFA8E73E26C0EA453B /* Typography.swift in Sources */,
-				C781F790409746BC7C510072 /* main.swift in Sources */,
+				A5B6AFF290088B2A60A3E905 /* AdobeHelper.swift in Sources */,
+				FC908513AE348AAAC106A5AA /* AdobeHelperRules.swift in Sources */,
+				1600790B84557CC6C8DC924F /* AllSwatchesView.swift in Sources */,
+				3AD0E58F458898A842BA3E6E /* Analysis.swift in Sources */,
+				F8AF607E28AB0BB3CE9EA678 /* Bookmarks.swift in Sources */,
+				17C01F2B9CAC0D632195CA24 /* Brand.swift in Sources */,
+				1A0F9F91E8771F1949113CEF /* Buttons.swift in Sources */,
+				BA990D53FAE50970BFD8D579 /* Catalogue.swift in Sources */,
+				7C45CC6B9266EA703EA76590 /* ColourEngine.swift in Sources */,
+				19761CD426ABFF9ED67FE33E /* ColourFormats.swift in Sources */,
+				2240C4C8528005C63512EC83 /* ColourIdentity.swift in Sources */,
+				C55914C978B28F3A4F08F9DE /* ColourNames.swift in Sources */,
+				957BC1CCC4644BF10C2DCDCA /* ColourProfiles.swift in Sources */,
+				443E2B21FAEA32943CBF9E2E /* ColourScience.swift in Sources */,
+				A1B9A931602F6AFA903ACE12 /* ContextRail.swift in Sources */,
+				A78C3A680265FC29F35E2B3A /* Controller.swift in Sources */,
+				92C0A3B505EF2AA7BD3CDA20 /* Controls.swift in Sources */,
+				A49E6C5661D26203460255C5 /* Design.swift in Sources */,
+				762F92AA06018B232FA3003E /* Dump.swift in Sources */,
+				26CB8837A065861C69B3E110 /* Exporters.swift in Sources */,
+				A92DEB92F839D4B6FBE21002 /* FormMemory.swift in Sources */,
+				0B346BEE5C4C03000C1CCD65 /* GamutMap.swift in Sources */,
+				8D01309212F932D163A918D8 /* HaloDemo.swift in Sources */,
+				06B84989B007206F578E5F14 /* HaloMenu.swift in Sources */,
+				59C50C9A281C866CDFDCB14E /* HaloTrainer.swift in Sources */,
+				5766F62A8B25A541D80C2D4C /* Helpers.swift in Sources */,
+				7E6E4998291B4B8B5DA2736B /* Histogram.swift in Sources */,
+				4FCE4C55033CFBF3BB9F1F6A /* History.swift in Sources */,
+				6082573F580D297C61F245B1 /* HistoryRail.swift in Sources */,
+				8BCFC7492B7733E3E8D76520 /* Importers.swift in Sources */,
+				F441D58D308F724929D1BDAF /* Lab.swift in Sources */,
+				D95D690F8941F14206680A0A /* LabContrast.swift in Sources */,
+				D6EB5AAE6379C986215E1F93 /* Logo.swift in Sources */,
+				4752CE2B15573FFE01BF077F /* LostProject.swift in Sources */,
+				EBA83DB3411737EB5763EDAC /* MainWindow.swift in Sources */,
+				BEC51AE7C67D069A04D901C7 /* Modal.swift in Sources */,
+				05C94BA7F7393360FFA128A7 /* Model.swift in Sources */,
+				C19063E406FA19E762D3301E /* NewColour.swift in Sources */,
+				E85AD30DC8E853305215116F /* Overview.swift in Sources */,
+				973EE214062137A9598F2E02 /* PageHeader.swift in Sources */,
+				DDC9CF18B6B60328176B9FC7 /* Palette.swift in Sources */,
+				EE1730A88A68DB094CBAB50D /* PaletteGroups.swift in Sources */,
+				EF147938F0BAFAFE59829E63 /* PaletteView.swift in Sources */,
+				0B87DCBFBFD00CAD4EA753D8 /* PaneGrip.swift in Sources */,
+				FAAF3A708533E3D8FCEA72F4 /* PermissionGate.swift in Sources */,
+				0AFAFA7A3975089BA49D2ABE /* Permissions.swift in Sources */,
+				40DCC7220EFD7C580740BABD /* PickIntent.swift in Sources */,
+				FD2BC39F1A6080367D6D068A /* Prefs.swift in Sources */,
+				10C94515875DEF61C2F9B0E2 /* ProjectFile.swift in Sources */,
+				8A66338034D866D9BA062F41 /* Projects.swift in Sources */,
+				51A7CD69FA7E83A491720CC3 /* Purposes.swift in Sources */,
+				295DC7CE6EBEC21F3DF5A244 /* Sampler.swift in Sources */,
+				21C8794069AA891F31EAACAB /* Schema.swift in Sources */,
+				6341C81392E957C3E2C9B8F1 /* SelfTest.swift in Sources */,
+				F79CF21F6F8DDADF6EF292C6 /* SettingsWindow.swift in Sources */,
+				93E9356AD889CF89A5B746F3 /* SetupAssistant.swift in Sources */,
+				5DD88997E45E324F761EF142 /* SetupFrame.swift in Sources */,
+				032643CA9538BEA8C6D9D3D5 /* Shortcuts.swift in Sources */,
+				33BE7812C115DDF0BEF81B88 /* Sidebar.swift in Sources */,
+				5F2558286D555B42F1923489 /* SlideConfirm.swift in Sources */,
+				A39E3660D0C31CEBC03F5CEE /* Splash.swift in Sources */,
+				AB6250E729F6439C1D9F9072 /* StepCards.swift in Sources */,
+				467C4808B52B536CBA1C8372 /* Store.swift in Sources */,
+				44546D8833C1AA4D0BAC3E88 /* StudioContrast.swift in Sources */,
+				9CCB072A23BA69B37A4B4FC9 /* StudioLab.swift in Sources */,
+				51E19D6FEC5B7CF7C7A7ADE8 /* StudioSchema.swift in Sources */,
+				0F1E68BA4C75E4F76FEAC8A1 /* StudioSettings.swift in Sources */,
+				BE9012F34EDFB5B6F91F978E /* StudioTags.swift in Sources */,
+				C5795ECBDD5CF4A49204F1AD /* StudioWindow.swift in Sources */,
+				B3F973FF4965E663645A4BE5 /* SwatchList.swift in Sources */,
+				FF05447667C3D3488169173C /* Sync.swift in Sources */,
+				EB947059E5A88437920D400A /* Tags.swift in Sources */,
+				EC9E5684CBD245A2738C6DA5 /* Typography.swift in Sources */,
+				AF935513FD075AB4253BD706 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

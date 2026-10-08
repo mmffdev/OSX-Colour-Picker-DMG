@@ -1291,6 +1291,25 @@ func runHaloTests(check: (Bool, String) -> Void) {
     check(schemaOnDisk?.collections.map { $0.name } == ["Clients"] && schemaOnDisk?.places[schemaMember.uuidString] != nil && schemaFreshElsewhere
           && SchemaTrial.collections.map { $0.name } == ["Clients"] && SchemaTrial.read(in: schemaHomeB).collections.map { $0.name } == ["Projects"],
           "a catalogue's schema is written to its folder as \(SchemaTrial.fileName), read back from it, and a catalogue without one starts fresh")
+    // A tag on a level-1 group is worn inside the members in that group and nowhere else; a colour change or a rename keeps the group.
+    var groupLib = Library()
+    let inGroup = groupLib.createProject(named: "Acme Web"), outside = groupLib.createProject(named: "Elsewhere")
+    let acme = SchemaFolder(name: "Acme")
+    SchemaTrial.changeCollection(SchemaTrial.collections[0].id) { $0.folders = [acme] }
+    SchemaTrial.place(inGroup, in: SchemaTrial.collections[0].id, folder: acme.id)
+    let wornIn = groupLib.createSwatch(named: "In", hexes: ["#111111"]), wornOut = groupLib.createSwatch(named: "Out", hexes: ["#222222"])
+    for (s, p) in [(wornIn, inGroup), (wornOut, outside)] { if let i = groupLib.swatches.firstIndex(where: { $0.id == s }) { groupLib.swatches[i].projectID = p } }
+    groupLib.setTag("Acme Only", colour: "#2F5FD6", project: nil, group: .some(acme.id))
+    groupLib.setTags(ofPalette: wornIn, ["Acme Only"]); groupLib.setTags(ofPalette: wornOut, ["Acme Only"])
+    groupLib.setTag("Acme Only", colour: "#D9452B", project: nil)
+    let groupKept = groupLib.group(ofTag: "Acme Only") == acme.id && groupLib.info(forTag: "Acme Only")?.colour == "#D9452B"
+    let groupRead = (try? JSONDecoder.library.decode(Library.self, from: try! JSONEncoder.library.encode(groupLib)))?.info(forTag: "Acme Only")?.groupID == acme.id
+    let scopeMenu = TagScopes.menu(groupLib, within: [inGroup])
+    groupLib.renameTag("Acme Only", to: "Acme Brand")
+    check(groupKept && groupRead && groupLib.scope(ofTag: "Acme Brand") == .group(acme.id) && groupLib.swatch(wornIn)?.tagList == ["Acme Brand"] && groupLib.swatch(wornOut)?.tagList == []
+          && groupLib.tags(offeredIn: inGroup).contains("Acme Brand") && !groupLib.tags(offeredIn: outside).contains("Acme Brand") && !groupLib.tags(offeredIn: nil).contains("Acme Brand")
+          && scopeMenu.scopes.compactMap { $0 } == [.global, .group(acme.id), .member(inGroup)],
+          "a tag on a group is worn only inside its members, keeps its group through a colour change, a rename and the file, and the halo offers Global, the group and the member")
     for d in [schemaHomeA, schemaHomeB] { try? FileManager.default.removeItem(at: d) }
 
     let schema = SchemaTrial.start, schemaOne = SchemaTrial.addingChild(to: schema.id, in: schema)
