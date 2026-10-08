@@ -146,11 +146,14 @@ enum SchemaTrial {
 
     // MARK: Stacks
 
-    // A project follows its collection's default stack until it is given one of its own, kept here by the project's id.
+    // Since 2026-10-08 every member follows its collection's pattern, the one the schema page shows: what that page
+    // lists under "Every Project" is what rail1 lists under every member. Stacks of a member's own are gone; the old
+    // panel used to copy the pattern into each new member, which froze it, so members drifted from the pattern as it
+    // changed. Anything still kept under the old key is dropped the first time it is written to.
     static var own: [String: SchemaNode] {
-        get { preferences.data(forKey: "schema.projects").flatMap { try? JSONDecoder().decode([String: SchemaNode].self, from: $0) } ?? [:] }
+        get { [:] }
         set {
-            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.projects") }
+            preferences.removeObject(forKey: "schema.projects")
             NotificationCenter.default.post(name: .schemaDidChange, object: nil)
         }
     }
@@ -1277,7 +1280,6 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             }
             guard let id = made, lib.project(id) != nil else { NSSound.beep(); return }
             SchemaTrial.place(id, in: collectionID, folder: nil)
-            SchemaTrial.setSchema(collection.stack, for: id)
             stack = id
             load()
             selected = root.id

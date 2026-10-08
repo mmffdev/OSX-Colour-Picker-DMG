@@ -445,7 +445,8 @@ final class StudioFrame: NSView {
                     rows += inside.flatMap { memberRows($0, indent: 1) }
                 }
             }
-            rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: 0) }
+            // A member in no folder still sits on the member's level, one step in from the folders, as the schema page lays it out.
+            rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: c.folderName == nil ? 0 : 1) }
         }
         let loose = palettes(lib.palettes(in: nil))
         rows.append(.group("Palettes"))

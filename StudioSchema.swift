@@ -23,9 +23,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     /// What a row on the map is: a collection, the level grouping its members, or a group in its stack with its level in the stack, the member being 1.
     /// A collection; the level grouping its members; a group in its stack with its level, the member's word being 1; or one real member, a project.
+    /// ... or one folder on the grouping level, a client, holding members.
     private enum Target: Hashable {
-        case collection(UUID), tier(UUID), node(UUID, UUID, Int), member(UUID, UUID)
-        var collection: UUID { switch self { case .collection(let c), .tier(let c), .node(let c, _, _), .member(let c, _): return c } }
+        case collection(UUID), tier(UUID), folder(UUID, UUID), node(UUID, UUID, Int), member(UUID, UUID)
+        var collection: UUID { switch self { case .collection(let c), .tier(let c), .folder(let c, _), .node(let c, _, _), .member(let c, _): return c } }
     }
     private var all: [SchemaCollection] = SchemaTrial.collections
     private var selected: Target?
@@ -42,6 +43,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         let places = SchemaTrial.places
         return lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: all, places: places).id == c.id }
     }
+    /// The members in one folder of the collection, or, with nil, those in no folder.
+    private func members(of c: SchemaCollection, folder: UUID?) -> [Project] {
+        let places = SchemaTrial.places
+        return members(of: c).filter { SchemaTrial.folder(of: $0.id, among: all, places: places) == folder }
+    }
+    private func folderWord(_ c: SchemaCollection) -> String { c.folderName ?? "Folder" }
 
     // MARK: The views
 
@@ -136,6 +143,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         switch t {
         case .collection: return true
         case .tier: return c.folderName != nil
+        case .folder(_, let f): return c.folders.contains { $0.id == f }
         case .node(_, let n, _): return SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
         case .member(_, let p): return lib.project(p) != nil
         }
@@ -190,10 +198,24 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 out.append(MapRow(target: .node(cid, nid, level), text: level == 1 ? "Every \(node.name)" : node.name, level: level + offset(c),
                                   holds: level == 1 ? "the pattern" : n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does))
             }
-            for p in inside {
+            // Then the members, as rail1 lists them: each folder on the grouping level with the members in it, then those in none.
+            func memberRow(_ p: Project, folder: UUID?) {
                 let pid = p.id, own = lib.palettes(in: pid).count
                 out.append(MapRow(target: .member(cid, pid), text: p.name, level: 1 + offset(c), holds: own > 0 ? plural(own, "palette") : nil, strong: false,
-                                  does: [("Add Sibling", 4, { [weak self] in self?.newMember(in: cid) }), ("Remove", 2, { [weak self] in self?.removeMember(cid, pid) })]))
+                                  does: [("Add Sibling", 4, { [weak self] in self?.newMember(in: cid, folder: folder) }), ("Remove", 2, { [weak self] in self?.removeMember(cid, pid) })]))
+            }
+            if c.folderName != nil {
+                for f in c.folders {
+                    let fid = f.id, held = members(of: c, folder: fid)
+                    out.append(MapRow(target: .folder(cid, fid), text: f.name, level: 1,
+                                      holds: held.isEmpty ? nil : "\(held.count) " + (held.count == 1 ? member(c) : SchemaTrial.plural(member(c))).lowercased(), strong: false,
+                                      does: [("Add Sibling", 4, { [weak self] in self?.addFolder(cid) }), ("Add Inside", 5, { [weak self] in self?.newMember(in: cid, folder: fid) }),
+                                             ("Remove", 2, { [weak self] in self?.removeFolder(cid, fid) })]))
+                    for p in held { memberRow(p, folder: fid) }
+                }
+                for p in members(of: c, folder: nil) { memberRow(p, folder: nil) }
+            } else {
+                for p in inside { memberRow(p, folder: nil) }
             }
         }
         return out
@@ -233,6 +255,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .tier:
                 g.levelTitle = SchemaTrial.title(forLevel: 1); g.name = c.folderName ?? ""; g.offered = SchemaTrial.folderNames
                 g.rightHelp = "The level that groups the \(many) of \(heading). Name what one of them is; Add Sibling makes another, and each is filled in rail1."
+            case .folder(_, let fid):
+                g.levelTitle = folderWord(c); g.name = c.folders.first { $0.id == fid }?.name ?? ""; g.offered = []; g.fixed = true
+                g.rightHelp = "One \(folderWord(c).lowercased()) in \(heading), holding the \(many) listed beneath it. Type over its name and press Return to rename it; Add Inside makes a \(memberWord) in it."
             case .node(_, let nid, let level):
                 let node = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node ?? c.stack
                 g.levelTitle = SchemaTrial.title(forLevel: level + offset(c)); g.name = node.name; g.offered = SchemaTrial.names(forLevel: level); g.said = node.about
@@ -393,6 +418,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         switch t {
         case .collection: return all.count > 1
         case .tier: return false
+        case .folder(let cid, _): return (collection(cid)?.folders.count ?? 0) > 1
         case .node(_, _, let level): return level > 1
         case .member(let cid, _): return (collection(cid).map { members(of: $0).count } ?? 0) > 1
         }
@@ -402,6 +428,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         switch t {
         case .collection: return all.map { .collection($0.id) }
         case .tier: return []
+        case .folder(let cid, _): return collection(cid).map { $0.folders.map { .folder(cid, $0.id) } } ?? []
         case .node(let cid, let nid, let level): return collection(cid).map { siblings(of: nid, in: $0).map { .node(cid, $0, level) } } ?? []
         case .member(let cid, _): return collection(cid).map { members(of: $0).map { .member(cid, $0.id) } } ?? []
         }
@@ -444,6 +471,14 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                         for i in order.indices where mine.contains(order[i]) { order[i] = mine[k]; k += 1 }
                         lib.placeProjects(order)
                     }
+                }
+            case .folder(let cid, let fid):
+                SchemaTrial.changeCollection(cid) { col in
+                    guard let from = col.folders.firstIndex(where: { $0.id == fid }) else { return }
+                    let moved = col.folders.remove(at: from)
+                    var to = min(max(slot, 0), col.folders.count + 1)
+                    if from < to { to -= 1 }
+                    col.folders.insert(moved, at: min(to, col.folders.count))
                 }
             case .tier: break
             }
@@ -522,6 +557,13 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         selected = .tier(cid)
         show()
     }
+    private func removeFolder(_ cid: UUID, _ fid: UUID) {
+        guard let lib = library else { return }
+        lib.dump(folder: fid, in: cid, over: window) { [weak self] in
+            self?.selected = .tier(cid)
+            self?.show()
+        }
+    }
     private func removeTier(_ cid: UUID) {
         SchemaTrial.changeCollection(cid) { $0.folderName = nil; $0.folders = [] }
         selected = .collection(cid)
@@ -558,10 +600,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     }
 
     /// Another member of the collection: a project with files of its own, named on the panel, placed in the collection.
-    private func newMember(in cid: UUID) {
+    private func newMember(in cid: UUID, folder: UUID? = nil) {
         guard let c = collection(cid), let lib = library else { return }
-        let word = member(c)
-        SwissConfirm.name(over: window, title: "New \(word)", note: "A \(word.lowercased()) in \(c.name): a project with files of its own, following the collection's stack.",
+        let word = member(c), home = folder.flatMap { f in c.folders.first { $0.id == f }?.name } ?? c.name
+        SwissConfirm.name(over: window, title: "New \(word)", note: "A \(word.lowercased()) in \(home): a project with files of its own, following the collection's pattern.",
                           placeholder: "Client, product or piece of work", confirm: "Create \(word)", check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             var made: UUID?
             lib.apply("New Project") { l in
@@ -571,7 +613,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                 made = id
             }
             guard let id = made, lib.library.project(id) != nil else { return }
-            SchemaTrial.place(id, in: cid, folder: nil)
+            SchemaTrial.place(id, in: cid, folder: folder)
+            self?.selected = .member(cid, id)
             self?.show()
         }
     }
@@ -583,6 +626,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         switch what {
         case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = name }
         case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = name }
+        case .folder(let cid, let fid):
+            let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typed.isEmpty else { return }
+            SchemaTrial.changeCollection(cid) { col in if let i = col.folders.firstIndex(where: { $0.id == fid }) { col.folders[i].name = typed } }
         case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.role = SchemaTrial.role(of: $0); $0.name = name })
         case .member(_, let pid):
             let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -599,7 +646,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             case .collection: now = c.name; offered = SchemaTrial.collectionNames
             case .tier: now = c.folderName ?? ""; offered = SchemaTrial.folderNames
             case .node(_, let nid, let level): now = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node.name ?? ""; offered = SchemaTrial.names(forLevel: level)
-            case .member: return
+            case .member, .folder: return
             }
             if !offered.contains(now) { window?.makeFirstResponder(customName); return }
             renaming = true
@@ -628,7 +675,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let text = field.stringValue
             switch what {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
-            case .tier, .member: break
+            case .tier, .member, .folder: break
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
             }
             all = SchemaTrial.collections
