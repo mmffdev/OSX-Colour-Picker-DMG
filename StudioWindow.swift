@@ -54,10 +54,17 @@ final class StudioWindowController: NSWindowController {
         library.window = c.window   // errors and prompts come up on this window
         // The backslash key turns Master Inner on and off, whenever no words are being typed.
         if gridKey == nil {
-            gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c] e in
-                guard e.characters == "\\", !(c?.window?.firstResponder is NSText) else { return e }
-                c?.frame.toggleGrid()
-                return nil
+            gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c, weak library] e in
+                guard let c = c, e.window === c.window, !(c.window?.firstResponder is NSText), !Overlays.any else { return e }
+                if c.window?.firstResponder is ShortcutsSettings { return e }   // a key being recorded is not a key being used
+                if e.characters == "\\" { c.frame.toggleGrid(); return nil }
+                // The quick keys: single keys that work anywhere in the window.
+                switch QuickKeys.command(for: e) {
+                case "newPalette"?: library?.newPalette(); return nil
+                case "pick"?: library?.togglePicking(); return nil
+                case "sample"?: library?.sampleArea(); return nil
+                default: return e
+                }
             }
         }
         // The controller's questions come up on the window's own panels, not the old window's.
@@ -119,7 +126,7 @@ final class StudioFrame: NSView {
 
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
-    enum Place: Equatable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), palette(UUID), palettes, projects, settings, schema }
+    enum Place: Equatable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, lab, contrast }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -146,7 +153,7 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [header, rail1, rail2, page, history, footer, strip, overlay] { addSubview(v) }
-        header.onTab = { [weak self] i in self?.go(i == 0 ? .catalogue : i == 3 ? .projects : .palettes) }
+        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .contrast, .projects][i]) }
         header.onSettings = { [weak self] in self?.go(.settings) }
         header.onSearch = { [weak self] _ in self?.fillPage() }
         page.onAcross = { [weak self] n in self?.page.grid.across = n }
@@ -184,6 +191,10 @@ final class StudioFrame: NSView {
         page.schema.library = library
         page.schema.onChange = { [weak self] in self?.reload() }
         page.onNew = { [weak self] in self?.newMember() }
+        page.add(ShortcutsSettings(), as: .shortcuts)
+        page.add(HaloSettings(), as: .halo)
+        page.add(EmbeddedSection(LabViewController(library: library)), as: .lab)
+        page.add(EmbeddedSection(ContrastViewController(library: library)), as: .contrast)
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -294,7 +305,7 @@ final class StudioFrame: NSView {
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema: return nil; case .projects: return 3; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo: return nil; case .lab: return 2; case .contrast: return 3; case .projects: return 4; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -438,9 +449,16 @@ final class StudioFrame: NSView {
         case .project(let id):
             guard let project = lib.project(id) else { return }
             return fillStack(of: project, in: lib)
-        case .settings, .schema:
+        case .settings, .schema, .shortcuts, .halo:
             heading = "Settings"; labels = ("Section", "")
-            rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema)]
+            rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
+                    .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo)]
+        case .lab:
+            heading = "Colour Lab"; labels = ("Tool", "")
+            rows = [.item("Wheel", nil, 0, .lab, true), .item("Contrast", nil, 0, .contrast, false)]
+        case .contrast:
+            heading = "Contrast"; labels = ("Tool", "")
+            rows = [.item("Wheel", nil, 0, .lab, false), .item("Contrast", nil, 0, .contrast, true)]
         case .projects:
             heading = "Members"; labels = ("Collection", "Palettes")
             for c in SchemaTrial.collections {
@@ -540,6 +558,18 @@ final class StudioFrame: NSView {
             let all = SchemaTrial.collections
             title = "Schema"; meta = (plural(all.count, "collection"), plural(lib.projects.count, "member"))
             page.show(.schema)
+        case .shortcuts:
+            title = "Shortcuts"; meta = ("\(QuickKeys.commands.count) quick keys", plural(Shortcuts.commands.count, "command"))
+            page.show(.shortcuts)
+        case .halo:
+            title = "Halo"; meta = ("Scrolling", "Colours")
+            page.show(.halo)
+        case .lab:
+            title = "Colour Lab"; meta = ("The wheel", "Build on a colour")
+            page.show(.lab)
+        case .contrast:
+            title = "Contrast"; meta = ("Text against ground", "WCAG")
+            page.show(.contrast)
         case .catalogue:
             items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
             title = "All Colours"; meta = ("\(items.count) colours", library.paletteSort.title)
@@ -627,7 +657,7 @@ final class StudioHeader: NSView, Overlay {
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
-    private let tabs = ["Library", "Palettes", "Lab", "Projects"]
+    private let tabs = ["Library", "Palettes", "Lab", "Contrast", "Projects"]
     private var tabRects: [NSRect] = []
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
@@ -670,7 +700,7 @@ final class StudioHeader: NSView, Overlay {
         var x = col(3)
         tabRects = []
         for (i, t) in tabs.enumerated() {
-            let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : i == 2 ? Design.soft : Design.quiet)
+            let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
             a.draw(x: x, baseline: b)
             let w = a.size().width
             tabRects.append(NSRect(x: x - 8, y: 0, width: w + 16, height: bounds.height))
@@ -756,7 +786,7 @@ final class StudioHeader: NSView, Overlay {
             }
             return
         }
-        if let i = tabRects.firstIndex(where: { $0.contains(p) }), i != 2 { onTab?(i); return }
+        if let i = tabRects.firstIndex(where: { $0.contains(p) }) { onTab?(i); return }
         if settingsRect.contains(p) { onSettings?(); return }
         super.mouseDown(with: event)
     }
@@ -1367,8 +1397,22 @@ final class StudioPage: NSView {
     /// How many tiles sit across: the slider in the page's header, right-aligned before the arrow and centred on it, shown with the tiles.
     private let slider = MiniSlider()
     var onAcross: ((Int) -> Void)?
-    enum Section { case tiles, catalogues, schema }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, lab, contrast }
     private var section = Section.tiles
+    /// The sections beyond the tiles, the catalogues and the schema, each in a scroll of its own, laid out like the catalogues.
+    private var extras: [Section: (view: PageSection, scroll: NSScrollView)] = [:]
+    func add(_ view: PageSection, as s: Section) {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.documentView = view
+        scroll.isHidden = true
+        addSubview(scroll)
+        view.onResize = { [weak self] in self?.needsLayout = true }
+        extras[s] = (view, scroll)
+    }
     /// Taking the whole width: the arrow turns to "close", and a press on it gives the rails back.
     var expanded = false { didSet { needsDisplay = true } }
     var onArrow: (() -> Void)?
@@ -1422,6 +1466,7 @@ final class StudioPage: NSView {
         scroll.isHidden = s != .tiles
         settingsScroll.isHidden = s != .catalogues
         schemaScroll.isHidden = s != .schema
+        for (k, e) in extras { e.scroll.isHidden = k != s; if k == s { e.view.reload() } }
         if s == .catalogues { settings.reload() }
         if s == .schema { schema.reload() }
         newButton.isHidden = true
@@ -1470,6 +1515,12 @@ final class StudioPage: NSView {
         let kh = schema.height(forWidth: inset + scroll.frame.width)
         schema.frame = NSRect(x: 0, y: 0, width: inset + scroll.frame.width, height: max(schemaScroll.frame.height, kh))
         schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
+        for (_, e) in extras {
+            e.scroll.frame = settingsScroll.frame
+            let eh = e.view.height(forWidth: scroll.frame.width)
+            e.view.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(e.scroll.frame.height, eh))
+            e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
+        }
         grid.width = scroll.frame.width
         grid.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none

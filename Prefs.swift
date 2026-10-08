@@ -133,6 +133,12 @@ enum Prefs {
         set { d.set(newValue, forKey: "splash") }
     }
 
+    /// The quick keys, by command id: a single key, with a shift arrow before it when Shift is held. Unset, the command's own fallback.
+    static var quickKeys: [String: String] {
+        get { d.dictionary(forKey: "quickKeys") as? [String: String] ?? [:] }
+        set { d.set(newValue, forKey: "quickKeys") }
+    }
+
     static var sounds: Bool {
         get { bool("sounds", true) }
         set { d.set(newValue, forKey: "sounds") }
