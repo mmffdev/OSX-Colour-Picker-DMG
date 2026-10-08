@@ -104,11 +104,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     private var typeHits: [(NSRect, String)] = []
     /// The template at the right of each type row, and the one on the Custom Name row.
     private var templateHits: [(NSRect, String)] = []
-    /// The rollover: what is under the pointer, and how far each pane has flown out, 0 to 1, driven by the clock.
-    private var hover: Key?
-    private var reveal: [Key: CGFloat] = [:]
-    private var clock: Timer?
-    private var lastTick = Date()
+    /// The rollover: what is under the pointer, and how far each pane has flown out, 0 to 1, driven by its clock.
+    private let rollover = Rollover<Key>()
     /// A group being dragged among its siblings, and the slot the pointer is over.
     private var dragging: Target?
     private var dragSlot: Int?
@@ -162,6 +159,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             scroll.documentView = canvas
             addSubview(scroll)
         }
+        rollover.keys = { [weak self] in self?.keys ?? [] }
+        rollover.locked = { [weak self] k in self?.locked(k) ?? false }
+        rollover.redraw = { [weak self] in self?.map.needsDisplay = true; self?.types.needsDisplay = true }
         map.onDraw = { [weak self] in self?.drawMap() }
         map.onDown = { [weak self] p in self?.mapDown(at: p) }
         map.onDrag = { [weak self] p in self?.mapDragged(to: p) }
@@ -184,42 +184,18 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    // MARK: The rollover's clock
+    // MARK: The rollover
 
-    /// Where a pane should be: out under the pointer and on the chosen row or type, home for the rest.
-    private func goal(_ k: Key) -> CGFloat {
-        if k == hover { return 1 }
+    /// A pane stays out on the chosen row and the chosen type; the rollover's clock does the rest.
+    private func locked(_ k: Key) -> Bool {
         switch k {
-        case .row(let t): return t == selected ? 1 : 0
-        case .type(let n): return typeRows.contains { $0.name == n && $0.chosen } ? 1 : 0
+        case .row(let t): return t == selected
+        case .type(let n): return typeRows.contains { $0.name == n && $0.chosen }
         }
     }
     private var keys: [Key] { mapRows.map { .row($0.target) } + typeRows.map { .type($0.name) } }
-    /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
-    private func settle() {
-        let moving = keys.contains { (reveal[$0] ?? 0) != goal($0) }
-        guard moving, clock == nil else { return }
-        lastTick = Date()
-        clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
-            guard let self = self else { t.invalidate(); return }
-            // Fast: the whole flight in a tenth of a second, so the wave follows the pointer without lag.
-            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick) / 0.1)
-            self.lastTick = now
-            var done = true
-            for k in self.keys {
-                let g = self.goal(k), v = self.reveal[k] ?? 0
-                if v == g { continue }
-                let next = v < g ? min(g, v + step) : max(g, v - step)
-                self.reveal[k] = next
-                if next != g { done = false }
-            }
-            self.reveal = self.reveal.filter { $0.value > 0 }
-            self.map.needsDisplay = true; self.types.needsDisplay = true
-            if done { t.invalidate(); self.clock = nil }
-        }
-        RunLoop.main.add(clock!, forMode: .common)
-    }
-    private func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
+    private func settle() { rollover.settle() }
+    private func moved(_ over: Key?) { rollover.moved(over) }
 
     func reload() {
         all = SchemaTrial.collections
@@ -492,10 +468,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.gutter / 2, height: box.height + 1), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
-            if let v = reveal[.row(r.target)], v > 0 {
-                let full = x + 36 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
-                fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: box.height + 1), Design.App.gridColour)
-            }
+            rollover.pane(.row(r.target), box: box, reach: x + 36 + name.size().width + Self.step)
         }
         TreeLines.draw(mapRows.enumerated().map { k, m in
             TreeLines.Row(top: rowRects[k].minY, height: rowRects[k].height, level: m.level, anchor: l + CGFloat(m.level) * Self.step + 3.5, markLeft: l + CGFloat(m.level) * Self.step, baseline: line)
@@ -547,10 +520,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             if t.chosen { fill(NSRect(x: 0, y: box.minY - 1, width: w, height: u + 1), Design.mist) }
             let name = Design.attributed(t.name, t.chosen ? .bodyStrong : .body, colour: t.locked ? Design.soft : t.chosen ? Design.ink : Design.quiet)
             // The pane: from the middle of the gutter, over the square and the name, to the name's end plus a step.
-            if let v = reveal[.type(t.name)], v > 0 {
-                let full = lead + 24 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
-                fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: u + 1), Design.App.gridColour)
-            }
+            rollover.pane(.type(t.name), box: box, reach: lead + 24 + name.size().width + Self.step)
             // The square: filled for the chosen type and for one a sibling holds, which cannot be chosen again.
             let sq = NSRect(x: lead, y: b - 10, width: 12, height: 12)
             fill(sq, t.chosen || t.locked ? Design.ink : Design.card)

@@ -292,6 +292,70 @@ enum RowMark {
     }
 }
 
+/// The rollover, first made for the schema page: a pane in the grid's colour that flies out from the left edge under the
+/// pointer, eased, the whole flight in a tenth of a second, and stays out on whatever is locked, the chosen row. One clock
+/// for any set of keys; the owner says which keys there are, which are locked, and what to redraw as the panes move.
+final class Rollover<Key: Hashable> {
+    private(set) var hover: Key?
+    private var reveal: [Key: CGFloat] = [:]
+    private var clock: Timer?
+    private var lastTick = Date()
+    var keys: () -> [Key] = { [] }
+    var locked: (Key) -> Bool = { _ in false }
+    var redraw: () -> Void = {}
+    deinit { clock?.invalidate() }
+
+    /// Where a pane should be: out under the pointer and on what is locked, home for the rest.
+    func goal(_ k: Key) -> CGFloat { k == hover || locked(k) ? 1 : 0 }
+    /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
+    func settle() {
+        let moving = keys().contains { (reveal[$0] ?? 0) != goal($0) }
+        guard moving, clock == nil else { return }
+        lastTick = Date()
+        clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            // Fast: the whole flight in a tenth of a second, so the wave follows the pointer without lag.
+            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick) / 0.1)
+            self.lastTick = now
+            var done = true
+            for k in self.keys() {
+                let g = self.goal(k), v = self.reveal[k] ?? 0
+                if v == g { continue }
+                let next = v < g ? min(g, v + step) : max(g, v - step)
+                self.reveal[k] = next
+                if next != g { done = false }
+            }
+            self.reveal = self.reveal.filter { $0.value > 0 }
+            self.redraw()
+            if done { t.invalidate(); self.clock = nil }
+        }
+        RunLoop.main.add(clock!, forMode: .common)
+    }
+    /// The pointer is over another key, or over none.
+    func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
+    /// Draws a key's pane, as far out as it has flown: from the left edge to `reach`, over `box` and one point above it, over the rule.
+    func pane(_ k: Key, box: NSRect, reach: CGFloat) {
+        guard let v = reveal[k], v > 0 else { return }
+        let eased = 1 - pow(1 - v, 3)
+        fill(NSRect(x: 0, y: box.minY - 1, width: (reach * eased).rounded(), height: box.height + 1), Design.App.gridColour)
+    }
+}
+
+/// The caret on a row that holds others: pointing right when they are hidden, down when they show. A thin stroke in the
+/// house manner, six points across its longer side, centred on `centre`, which a row puts on its mark's centre line.
+enum Caret {
+    static func draw(open: Bool, centre c: NSPoint, colour: NSColor) {
+        colour.setStroke()
+        let p = NSBezierPath(); p.lineWidth = 1.2; p.lineJoinStyle = .miter; p.lineCapStyle = .butt
+        if open {
+            p.move(to: NSPoint(x: c.x - 3.5, y: c.y - 1.75)); p.line(to: NSPoint(x: c.x, y: c.y + 1.75)); p.line(to: NSPoint(x: c.x + 3.5, y: c.y - 1.75))
+        } else {
+            p.move(to: NSPoint(x: c.x - 1.75, y: c.y - 3.5)); p.line(to: NSPoint(x: c.x + 1.75, y: c.y)); p.line(to: NSPoint(x: c.x - 1.75, y: c.y + 3.5))
+        }
+        p.stroke()
+    }
+}
+
 extension Design {
     /// The halo's own mark: a ring, as the dial is, with a smaller ring inside it. Drawn in a 16 box.
     static func haloMark(in g: NSRect, colour: NSColor) {
