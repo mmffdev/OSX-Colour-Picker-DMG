@@ -230,7 +230,7 @@ final class StudioFrame: NSView {
         page.add(HaloSettings(), as: .halo)
         // Tags: the old editor, every tag with its colour, name, scope and the swatches that wear it, the one place for all of them.
         page.add(EmbeddedSection(TagEditorController(library: library, focus: nil)), as: .tags)
-        page.add(EmbeddedSection(LabViewController(library: library)), as: .lab)
+        page.add(LabPage(library: library), as: .lab)
         page.add(EmbeddedSection(ContrastViewController(library: library)), as: .contrast)
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
