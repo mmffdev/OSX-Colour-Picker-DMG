@@ -224,11 +224,14 @@ final class EmbeddedSection: NSView, PageSection {
         self.controller = controller
         self.least = least
         super.init(frame: .zero)
+        // The old page's words are set for the old window's ground, so it keeps that ground until it is redrawn.
+        wantsLayer = true
+        layer?.backgroundColor = Theme.background.cgColor
         addSubview(controller.view)
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
-    func reload() { needsLayout = true }
+    func reload() { layer?.backgroundColor = Theme.background.cgColor; needsLayout = true }
     func height(forWidth width: CGFloat) -> CGFloat { least }
     override func layout() { super.layout(); controller.view.frame = bounds }
 }

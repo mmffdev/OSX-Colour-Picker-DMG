@@ -48,7 +48,10 @@ final class StudioWindowController: NSWindowController {
         let project = args.firstIndex(of: "--project").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
-        else { c.frame.go(args.contains("--settings") ? .settings : args.contains("--schema") ? .schema : args.contains("--projects") ? .projects : args.contains("--palettes") ? .palettes : .catalogue) }
+        else {
+            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes)]
+            c.frame.go(views.first { args.contains($0.0) }?.1 ?? .catalogue)
+        }
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
@@ -199,7 +202,10 @@ final class StudioFrame: NSView {
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .schemaDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(flashed(_:)), name: .statusMessage, object: nil)
+        library.onReveal = { [weak self] hex in self?.choose(hex) }
     }
+    @objc private func flashed(_ n: Notification) { if let t = n.userInfo?["text"] as? String { footer.flash(t) } }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
@@ -2401,6 +2407,14 @@ final class StudioFooter: NSView {
     private(set) var hex = Brand.masterHex
     private(set) var name = Brand.masterName
     var onAct: ((Int) -> Void)?
+    /// A word from the controller, "Picked Hemlock", in the actions' place for four seconds.
+    private var flash: String?
+    private var flashTimer: Timer?
+    func flash(_ text: String) {
+        flash = text; needsDisplay = true
+        flashTimer?.invalidate()
+        flashTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in self?.flash = nil; self?.needsDisplay = true }
+    }
     private let actions = ["Copy Hex", "Copy Name", "Copy RGB"]
     /// The action last used; none until one is.
     private var live: Int? = nil
@@ -2419,10 +2433,11 @@ final class StudioFooter: NSView {
         let n = Design.attributed(name, .body)
         n.draw(x: grid.x + 18, baseline: b, width: grid.centre - grid.x - 100)
         Design.attributed(hex, .caption, colour: Design.quiet).draw(x: grid.x + 18 + min(n.size().width, grid.centre - grid.x - 100) + 10, baseline: b)
-        // The actions as text from the page's left edge, the live one Medium.
+        // The actions as text from the page's left edge, the live one Medium; a flash takes their place while it lasts.
         var x = grid.centre
         hits = []
-        for (i, a) in actions.enumerated() {
+        if let f = flash { Design.attributed(f, .body).draw(x: x, baseline: b, width: grid.x + 12 * grid.column + 11 * Design.App.gutter - 200 - x) }
+        for (i, a) in actions.enumerated() where flash == nil {
             let t = Design.attributed(a, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
             t.draw(x: x, baseline: b)
             hits.append(NSRect(x: x - 8, y: 0, width: t.size().width + 16, height: bounds.height))
