@@ -2,17 +2,15 @@ import AppKit
 
 // ---------- Settings ▸ Schema, on the Studio window ----------
 //
-// One tree of everything, on Master Inner. The left column is the map: every collection at level
-// 0, the level that groups its members when there is one, then its stack, the member at the next
-// level and its groups beneath, each row with what it holds. A click selects a row, and the
-// selected row carries what can be done with it: Add Sibling on every level (another collection,
-// another folder, another member, another group), Add Inside, Remove, Add Level Beneath. A group is
-// dragged among the rows that share its parent. The right column is the selected row: its level, a
-// word of help in a box that never grows, the names on offer with the chosen one marked, a box for a
-// name of your own, and a description. A group that holds things cannot simply go: the window's
-// own panel asks.
+// Two columns on Master Inner. The left is the map, Schema: every collection at level 0, the level that groups
+// its members when there is one, the Master Template with the groups every member follows, then the members
+// themselves with those groups beneath each, exactly as rail1 lists them, tied by right-angled lines. Every row
+// carries Add Child, Add Sibling and a bin. A group drags among its siblings. The right is the selected row,
+// Type: its name, its description where it has one, then the types on offer for its level, each with its icon
+// and a template, the ones its siblings already have locked. The map and the types each scroll under their
+// header; the headers and the words stay.
 
-final class SchemaSettings: NSView, NSTextFieldDelegate {
+final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
     weak var library: LibraryController?
     var onChange: (() -> Void)?
     var onResize: (() -> Void)?
@@ -21,19 +19,18 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     // MARK: State
 
-    /// What a row on the map is: a collection, the level grouping its members, or a group in its stack with its level in the stack, the member being 1.
-    /// A collection; the level grouping its members; a group in its stack with its level, the member's word being 1; or one real member, a project.
-    /// ... or one folder on the grouping level, a client, holding members.
-    /// ... or one group inside one member, as the pattern lays it out: shown, not edited here.
+    /// What a row on the map is: a collection; the level grouping its members; one folder on that level; a group in the
+    /// pattern with its level, the Master Template being 1; one member; or one group inside one member, shown, not edited here.
     private enum Target: Hashable {
         case collection(UUID), tier(UUID), folder(UUID, UUID), node(UUID, UUID, Int), member(UUID, UUID), instance(UUID, UUID, UUID, Int)
         var collection: UUID { switch self { case .collection(let c), .tier(let c), .folder(let c, _), .node(let c, _, _), .member(let c, _), .instance(let c, _, _, _): return c } }
     }
+    /// A row of the map or a type on the right, for the rollover: the pane follows the pointer and locks on the chosen one.
+    private enum Key: Hashable { case row(Target), type(String) }
+
     private var all: [SchemaCollection] = SchemaTrial.collections
     private var selected: Target?
-    private var renaming = false
-    /// What is being typed into Custom Name, drawn on the map as it goes and written only when the typing ends,
-    /// because every write rebuilds the window and that ends the typing.
+    /// What is being typed into Name, drawn on the map as it goes and written only when the typing ends, since every write rebuilds the window.
     private var draft: String?
     private var lib: Library { library?.library ?? Library() }
 
@@ -50,23 +47,39 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         return members(of: c).filter { SchemaTrial.folder(of: $0.id, among: all, places: places) == folder }
     }
     private func folderWord(_ c: SchemaCollection) -> String { c.folderName ?? "Folder" }
+    private func node(_ nid: UUID, in c: SchemaCollection) -> SchemaNode? { SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node }
+    /// The tree a member shows: its own once it has shaped one, the collection's Master Template until then.
+    private func tree(of pid: UUID) -> SchemaNode { SchemaTrial.schema(for: pid) }
+    private func node(_ nid: UUID, of pid: UUID) -> SchemaNode? { SchemaTrial.rows(of: tree(of: pid)).first { $0.node.id == nid }?.node }
+    /// A change to a member's tree: the template is copied into a tree of the member's own first, if it still followed the template.
+    private func shape(_ pid: UUID, _ change: (SchemaNode) -> SchemaNode) { SchemaTrial.setSchema(change(tree(of: pid)), for: pid); all = SchemaTrial.collections }
+    private func parent(of id: UUID, in root: SchemaNode) -> UUID? {
+        for (node, _) in SchemaTrial.rows(of: root) where node.children.contains(where: { $0.id == id }) { return node.id }
+        return nil
+    }
 
     // MARK: The views
 
-    private let customName = NSTextField(string: "")
+    private let nameField = NSTextField(string: "")
     private let about = NSTextField(string: "")
+    private let mapScroll = NSScrollView(), typeScroll = NSScrollView()
+    private let map = Canvas(), types = Canvas()
 
+    /// What a row's action is: a child beneath, a sibling after, or the bin.
+    private enum Act { case child, sibling, bin }
     /// One row of the map, as the drawing lays it out.
-    private struct MapRow { let target: Target; let text: String; let level: Int; let holds: String?; let strong: Bool; let does: [(String, Int, () -> Void)] }
+    private struct MapRow { let target: Target; let text: String; let level: Int; let holds: String?; let strong: Bool; let does: [(Act, () -> Void)] }
+    /// One type on offer at the right: locked when a sibling already has it, chosen when this row has it.
+    private struct TypeRow { let name: String; let locked: Bool; let chosen: Bool; let symbol: String }
     private var mapRows: [MapRow] = []
+    private var typeRows: [TypeRow] = []
     private var rowRects: [NSRect] = []
     private var gripRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
-    private var nameHits: [(NSRect, String?)] = []
-    /// The rollover: the row under the pointer, and how far each row's orange pane has flown out, 0 to 1, driven by the clock.
-    /// A selected row's pane stays out; a click on a row already under the pointer changes nothing, so it cannot flick.
-    private var hoverRow: Target?
-    private var reveal: [Target: CGFloat] = [:]
+    private var typeHits: [(NSRect, String)] = []
+    /// The rollover: what is under the pointer, and how far each pane has flown out, 0 to 1, driven by the clock.
+    private var hover: Key?
+    private var reveal: [Key: CGFloat] = [:]
     private var clock: Timer?
     private var lastTick = Date()
     /// A group being dragged among its siblings, and the slot the pointer is over.
@@ -81,7 +94,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     init() {
         super.init(frame: .zero)
-        for f in [customName, about] {
+        for f in [nameField, about] {
             f.isBordered = false
             f.drawsBackground = false
             f.focusRingType = .none
@@ -90,21 +103,55 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             f.delegate = self
             f.isHidden = true
         }
-        customName.placeholderAttributedString = Design.attributed("Type a name", .body, colour: Design.soft)
-        about.placeholderAttributedString = Design.attributed("What this holds", .body, colour: Design.soft)
-        customName.target = self; customName.action = #selector(nameEntered)
-        for v in [customName, about] { addSubview(v) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
+        nameField.placeholderAttributedString = Design.attributed("Name", .body, colour: Design.soft)
+        about.placeholderAttributedString = Design.attributed("Description: what this holds", .body, colour: Design.soft)
+        nameField.target = self; nameField.action = #selector(nameEntered)
+        about.target = self; about.action = #selector(nameEntered)
+        for v in [nameField, about] { addSubview(v) }
+        for (scroll, canvas) in [(mapScroll, map), (typeScroll, types)] {
+            scroll.drawsBackground = false
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = true
+            scroll.scrollerStyle = .overlay
+            scroll.documentView = canvas
+            addSubview(scroll)
+        }
+        map.onDraw = { [weak self] in self?.drawMap() }
+        map.onDown = { [weak self] p in self?.mapDown(at: p) }
+        map.onDrag = { [weak self] p in self?.mapDragged(to: p) }
+        map.onUp = { [weak self] in self?.mapUp() }
+        map.onMove = { [weak self] p in
+            guard let self = self else { return }
+            var over: Key?
+            if let pt = p, let i = self.rowRects.firstIndex(where: { $0.contains(pt) }) { over = .row(self.mapRows[i].target) }
+            self.moved(over)
+        }
+        types.onDraw = { [weak self] in self?.drawTypes() }
+        types.onDown = { [weak self] p in self?.typesDown(at: p) }
+        types.onMove = { [weak self] p in
+            guard let self = self else { return }
+            var over: Key?
+            if let pt = p, let h = self.typeHits.first(where: { $0.0.contains(pt) }) { over = .type(h.1) }
+            self.moved(over)
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
 
     // MARK: The rollover's clock
 
-    /// Where a row's pane should be: out for the row under the pointer and the selected one, home for the rest.
-    private func goal(_ t: Target) -> CGFloat { t == hoverRow || t == selected ? 1 : 0 }
+    /// Where a pane should be: out under the pointer and on the chosen row or type, home for the rest.
+    private func goal(_ k: Key) -> CGFloat {
+        if k == hover { return 1 }
+        switch k {
+        case .row(let t): return t == selected ? 1 : 0
+        case .type(let n): return typeRows.contains { $0.name == n && $0.chosen } ? 1 : 0
+        }
+    }
+    private var keys: [Key] { mapRows.map { .row($0.target) } + typeRows.map { .type($0.name) } }
     /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
     private func settle() {
-        let moving = mapRows.contains { (reveal[$0.target] ?? 0) != goal($0.target) }
+        let moving = keys.contains { (reveal[$0] ?? 0) != goal($0) }
         guard moving, clock == nil else { return }
         lastTick = Date()
         clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
@@ -113,26 +160,20 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick) / 0.1)
             self.lastTick = now
             var done = true
-            for r in self.mapRows {
-                let g = self.goal(r.target), v = self.reveal[r.target] ?? 0
+            for k in self.keys {
+                let g = self.goal(k), v = self.reveal[k] ?? 0
                 if v == g { continue }
                 let next = v < g ? min(g, v + step) : max(g, v - step)
-                self.reveal[r.target] = next
+                self.reveal[k] = next
                 if next != g { done = false }
             }
             self.reveal = self.reveal.filter { $0.value > 0 }
-            self.needsDisplay = true
+            self.map.needsDisplay = true; self.types.needsDisplay = true
             if done { t.invalidate(); self.clock = nil }
         }
         RunLoop.main.add(clock!, forMode: .common)
     }
-    override func mouseMoved(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        let over = rowRects.firstIndex { $0.contains(p) }.map { mapRows[$0].target }
-        if over != hoverRow { hoverRow = over; settle() }
-    }
-    override func mouseExited(with event: NSEvent) { if hoverRow != nil { hoverRow = nil; settle() } }
-    override var isFlipped: Bool { true }
+    private func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
 
     func reload() {
         all = SchemaTrial.collections
@@ -145,22 +186,22 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         case .collection: return true
         case .tier: return c.folderName != nil
         case .folder(_, let f): return c.folders.contains { $0.id == f }
-        case .node(_, let n, _): return SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
+        case .node(_, let n, _): return node(n, in: c) != nil
         case .member(_, let p): return lib.project(p) != nil
-        case .instance(_, let p, let n, _): return lib.project(p) != nil && SchemaTrial.rows(of: c.stack).contains { $0.node.id == n }
+        case .instance(_, let p, let n, _): return lib.project(p) != nil && node(n, of: p) != nil
         }
     }
-    private func refresh() { needsLayout = true; needsDisplay = true; onResize?() }
-    private func show() { all = SchemaTrial.collections; if selected == nil || !stillThere(selected!) { selected = .collection(all[0].id) }; refresh(); onChange?() }
+    private func refresh() { needsLayout = true; needsDisplay = true; map.needsDisplay = true; types.needsDisplay = true; onResize?() }
+    private func show() { all = SchemaTrial.collections; if selected == nil || !stillThere(selected!) { selected = .collection(all[0].id) }; refresh(); settle(); onChange?() }
     private func keep(_ c: UUID, _ tree: SchemaNode) { SchemaTrial.changeCollection(c) { $0.stack = tree }; all = SchemaTrial.collections }
 
     // MARK: What a group holds
 
     private func palettes(_ role: SchemaRole, in project: UUID) -> [UUID] { lib.palettes(in: project).filter { $0.isTypography == (role == .typography) }.map { $0.id } }
     private func tags(in project: UUID) -> [String] { lib.allTags.filter { lib.project(ofTag: $0) == project } }
-    private func count(_ node: SchemaNode, level: Int, in c: SchemaCollection) -> Int {
-        guard level == 2, let role = SchemaTrial.role(of: node) else { return 0 }
-        let holders = members(of: c).map { $0.id }.filter { !SchemaTrial.hasOwn($0) }
+    private func count(_ node: SchemaNode, in c: SchemaCollection, of member: UUID? = nil) -> Int {
+        guard let role = SchemaTrial.role(of: node) else { return 0 }
+        let holders = member.map { [$0] } ?? members(of: c).map { $0.id }.filter { !SchemaTrial.hasOwn($0) }
         switch role {
         case .information: return 0
         case .palettes, .typography: return holders.reduce(0) { $0 + palettes(role, in: $1).count }
@@ -175,48 +216,55 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         }
     }
 
-    // MARK: The map: every collection, its grouping level, its stack
+    // MARK: The map: every collection, its grouping level, its template, its members
 
     private func buildMap() -> [MapRow] {
         var out: [MapRow] = []
         for c in all {
-            let inside = members(of: c), cid = c.id
-            var does: [(String, Int, () -> Void)] = [("Add Sibling", 4, { [weak self] in self?.newCollection(after: cid) })]
-            if c.folderName == nil { does.append(("Add Level Beneath", 5, { [weak self] in self?.addTier(cid) })) }
-            if c.id != all[0].id { does.append(("Remove", 2, { [weak self] in self?.removeCollection(cid) })) }
+            let inside = members(of: c), cid = c.id, hasTier = c.folderName != nil
+            var does: [(Act, () -> Void)] = [(.child, { [weak self] in if hasTier { self?.addFolder(cid) } else { self?.addTier(cid) } }), (.sibling, { [weak self] in self?.newCollection(after: cid) })]
+            if c.id != all[0].id { does.append((.bin, { [weak self] in self?.removeCollection(cid) })) }
             out.append(MapRow(target: .collection(cid), text: c.name.isEmpty ? "Unnamed" : c.name, level: 0,
                               holds: inside.isEmpty ? nil : "\(inside.count) " + (inside.count == 1 ? member(c) : SchemaTrial.plural(member(c))).lowercased(), strong: true, does: does))
             if let tier = c.folderName {
                 out.append(MapRow(target: .tier(cid), text: tier, level: 1, holds: c.folders.isEmpty ? nil : "\(c.folders.count) made", strong: false,
-                                  does: [("Add Sibling", 4, { [weak self] in self?.addFolder(cid) }), ("Remove", 2, { [weak self] in self?.removeTier(cid) })]))
+                                  does: [(.child, { [weak self] in self?.addFolder(cid) }), (.bin, { [weak self] in self?.removeTier(cid) })]))
             }
-            // The template: "Every Project", the pattern each member follows, with its groups; then the members themselves.
+            // The Master Template, the pattern every member follows, with its groups.
             for (node, level) in SchemaTrial.rows(of: c.stack) {
-                let n = count(node, level: level, in: c), nid = node.id
-                var does: [(String, Int, () -> Void)] = []
-                if level > 1 { does.append(("Add Sibling", 4, { [weak self] in self?.add(child: false, at: nid, in: cid) })) }
-                does.append(("Add Inside", 5, { [weak self] in self?.add(child: true, at: nid, in: cid) }))
-                if level > 1 { does.append(("Remove", 2, { [weak self] in self?.remove(node, level: level, in: cid) })) }
-                out.append(MapRow(target: .node(cid, nid, level), text: level == 1 ? "Every \(node.name)" : node.name, level: level + offset(c),
-                                  holds: level == 1 ? "the pattern" : n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does))
+                let n = count(node, in: c), nid = node.id
+                var does: [(Act, () -> Void)] = [(.child, { [weak self] in self?.add(child: true, at: nid, in: cid) })]
+                if level > 1 {
+                    does.append((.sibling, { [weak self] in self?.add(child: false, at: nid, in: cid) }))
+                    does.append((.bin, { [weak self] in self?.remove(node, level: level, in: cid) }))
+                } else {
+                    does.append((.sibling, { [weak self] in self?.newMember(in: cid, folder: nil) }))
+                }
+                out.append(MapRow(target: .node(cid, nid, level), text: level == 1 ? "Master Template" : node.name, level: level + offset(c),
+                                  holds: level == 1 ? nil : n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: level == 1, does: does))
             }
             // Then the members, as rail1 lists them: each folder on the grouping level with the members in it, then those in none.
             func memberRow(_ p: Project, folder: UUID?) {
-                let pid = p.id, own = lib.palettes(in: pid).count
+                let pid = p.id, own = lib.palettes(in: pid).count, root = tree(of: pid).id
                 out.append(MapRow(target: .member(cid, pid), text: p.name, level: 1 + offset(c), holds: own > 0 ? plural(own, "palette") : nil, strong: false,
-                                  does: [("Add Sibling", 4, { [weak self] in self?.newMember(in: cid, folder: folder) }), ("Remove", 2, { [weak self] in self?.removeMember(cid, pid) })]))
-                // The member's groups beneath it, as the pattern lays them out and as rail1 lists them.
-                for (node, level) in SchemaTrial.rows(of: c.stack) where level >= 2 {
-                    out.append(MapRow(target: .instance(cid, pid, node.id, level), text: node.name, level: level + offset(c), holds: nil, strong: false, does: []))
+                                  does: [(.child, { [weak self] in self?.addOwn(child: true, at: root, of: pid, in: cid) }), (.sibling, { [weak self] in self?.newMember(in: cid, folder: folder) }),
+                                         (.bin, { [weak self] in self?.removeMember(cid, pid) })]))
+                // The member's own tree beneath it, as rail1 lists it: the template's shape until the member shapes its own.
+                for (node, level) in SchemaTrial.rows(of: tree(of: pid)) where level >= 2 {
+                    let nid = node.id, n = count(node, in: c, of: pid)
+                    out.append(MapRow(target: .instance(cid, pid, nid, level), text: node.name, level: level + offset(c),
+                                      holds: n > 0 ? "\(n) \(noun(SchemaTrial.role(of: node), n))" : nil, strong: false,
+                                      does: [(.child, { [weak self] in self?.addOwn(child: true, at: nid, of: pid, in: cid) }), (.sibling, { [weak self] in self?.addOwn(child: false, at: nid, of: pid, in: cid) }),
+                                             (.bin, { [weak self] in self?.removeOwn(node, level: level, of: pid, in: cid) })]))
                 }
             }
-            if c.folderName != nil {
+            if hasTier {
                 for f in c.folders {
                     let fid = f.id, held = members(of: c, folder: fid)
                     out.append(MapRow(target: .folder(cid, fid), text: f.name, level: 1,
                                       holds: held.isEmpty ? nil : "\(held.count) " + (held.count == 1 ? member(c) : SchemaTrial.plural(member(c))).lowercased(), strong: false,
-                                      does: [("Add Sibling", 4, { [weak self] in self?.addFolder(cid) }), ("Add Inside", 5, { [weak self] in self?.newMember(in: cid, folder: fid) }),
-                                             ("Remove", 2, { [weak self] in self?.removeFolder(cid, fid) })]))
+                                      does: [(.child, { [weak self] in self?.newMember(in: cid, folder: fid) }), (.sibling, { [weak self] in self?.addFolder(cid) }),
+                                             (.bin, { [weak self] in self?.removeFolder(cid, fid) })]))
                     for p in held { memberRow(p, folder: fid) }
                 }
                 for p in members(of: c, folder: nil) { memberRow(p, folder: nil) }
@@ -227,119 +275,172 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         return out
     }
 
-    // MARK: Geometry: one walk, on the page's six columns and the unit
+    // MARK: The selected row: its words, name, description and the types on offer
 
-    private struct Geometry {
-        var left = NSRect.zero, right = NSRect.zero
-        var mapTop: CGFloat = 0, mapRows: [NSRect] = []
-        var nameLabel: CGFloat = 0, names: [NSRect] = [], customLabel: CGFloat = 0, customName = NSRect.zero, aboutLabel: CGFloat = 0, about = NSRect.zero
-        var height: CGFloat = 0
-        var leftHelp = "", rightHelp = "", levelTitle = "", offered: [String] = [], name = "", said: String?, custom = false, fixed = false
+    private struct Form {
+        var title = "", help = "", name = "", said: String?, offered: [String] = [], chosen: String?, locked: Set<String> = [], canName = false, symbol = "square.dashed"
+    }
+    private func symbol(forType t: String) -> String {
+        switch SchemaRole.allCases.first(where: { $0.title == t }) {
+        case .palettes?: return "swatchpalette"
+        case .information?: return "info.circle"
+        case .typography?: return "textformat"
+        case .tags?: return "tag"
+        case nil: return "square.dashed"
+        }
+    }
+    private func form() -> Form {
+        var f = Form()
+        guard let what = selected, let c = collection(what.collection) else { return f }
+        let heading = c.name.isEmpty ? "this collection" : c.name
+        let memberWord = member(c).lowercased(), many = SchemaTrial.plural(member(c)).lowercased()
+        switch what {
+        case .collection:
+            f.title = SchemaTrial.title(forLevel: 0); f.name = c.name; f.offered = SchemaTrial.collectionNames.sorted(); f.chosen = c.name; f.said = c.about; f.canName = true
+            f.help = "Its name heads rail1; the description says what it is for. " + (c.folderName == nil ? "Its \(many) sit straight under it; Add Child makes a level that groups them." : "Its \(many) are grouped under the level on the next row.")
+        case .tier:
+            f.title = SchemaTrial.title(forLevel: 1); f.name = c.folderName ?? ""; f.offered = SchemaTrial.folderNames.sorted(); f.chosen = c.folderName; f.canName = true; f.symbol = "building.2"
+            f.help = "The level that groups the \(many) of \(heading). Name what one of them is; Add Child makes one, and each is filled in rail1."
+        case .folder(_, let fid):
+            f.title = folderWord(c); f.name = c.folders.first { $0.id == fid }?.name ?? ""; f.canName = true; f.symbol = "building.2"
+            f.help = "One \(folderWord(c).lowercased()) in \(heading), holding the \(many) listed beneath it. Add Child makes a \(memberWord) in it."
+        case .node(_, let nid, let level):
+            let n = node(nid, in: c) ?? c.stack
+            f.title = level == 1 ? "Master Template" : SchemaTrial.title(forLevel: level + offset(c)); f.name = n.name; f.said = n.about; f.canName = true
+            if level == 1 {
+                f.symbol = "folder"
+                f.help = "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups beneath it. Add Child makes a group in every \(memberWord); Add Sibling makes a \(memberWord)."
+            } else {
+                f.offered = SchemaTrial.nestedNames.sorted(); f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
+                // The types its siblings already hold are locked: one of each to a level. A second can always be made under a name of its own.
+                if let p = parent(of: nid, in: c), let pn = node(p, in: c) { f.locked = Set(pn.children.filter { $0.id != nid }.map { SchemaTrial.type(of: $0) }) }
+                f.help = "A group in every \(memberWord) of \(heading). Choose its type, then name it as you like. Information, Palettes, Typography and Tags hold what they always have; any other type is a label for now."
+            }
+        case .member(_, let pid):
+            f.title = member(c); f.name = lib.project(pid)?.name ?? ""; f.canName = true; f.symbol = "folder"
+            f.help = "One \(memberWord) in \(heading): a project with files of its own, following the Master Template. Its palettes are made in rail1."
+        case .instance(_, let pid, let nid, let level):
+            let root = tree(of: pid), n = node(nid, of: pid) ?? root
+            f.title = SchemaTrial.title(forLevel: level + offset(c)); f.name = n.name; f.said = n.about; f.canName = true
+            f.offered = SchemaTrial.nestedNames.sorted(); f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
+            if let p = parent(of: nid, in: root), let pn = SchemaTrial.rows(of: root).first(where: { $0.node.id == p })?.node { f.locked = Set(pn.children.filter { $0.id != nid }.map { SchemaTrial.type(of: $0) }) }
+            f.help = (SchemaTrial.hasOwn(pid) ? "A group of \(lib.project(pid)?.name ?? memberWord)'s own: its tree began as the Master Template and is now its own to shape." : "A group in \(lib.project(pid)?.name ?? memberWord), following the Master Template; the first change here gives the \(memberWord) a tree of its own.")
+                + " Choose its type, then name it as you like."
+        }
+        return f
     }
 
-    /// `w` is the width from the first column to the last; the view is `leading` wider on the left.
+    // MARK: Geometry: the two columns on the page's six columns and the unit
+
+    private struct Geometry {
+        var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0
+        var mapTop: CGFloat = 0, formTop: CGFloat = 0, nameRow = NSRect.zero, aboutRow: NSRect?, typesTop: CGFloat = 0
+        var form = Form()
+    }
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
         let u = Self.u, gut = Design.App.gutter, l = leading
-        // Both columns: a header on row 0, words on rows 1 to 3, content from row 4. The map takes 60 of the width, the selected row 40 (Rick, 2026-10-08).
-        let lw = ((w - gut) * 0.6).rounded(), rx = l + lw + gut, rw = w - lw - gut
-        g.leftHelp = "Every collection is a heading in rail1, with its members under it, grouped under a level between when it has one. Each member follows its collection's stack: the groups inside it. Add Sibling on any row makes another at that level; a group drags among its siblings."
-        var y = 4 * u
-        g.mapTop = y
-        mapRows = buildMap()
-        for _ in mapRows { g.mapRows.append(NSRect(x: l, y: y, width: lw, height: u)); y += u }
-        g.left = NSRect(x: l, y: 0, width: lw, height: y + u)
-
-        var ry = 4 * u
-        if let what = selected, let c = collection(what.collection) {
-            let heading = c.name.isEmpty ? "this collection" : c.name
-            let memberWord = member(c).lowercased(), many = SchemaTrial.plural(member(c)).lowercased()
-            switch what {
-            case .collection:
-                g.levelTitle = SchemaTrial.title(forLevel: 0); g.name = c.name; g.offered = SchemaTrial.collectionNames; g.said = c.about
-                g.rightHelp = "Its name heads rail1; the description says what it is for. " + (c.folderName == nil ? "Its \(many) sit straight under it; Add Level Beneath groups them." : "Its \(many) are grouped under the level on the next row.")
-            case .tier:
-                g.levelTitle = SchemaTrial.title(forLevel: 1); g.name = c.folderName ?? ""; g.offered = SchemaTrial.folderNames
-                g.rightHelp = "The level that groups the \(many) of \(heading). Name what one of them is; Add Sibling makes another, and each is filled in rail1."
-            case .folder(_, let fid):
-                g.levelTitle = folderWord(c); g.name = c.folders.first { $0.id == fid }?.name ?? ""; g.offered = []; g.fixed = true
-                g.rightHelp = "One \(folderWord(c).lowercased()) in \(heading), holding the \(many) listed beneath it. Type over its name and press Return to rename it; Add Inside makes a \(memberWord) in it."
-            case .node(_, let nid, let level):
-                let node = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node ?? c.stack
-                g.levelTitle = SchemaTrial.title(forLevel: level + offset(c)); g.name = node.name; g.offered = SchemaTrial.names(forLevel: level); g.said = node.about
-                g.rightHelp = level == 1 ? "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups under it. The \(many) themselves are listed beneath."
-                    : level == 2 ? "A group in every \(memberWord) of \(heading). Information, Palettes, Typography and Tags hold what they always have; any other group is a label for now."
-                    : "A group \(level - 1) levels inside every \(memberWord) of \(heading). Groups this deep are labels for now."
-            case .member(_, let pid):
-                g.levelTitle = member(c); g.name = lib.project(pid)?.name ?? ""; g.offered = []; g.fixed = true
-                g.rightHelp = "One \(memberWord) in \(heading): a project with files of its own, following the pattern above it. Type over its name and press Return to rename it; its palettes are made in rail1."
-            case .instance(_, let pid, let nid, let level):
-                let node = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node
-                g.levelTitle = SchemaTrial.title(forLevel: level + offset(c)); g.name = node?.name ?? ""; g.offered = []; g.fixed = true
-                g.rightHelp = "A group in \(lib.project(pid)?.name ?? memberWord), as the pattern lays it out. Change it on Every \(member(c)) above and every \(memberWord) follows; it is filled in rail1."
-            }
-            g.custom = g.fixed || renaming || !g.offered.contains(g.name)
-            g.nameLabel = ry; ry += u
-            if !g.fixed { for _ in 0..<(g.offered.count + 1) { g.names.append(NSRect(x: rx, y: ry, width: rw, height: u)); ry += u } }
-            if g.custom {
-                ry += u
-                g.customLabel = ry; ry += u
-                g.customName = NSRect(x: rx, y: ry, width: rw, height: u); ry += u
-            }
-            if g.said != nil {
-                ry += u
-                g.aboutLabel = ry; ry += u
-                g.about = NSRect(x: rx, y: ry, width: rw, height: u); ry += u
-            }
-        }
-        g.right = NSRect(x: rx, y: 0, width: rw, height: ry)
-        g.height = max(g.left.maxY, g.right.maxY) + u
+        // Both columns: a header on row 0, words on rows 1 to 3, a second header on row 4 with its rule, content from row 5. The map takes 60 of the width, the selected row 40.
+        g.lw = ((w - gut) * 0.6).rounded(); g.rx = l + g.lw + gut; g.rw = w - g.lw - gut
+        g.mapTop = 5 * u
+        g.form = form()
+        g.formTop = 5 * u
+        g.nameRow = NSRect(x: g.rx, y: g.formTop, width: g.rw, height: u)
+        var y = g.formTop + (g.form.canName ? u : 0)
+        if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
+        g.typesTop = y
         return g
     }
+    private var leftHelp: String {
+        "Every collection is a heading in rail1, with its members under it, grouped under a level between when it has one. Each member follows its collection's Master Template: the groups inside it. Add Child and Add Sibling on any row make another; a group drags among its siblings."
+    }
 
-    func height(forWidth width: CGFloat) -> CGFloat { geometry(width: max(width - leading, 1)).height }
+    /// The section fills the page; the map and the types scroll within it.
+    func height(forWidth width: CGFloat) -> CGFloat { 0 }
 
     override func layout() {
         super.layout()
-        let g = geometry(width: bounds.width - leading), line = Self.line
+        let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line
+        mapRows = buildMap()
+        typeRows = g.form.offered.map { TypeRow(name: $0, locked: g.form.locked.contains($0) && $0 != g.form.chosen, chosen: $0 == g.form.chosen, symbol: symbol(forType: $0)) }
+        // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
+        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter / 2, height: max(0, bounds.height - g.mapTop))
+        let mapHeight = CGFloat(mapRows.count) * u + u
+        map.frame = NSRect(x: 0, y: 0, width: mapScroll.frame.width, height: max(mapScroll.frame.height, mapHeight))
+        mapScroll.verticalScrollElasticity = mapHeight > mapScroll.frame.height ? .allowed : .none
+        rowRects = mapRows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
+        typeScroll.frame = NSRect(x: g.rx, y: g.typesTop, width: g.rw, height: max(0, bounds.height - g.typesTop))
+        let typesHeight = CGFloat(typeRows.count) * u + u
+        types.frame = NSRect(x: 0, y: 0, width: g.rw, height: max(typeScroll.frame.height, typesHeight))
+        typeScroll.verticalScrollElasticity = typesHeight > typeScroll.frame.height ? .allowed : .none
+        typeScroll.isHidden = typeRows.isEmpty
         // A 13 field's text sits 15 below its top: on the line.
-        customName.isHidden = !g.custom
-        customName.frame = NSRect(x: g.customName.minX, y: g.customName.minY + line - 15, width: g.customName.width, height: 20)
-        if customName.currentEditor() == nil { customName.stringValue = g.custom ? g.name : "" }
-        about.isHidden = g.said == nil
-        about.frame = NSRect(x: g.about.minX, y: g.about.minY + line - 15, width: g.about.width, height: 20)
-        if about.currentEditor() == nil { about.stringValue = g.said ?? "" }
+        nameField.isHidden = selected == nil || !g.form.canName
+        nameField.frame = NSRect(x: g.nameRow.minX, y: g.nameRow.minY + line - 15, width: g.nameRow.width - 130, height: 20)
+        if nameField.currentEditor() == nil { nameField.stringValue = g.form.name }
+        about.isHidden = g.aboutRow == nil
+        if let r = g.aboutRow { about.frame = NSRect(x: r.minX, y: r.minY + line - 15, width: r.width, height: 20) }
+        if about.currentEditor() == nil { about.stringValue = g.form.said ?? "" }
     }
 
-    // MARK: Drawing
+    // MARK: Drawing: the headers and words here, the map and the types on their own canvases
 
     override func draw(_ dirtyRect: NSRect) {
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line, l = leading
-        rowRects = g.mapRows; doHits = []; nameHits = []; gripRects = []
-        // The two first-order headers on the first line, their words in a box of three units under each.
+        // The two first-order headers on the first line, their words in a box of three units under each, then the second pair of headers on one line with their rules.
         Design.attributed("Structure", .body).draw(x: l, baseline: line)
-        Design.attributed(g.leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.left.width, height: Self.helpUnits * u))
-        hairline(x: l, y: g.mapTop - 1, width: g.left.width, Design.rule)
+        Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
+        Design.attributed("Schema", .body).draw(x: l, baseline: 4 * u + line)
+        hairline(x: l, y: g.mapTop - 1, width: g.lw, Design.rule)
+        guard selected != nil else { return }
+        let rx = g.rx
+        Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
+        Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
+        Design.attributed("Type", .body).draw(x: rx, baseline: 4 * u + line)
+        hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
+        // The name's row: the field, then the icon and the template at the right, as every type row has them; its rule beneath.
+        if g.form.canName {
+            trailing(in: g.nameRow, baseline: g.nameRow.minY + line, symbol: g.form.symbol)
+            hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
+        }
+        if let r = g.aboutRow { hairline(x: rx, y: r.maxY - 1, width: g.rw, about.currentEditor() != nil ? Design.ink : Design.mist) }
+    }
+    /// The icon and the template at the right of a row on the Type side: the icon picker and the template to come, shown for now.
+    private func trailing(in box: NSRect, baseline b: CGFloat, symbol: String) {
+        let t = Design.attributed("Template", .caption, colour: Design.soft)
+        t.draw(right: box.maxX - 14, baseline: b)
+        // The chevron after it.
+        Design.soft.setStroke()
+        let p = NSBezierPath(); p.lineWidth = 1
+        p.move(to: NSPoint(x: box.maxX - 9, y: b - 6)); p.line(to: NSPoint(x: box.maxX - 5, y: b - 2)); p.line(to: NSPoint(x: box.maxX - 1, y: b - 6))
+        p.stroke()
+        RowMark.draw(symbol, x: box.maxX - 14 - t.size().width - 30, baseline: b, colour: Design.soft)
+    }
+
+    private func drawMap() {
+        let line = Self.line, l = leading
+        doHits = []; gripRects = []
+        guard rowRects.count == mapRows.count else { return }
+        // The grounds first, each a point taller at the top so it sits over the rule above it; then the tree's lines; then the rows.
         for (i, r) in mapRows.enumerated() {
-            let box = g.mapRows[i], b = box.minY + line
+            let box = rowRects[i]
             let on = r.target == selected
-            // The selected row's ground breaks the grid: from the rail's divider to the middle of the gutter between the panels.
-            if on { fill(Design.App.ground(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height)), Design.mist) }
+            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.gutter / 2, height: box.height + 1), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
-            // The pane: from the divider under the level, the grip and the name, to the name's end plus a step; eased out, and back.
-            if let v = reveal[r.target], v > 0 {
-                let full = x + 36 + name.size().width + Self.step
-                let eased = 1 - pow(1 - v, 3)
-                fill(Design.App.ground(NSRect(x: 0, y: box.minY, width: (full * eased).rounded(), height: box.height)), Design.App.gridColour)
+            if let v = reveal[.row(r.target)], v > 0 {
+                let full = x + 36 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
+                fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: box.height + 1), Design.App.gridColour)
             }
-            if i == 0 {
-                // The tree's lines, once, under every row's number: a stem from under the parent's number, a tee or an elbow into each child.
-                TreeLines.draw(mapRows.enumerated().map { k, m in
-                    TreeLines.Row(top: g.mapRows[k].minY, height: g.mapRows[k].height, level: m.level, anchor: l + CGFloat(m.level) * Self.step + 3.5,
-                                  markLeft: l + CGFloat(m.level) * Self.step, baseline: line)
-                }, colour: Design.rule)
-            }
+        }
+        TreeLines.draw(mapRows.enumerated().map { k, m in
+            TreeLines.Row(top: rowRects[k].minY, height: rowRects[k].height, level: m.level, anchor: l + CGFloat(m.level) * Self.step + 3.5, markLeft: l + CGFloat(m.level) * Self.step, baseline: line)
+        }, colour: Design.rule)
+        for (i, r) in mapRows.enumerated() {
+            let box = rowRects[i], b = box.minY + line
+            let on = r.target == selected
+            let x = l + CGFloat(r.level) * Self.step
+            let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
             // The grip between the level and the name: two columns of three dots; a drag from it puts the row in another order among its own.
             let grip = NSRect(x: x + 16, y: box.minY, width: Self.grip, height: box.height)
@@ -349,13 +450,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             } else { gripRects.append(.zero) }
             var right = box.maxX
             if on {
-                for (title, glyph, run) in r.does.reversed() {
+                // Add Child, Add Sibling and the bin, from the right: the bin an icon alone.
+                for (act, run) in r.does.reversed() {
+                    let title = act == .child ? "Add Child" : act == .sibling ? "Add Sibling" : ""
                     let t = Design.attributed(title, .caption, colour: Design.quiet)
-                    right -= t.size().width
-                    t.draw(x: right, baseline: b)
-                    icon(glyph, at: NSPoint(x: right - 14, y: b - 9))
-                    doHits.append((NSRect(x: right - 20, y: box.minY, width: t.size().width + 24, height: box.height), run))
-                    right -= 32
+                    let w = title.isEmpty ? 0 : t.size().width
+                    right -= w
+                    if !title.isEmpty { t.draw(x: right, baseline: b) }
+                    icon(act, at: NSPoint(x: right - 14, y: b - 9))
+                    doHits.append((NSRect(x: right - 20, y: box.minY, width: w + 24, height: box.height), run))
+                    right -= title.isEmpty ? 24 : 32
                 }
             } else if let holds = r.holds {
                 let t = Design.attributed(holds, .caption, colour: Design.quiet)
@@ -367,78 +471,79 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         }
         if let slot = dragSlot, let d = dragging, let i = mapRows.firstIndex(where: { $0.target == d }) {
             let y = slotY(slot, for: d)
-            fill(NSRect(x: l + CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: g.left.width - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
-        }
-        guard selected != nil else { return }
-        let rx = g.right.minX
-        Design.attributed(g.levelTitle, .body).draw(x: rx, baseline: line)
-        Design.attributed(g.rightHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.right.width, height: Self.helpUnits * u))
-        Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
-        let list = g.fixed ? [] : ["Custom Name\u{2026}"] + g.offered
-        for (i, n) in list.enumerated() {
-            let box = g.names[i], b = box.minY + line
-            let chosen = i == 0 ? g.custom : (!g.custom && n == g.name)
-            let sq = NSRect(x: box.minX, y: b - 10, width: 12, height: 12)
-            fill(sq, chosen ? Design.ink : Design.card)
-            Design.ink.setStroke()
-            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-            Design.attributed(n, .body, colour: chosen ? Design.ink : Design.quiet).draw(x: box.minX + 24, baseline: b, width: box.width - 24)
-            nameHits.append((box, i == 0 ? nil : n))
-        }
-        if g.custom {
-            if !g.fixed { Design.attributed("Custom Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.customLabel + line) }
-            hairline(x: rx, y: g.customName.maxY - 1, width: g.right.width, customName.currentEditor() != nil ? Design.ink : Design.rule)
-        }
-        if g.said != nil {
-            Design.attributed("Description", .label, colour: Design.quiet).draw(x: rx, baseline: g.aboutLabel + line)
-            hairline(x: rx, y: g.about.maxY - 1, width: g.right.width, about.currentEditor() != nil ? Design.ink : Design.rule)
+            fill(NSRect(x: l + CGFloat(mapRows[i].level) * Self.step, y: y - 1, width: rowRects[i].width - CGFloat(mapRows[i].level) * Self.step, height: 2), Design.ink)
         }
     }
 
-    private func icon(_ which: Int, at p: NSPoint) {
+    private func drawTypes() {
+        let u = Self.u, line = Self.line, w = types.bounds.width
+        typeHits = []
+        for (i, t) in typeRows.enumerated() {
+            let box = NSRect(x: 0, y: CGFloat(i) * u, width: w, height: u), b = box.minY + line
+            if t.chosen { fill(NSRect(x: 0, y: box.minY - 1, width: w, height: u + 1), Design.mist) }
+            let name = Design.attributed(t.name, t.chosen ? .bodyStrong : .body, colour: t.locked ? Design.soft : t.chosen ? Design.ink : Design.quiet)
+            if let v = reveal[.type(t.name)], v > 0 {
+                let full = 24 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
+                fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: u + 1), Design.App.gridColour)
+            }
+            // The square: filled for the chosen type and for one a sibling holds, which cannot be chosen again.
+            let sq = NSRect(x: 0, y: b - 10, width: 12, height: 12)
+            fill(sq, t.chosen || t.locked ? Design.ink : Design.card)
+            Design.ink.setStroke()
+            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+            name.draw(x: 24, baseline: b, width: w - 24 - 130)
+            trailing(in: box, baseline: b, symbol: t.symbol)
+            hairline(x: 0, y: box.maxY - 1, width: w, Design.mist)
+            if !t.locked { typeHits.append((box, t.name)) }
+        }
+    }
+
+    private func icon(_ act: Act, at p: NSPoint) {
         Design.quiet.setStroke()
         let s: CGFloat = 9, path = NSBezierPath()
         path.lineWidth = 1.2
-        switch which {
-        case 2:
-            path.move(to: NSPoint(x: p.x + 1, y: p.y + 1)); path.line(to: NSPoint(x: p.x + s, y: p.y + s))
-            path.move(to: NSPoint(x: p.x + s, y: p.y + 1)); path.line(to: NSPoint(x: p.x + 1, y: p.y + s))
-        case 4:
+        switch act {
+        case .bin:
+            // A bin: the lid with its handle, then the body.
+            path.move(to: NSPoint(x: p.x, y: p.y + 2)); path.line(to: NSPoint(x: p.x + s + 1, y: p.y + 2))
+            path.move(to: NSPoint(x: p.x + 3, y: p.y + 2)); path.line(to: NSPoint(x: p.x + 3, y: p.y)); path.line(to: NSPoint(x: p.x + s - 2, y: p.y)); path.line(to: NSPoint(x: p.x + s - 2, y: p.y + 2))
+            path.move(to: NSPoint(x: p.x + 1.5, y: p.y + 2)); path.line(to: NSPoint(x: p.x + 2.5, y: p.y + s + 1)); path.line(to: NSPoint(x: p.x + s - 1.5, y: p.y + s + 1)); path.line(to: NSPoint(x: p.x + s - 0.5, y: p.y + 2))
+        case .sibling:
             path.move(to: NSPoint(x: p.x, y: p.y + 5)); path.line(to: NSPoint(x: p.x + s, y: p.y + 5))
             path.move(to: NSPoint(x: p.x + 5, y: p.y)); path.line(to: NSPoint(x: p.x + 5, y: p.y + s))
-        default:
+        case .child:
             path.move(to: NSPoint(x: p.x + 1, y: p.y)); path.line(to: NSPoint(x: p.x + 1, y: p.y + 6)); path.line(to: NSPoint(x: p.x + s, y: p.y + 6))
             path.move(to: NSPoint(x: p.x + s - 3, y: p.y + 3)); path.line(to: NSPoint(x: p.x + s, y: p.y + 6)); path.line(to: NSPoint(x: p.x + s - 3, y: p.y + 9))
         }
         path.stroke()
     }
 
-    // MARK: The pointer: select, act, choose a name, drag a group among its siblings
+    // MARK: The pointer: select, act, choose a type, drag a group among its siblings
 
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
+    private func mapDown(at p: NSPoint) {
         window?.makeFirstResponder(self)
         if let d = doHits.first(where: { $0.0.contains(p) }) { d.1(); return }
-        if let n = nameHits.first(where: { $0.0.contains(p) }) { choose(name: n.1); return }
         if let i = rowRects.firstIndex(where: { $0.contains(p) }) {
             let r = mapRows[i]
             selected = r.target
-            renaming = false
             dragging = gripRects[i].contains(p) && canDrag(r.target) ? r.target : nil
             dragStart = p
             refresh()
             settle()
         }
     }
-    /// What can be put in another order: a collection among the collections, a group among its siblings. The grouping level and the member stand alone.
+    private func typesDown(at p: NSPoint) {
+        if let h = typeHits.first(where: { $0.0.contains(p) }) { choose(type: h.1) }
+    }
+    /// What can be put in another order: a collection among the collections, a folder among the folders, a group among its siblings, a member among the members.
     private func canDrag(_ t: Target) -> Bool {
         switch t {
         case .collection: return all.count > 1
         case .tier: return false
+        case .instance(_, let pid, let nid, _): return parent(of: nid, in: tree(of: pid)).flatMap { p in SchemaTrial.rows(of: tree(of: pid)).first { $0.node.id == p }?.node.children.count } ?? 0 > 1
         case .folder(let cid, _): return (collection(cid)?.folders.count ?? 0) > 1
         case .node(_, _, let level): return level > 1
         case .member(let cid, _): return (collection(cid).map { members(of: $0).count } ?? 0) > 1
-        case .instance: return false
         }
     }
     /// The rows a dragged row may land among, in order, itself included.
@@ -446,24 +551,25 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         switch t {
         case .collection: return all.map { .collection($0.id) }
         case .tier: return []
+        case .instance(let cid, let pid, let nid, let level):
+            guard let p = parent(of: nid, in: tree(of: pid)), let pn = SchemaTrial.rows(of: tree(of: pid)).first(where: { $0.node.id == p })?.node else { return [] }
+            return pn.children.map { .instance(cid, pid, $0.id, level) }
         case .folder(let cid, _): return collection(cid).map { $0.folders.map { .folder(cid, $0.id) } } ?? []
-        case .instance: return []
         case .node(let cid, let nid, let level): return collection(cid).map { siblings(of: nid, in: $0).map { .node(cid, $0, level) } } ?? []
         case .member(let cid, _): return collection(cid).map { members(of: $0).map { .member(cid, $0.id) } } ?? []
         }
     }
-    override func mouseDragged(with event: NSEvent) {
+    private func mapDragged(to p: NSPoint) {
         guard let d = dragging, let start = dragStart else { return }
-        let p = convert(event.locationInWindow, from: nil)
         guard abs(p.y - start.y) > 4 || dragSlot != nil else { return }
         let sibs = peers(of: d)
         var slot = sibs.count
         for (k, s) in sibs.enumerated() {
             if let i = mapRows.firstIndex(where: { $0.target == s }), p.y < rowRects[i].midY { slot = k; break }
         }
-        if slot != dragSlot { dragSlot = slot; needsDisplay = true }
+        if slot != dragSlot { dragSlot = slot; map.needsDisplay = true }
     }
-    override func mouseUp(with event: NSEvent) {
+    private func mapUp() {
         if let d = dragging, let slot = dragSlot {
             switch d {
             case .node(let cid, let nid, _):
@@ -499,23 +605,22 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
                     if from < to { to -= 1 }
                     col.folders.insert(moved, at: min(to, col.folders.count))
                 }
-            case .tier, .instance: break
+            case .instance(_, let pid, let nid, _):
+                shape(pid) { SchemaTrial.moving(nid, to: slot, in: $0) }
+            case .tier: break
             }
             show()
         }
         dragging = nil; dragSlot = nil; dragStart = nil
-        needsDisplay = true
+        map.needsDisplay = true
     }
     private func siblings(of id: UUID, in c: SchemaCollection) -> [UUID] {
         for (node, _) in SchemaTrial.rows(of: c.stack) where node.children.contains(where: { $0.id == id }) { return node.children.map { $0.id } }
         return []
     }
-    private func rowIndex(ofNode id: UUID, in cid: UUID) -> Int? {
-        mapRows.firstIndex { if case .node(let c, let n, _) = $0.target { return c == cid && n == id }; return false }
-    }
-    /// Where the slot line goes: on the peer at that place, or under the last peer and everything inside it.
-    private func slotY(_ slot: Int, for t: Target) -> CGFloat {
-        let sibs = peers(of: t)
+    /// Where the drag's line sits: above the slot's row, or under the last sibling's subtree.
+    private func slotY(_ slot: Int, for d: Target) -> CGFloat {
+        let sibs = peers(of: d)
         if slot < sibs.count, let i = mapRows.firstIndex(where: { $0.target == sibs[slot] }) { return rowRects[i].minY }
         if let last = sibs.last, let i = mapRows.firstIndex(where: { $0.target == last }) {
             var end = i
@@ -539,11 +644,32 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         show()
     }
 
+    private func addOwn(child: Bool, at id: UUID, of pid: UUID, in cid: UUID) {
+        var made: UUID?
+        shape(pid) { root in
+            let r = child ? SchemaTrial.addingChild(to: id, in: root) : SchemaTrial.addingSibling(after: id, in: root)
+            made = r.added
+            return r.tree
+        }
+        if let m = made, let level = SchemaTrial.rows(of: tree(of: pid)).first(where: { $0.node.id == m })?.level { selected = .instance(cid, pid, m, level) }
+        show()
+    }
+    /// The bin on a group of a member's own: gone at once when it holds nothing in that member; asked about when it holds something.
+    private func removeOwn(_ node: SchemaNode, level: Int, of pid: UUID, in cid: UUID) {
+        guard let c = collection(cid) else { return }
+        let n = count(node, in: c, of: pid)
+        guard n == 0 else { selected = .instance(cid, pid, node.id, level); refresh(); askAboutContents(of: node, in: c, holding: n); return }
+        let up = parent(of: node.id, in: tree(of: pid))
+        shape(pid) { SchemaTrial.removing(node.id, from: $0) }
+        if let p = up, let l = SchemaTrial.rows(of: tree(of: pid)).first(where: { $0.node.id == p })?.level { selected = p == tree(of: pid).id ? .member(cid, pid) : .instance(cid, pid, p, l) }
+        show()
+    }
+
     /// The bin on a group: gone at once when it holds nothing, and the row above it takes the selection; asked about on the panel when it holds something.
     private func remove(_ node: SchemaNode, level: Int, in cid: UUID) {
         guard let c = collection(cid) else { return }
-        let n = count(node, level: level, in: c)
-        guard n == 0 else { selected = .node(cid, node.id, level); refresh(); askAboutContents(of: node, level: level, in: c, holding: n); return }
+        let n = count(node, in: c)
+        guard n == 0 else { selected = .node(cid, node.id, level); refresh(); askAboutContents(of: node, in: c, holding: n); return }
         let up = parent(of: node.id, in: c)
         let tree = SchemaTrial.removing(node.id, from: c.stack)
         keep(cid, tree)
@@ -551,19 +677,17 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         show()
     }
 
-    private func askAboutContents(of node: SchemaNode, level: Int, in c: SchemaCollection, holding n: Int) {
+    private func askAboutContents(of node: SchemaNode, in c: SchemaCollection, holding n: Int) {
         let role = SchemaTrial.role(of: node), things = "\(n) \(noun(role, n))"
-        let note = "You are about to remove \(node.name), which holds \(things), spread over the \(c.name) \(SchemaTrial.plural(member(c)).lowercased()) that follow this stack. They would be left with nowhere to show. The group can be renamed and they stay where they are; to delete them, do it member by member."
+        let note = "You are about to remove \(node.name), which holds \(things), spread over the \(c.name) \(SchemaTrial.plural(member(c)).lowercased()) that follow this template. They would be left with nowhere to show. The group can be renamed and they stay where they are; to delete them, do it member by member."
         SwissConfirm.ask(over: window, title: "Remove Group", note: note, commit: "Go On",
-                         options: ["Keep the \(noun(role, n)) and rename the group"]) { [weak self] _ in self?.keepAndRename() }
+                         options: ["Keep the \(noun(role, n)) and rename the group"]) { [weak self] _ in self?.focusName() }
     }
-    private func keepAndRename() {
-        guard case .node(let cid, let nid, _)? = selected, let c = collection(cid) else { return }
-        keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.role = SchemaTrial.role(of: $0) })
-        renaming = true
+    /// The name field takes the typing, its words selected.
+    private func focusName() {
         show()
-        window?.makeFirstResponder(customName)
-        customName.currentEditor()?.selectAll(nil)
+        window?.makeFirstResponder(nameField)
+        nameField.currentEditor()?.selectAll(nil)
     }
 
     private func addTier(_ cid: UUID) {
@@ -572,9 +696,14 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         show()
     }
     private func addFolder(_ cid: UUID) {
-        SchemaTrial.changeCollection(cid) { col in col.folders.append(SchemaFolder(name: "\(col.folderName ?? "Folder") \(col.folders.count + 1)")) }
-        selected = .tier(cid)
-        show()
+        var made: UUID?
+        SchemaTrial.changeCollection(cid) { col in
+            let f = SchemaFolder(name: "\(col.folderName ?? "Folder") \(col.folders.count + 1)")
+            made = f.id
+            col.folders.append(f)
+        }
+        if let f = made { selected = .folder(cid, f) }
+        focusName()
     }
     private func removeFolder(_ cid: UUID, _ fid: UUID) {
         guard let lib = library else { return }
@@ -603,103 +732,123 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Another collection, after this one, starting with its stack; named on the window's own panel.
+    /// Another collection, after this one, starting with its template; it appears at once, its name ready to type over.
     private func newCollection(after cid: UUID) {
         guard let c = collection(cid) else { return }
-        SwissConfirm.name(over: window, title: "New Collection", note: "A heading in rail1 of its own, after \(c.name.isEmpty ? "this collection" : c.name) and starting with its stack.",
-                          placeholder: "Clients, Our Own Work, Archive", confirm: "Create Collection", check: { ProjectField.problem(name: $0, values: [:], naming: "collection") }) { [weak self] name in
-            guard let self = self else { return }
-            var list = SchemaTrial.collections
-            let made = SchemaCollection(name: name, stack: c.stack)
-            list.insert(made, at: (list.firstIndex { $0.id == cid } ?? list.count - 1) + 1)
-            SchemaTrial.collections = list
-            self.selected = .collection(made.id)
-            self.show()
-        }
+        var list = SchemaTrial.collections
+        let taken = Set(list.map { $0.name })
+        let name = SchemaTrial.collectionNames.first { !taken.contains($0) } ?? "Collection \(list.count + 1)"
+        let made = SchemaCollection(name: name, stack: c.stack)
+        list.insert(made, at: (list.firstIndex { $0.id == cid } ?? list.count - 1) + 1)
+        SchemaTrial.collections = list
+        selected = .collection(made.id)
+        focusName()
     }
 
-    /// Another member of the collection: a project with files of its own, named on the panel, placed in the collection.
-    private func newMember(in cid: UUID, folder: UUID? = nil) {
+    /// Another member of the collection: a project with files of its own, placed in the collection and the folder, named at once on the right.
+    private func newMember(in cid: UUID, folder: UUID?) {
         guard let c = collection(cid), let lib = library else { return }
-        let word = member(c), home = folder.flatMap { f in c.folders.first { $0.id == f }?.name } ?? c.name
-        SwissConfirm.name(over: window, title: "New \(word)", note: "A \(word.lowercased()) in \(home): a project with files of its own, following the collection's pattern.",
-                          placeholder: "Client, product or piece of work", confirm: "Create \(word)", check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
-            var made: UUID?
-            lib.apply("New Project") { l in
-                let id = l.createProject(named: name)
-                let organisation = ProjectField.tidy(Prefs.organisation)
-                if !organisation.isEmpty { l.setProjectDetails(id, organisation) }
-                made = id
-            }
-            guard let id = made, lib.library.project(id) != nil else { return }
-            SchemaTrial.place(id, in: cid, folder: folder)
-            self?.selected = .member(cid, id)
-            self?.show()
+        let word = member(c), n = members(of: c).count + 1
+        var made: UUID?
+        lib.apply("New \(word)") { l in
+            let id = l.createProject(named: "\(word) \(n)")
+            let organisation = ProjectField.tidy(Prefs.organisation)
+            if !organisation.isEmpty { l.setProjectDetails(id, organisation) }
+            made = id
         }
+        guard let id = made, lib.library.project(id) != nil else { return }
+        SchemaTrial.place(id, in: cid, folder: folder)
+        selected = .member(cid, id)
+        focusName()
     }
 
-    // MARK: Names
+    // MARK: Types and names
 
-    private func setName(_ name: String) {
+    /// A type chosen on the right: the row takes it, its name starts as the type unless it already had one of its own, and the name is ready to change.
+    private func choose(type: String) {
         guard let what = selected, let c = collection(what.collection) else { return }
+        switch what {
+        case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = type }
+        case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = type }
+        case .node(let cid, let nid, _):
+            keep(cid, SchemaTrial.changing(nid, in: c.stack) { n in
+                let wasTyped = n.name == SchemaTrial.type(of: n) || n.name.isEmpty
+                n.kind = type
+                n.role = SchemaRole.allCases.first { $0.title == type }
+                if wasTyped { n.name = type }
+            })
+        case .instance(_, let pid, let nid, _):
+            shape(pid) { root in
+                SchemaTrial.changing(nid, in: root) { n in
+                    let wasTyped = n.name == SchemaTrial.type(of: n) || n.name.isEmpty
+                    n.kind = type
+                    n.role = SchemaRole.allCases.first { $0.title == type }
+                    if wasTyped { n.name = type }
+                }
+            }
+        case .folder, .member: return
+        }
+        focusName()
+    }
+    private func setName(_ raw: String) {
+        guard let what = selected, let c = collection(what.collection) else { return }
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
         switch what {
         case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = name }
         case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = name }
-        case .folder(let cid, let fid):
-            let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !typed.isEmpty else { return }
-            SchemaTrial.changeCollection(cid) { col in if let i = col.folders.firstIndex(where: { $0.id == fid }) { col.folders[i].name = typed } }
-        case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.role = SchemaTrial.role(of: $0); $0.name = name })
+        case .folder(let cid, let fid): SchemaTrial.changeCollection(cid) { col in if let i = col.folders.firstIndex(where: { $0.id == fid }) { col.folders[i].name = name } }
+        case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.name = name })
         case .member(_, let pid):
-            let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !typed.isEmpty, typed != lib.project(pid)?.name else { return }
-            library?.apply("Rename Project") { _ = $0.renameProject(pid, to: typed) }
-        case .instance: return
+            guard name != lib.project(pid)?.name else { return }
+            library?.apply("Rename Project") { _ = $0.renameProject(pid, to: name) }
+        case .instance(_, let pid, let nid, _): shape(pid) { SchemaTrial.changing(nid, in: $0) { $0.name = name } }
         }
         all = SchemaTrial.collections
-    }
-    private func choose(name: String?) {
-        guard let what = selected, let c = collection(what.collection) else { return }
-        if name == nil {
-            let now: String, offered: [String]
-            switch what {
-            case .collection: now = c.name; offered = SchemaTrial.collectionNames
-            case .tier: now = c.folderName ?? ""; offered = SchemaTrial.folderNames
-            case .node(_, let nid, let level): now = SchemaTrial.rows(of: c.stack).first { $0.node.id == nid }?.node.name ?? ""; offered = SchemaTrial.names(forLevel: level)
-            case .member, .folder, .instance: return
-            }
-            if !offered.contains(now) { window?.makeFirstResponder(customName); return }
-            renaming = true
-            refresh()
-            window?.makeFirstResponder(customName)
-            return
-        }
-        window?.makeFirstResponder(self)
-        renaming = false
-        setName(name ?? "")
-        show()
     }
     @objc private func nameEntered() { window?.makeFirstResponder(self) }
     /// Typing only keeps a draft, drawn on the map as it goes; nothing is written until the typing ends, since a write rebuilds the window.
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
-        if field === customName { draft = field.stringValue; needsDisplay = true }
+        if field === nameField { draft = field.stringValue; map.needsDisplay = true }
     }
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, let what = selected, let c = collection(what.collection) else { return }
-        if field === customName {
+        if field === nameField {
             draft = nil
             setName(field.stringValue)
-            renaming = false
         } else if field === about {
             let text = field.stringValue
             switch what {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
-            case .tier, .member, .folder, .instance: break
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
+            case .instance(_, let pid, let nid, _): shape(pid) { SchemaTrial.changing(nid, in: $0) { $0.about = text } }
+            case .tier, .member, .folder: break
             }
             all = SchemaTrial.collections
         }
         show()
     }
+}
+
+/// A drawing surface inside a scroll view that hands everything to its owner: what to draw, and where the pointer went.
+final class Canvas: NSView {
+    var onDraw: (() -> Void)?
+    var onDown: ((NSPoint) -> Void)?
+    var onDrag: ((NSPoint) -> Void)?
+    var onUp: (() -> Void)?
+    /// The pointer's place while it moves over the canvas, or nil when it leaves.
+    var onMove: ((NSPoint?) -> Void)?
+    override var isFlipped: Bool { true }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func draw(_ dirtyRect: NSRect) { onDraw?() }
+    override func mouseDown(with event: NSEvent) { onDown?(convert(event.locationInWindow, from: nil)) }
+    override func mouseDragged(with event: NSEvent) { onDrag?(convert(event.locationInWindow, from: nil)) }
+    override func mouseUp(with event: NSEvent) { onUp?() }
+    override func mouseMoved(with event: NSEvent) { onMove?(convert(event.locationInWindow, from: nil)) }
+    override func mouseExited(with event: NSEvent) { onMove?(nil) }
 }

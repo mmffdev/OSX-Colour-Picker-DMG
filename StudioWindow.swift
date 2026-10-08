@@ -521,19 +521,16 @@ final class StudioFrame: NSView {
         let held = lib.palettes(in: project.id)
         let own = lib.allTags.filter { lib.project(ofTag: $0) == project.id }
         var rows: [PaletteTable.Row] = []
-        func label(_ group: SchemaNode, _ indent: Int) {
-            rows.append(.group(group.name, indent))
-            for child in group.children { label(child, indent + 1) }
-        }
-        for group in schema.children {
+        // A group with a role holds what it always has, wherever the pattern puts it; any other group is a label with its own beneath.
+        func walk(_ group: SchemaNode, _ indent: Int) {
             switch SchemaTrial.role(of: group) {
             case .information?:
-                rows.append(.group(group.name.isEmpty ? "Information" : group.name, 0))
-                rows.append(.item("Overview", nil, 0, .project(project.id), place == .project(project.id)))
+                rows.append(.group(group.name.isEmpty ? "Information" : group.name, indent))
+                rows.append(.item("Overview", nil, indent, .project(project.id), place == .project(project.id)))
             case .palettes?:
-                rows.append(.group(group.name.isEmpty ? "Palettes" : group.name, 0))
+                rows.append(.group(group.name.isEmpty ? "Palettes" : group.name, indent))
                 let colours = held.filter { !$0.isTypography }
-                func row(_ s: Swatch) -> PaletteTable.Row { .palette(s.id, s.name, s.entries.count, s.entries.map { Design.hex($0.hex) }, place == .palette(s.id), 0) }
+                func row(_ s: Swatch) -> PaletteTable.Row { .palette(s.id, s.name, s.entries.count, s.entries.map { Design.hex($0.hex) }, place == .palette(s.id), indent) }
                 // This week's arrivals first, parted from the rest by a word on a hairline, when there are both.
                 let week = Date().addingTimeInterval(-7 * 24 * 3600)
                 let fresh = colours.filter { ($0.placedAt ?? $0.createdAt) >= week }, older = colours.filter { ($0.placedAt ?? $0.createdAt) < week }
@@ -541,20 +538,22 @@ final class StudioFrame: NSView {
                     rows.append(.divider("Just Added")); rows += fresh.map(row)
                     rows.append(.divider("Earlier")); rows += older.map(row)
                 } else { rows += colours.map(row) }
-                if colours.isEmpty { rows.append(.item("None found", nil, 0, nil, false)) }
+                if colours.isEmpty { rows.append(.item("None found", nil, indent, nil, false)) }
             case .typography?:
-                rows.append(.group(group.name.isEmpty ? "Typography" : group.name, 0))
+                rows.append(.group(group.name.isEmpty ? "Typography" : group.name, indent))
                 let type = held.filter { $0.isTypography }
-                rows += type.map { .item($0.name, "\($0.styles?.count ?? 0)", 0, nil, false) }
-                if type.isEmpty { rows.append(.item("None found", nil, 0, nil, false)) }
+                rows += type.map { .item($0.name, "\($0.styles?.count ?? 0)", indent, nil, false) }
+                if type.isEmpty { rows.append(.item("None found", nil, indent, nil, false)) }
             case .tags?:
-                rows.append(.group(group.name.isEmpty ? "Tags" : group.name, 0))
-                rows += own.map { .item($0, nil, 0, nil, false) }
-                if own.isEmpty { rows.append(.item("None found", nil, 0, nil, false)) }
+                rows.append(.group(group.name.isEmpty ? "Tags" : group.name, indent))
+                rows += own.map { .item($0, nil, indent, nil, false) }
+                if own.isEmpty { rows.append(.item("None found", nil, indent, nil, false)) }
             case nil:
-                label(group, 0)
+                rows.append(.group(group.name, indent))
             }
+            for child in group.children { walk(child, indent + 1) }
         }
+        for group in schema.children { walk(group, 0) }
         let c = SchemaTrial.collection(of: project.id)
         rail2.set(heading: project.name, labels: (SchemaTrial.memberName(of: c), "Items"), rows: rows)
     }

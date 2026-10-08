@@ -26,6 +26,9 @@ struct SchemaNode: Codable, Equatable {
     var children: [SchemaNode] = []
     /// Which of the app's own groups this is, whatever it has been renamed to; nil for a group that is a label only.
     var role: SchemaRole? = nil
+    /// The type chosen for the group on the schema page, which its name starts as and may leave: a group typed Assets
+    /// can be called Props and still be the Assets of its level, so no sibling can be typed Assets again.
+    var kind: String? = nil
 }
 
 /// The groups inside a project that the app fills itself.
@@ -98,6 +101,8 @@ enum SchemaTrial {
     struct SchemaFile: Codable {
         var collections: [SchemaCollection]
         var places: [String: SchemaPlace]
+        /// The members that have shaped a tree of their own, by the member's id; the rest follow their collection's Master Template.
+        var stacks: [String: SchemaNode]?
         /// What a catalogue starts with: the one collection the app has always had.
         static var fresh: SchemaFile { SchemaFile(collections: [SchemaCollection(id: firstCollection, name: "Projects", stack: start)], places: [:]) }
     }
@@ -202,13 +207,12 @@ enum SchemaTrial {
 
     // MARK: Stacks
 
-    // Since 2026-10-08 every member follows its collection's pattern, the one the schema page shows: what that page
-    // lists under "Every Project" is what rail1 lists under every member. Stacks of a member's own are gone; the old
-    // panel used to copy the pattern into each new member, which froze it, so members drifted from the pattern as it
-    // changed. Anything still kept under the old key is dropped the first time it is written to.
+    // A member follows its collection's Master Template until its tree is shaped on the schema page: the first change
+    // copies the template into a tree of the member's own, kept in the catalogue's schema file, and from then on the
+    // member's tree is its own. Nothing is copied on creation, so a member left alone follows the template as it changes.
     static var own: [String: SchemaNode] {
-        get { [:] }
-        set { NotificationCenter.default.post(name: .schemaDidChange, object: nil) }
+        get { file.stacks ?? [:] }
+        set { var f = file; f.stacks = newValue.isEmpty ? nil : newValue; write(f) }
     }
     static func hasOwn(_ project: UUID) -> Bool { own[project.uuidString] != nil }
     /// The stack a project shows: its own, or its collection's default.
@@ -222,7 +226,9 @@ enum SchemaTrial {
 
     /// Which of the app's own groups a group directly inside a member is: the role it was given,
     /// or, for one added by name, the role of that name.
-    static func role(of node: SchemaNode) -> SchemaRole? { node.role ?? SchemaRole.allCases.first { $0.title == node.name } }
+    static func role(of node: SchemaNode) -> SchemaRole? { node.role ?? SchemaRole.allCases.first { $0.title == node.kind } ?? SchemaRole.allCases.first { $0.title == node.name } }
+    /// What a group is typed as: the type it was given, or its name when it was only ever named.
+    static func type(of node: SchemaNode) -> String { node.kind ?? node.name }
 
     /// The name for several of a thing: Projects, Companies, Classes.
     static func plural(_ name: String) -> String {
@@ -257,8 +263,13 @@ enum SchemaTrial {
 
     /// A name for a new group among these: the first on offer that none of them has taken.
     static func freshName(level: Int, among taken: [SchemaNode]) -> String {
-        let used = Set(taken.map { $0.name })
+        let used = Set(taken.map { type(of: $0) })
         return names(forLevel: level).first { !used.contains($0) } ?? "New Group"
+    }
+    /// A new group among these: named and typed as the first type its level has free.
+    static func freshNode(level: Int, among taken: [SchemaNode]) -> SchemaNode {
+        let name = freshName(level: level, among: taken)
+        return SchemaNode(name: name, kind: name)
     }
 
     /// Adds a group inside the one with this id, last. Returns the tree and the new group's id.
@@ -266,7 +277,7 @@ enum SchemaTrial {
         guard let level = rows(of: root).first(where: { $0.node.id == id })?.level else { return (root, nil) }
         var made: UUID?
         let tree = changing(id, in: root) { parent in
-            let node = SchemaNode(name: freshName(level: level + 1, among: parent.children))
+            let node = freshNode(level: level + 1, among: parent.children)
             made = node.id
             parent.children.append(node)
         }
@@ -279,7 +290,7 @@ enum SchemaTrial {
         func walk(_ n: SchemaNode, _ level: Int) -> SchemaNode {
             var out = n
             if let at = out.children.firstIndex(where: { $0.id == id }) {
-                let node = SchemaNode(name: freshName(level: level + 1, among: out.children))
+                let node = freshNode(level: level + 1, among: out.children)
                 made = node.id
                 out.children.insert(node, at: at + 1)
                 return out

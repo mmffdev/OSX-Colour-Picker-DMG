@@ -260,7 +260,8 @@ enum TreeLines {
         }
         for (i, r) in rows.enumerated() where r.level > 0 {
             guard let p = rows[..<i].lastIndex(where: { $0.level == r.level - 1 }) else { continue }
-            let x = rows[p].anchor, tailY = (r.top + r.baseline - 4).rounded()
+            // The arm sits on the centre of the number and the words: two points above the line they sit on.
+            let x = rows[p].anchor, tailY = (r.top + r.baseline - 2).rounded()
             stem(x, from: r.top, to: later(r.level, after: i) ? r.top + r.height : tailY)
             NSRect(x: x.rounded() - 1, y: tailY - 1, width: r.markLeft - 2 - (x.rounded() - 1), height: 1).fill()
             // The ancestors' stems, where an ancestor still has a sibling to come.
