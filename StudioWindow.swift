@@ -1843,7 +1843,7 @@ final class TileGrid: NSView {
     var onPick: ((String) -> Void)?
     var onOpen: ((UUID) -> Void)?
     var onResize: (() -> Void)?
-    /// The halo mark at the right of the caption copies the caption's value; a click on the colour itself opens the halo over it.
+    /// A click on the colour itself copies the caption's value; the halo mark at the right of the caption opens the halo over it.
     var onCopy: ((String) -> Void)?
     var onHalo: ((String, NSRect) -> Void)?
     private var markHits: [(NSRect, Int)] = []
@@ -1897,13 +1897,13 @@ final class TileGrid: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if let m = markHits.first(where: { $0.0.contains(p) }) { onCopy?(items[m.1].caption); return }
+        if let m = markHits.first(where: { $0.0.contains(p) }), let h = items[m.1].hex { onPick?(h); onHalo?(h, m.0); return }
         guard let i = items.indices.first(where: { rect($0).contains(p) }) else { return }
         if let h = items[i].hex {
             onPick?(h)
-            // The colour block itself opens the halo over it; the words beneath only choose.
+            // The colour block itself copies its value; the words beneath only choose.
             let block = NSRect(x: rect(i).minX, y: rect(i).minY, width: rect(i).width, height: Self.block)
-            if block.contains(p) { onHalo?(h, block) }
+            if block.contains(p) { onCopy?(items[i].caption) }
         }
         else if let id = items[i].id, event.clickCount == 2 { onOpen?(id) }
         else if let id = items[i].id { onOpen?(id) }
