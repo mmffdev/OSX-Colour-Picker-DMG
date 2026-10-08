@@ -367,7 +367,9 @@ final class LibraryController: NSObject {
     func show(_ error: Error) { Diagnostics.log("library", error: error); present(NSAlert(error: error)) }
 
     private func present(_ alert: NSAlert, then: ((NSApplication.ModalResponse) -> Void)? = nil) {
-        if let w = window { alert.beginSheetModal(for: w) { then?($0) } }
+        // Only a window that is on screen takes the sheet: a sheet brings its window up, and an error before
+        // the Studio window exists would otherwise drag the old window into view beside it.
+        if let w = window, w.isVisible { alert.beginSheetModal(for: w) { then?($0) } }
         else { then?(alert.runModal()) }
     }
 
