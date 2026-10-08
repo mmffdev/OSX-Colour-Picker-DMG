@@ -170,6 +170,9 @@ final class StudioFrame: NSView {
             self.library.apply("Move Palette") { $0.move(palette, to: member, index: 0) }
             self.go(.project(member))
         }
+        rail1.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
+        rail1.onTarget = { [weak self] id in guard let self = self else { return }; self.library.setTarget(self.library.library.activeSwatchID == id ? nil : id) }
+        rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
         rail2.onPick = { [weak self] p in self?.go(p) }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
         page.grid.onOpen = { [weak self] id in
@@ -296,6 +299,50 @@ final class StudioFrame: NSView {
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
 
+    // MARK: The palette's halo
+
+    private var halo: HaloMenu?
+
+    /// The old window's palette menu as a halo over the gear: rename, favourite, picks here, duplicate, copy to a member or a new one, move to a
+    /// collection's member on a second ring, copy all, export, delete.
+    private func openHalo(for id: UUID, from view: NSView, rect: NSRect) {
+        let lib = library.library
+        guard let s = lib.swatch(id) else { return }
+        let library = self.library
+        func group(_ id: String, _ label: String, _ symbol: String, _ inner: @escaping () -> [HaloAction]) -> HaloAction { HaloAction(id: id, label: label, symbol: symbol, children: inner) }
+        var actions: [HaloAction] = [
+            HaloAction(id: "rename", label: "Rename", symbol: "pencil", edit: (s.name, "Palette name", "Return keeps it", { library.rename(id, to: $0) })),
+            HaloAction(id: "fav", label: s.favourite ? "Remove From Favourites" : "Add To Favourites", symbol: "star", checked: s.favourite) { library.toggleFavourite(id) },
+            HaloAction(id: "target", label: lib.activeSwatchID == id ? "Stop Sending Picks Here" : "Send Picks Here", symbol: "scope", checked: lib.activeSwatchID == id) { library.setTarget(lib.activeSwatchID == id ? nil : id) },
+            HaloAction(id: "duplicate", label: "Duplicate", symbol: "plus.square.on.square") { library.duplicate(id) },
+            group("copy-to", "Copy To Member", "folder.badge.plus") {
+                var inner: [HaloAction] = lib.orderedProjects.filter { $0.id != s.projectID }.map { p in HaloAction(id: p.id.uuidString, label: p.name, symbol: "folder") { library.move(palette: id, to: p.id, index: Int.max) } }
+                if s.projectID != nil { inner.append(HaloAction(id: "loose", label: "Palettes, Outside Any Member", symbol: "tray") { library.move(palette: id, to: nil, index: Int.max) }) }
+                inner.append(HaloAction(id: "new", label: "New Member\u{2026}", symbol: "plus") { library.startProject(moving: id) })
+                return inner
+            },
+            group("collections", "Add To Collection", "square.grid.2x2") {
+                // The second ring: each collection, and inside it a third ring of its members.
+                SchemaTrial.collections.map { c in
+                    HaloAction(id: c.id.uuidString, label: c.name, symbol: "folder", children: {
+                        let places = SchemaTrial.places, all = SchemaTrial.collections
+                        return lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: all, places: places).id == c.id }
+                            .map { p in HaloAction(id: p.id.uuidString, label: p.name, symbol: "folder") { library.move(palette: id, to: p.id, index: Int.max) } }
+                    })
+                }
+            },
+            HaloAction(id: "copy-all", label: "Copy All", symbol: "doc.on.doc") { library.copy(lib.hexes(inSwatch: id, by: .oldest), from: s.name) },
+            HaloAction(id: "export-file", label: "Export Palette File\u{2026}", symbol: "square.and.arrow.up") { library.exportPaletteFile(id) },
+            HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id) },
+        ]
+        if s.projectID != nil { actions.insert(HaloAction(id: "open", label: "Open Member", symbol: "arrow.up.right", onSelect: { [weak self] in if let p = s.projectID { self?.go(.project(p)) } }), at: 0) }
+        let h = halo ?? HaloMenu(label: "Palette", hint: "Scroll to turn, click to choose", actions: [])
+        halo = h
+        h.label = s.name
+        h.actions = actions
+        h.open(from: view, rect: rect)
+    }
+
     /// A member made where the page stands: in the collection or folder in view, else the first collection; named on the window's own panel.
     private func newMember() {
         let all = SchemaTrial.collections
@@ -324,11 +371,18 @@ final class StudioFrame: NSView {
     private func fillLibraryRail() {
         let lib = library.library
         var rows: [LibraryRail.Row] = [.group("Catalogue"), .row("All Colours", lib.colours.count, .catalogue, 0)]
-        func two(_ s: Swatch) -> LibraryRail.Row { .palette(s.name, s.entries.count, .palette(s.id), s.entries.map { Design.hex($0.hex) }) }
+        func two(_ s: Swatch, in project: UUID? = nil, indent: Int = 0) -> LibraryRail.Row {
+            .palette(LibraryRail.PaletteRow(id: s.id, name: s.name, count: s.entries.count, colours: s.entries.map { Design.hex($0.hex) },
+                                            favourite: s.favourite, target: lib.activeSwatchID == s.id, project: project, indent: indent))
+        }
+        /// A member, then its palettes one step in, each with its icons, so picks can be sent to any of them from here.
+        func memberRows(_ p: Project, indent: Int) -> [LibraryRail.Row] {
+            [.row(p.name, palettes(lib.palettes(in: p.id)).count, .project(p.id), indent)] + palettes(lib.palettes(in: p.id)).map { two($0, in: p.id, indent: indent + 1) }
+        }
         let favourites = palettes(lib.orderedFavourites)
         if !favourites.isEmpty {
             rows.append(.group("Favourites"))
-            rows += favourites.map(two)
+            rows += favourites.map { two($0) }
         }
         // Level 0: each collection is a heading. Level 1: its folders, where it has them, each holding its
         // members. Then the member itself, the app's project, with its palettes counted.
@@ -338,14 +392,14 @@ final class StudioFrame: NSView {
                 for f in c.folders {
                     let inside = members(of: c, folder: .some(f.id))
                     rows.append(.row(f.name, inside.count, .folder(c.id, f.id), 0))
-                    rows += inside.map { .row($0.name, palettes(lib.palettes(in: $0.id)).count, .project($0.id), 1) }
+                    rows += inside.flatMap { memberRows($0, indent: 1) }
                 }
             }
-            rows += members(of: c, folder: .some(nil)).map { .row($0.name, palettes(lib.palettes(in: $0.id)).count, .project($0.id), 0) }
+            rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: 0) }
         }
         let loose = palettes(lib.palettes(in: nil))
         rows.append(.group("Palettes"))
-        rows += loose.map(two)
+        rows += loose.map { two($0) }
         rows.append(.row("All Palettes", palettes(lib.swatches).count, .palettes, 0))
         rail1.set(rows: rows, chosen: place)
     }
@@ -825,10 +879,16 @@ enum AreaHeader {
 /// inside the row above it, as a member sits in its folder.
 final class LibraryRail: StudioRail {
     /// A group label; a row with its count; a palette on two lines, its name over its colours with the count on the second line.
-    enum Row { case group(String), row(String, Int, StudioFrame.Place, Int), palette(String, Int, StudioFrame.Place, [NSColor]) }
+    /// A palette row: its name, count, colours, whether it is a favourite and the picks' target, and the member it sits in, at an indent.
+    struct PaletteRow { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let favourite: Bool; let target: Bool; let project: UUID?; let indent: Int }
+    enum Row { case group(String), row(String, Int, StudioFrame.Place, Int), palette(PaletteRow) }
     var onPick: ((StudioFrame.Place) -> Void)?
     /// A palette dropped on a member: the palette, then the member it lands in.
     var onDrop: ((UUID, UUID) -> Void)?
+    /// The three icons on a palette row: the star, the picks' target, and the gear, which opens the halo over the icon's rect in the body's coordinates.
+    var onFavourite: ((UUID) -> Void)?
+    var onTarget: ((UUID) -> Void)?
+    var onGear: ((UUID, NSView, NSRect) -> Void)?
     private var list: Body { body as! Body }
     /// Shut to a narrow strip: the arrow to open it, then a mark for each of its groups, the chosen one's filled.
     var collapsed = false { didSet { scroll.isHidden = collapsed; needsDisplay = true } }
@@ -838,6 +898,9 @@ final class LibraryRail: StudioRail {
         super.init(body: Body()); heading = "Library"; labels = ("Name", "Count")
         list.onPick = { [weak self] p in self?.onPick?(p) }
         list.onDrop = { [weak self] s, m in self?.onDrop?(s, m) }
+        list.onFavourite = { [weak self] id in self?.onFavourite?(id) }
+        list.onTarget = { [weak self] id in self?.onTarget?(id) }
+        list.onGear = { [weak self] id, v, r in self?.onGear?(id, v, r) }
     }
     required init?(coder: NSCoder) { fatalError() }
     func set(rows: [Row], chosen: StudioFrame.Place) { list.rows = rows; list.chosen = chosen; needsLayout = true; needsDisplay = true }
@@ -857,9 +920,12 @@ final class LibraryRail: StudioRail {
             case .group(let title):
                 if let p = groupPlace { marks.append((p, groupHas, groupName)) }
                 groupPlace = nil; groupHas = false; groupName = title
-            case .row(_, _, let p, _), .palette(_, _, let p, _):
+            case .row(_, _, let p, _):
                 if groupPlace == nil { groupPlace = p }
                 if p == list.chosen { groupHas = true }
+            case .palette(let pr):
+                if groupPlace == nil { groupPlace = .palette(pr.id) }
+                if .palette(pr.id) == list.chosen { groupHas = true }
             }
         }
         if let p = groupPlace { marks.append((p, groupHas, groupName)) }
@@ -902,6 +968,11 @@ final class LibraryRail: StudioRail {
         var chosen: StudioFrame.Place = .catalogue
         var onPick: ((StudioFrame.Place) -> Void)?
         var onDrop: ((UUID, UUID) -> Void)?
+        var onFavourite: ((UUID) -> Void)?
+        var onTarget: ((UUID) -> Void)?
+        var onGear: ((UUID, NSView, NSRect) -> Void)?
+        /// The icons on palette rows, with what a press on each does.
+        private var iconHits: [(NSRect, Int, UUID)] = []
         static var row: CGFloat { unit }
         static var two: CGFloat { unit * 2 }
         static var groupAbove: CGFloat { unit }
@@ -927,9 +998,40 @@ final class LibraryRail: StudioRail {
             return h + Self.unit
         }
 
+        /// A 16 icon in the house stroke: the star, the picks' target, the gear. `on` fills the star or the target's centre.
+        private func icon(_ which: Int, in g: NSRect, on: Bool, colour: NSColor) {
+            colour.setStroke(); colour.setFill()
+            let path = NSBezierPath(); path.lineWidth = 1.1; path.lineJoinStyle = .miter
+            switch which {
+            case 0:
+                let c = NSPoint(x: g.midX, y: g.midY + 0.5), r1: CGFloat = 7, r2: CGFloat = 2.8
+                for k in 0..<10 {
+                    let a = -CGFloat.pi / 2 + CGFloat(k) * CGFloat.pi / 5, r = k % 2 == 0 ? r1 : r2
+                    let pt = NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
+                    if k == 0 { path.move(to: pt) } else { path.line(to: pt) }
+                }
+                path.close()
+                if on { path.fill() } else { path.stroke() }
+            case 1:
+                path.appendOval(in: g.insetBy(dx: 1.5, dy: 1.5))
+                path.stroke()
+                if on { NSBezierPath(ovalIn: g.insetBy(dx: 5.5, dy: 5.5)).fill() }
+                else { let dot = NSBezierPath(ovalIn: g.insetBy(dx: 6.5, dy: 6.5)); dot.lineWidth = 1; dot.stroke() }
+            default:
+                // The gear: a ring with eight short teeth.
+                let c = NSPoint(x: g.midX, y: g.midY)
+                path.appendOval(in: g.insetBy(dx: 4, dy: 4))
+                for k in 0..<8 {
+                    let a = CGFloat(k) * CGFloat.pi / 4
+                    path.move(to: NSPoint(x: c.x + 4.5 * cos(a), y: c.y + 4.5 * sin(a))); path.line(to: NSPoint(x: c.x + 7.5 * cos(a), y: c.y + 7.5 * sin(a)))
+                }
+                path.stroke()
+            }
+        }
+
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
-            hits = []
+            hits = []; iconHits = []
             let right = bounds.width - insetRight
             for (i, r) in rows.enumerated() {
                 switch r {
@@ -957,23 +1059,34 @@ final class LibraryRail: StudioRail {
                     }
                     hits.append((box, place))
                     y += Self.row
-                case .palette(let name, let count, let place, let colours):
+                case .palette(let pr):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
+                    let place = StudioFrame.Place.palette(pr.id)
                     let on = place == chosen
                     if on { fill(box, Design.mist) }
-                    let x = inset + 12
-                    let nameText = Design.attributed(name, on ? .bodyStrong : .body)
+                    let x = inset + 12 + CGFloat(pr.indent) * Self.step
+                    let nameText = Design.attributed(pr.name, on ? .bodyStrong : .body)
                     nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))
                     if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + Self.line - 6, width: 4, height: 4), Design.ink) }
-                    // The second line: the colours as one strip, its bottom on the second line, the same width on every row, the count at the right.
-                    let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
-                    let strip = NSRect(x: x, y: y + Self.unit + Self.line - 10, width: right - x - 36, height: 10)
-                    if colours.isEmpty { fill(strip, Design.mist) }
-                    else {
-                        let bw = strip.width / CGFloat(colours.count)
-                        for (k, c) in colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
+                    // The second line: the colours as a strip half the row's width, then, from the right, the count and the three icons before it.
+                    let countText = Design.attributed(String(pr.count), .caption, colour: Design.quiet)
+                    let b2 = y + Self.unit + Self.line
+                    countText.draw(right: right, baseline: b2)
+                    var ix = right - countText.size().width - 12
+                    for which in [2, 1, 0] {
+                        ix -= 16
+                        let g = NSRect(x: ix, y: b2 - 13, width: 16, height: 16)
+                        let lit = (which == 0 && pr.favourite) || (which == 1 && pr.target)
+                        icon(which, in: g, on: lit, colour: lit ? Design.ink : Design.quiet)
+                        iconHits.append((g.insetBy(dx: -4, dy: -4), which, pr.id))
+                        ix -= 8
                     }
-                    countText.draw(right: right, baseline: y + Self.unit + Self.line)
+                    let strip = NSRect(x: x, y: b2 - 10, width: ((right - x) / 2).rounded(), height: 10)
+                    if pr.colours.isEmpty { fill(strip, Design.mist) }
+                    else {
+                        let bw = strip.width / CGFloat(pr.colours.count)
+                        for (k, c) in pr.colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == pr.colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
+                    }
                     hits.append((box, place))
                     y += Self.two
                 }
@@ -986,8 +1099,8 @@ final class LibraryRail: StudioRail {
                 switch r {
                 case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
                 case .row: y += Self.row
-                case .palette(let name, _, let place, let colours):
-                    if case .palette(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return (id, name, colours) }
+                case .palette(let pr):
+                    if NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return (pr.id, pr.name, pr.colours) }
                     y += Self.two
                 }
             }
@@ -996,6 +1109,14 @@ final class LibraryRail: StudioRail {
 
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
+            if let h = iconHits.first(where: { $0.0.contains(p) }) {
+                switch h.1 {
+                case 0: onFavourite?(h.2)
+                case 1: onTarget?(h.2)
+                default: onGear?(h.2, self, h.0)
+                }
+                return
+            }
             pressed = palette(at: p)
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
         }
@@ -1007,10 +1128,21 @@ final class LibraryRail: StudioRail {
         override func mouseUp(with event: NSEvent) { pressed = nil }
         func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
 
-        // MARK: A palette dropped on a member
+        // MARK: A palette dropped on a member, or on one of the member's own palettes
 
         private func member(at p: NSPoint) -> UUID? {
-            for (box, place) in hits where box.contains(p) { if case .project(let id) = place { return id } }
+            var y: CGFloat = 0
+            for (i, r) in rows.enumerated() {
+                switch r {
+                case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
+                case .row(_, _, let place, _):
+                    if case .project(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return id }
+                    y += Self.row
+                case .palette(let pr):
+                    if let m = pr.project, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return m }
+                    y += Self.two
+                }
+            }
             return nil
         }
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
