@@ -13,6 +13,17 @@ import UniformTypeIdentifiers
 final class StudioWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    /// A click anywhere that is not a field ends whatever field was being typed in, the search above all: otherwise the
+    /// quick keys, 1 and 2, go on typing into it and the page is filtered by "22" while the picks land elsewhere.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, firstResponder is NSText, let content = contentView {
+            let hit = content.hitTest(content.convert(event.locationInWindow, from: nil))
+            var inField = false, v = hit
+            while let view = v { if view is NSTextField || view is NSTextView { inField = true; break }; v = view.superview }
+            if !inField { makeFirstResponder(content) }
+        }
+        super.sendEvent(event)
+    }
 }
 
 final class StudioWindowController: NSWindowController {
@@ -680,7 +691,7 @@ final class StudioFrame: NSView {
 // MARK: - The header, 64 high
 
 /// The wordmark, the tabs, Search, the tile-size slider and the avatar, all on one baseline.
-final class StudioHeader: NSView, Overlay {
+final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
     func dismissOverlay() { closeMenu() }
     var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { needsLayout = true; needsDisplay = true } }
@@ -715,6 +726,7 @@ final class StudioHeader: NSView, Overlay {
         field.placeholderAttributedString = Design.attributed("Search", .body, colour: Design.soft)
         field.target = self
         field.action = #selector(searched)
+        field.delegate = self
         (field.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
         addSubview(field)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
@@ -832,6 +844,14 @@ final class StudioHeader: NSView, Overlay {
         super.mouseDown(with: event)
     }
     @objc private func searched() { onSearch?(field.stringValue) }
+    /// Escape in the search clears it and lets go, so the page is whole again and the quick keys work.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        guard sel == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        field.stringValue = ""
+        searched()
+        window?.makeFirstResponder(window?.contentView)
+        return true
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: field, queue: .main) { [weak self] _ in self?.searched() }
