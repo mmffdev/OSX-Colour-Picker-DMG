@@ -30,6 +30,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
     private var all: [SchemaCollection] = SchemaTrial.collections
     private var selected: Target?
     private var renaming = false
+    /// What is being typed into Custom Name, drawn on the map as it goes and written only when the typing ends,
+    /// because every write rebuilds the window and that ends the typing.
+    private var draft: String?
     private var lib: Library { library?.library ?? Library() }
 
     private func collection(_ id: UUID) -> SchemaCollection? { all.first { $0.id == id } }
@@ -288,7 +291,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             // The selected row's ground breaks the grid: from the rail's divider to the middle of the gutter between the panels.
             if on { fill(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
-            let name = Design.attributed(r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
+            let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             // The pane: from the divider under the level, the grip and the name, to the name's end plus a step; eased out, and back.
             if let v = reveal[r.target], v > 0 {
                 let full = x + 36 + name.size().width + Self.step
@@ -610,13 +613,17 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
         show()
     }
     @objc private func nameEntered() { window?.makeFirstResponder(self) }
-    /// Typing keeps the name letter by letter without rebuilding the window, which would end the editing; the rails follow when it ends.
+    /// Typing only keeps a draft, drawn on the map as it goes; nothing is written until the typing ends, since a write rebuilds the window.
     func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        if field === customName { draft = field.stringValue; needsDisplay = true }
+    }
+    func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, let what = selected, let c = collection(what.collection) else { return }
         if field === customName {
-            if case .member = what { return }   // a project is renamed when the typing ends, as it renames its files
+            draft = nil
             setName(field.stringValue)
-            needsDisplay = true
+            renaming = false
         } else if field === about {
             let text = field.stringValue
             switch what {
@@ -626,10 +633,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             }
             all = SchemaTrial.collections
         }
-    }
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        if field === customName { setName(field.stringValue); renaming = false }
         show()
     }
 }
