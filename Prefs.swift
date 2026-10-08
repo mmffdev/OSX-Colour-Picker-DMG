@@ -94,6 +94,15 @@ enum Prefs {
     /// History is kept per library (catalogue): on unless turned off for that one.
     static func historyEnabled(for catalogue: String) -> Bool { bool("history.\(catalogue)", true) }
     static func setHistoryEnabled(_ on: Bool, for catalogue: String) { d.set(on, forKey: "history.\(catalogue)") }
+
+    /// The rails' buckets that are shut, per catalogue, by each bucket's stable key: a collection, folder, member or group by its
+    /// id. Every bucket is open until shut, so only the shut ones are kept.
+    static func railShut(in catalogue: String) -> Set<String> { Set(d.stringArray(forKey: "rails.shut.\(catalogue)") ?? []) }
+    static func setRailShut(_ key: String, _ shut: Bool, in catalogue: String) {
+        var all = railShut(in: catalogue)
+        if shut { all.insert(key) } else { all.remove(key) }
+        d.set(all.sorted(), forKey: "rails.shut.\(catalogue)")
+    }
     /// How palettes are laid out: cards in a grid, or one colour to a row with its notes. One
     /// choice for every palette, so it holds as the user goes from one palette to the next.
     static var paletteListView: Bool {
