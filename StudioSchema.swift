@@ -10,7 +10,7 @@ import AppKit
 // and a template, the ones its siblings already have locked. The map and the types each scroll under their
 // header; the headers and the words stay.
 
-final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
+final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, PageSection, Overlay {
     /// The template menu open over a type row, if any.
     private var dropped: SwissDropdown.MenuPanel?
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
@@ -84,7 +84,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
     // MARK: The views
 
     private let nameField = NSTextField(string: "")
-    private let about = NSTextField(string: "")
+    /// The description: a box of five lines, each line on the beat, in its own scroll.
+    private let about = NSTextView()
+    private let aboutScroll = NSScrollView()
     private let mapScroll = NSScrollView(), typeScroll = NSScrollView()
     private let map = Canvas(), types = Canvas()
 
@@ -102,7 +104,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
     private var typeHits: [(NSRect, String)] = []
     /// The template at the right of each type row, and the one on the Custom Name row.
     private var templateHits: [(NSRect, String)] = []
-    private var customTemplateHit = NSRect.zero
     /// The rollover: what is under the pointer, and how far each pane has flown out, 0 to 1, driven by the clock.
     private var hover: Key?
     private var reveal: [Key: CGFloat] = [:]
@@ -120,20 +121,39 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
     init() {
         super.init(frame: .zero)
-        for f in [nameField, about] {
-            f.isBordered = false
-            f.drawsBackground = false
-            f.focusRingType = .none
-            f.font = Design.Text.body.font()
-            f.textColor = Design.ink
-            f.delegate = self
-            f.isHidden = true
-        }
+        nameField.isBordered = false
+        nameField.drawsBackground = false
+        nameField.focusRingType = .none
+        nameField.font = Design.Text.body.font()
+        nameField.textColor = Design.ink
+        nameField.delegate = self
+        nameField.isHidden = true
         nameField.placeholderAttributedString = Design.attributed("Name", .body, colour: Design.soft)
-        about.placeholderAttributedString = Design.attributed("Description: what this holds", .body, colour: Design.soft)
         nameField.target = self; nameField.action = #selector(nameEntered)
-        about.target = self; about.action = #selector(nameEntered)
-        for v in [nameField, about] { addSubview(v) }
+        addSubview(nameField)
+        about.drawsBackground = false
+        about.focusRingType = .none
+        about.font = Design.Text.body.font()
+        about.textColor = Design.ink
+        about.insertionPointColor = Design.ink
+        about.isRichText = false
+        about.textContainerInset = .zero
+        about.textContainer?.lineFragmentPadding = 0
+        about.isVerticallyResizable = true
+        about.isHorizontallyResizable = false
+        about.autoresizingMask = [.width]
+        about.delegate = self
+        let para = NSMutableParagraphStyle()
+        para.minimumLineHeight = Design.App.unit; para.maximumLineHeight = Design.App.unit
+        about.defaultParagraphStyle = para
+        about.typingAttributes = [.font: Design.Text.body.font(), .foregroundColor: Design.ink, .paragraphStyle: para]
+        aboutScroll.drawsBackground = false
+        aboutScroll.hasVerticalScroller = true
+        aboutScroll.autohidesScrollers = true
+        aboutScroll.scrollerStyle = .overlay
+        aboutScroll.documentView = about
+        aboutScroll.isHidden = true
+        addSubview(aboutScroll)
         for (scroll, canvas) in [(mapScroll, map), (typeScroll, types)] {
             scroll.drawsBackground = false
             scroll.hasVerticalScroller = true
@@ -362,7 +382,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
     private struct Geometry {
         var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0
-        var mapTop: CGFloat = 0, formTop: CGFloat = 0, nameRow = NSRect.zero, aboutRow: NSRect?, customRow: NSRect?, typesTop: CGFloat = 0
+        var mapTop: CGFloat = 0, formTop: CGFloat = 0, nameLabel: CGFloat = 0, nameRow = NSRect.zero, aboutLabel: CGFloat = 0, aboutRow: NSRect?, typesTop: CGFloat = 0
         var form = Form()
     }
     private func geometry(width w: CGFloat) -> Geometry {
@@ -373,15 +393,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         g.mapTop = 5 * u
         g.form = form()
         g.formTop = 5 * u
-        // Under the Type rule: a member or folder has its name and description; a typed row has its description, then the Custom Name row with the type it follows, then the types.
+        // Under the Type rule: Name over its field, Description over its box of five lines, then the types; every piece a whole number of units, so the types' rows keep the map's beat.
         var y = g.formTop
-        if g.form.offered.isEmpty {
-            if g.form.canName { g.nameRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
-            if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
-        } else {
-            if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
-            g.customRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); g.nameRow = g.customRow!; y += u
-        }
+        if g.form.canName { g.nameLabel = y; g.nameRow = NSRect(x: g.rx, y: y + u, width: g.rw, height: u); y += 2 * u }
+        if g.form.said != nil { g.aboutLabel = y; g.aboutRow = NSRect(x: g.rx, y: y + u, width: g.rw, height: 5 * u); y += 6 * u }
         g.typesTop = y
         return g
     }
@@ -411,12 +426,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         typeScroll.isHidden = typeRows.isEmpty
         // A 13 field's text sits 15 below its top: on the line.
         nameField.isHidden = selected == nil || !g.form.canName
-        let nameLeft = g.customRow == nil ? g.nameRow.minX : g.nameRow.minX + 24
-        nameField.frame = NSRect(x: nameLeft - 2, y: g.nameRow.minY + line - 15, width: g.nameRow.maxX - 150 - nameLeft, height: 20)
+        nameField.frame = NSRect(x: g.nameRow.minX - 2, y: g.nameRow.minY + line - 12, width: g.nameRow.width + 2, height: 20)
         if nameField.currentEditor() == nil { nameField.stringValue = g.form.name }
-        about.isHidden = g.aboutRow == nil
-        if let r = g.aboutRow { about.frame = NSRect(x: r.minX, y: r.minY + line - 15, width: r.width, height: 20) }
-        if about.currentEditor() == nil { about.stringValue = g.form.said ?? "" }
+        aboutScroll.isHidden = g.aboutRow == nil
+        if let r = g.aboutRow {
+            // The box's first line sits on the row's line: the text's baseline in a 28 line is 20 below the line's top.
+            aboutScroll.frame = NSRect(x: r.minX, y: r.minY + line - 20, width: r.width, height: r.height)
+            about.frame = NSRect(x: 0, y: 0, width: r.width, height: r.height)
+            about.textContainer?.containerSize = NSSize(width: r.width, height: .greatestFiniteMagnitude)
+        }
+        if window?.firstResponder !== about { about.string = g.form.said ?? "" }
     }
 
     // MARK: Drawing: the headers and words here, the map and the types on their own canvases
@@ -434,21 +453,15 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
         Design.attributed("Type", .body).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
-        customTemplateHit = .zero
-        if let r = g.customRow {
-            // The Custom Name row: its square, filled when the name is the row's own; the name; and the type it follows, chosen on its menu.
-            let b = r.minY + line
-            let sq = NSRect(x: r.minX, y: b - 10, width: 12, height: 12)
-            fill(sq, g.form.custom ? Design.ink : Design.card)
-            Design.ink.setStroke()
-            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-            let follows = g.form.custom ? (g.form.chosen ?? "Template") : "Template"
-            customTemplateHit = trailing(in: NSRect(x: r.minX, y: r.minY, width: r.width - 16, height: u), baseline: b, symbol: g.form.symbol, word: follows)
-            hairline(x: rx, y: r.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
-        } else if g.form.canName {
-            hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
+        if g.form.canName {
+            Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
+            hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.rule)
         }
-        if let r = g.aboutRow { hairline(x: rx, y: r.maxY - 1, width: g.rw, about.currentEditor() != nil ? Design.ink : Design.mist) }
+        if let r = g.aboutRow {
+            Design.attributed("Description", .label, colour: Design.quiet).draw(x: rx, baseline: g.aboutLabel + line)
+            if about.string.isEmpty && window?.firstResponder !== about { Design.attributed("What this holds", .body, colour: Design.soft).draw(x: rx, baseline: r.minY + line) }
+            hairline(x: rx, y: r.maxY - 1, width: g.rw, window?.firstResponder === about ? Design.ink : Design.rule)
+        }
     }
     /// The icon and the template at the right of a row on the Type side: the icon picker to come, and the template's word with its
     /// menu, which the app's own four types do without. Returns the rect a click opens the menu from.
@@ -591,11 +604,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         if let h = templateHits.first(where: { $0.0.contains(p) }) { openTemplates(for: h.1, under: h.0, in: types); return }
         if let h = typeHits.first(where: { $0.0.contains(p) }) { choose(type: h.1) }
     }
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        if !customTemplateHit.isEmpty, customTemplateHit.contains(p) { openCustomTemplate(under: customTemplateHit); return }
-        window?.makeFirstResponder(self)
-    }
+    override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
     /// A type's menu: the type itself, Customise, which takes the type and opens the name, and the templates saved for it, none yet.
     private func openTemplates(for type: String, under rect: NSRect, in view: NSView) {
         let M = SwissDropdown.MenuPanel.self
@@ -606,28 +615,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
             if i == 2 { self.choose(type: type); self.customise() }
         }
     }
-    /// The Custom Name row's menu: every type of the level, so a group called Lego can follow Assets.
-    private func openCustomTemplate(under rect: NSRect) {
-        let f = form()
-        openMenu(under: rect, in: self, items: f.offered, chosen: f.chosen ?? "") { [weak self] i in self?.follow(type: f.offered[i]) }
-    }
     /// The name becomes the row's own: the field takes the typing with the type's word selected, ready to be replaced.
     private func customise() {
         window?.makeFirstResponder(nameField)
         nameField.currentEditor()?.selectAll(nil)
     }
-    /// The type a custom-named group follows, changed without touching its name.
-    private func follow(type: String) {
-        guard let what = selected, let c = collection(what.collection) else { return }
-        switch what {
-        case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.kind = type; $0.role = SchemaRole.allCases.first { $0.title == type } })
-        case .instance(_, let pid, let nid, _): shape(pid) { SchemaTrial.changing(nid, in: $0) { $0.kind = type; $0.role = SchemaRole.allCases.first { $0.title == type } } }
-        case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.name = type }
-        case .tier(let cid): SchemaTrial.changeCollection(cid) { $0.folderName = type }
-        case .folder, .member: return
-        }
-        show()
-    }
+
     /// What can be put in another order: a collection among the collections, a folder among the folders, a group among its siblings, a member among the members.
     private func canDrag(_ t: Target) -> Bool {
         switch t {
@@ -905,13 +898,19 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         guard let field = obj.object as? NSTextField else { return }
         if field === nameField { draft = field.stringValue; map.needsDisplay = true }
     }
+    func textDidEndEditing(_ notification: Notification) { describe(about.string); show() }
+    func textDidBeginEditing(_ notification: Notification) { needsDisplay = true }
     func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, let what = selected, let c = collection(what.collection) else { return }
+        guard let field = obj.object as? NSTextField, let what = selected, collection(what.collection) != nil else { return }
         if field === nameField {
             draft = nil
             setName(field.stringValue)
-        } else if field === about {
-            let text = field.stringValue
+        }
+        show()
+    }
+    private func describe(_ text: String) {
+        guard let what = selected, let c = collection(what.collection) else { return }
+        do {
             switch what {
             case .collection(let cid): SchemaTrial.changeCollection(cid) { $0.about = text }
             case .node(let cid, let nid, _): keep(cid, SchemaTrial.changing(nid, in: c.stack) { $0.about = text })
@@ -924,7 +923,6 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
             }
             all = SchemaTrial.collections
         }
-        show()
     }
 }
 
