@@ -191,6 +191,10 @@ enum Design {
         /// another; a two-line row is two units, a header row one. The overlay draws it (Rick, 2026-10-08).
         static let unit: CGFloat = 24
         static let textBaseline: CGFloat = 17
+        /// A row's ground reaches this far below its unit: with the baseline at 17, capitals sit centred in the unit, but the
+        /// descenders leave the bottom tight to the eye, so the band runs on to sit even around the whole word. Nothing moves for it.
+        static let groundBelow: CGFloat = 4
+        static func ground(_ box: NSRect) -> NSRect { NSRect(x: box.minX, y: box.minY, width: box.width, height: box.height + groundBelow) }
         /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
         static var masterGrid = false
         static let gridColour = hex("#FCC80A")

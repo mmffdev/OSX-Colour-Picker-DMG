@@ -1131,7 +1131,7 @@ final class LibraryRail: StudioRail {
                 case .row(let name, let count, let place, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let on = place == chosen
-                    if on { fill(box, Design.mist) }
+                    if on { fill(Design.App.ground(box), Design.mist) }
                     // Rows sit one small step in from their group's header, so the groups read as groups.
                     let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
@@ -1162,7 +1162,7 @@ final class LibraryRail: StudioRail {
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
                     let place = StudioFrame.Place.palette(pr.id)
                     let on = place == chosen
-                    if on { fill(box, Design.mist) }
+                    if on { fill(Design.App.ground(box), Design.mist) }
                     let x = inset + 12 + CGFloat(pr.indent) * Self.step
                     let nameText = Design.attributed(pr.name, on ? .bodyStrong : .body)
                     if renaming != place {
@@ -1384,7 +1384,7 @@ final class PaletteTable: StudioRail {
                     y += Self.group
                 case .palette(let id, let name, let count, let colours, let chosen, let indent):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                    if chosen { fill(box, Design.mist) }
+                    if chosen { fill(Design.App.ground(box), Design.mist) }
                     let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
                     // The whole palette as a strip, each colour an equal band; an empty one is Mist.
                     let strip = NSRect(x: x, y: b - 9, width: Self.strip, height: 10)
@@ -1403,7 +1403,7 @@ final class PaletteTable: StudioRail {
                     y += Self.row
                 case .item(let name, let detail, let indent, let place, let chosen):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                    if chosen { fill(box, Design.mist) }
+                    if chosen { fill(Design.App.ground(box), Design.mist) }
                     let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
                     let detailText = Design.attributed(detail ?? "", .caption, colour: Design.quiet)
                     let dim = place == nil && detail == nil && name == "None found"

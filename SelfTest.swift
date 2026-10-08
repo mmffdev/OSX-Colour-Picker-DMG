@@ -1228,9 +1228,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let real = Catalogues.standard
     check(real.previousURL?.path.hasSuffix("/MMFFDev Colour 2/library.json") == true
           && real.legacyURL?.path.hasSuffix("/MMFFDev Colour/library.json") == true
-          && real.previousURL != real.store(for: Catalogues.mainName).url,
+          && real.previousURL?.path.hasPrefix(real.root.path + "/") == false,
           "the app looks for earlier libraries in the version 1 and version 2 folders, not its own")
-    check(real.store(for: "Some other catalogue").previousURL == nil, "only Main is seeded from an earlier version")
+    // On a scratch root, never the real home: a store made here would leave a folder in the user's catalogues.
+    var scratch = Catalogues(root: v3Dir.appendingPathComponent("scratch-home"), legacyURL: nil)
+    scratch.previousURL = v2File
+    check(scratch.store(for: Catalogues.mainName).previousURL == v2File && scratch.store(for: "Some other catalogue").previousURL == nil,
+          "only Main is seeded from an earlier version")
 }
 
 func runHaloTests(check: (Bool, String) -> Void) {

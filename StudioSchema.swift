@@ -314,14 +314,14 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
             let box = g.mapRows[i], b = box.minY + line
             let on = r.target == selected
             // The selected row's ground breaks the grid: from the rail's divider to the middle of the gutter between the panels.
-            if on { fill(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height), Design.mist) }
+            if on { fill(Design.App.ground(NSRect(x: 0, y: box.minY, width: box.maxX + Design.App.gutter / 2, height: box.height)), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             // The pane: from the divider under the level, the grip and the name, to the name's end plus a step; eased out, and back.
             if let v = reveal[r.target], v > 0 {
                 let full = x + 36 + name.size().width + Self.step
                 let eased = 1 - pow(1 - v, 3)
-                fill(NSRect(x: 0, y: box.minY, width: (full * eased).rounded(), height: box.height), Design.App.gridColour)
+                fill(Design.App.ground(NSRect(x: 0, y: box.minY, width: (full * eased).rounded(), height: box.height)), Design.App.gridColour)
             }
             Design.attributed("\(r.level)", .caption, colour: Design.soft).draw(x: x, baseline: b)
             // The grip between the level and the name: two columns of three dots; a drag from it puts the row in another order among its own.
