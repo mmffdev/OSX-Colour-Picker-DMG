@@ -291,3 +291,12 @@ enum RowMark {
         img.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }
+
+extension Design {
+    /// The halo's own mark: a ring, as the dial is, with a smaller ring inside it. Drawn in a 16 box.
+    static func haloMark(in g: NSRect, colour: NSColor) {
+        colour.setStroke()
+        let outer = NSBezierPath(ovalIn: g.insetBy(dx: 2, dy: 2)); outer.lineWidth = 2; outer.stroke()
+        let inner = NSBezierPath(ovalIn: g.insetBy(dx: 5.5, dy: 5.5)); inner.lineWidth = 1; inner.stroke()
+    }
+}

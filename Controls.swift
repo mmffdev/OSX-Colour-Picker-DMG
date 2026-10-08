@@ -333,8 +333,9 @@ enum SwissConfirm {
     }
 
     /// A name asked for: a field on a hairline, the one button primary, a word under the field when the name will not do.
-    static func name(over window: NSWindow?, title: String, note: String, placeholder: String, confirm: String, check: @escaping (String) -> String?, then: @escaping (String) -> Void) {
+    static func name(over window: NSWindow?, title: String, note: String, placeholder: String, value: String = "", confirm: String, check: @escaping (String) -> String?, then: @escaping (String) -> Void) {
         let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: confirm, naming: (placeholder, check))
+        panel.preset(value)
         panel.present(over: window) { _ in then(panel.text) }
     }
 
@@ -366,6 +367,8 @@ enum SwissConfirm {
         private let check: ((String) -> String?)?
         var onEscape: (() -> Void)?
         var text: String { field?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        /// Words already in the field when it opens, to be changed rather than typed from nothing.
+        func preset(_ s: String) { field?.stringValue = s }
         private weak var host: NSWindow?
 
         init(title: String, note: String, commit: String?, options: [String], must: String? = nil, escapes: Bool = false, naming: (String, (String) -> String?)? = nil) {

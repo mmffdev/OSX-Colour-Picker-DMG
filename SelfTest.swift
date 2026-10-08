@@ -1873,9 +1873,12 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(near(typedLab.master.lab.l, 52, 0.001) && near(typedLab.master.lab.a, 60, 0.001) && ColourDefinition.cmyk([0, 0, 0, 0], press: "No Such Press") == nil
           && wideLib.addColour(typedLab, at: t).map { ColourFormat.lab.fields($0) } == ["52.0", "60.0", "40.0"],
           "a colour given as Lab keeps those very values; a build for a press that is not here is refused")
+    let plainPick = ColourDefinition.picked(NSColor(srgbRed: 79.0 / 255, green: 128.0 / 255, blue: 147.0 / 255, alpha: 1))
+    let plainPickKey = plainPick.flatMap { wideLib.addColour($0, at: t) }
     check(ColourDefinition.picked(NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1))?.source.space == RGBSpace.displayP3.rawValue
-          && ColourDefinition.picked(NSColor(srgbRed: 79.0 / 255, green: 128.0 / 255, blue: 147.0 / 255, alpha: 1))?.sourceText == plainRGB.sourceText,
-          "a pick from a wide screen is kept in Display P3 when sRGB cannot hold it, and as a plain hex when it can")
+          && plainPick?.source.space == RGBSpace.displayP3.rawValue && plainPickKey == "#4F8093"
+          && wideLib.colours.first { $0.hex == "#4F8093" }?.source?.space == RGBSpace.displayP3.rawValue,
+          "a pick is kept whole as the Display P3 the screen showed; one sRGB can hold is keyed by its hex, as ever, with its exact values on the record")
     check(vivid.master.display.colorSpace == .displayP3 && near(Double(vivid.master.display.redComponent), 1, 0.001) && near(Double(vivid.master.display.greenComponent), 0, 0.001)
           && vivid.master.fits(.displayP3) && !vivid.master.fits(.srgb) && !RGBSpace.rec2020.master(of: [0, 1, 0]).fits(.displayP3) && plainRGB.master.shows(on: nil) && !vivid.master.shows(on: nil),
           "a proof chip is painted in Display P3, so a colour beyond sRGB is not flattened; a colour beyond the screen is known to be so")
