@@ -180,6 +180,18 @@ final class StudioFrame: NSView {
             self.library.apply("Move Palette") { $0.move(palette, to: member, index: 0) }
             self.go(.project(member))
         }
+        // A name typed over its words on either rail, written once the typing ends: a palette, a member, or a folder.
+        let rename: (StudioFrame.Place, String) -> Void = { [weak self] p, name in
+            guard let self = self else { return }
+            switch p {
+            case .palette(let id): self.library.rename(id, to: name)
+            case .project(let id): self.library.apply("Rename Member") { $0.renameProject(id, to: name) }
+            case .folder(let c, let f): SchemaTrial.changeCollection(c) { col in if let i = col.folders.firstIndex(where: { $0.id == f }) { col.folders[i].name = name } }
+            default: break
+            }
+        }
+        rail1.onRename = rename
+        rail2.onRename = rename
         rail1.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
         rail1.onTarget = { [weak self] id in guard let self = self else { return }; self.library.setTarget(self.library.library.activeSwatchID == id ? nil : id) }
         rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
@@ -392,9 +404,30 @@ final class StudioFrame: NSView {
             .palette(LibraryRail.PaletteRow(id: s.id, name: s.name, count: s.entries.count, colours: s.entries.map { Design.hex($0.hex) },
                                             favourite: s.favourite, target: lib.activeSwatchID == s.id, project: project, indent: indent))
         }
-        /// A member, then its palettes one step in, each with its icons, so picks can be sent to any of them from here.
+        /// A member, then its stack as the schema lays it out, each group one step in with what it holds: the palettes
+        /// under the Palettes group and the typography palettes under Typography, each with its icons, so picks can be
+        /// sent to any of them from here; a member whose stack has no groups lists its palettes straight beneath it.
         func memberRows(_ p: Project, indent: Int) -> [LibraryRail.Row] {
-            [.row(p.name, palettes(lib.palettes(in: p.id)).count, .project(p.id), indent)] + palettes(lib.palettes(in: p.id)).map { two($0, in: p.id, indent: indent + 1) }
+            let held = lib.palettes(in: p.id), colours = palettes(held), type = held.filter { $0.isTypography }
+            var out: [LibraryRail.Row] = [.row(p.name, colours.count, .project(p.id), indent)]
+            let stack = SchemaTrial.rows(of: SchemaTrial.schema(for: p.id)).filter { $0.level >= 2 }
+            if stack.isEmpty { return out + colours.map { two($0, in: p.id, indent: indent + 1) } }
+            for (node, level) in stack {
+                let at = indent + level - 1
+                switch SchemaTrial.role(of: node) {
+                case .palettes?:
+                    out.append(.node(node.name, colours.count, p.id, at, true))
+                    out += colours.map { two($0, in: p.id, indent: at + 1) }
+                case .typography?:
+                    out.append(.node(node.name, type.count, p.id, at, false))
+                    out += type.map { two($0, in: p.id, indent: at + 1) }
+                case .tags?:
+                    out.append(.node(node.name, lib.allTags.filter { lib.project(ofTag: $0) == p.id }.count, p.id, at, false))
+                case .information?, nil:
+                    out.append(.node(node.name, 0, p.id, at, false))
+                }
+            }
+            return out
         }
         let favourites = palettes(lib.orderedFavourites)
         if !favourites.isEmpty {
@@ -917,8 +950,11 @@ final class LibraryRail: StudioRail {
     /// A group label; a row with its count; a palette on two lines, its name over its colours with the count on the second line.
     /// A palette row: its name, count, colours, whether it is a favourite and the picks' target, and the member it sits in, at an indent.
     struct PaletteRow { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let favourite: Bool; let target: Bool; let project: UUID?; let indent: Int }
-    enum Row { case group(String), row(String, Int, StudioFrame.Place, Int), palette(PaletteRow) }
+    /// A group of a member's stack: its name, what it holds, the member, its indent, and whether a palette can be dropped on it.
+    enum Row { case group(String), row(String, Int, StudioFrame.Place, Int), palette(PaletteRow), node(String, Int, UUID, Int, Bool) }
     var onPick: ((StudioFrame.Place) -> Void)?
+    /// A name typed over where it is drawn: the place renamed, and the new name.
+    var onRename: ((StudioFrame.Place, String) -> Void)?
     /// A palette dropped on a member: the palette, then the member it lands in.
     var onDrop: ((UUID, UUID) -> Void)?
     /// The three icons on a palette row: the star, the picks' target, and the gear, which opens the halo over the icon's rect in the body's coordinates.
@@ -933,6 +969,7 @@ final class LibraryRail: StudioRail {
     init() {
         super.init(body: Body()); heading = "Library"; labels = ("Name", "Count")
         list.onPick = { [weak self] p in self?.onPick?(p) }
+        list.onRename = { [weak self] p, n in self?.onRename?(p, n) }
         list.onDrop = { [weak self] s, m in self?.onDrop?(s, m) }
         list.onFavourite = { [weak self] id in self?.onFavourite?(id) }
         list.onTarget = { [weak self] id in self?.onTarget?(id) }
@@ -962,6 +999,8 @@ final class LibraryRail: StudioRail {
             case .palette(let pr):
                 if groupPlace == nil { groupPlace = .palette(pr.id) }
                 if .palette(pr.id) == list.chosen { groupHas = true }
+            case .node(_, _, let pid, _, _):
+                if groupPlace == nil { groupPlace = .project(pid) }
             }
         }
         if let p = groupPlace { marks.append((p, groupHas, groupName)) }
@@ -1003,6 +1042,7 @@ final class LibraryRail: StudioRail {
         var rows: [Row] = []
         var chosen: StudioFrame.Place = .catalogue
         var onPick: ((StudioFrame.Place) -> Void)?
+        var onRename: ((StudioFrame.Place, String) -> Void)?
         var onDrop: ((UUID, UUID) -> Void)?
         var onFavourite: ((UUID) -> Void)?
         var onTarget: ((UUID) -> Void)?
@@ -1014,6 +1054,10 @@ final class LibraryRail: StudioRail {
         static var groupAbove: CGFloat { unit }
         static let step: CGFloat = 16
         private var hits: [(NSRect, StudioFrame.Place)] = []
+        /// Every name that can be renamed where it is: its rect, with the line at `line` into it, its place, its words and its style.
+        private var nameHits: [(NSRect, StudioFrame.Place, String, Design.Text)] = []
+        /// The place whose name is being typed over, so the drawn name stays out of the field's way.
+        private var renaming: StudioFrame.Place?
         /// The palette under the mouse at mouseDown, so a drag can take it; the member a drag is over.
         private var pressed: (UUID, String, [NSColor])?
         private var target: UUID?
@@ -1027,7 +1071,7 @@ final class LibraryRail: StudioRail {
             for (i, r) in rows.enumerated() {
                 switch r {
                 case .group: h += (i == 0 ? 0 : Self.groupAbove) + Self.row
-                case .row: h += Self.row
+                case .row, .node: h += Self.row
                 case .palette: h += Self.two
                 }
             }
@@ -1067,8 +1111,13 @@ final class LibraryRail: StudioRail {
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
-            hits = []; iconHits = []
+            hits = []; iconHits = []; nameHits = []
             let right = bounds.width - insetRight
+            /// A member lit while a palette is dragged over it, or a group of its stack that takes the drop: a one-point ink edge.
+            func edge(_ box: NSRect) {
+                Design.ink.setStroke()
+                let e = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+            }
             for (i, r) in rows.enumerated() {
                 switch r {
                 case .group(let title):
@@ -1084,16 +1133,27 @@ final class LibraryRail: StudioRail {
                     let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
                     let countW = countText.size().width
-                    let nameText = Design.attributed(name, on ? .bodyStrong : .body)
-                    nameText.draw(x: x, baseline: b, width: right - x - countW - 12 - (on ? 10 : 0))
-                    if on { fill(NSRect(x: x + min(nameText.size().width, right - x - countW - 22) + 6, y: b - 6, width: 4, height: 4), Design.ink) }
-                    countText.draw(right: right, baseline: b)
-                    // A member lit while a palette is dragged over it: a one-point ink edge.
-                    if case .project(let id) = place, id == target {
-                        Design.ink.setStroke()
-                        let e = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+                    let nameText = Design.attributed(name, on ? .bodyStrong : .body), nameW = right - x - countW - 12
+                    if renaming != place {
+                        nameText.draw(x: x, baseline: b, width: nameW - (on ? 10 : 0))
+                        if on { fill(NSRect(x: x + min(nameText.size().width, right - x - countW - 22) + 6, y: b - 6, width: 4, height: 4), Design.ink) }
                     }
+                    switch place {
+                    case .project, .folder: nameHits.append((NSRect(x: x, y: y, width: nameW, height: Self.row), place, name, on ? .bodyStrong : .body))
+                    default: break
+                    }
+                    countText.draw(right: right, baseline: b)
+                    if case .project(let id) = place, id == target { edge(box) }
                     hits.append((box, place))
+                    y += Self.row
+                case .node(let name, let count, let pid, let indent, let drop):
+                    let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
+                    let b = y + Self.line, x = inset + 12 + CGFloat(indent) * Self.step
+                    let countText = Design.attributed(count > 0 ? String(count) : "", .caption, colour: Design.quiet)
+                    Design.attributed(name, .body).draw(x: x, baseline: b, width: right - x - countText.size().width - 12)
+                    countText.draw(right: right, baseline: b)
+                    if drop, pid == target { edge(box) }
+                    hits.append((box, .project(pid)))
                     y += Self.row
                 case .palette(let pr):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
@@ -1102,8 +1162,11 @@ final class LibraryRail: StudioRail {
                     if on { fill(box, Design.mist) }
                     let x = inset + 12 + CGFloat(pr.indent) * Self.step
                     let nameText = Design.attributed(pr.name, on ? .bodyStrong : .body)
-                    nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))
-                    if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + Self.line - 6, width: 4, height: 4), Design.ink) }
+                    if renaming != place {
+                        nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))
+                        if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + Self.line - 6, width: 4, height: 4), Design.ink) }
+                    }
+                    nameHits.append((NSRect(x: x, y: y, width: right - x, height: Self.row), place, pr.name, on ? .bodyStrong : .body))
                     // The second line: the colours as a strip half the row's width, then, from the right, the count and the three icons before it.
                     let countText = Design.attributed(String(pr.count), .caption, colour: Design.quiet)
                     let b2 = y + Self.unit + Self.line
@@ -1134,7 +1197,7 @@ final class LibraryRail: StudioRail {
             for (i, r) in rows.enumerated() {
                 switch r {
                 case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
-                case .row: y += Self.row
+                case .row, .node: y += Self.row
                 case .palette(let pr):
                     if NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return (pr.id, pr.name, pr.colours) }
                     y += Self.two
@@ -1153,8 +1216,17 @@ final class LibraryRail: StudioRail {
                 }
                 return
             }
+            if event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) { rename(h, at: p); return }
             pressed = palette(at: p)
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
+        }
+        /// A double-click on a name: the cursor goes into the words where they are, and the name is written when the typing ends.
+        private func rename(_ h: (NSRect, StudioFrame.Place, String, Design.Text), at p: NSPoint) {
+            renaming = h.1; needsDisplay = true
+            InlineName.edit(h.2, style: h.3, in: self, x: h.0.minX, baseline: h.0.minY + Self.line, width: h.0.width, at: p) { [weak self] name in
+                self?.renaming = nil; self?.needsDisplay = true
+                if let n = name, n != h.2 { self?.onRename?(h.1, n) }
+            }
         }
         override func mouseDragged(with event: NSEvent) {
             guard let (id, name, colours) = pressed else { return }
@@ -1173,6 +1245,9 @@ final class LibraryRail: StudioRail {
                 case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
                 case .row(_, _, let place, _):
                     if case .project(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return id }
+                    y += Self.row
+                case .node(_, _, let pid, _, let drop):
+                    if drop, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return pid }
                     y += Self.row
                 case .palette(let pr):
                     if let m = pr.project, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return m }
@@ -1242,8 +1317,13 @@ final class PaletteTable: StudioRail {
         case divider(String)
     }
     var onPick: ((StudioFrame.Place) -> Void)?
+    var onRename: ((StudioFrame.Place, String) -> Void)?
     private var table: Body { body as! Body }
-    init() { super.init(body: Body()); labels = ("Palette", "Colours"); table.onPick = { [weak self] p in self?.onPick?(p) } }
+    init() {
+        super.init(body: Body()); labels = ("Palette", "Colours")
+        table.onPick = { [weak self] p in self?.onPick?(p) }
+        table.onRename = { [weak self] p, n in self?.onRename?(p, n) }
+    }
     required init?(coder: NSCoder) { fatalError() }
     func set(heading: String, labels: (String, String), rows: [Row]) {
         self.heading = heading; self.labels = labels; table.rows = rows; needsLayout = true
@@ -1264,11 +1344,14 @@ final class PaletteTable: StudioRail {
     final class Body: RailBody, NSDraggingSource {
         var rows: [Row] = []
         var onPick: ((StudioFrame.Place) -> Void)?
+        var onRename: ((StudioFrame.Place, String) -> Void)?
         static var row: CGFloat { unit }
         static var group: CGFloat { unit }
         static var divider: CGFloat { unit }
         static let step: CGFloat = 16, strip: CGFloat = 44
         private var hits: [(NSRect, StudioFrame.Place)] = []
+        private var nameHits: [(NSRect, StudioFrame.Place, String, Design.Text)] = []
+        private var renaming: StudioFrame.Place?
         private var pressed: (UUID, String, [NSColor])?
         static func height(of r: Row) -> CGFloat {
             switch r { case .group: return group; case .divider: return divider; default: return row }
@@ -1278,7 +1361,7 @@ final class PaletteTable: StudioRail {
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
             let right = bounds.width - insetRight
-            hits = []
+            hits = []; nameHits = []
             for r in rows {
                 switch r {
                 case .group(let name, let indent):
@@ -1297,7 +1380,9 @@ final class PaletteTable: StudioRail {
                         for (k, c) in colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
                     }
                     let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
-                    Design.attributed(name, chosen ? .bodyStrong : .body).draw(x: x + Self.strip + 10, baseline: b, width: right - x - Self.strip - 10 - countText.size().width - 12)
+                    let nameX = x + Self.strip + 10, nameW = right - nameX - countText.size().width - 12
+                    if renaming != .palette(id) { Design.attributed(name, chosen ? .bodyStrong : .body).draw(x: nameX, baseline: b, width: nameW) }
+                    nameHits.append((NSRect(x: nameX, y: y, width: nameW, height: Self.row), .palette(id), name, chosen ? .bodyStrong : .body))
                     countText.draw(right: right, baseline: b)
                     hairline(x: inset, y: y + Self.row - 1, width: right - inset, Design.mist)
                     hits.append((box, .palette(id)))
@@ -1308,7 +1393,9 @@ final class PaletteTable: StudioRail {
                     let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
                     let detailText = Design.attributed(detail ?? "", .caption, colour: Design.quiet)
                     let dim = place == nil && detail == nil && name == "None found"
-                    Design.attributed(name, chosen ? .bodyStrong : .body, colour: dim ? Design.soft : Design.ink).draw(x: x, baseline: b, width: right - x - detailText.size().width - 12)
+                    let nameW = right - x - detailText.size().width - 12
+                    if renaming == nil || renaming != place { Design.attributed(name, chosen ? .bodyStrong : .body, colour: dim ? Design.soft : Design.ink).draw(x: x, baseline: b, width: nameW) }
+                    if case .project? = place { nameHits.append((NSRect(x: x, y: y, width: nameW, height: Self.row), place!, name, chosen ? .bodyStrong : .body)) }
                     if detail != nil { detailText.draw(right: right, baseline: b) }
                     hairline(x: inset, y: y + Self.row - 1, width: right - inset, Design.mist)
                     if let p = place { hits.append((box, p)) }
@@ -1332,6 +1419,14 @@ final class PaletteTable: StudioRail {
         }
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
+            if event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) {
+                renaming = h.1; needsDisplay = true
+                InlineName.edit(h.2, style: h.3, in: self, x: h.0.minX, baseline: h.0.minY + Self.line, width: h.0.width, at: p) { [weak self] name in
+                    self?.renaming = nil; self?.needsDisplay = true
+                    if let n = name, n != h.2 { self?.onRename?(h.1, n) }
+                }
+                return
+            }
             pressed = palette(at: p)
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
         }

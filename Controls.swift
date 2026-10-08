@@ -514,3 +514,51 @@ enum SwissConfirm {
         }
     }
 }
+
+/// A name edited where it is drawn: a double-click puts the cursor straight into the words, in the same type, no box
+/// and no change of weight, and the name is written when the typing ends, on Return or a click elsewhere. Escape
+/// leaves the name as it was. The host stops drawing the name while the field is over it.
+final class InlineName: NSTextField, NSTextFieldDelegate {
+    private var done: ((String?) -> Void)?
+    private var finished = false
+
+    /// `baseline` is the line the host draws the name on, in the host's flipped coordinates; `at` is the click, so the cursor lands in the word under it.
+    static func edit(_ name: String, style: Design.Text, in host: NSView, x: CGFloat, baseline: CGFloat, width: CGFloat, at p: NSPoint, then: @escaping (String?) -> Void) {
+        let f = InlineName(string: name)
+        f.done = then
+        f.isBordered = false
+        f.drawsBackground = false
+        f.focusRingType = .none
+        f.font = style.font()
+        f.textColor = Design.ink
+        f.cell?.wraps = false
+        f.cell?.isScrollable = true
+        f.delegate = f
+        let font = style.font()
+        // The cell draws its text two points in from the top and the left; the frame is set so the field's baseline is the drawn one.
+        f.frame = NSRect(x: x - 2, y: baseline - font.ascender - 2, width: width + 4, height: font.ascender - font.descender + 4)
+        host.addSubview(f)
+        host.window?.makeFirstResponder(f)
+        if let tv = f.currentEditor() as? NSTextView {
+            tv.insertionPointColor = Design.ink
+            let i = tv.characterIndexForInsertion(at: tv.convert(p, from: host))
+            tv.setSelectedRange(NSRange(location: min(i, (name as NSString).length), length: 0))
+        }
+    }
+    func controlTextDidEndEditing(_ obj: Notification) { finish(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if sel == #selector(NSResponder.cancelOperation(_:)) { finish(nil); return true }
+        return false
+    }
+    private func finish(_ name: String?) {
+        guard !finished else { return }
+        finished = true
+        let d = done; done = nil
+        // The field goes on the next turn: it is still ending its edit while this is called.
+        DispatchQueue.main.async { [weak self] in
+            if self?.window?.firstResponder === self?.currentEditor() { self?.window?.makeFirstResponder(nil) }
+            self?.removeFromSuperview()
+            d?(name.flatMap { $0.isEmpty ? nil : $0 })
+        }
+    }
+}
