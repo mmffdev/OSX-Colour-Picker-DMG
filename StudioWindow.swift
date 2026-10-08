@@ -1390,8 +1390,8 @@ final class TileGrid: NSView {
                 let bw = block.width / CGFloat(it.colours.count)
                 for (k, c) in it.colours.enumerated() { fill(NSRect(x: block.minX + CGFloat(k) * bw, y: block.minY, width: k == it.colours.count - 1 ? block.width - CGFloat(k) * bw : bw + 0.5, height: block.height), c) }
             }
-            Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 12, baseline: block.maxY + Design.App.textBaseline, width: r.width - 24)
-            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 12, baseline: block.maxY + Design.App.unit + Design.App.textBaseline, width: r.width - 24)
+            Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 6, baseline: block.maxY + Design.App.textBaseline, width: r.width - 12)
+            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 6, baseline: block.maxY + Design.App.unit + Design.App.textBaseline, width: r.width - 12)
             if let h = it.hex, h == chosenHex {
                 // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
                 Design.rule.setStroke()
