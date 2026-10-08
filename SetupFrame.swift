@@ -305,8 +305,24 @@ enum SetupDraft {
 }
 
 enum Relaunch {
+    /// Whether a debugger (Xcode) is attached: a relaunch would end its session, which reads as the app dying.
+    static var debugged: Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0 else { return false }
+        return info.kp_proc.p_flag & P_TRACED != 0
+    }
+
     /// Opens a fresh copy of the app and quits this one.
     static func now() {
+        if debugged {
+            let a = NSAlert()
+            a.messageText = "Run it again from Xcode"
+            a.informativeText = "macOS applies what you just allowed to a fresh copy of the app. Outside Xcode the app reopens itself; under the debugger that would end the session, so stop and press Run again."
+            a.runModal()
+            return
+        }
         let bundle = Bundle.main.bundleURL
         if bundle.pathExtension == "app" {
             let c = NSWorkspace.OpenConfiguration()

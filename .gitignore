@@ -7,5 +7,4 @@ release/
 .swiftpm/
 xcuserdata/
 .env
-appstore/*.xcodeproj/
 appstore/build/

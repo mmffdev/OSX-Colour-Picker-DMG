@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROJECT="appstore/MMFFDevColour3Store.xcodeproj"
+PROJECT="Colorgain Store.xcodeproj"
 SCHEME="Colorgain"
 DERIVED="appstore/build"
 APP="$DERIVED/Build/Products/Release/MMFFDev Colour 3.app"
@@ -21,7 +21,7 @@ MODE="${1:-build}"
 
 command -v xcodegen >/dev/null || { echo "xcodegen is needed: brew install xcodegen"; exit 1; }
 echo "generating project..."
-xcodegen generate --spec appstore/project.yml --project appstore --quiet
+xcodegen generate --spec appstore/project.yml --project . --quiet
 
 if [ "$MODE" = "archive" ]; then
     ARCHIVE="$DERIVED/MMFFDevColour3.xcarchive"

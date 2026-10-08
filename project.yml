@@ -33,6 +33,7 @@ targets:
           - Package.swift
           - project.yml
           - Colorgain.xcodeproj
+          - Colorgain Store.xcodeproj
           - appstore
           - "helper/**"
           - vendor

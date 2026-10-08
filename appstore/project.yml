@@ -4,8 +4,10 @@
 # built with APPSTORE set so that what the Store cannot carry (Sparkle, the root helper and the rest,
 # see .claude/c_appstore_backlog.md) compiles out.
 #
-# Regenerate after adding or removing a .swift file: ./make_appstore.sh does it every time.
-name: MMFFDevColour3Store
+# The project is written to the repository root as "Colorgain Store.xcodeproj", beside Colorgain.xcodeproj
+# for the direct download, and committed like it. Regenerate after adding or removing a .swift file:
+# ./make_appstore.sh does it every time, or `xcodegen generate --spec appstore/project.yml --project .`
+name: Colorgain Store
 options:
   xcodeVersion: "27.0"
   deploymentTarget:
@@ -26,7 +28,7 @@ targets:
       - path: ..
         name: Sources
         includes: ["*.swift"]
-        excludes: ["Package.swift", "appstore", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
+        excludes: ["Package.swift", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html", "appstore", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
       - path: ../AppIcon.icns
         buildPhase: resources
       - path: ../icons
@@ -39,8 +41,8 @@ targets:
         EXECUTABLE_NAME: MMFFDevColour3
         PRODUCT_BUNDLE_IDENTIFIER: com.mmffdev.mmffdevcolour3
         GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: $(SRCROOT)/../Info.plist
-        CODE_SIGN_ENTITLEMENTS: $(SRCROOT)/MMFFDevColour3.entitlements
+        INFOPLIST_FILE: $(SRCROOT)/Info.plist
+        CODE_SIGN_ENTITLEMENTS: $(SRCROOT)/appstore/MMFFDevColour3.entitlements
         # Developer ID by hand, so Cmd+B and Cmd+R work with the one certificate this Mac has; the sandbox
         # still applies, and bookmarks hold since the identity is real. The archive switches to automatic
         # signing with Apple Distribution (make_appstore.sh archive).
@@ -74,7 +76,7 @@ targets:
               /usr/libexec/PlistBuddy -c "Delete :$key" "$plist" 2>/dev/null || true
           done
           /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOSX_DEPLOYMENT_TARGET" "$plist"
-          cd "$SRCROOT/.."
+          cd "$SRCROOT"
           if git rev-parse --git-dir >/dev/null 2>&1; then
               build="$(git rev-list --count HEAD)"
               commit="$(git rev-parse --short HEAD)"
