@@ -2259,9 +2259,13 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     private func askToRemove(_ items: Set<Item>) {
         guard let e = expanded, let lib = contents, !items.isEmpty else { return }
         let picked = gather(items, in: lib)
-        let what = [picked.projects.isEmpty ? nil : plural(picked.projects.count, "member"), picked.palettes.isEmpty ? nil : plural(picked.palettes.count, "palette")].compactMap { $0 }.joined(separator: " and ")
-        SwissConfirm.ask(over: window, title: items.count == 1 ? "Remove 1 Item" : "Remove \(items.count) Items",
-                         note: "\(what.prefix(1).uppercased() + what.dropFirst()) go from \(e) for good, a member's palettes with it; the colours stay in the catalogue. Slide across to go on.",
+        // The title is the act and its object; the note names what, then what it means.
+        let title = picked.projects.isEmpty ? (picked.palettes.count == 1 ? "Remove Palette" : "Remove Palettes")
+            : items.count == picked.projects.count ? (picked.projects.count == 1 ? "Remove Member" : "Remove Members") : "Remove Items"
+        let names = (picked.projects.map { $0.name } + picked.palettes.filter { s in !picked.projects.contains { $0.id == s.projectID } }.map { $0.name })
+        let listed = names.count <= 3 ? names.joined(separator: ", ") : "\(names.prefix(2).joined(separator: ", ")) and \(names.count - 2) more"
+        SwissConfirm.ask(over: window, title: title,
+                         note: "You are about to remove \(listed) from \(e). It goes for good, a member's palettes with it; the colours stay in the catalogue. Slide across to go on.",
                          commit: "Remove") { [weak self] in
             guard let self = self else { return }
             do {
@@ -2298,8 +2302,8 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         let lib = libraryFor(e)
         let held = lib.map { "\(e) holds \(plural($0.projects.count, "member")), \(plural($0.swatches.count, "palette")) and \(plural($0.colours.count, "colour")). " } ?? ""
         let targets = others
-        SwissConfirm.ask(over: window, title: "Remove \(e)",
-                         note: held + "The catalogue's folder goes to the Bin with everything still in it, and it comes off the list. Choose where its contents go, then slide across.",
+        SwissConfirm.ask(over: window, title: "Remove Catalogue",
+                         note: "You are about to remove \(e). " + held + "The catalogue's folder goes to the Bin with everything still in it, and it comes off the list. Choose where its contents go, then slide across.",
                          commit: "Remove",
                          options: ["Bin Everything With The Folder"] + targets.map { "Move Everything To \($0)" }) { [weak self] choice in
             guard let self = self else { return }

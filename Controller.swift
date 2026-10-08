@@ -688,15 +688,9 @@ final class LibraryController: NSObject {
         guard let p = library.project(id) else { return }
         let count = library.palettes(in: id).count
         guard count > 0 else { apply("Delete Project") { $0.deleteProject(id) }; return }
-        let a = NSAlert()
-        a.alertStyle = .warning
-        a.messageText = "Delete the project \u{201C}\(p.name)\u{201D}?"
-        a.informativeText = "Its \(plural(count, "palette")) will move to the Palettes list. Nothing is deleted from the library."
-        a.addButton(withTitle: "Delete Project")
-        a.addButton(withTitle: "Cancel")
-        present(a) { [weak self] r in
-            if r == .alertFirstButtonReturn { self?.apply("Delete Project") { $0.deleteProject(id) } }
-        }
+        SwissConfirm.ask(over: window, title: "Delete \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))",
+                         note: "You are about to delete \(p.name). Its \(plural(count, "palette")) move to the Palettes list; nothing leaves the catalogue. Slide across to go on.",
+                         commit: "Delete") { [weak self] in self?.apply("Delete Project") { $0.deleteProject(id) } }
     }
 
     /// Asks a question in the middle of the page; set by the window. Title, message, answers (the last is the way out).
@@ -878,15 +872,9 @@ final class LibraryController: NSObject {
     func delete(palette id: UUID) {
         guard let s = library.swatch(id) else { return }
         guard !s.entries.isEmpty else { apply("Delete Palette") { $0.deleteSwatch(id) }; return }
-        let a = NSAlert()
-        a.alertStyle = .warning
-        a.messageText = "Delete \u{201C}\(s.name)\u{201D}?"
-        a.informativeText = "Its \(plural(s.entries.count, "swatch", "swatches")) will stay in your library."
-        a.addButton(withTitle: "Delete")
-        a.addButton(withTitle: "Cancel")
-        present(a) { [weak self] r in
-            if r == .alertFirstButtonReturn { self?.apply("Delete Palette") { $0.deleteSwatch(id) } }
-        }
+        SwissConfirm.ask(over: window, title: "Delete Palette",
+                         note: "You are about to delete \(s.name). Its \(plural(s.entries.count, "colour")) stay in the catalogue. Slide across to go on.",
+                         commit: "Delete") { [weak self] in self?.apply("Delete Palette") { $0.deleteSwatch(id) } }
     }
 
     func add(_ hexes: [String], to id: UUID) {

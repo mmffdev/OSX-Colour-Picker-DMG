@@ -53,7 +53,7 @@ extension LibraryController {
         if let name = locked(among: [id]) { refuse(locked: name); return }
         let home = SchemaTrial.collection(of: id)
         let what = holdings(of: [id]).map { "Its \($0) and every group inside it are deleted, not moved." } ?? "It holds nothing yet, and its groups go with it."
-        SlideConfirm.ask(over: window, title: "Remove \(p.name) From \(home.name)", note: what + " This cannot be undone.") { [weak self] in
+        SlideConfirm.ask(over: window, title: "Remove \(SchemaTrial.memberName(of: home))", note: "You are about to remove \(p.name) from \(home.name). " + what + " This cannot be undone.") { [weak self] in
             self?.erase(projects: [id], as: "Remove \(SchemaTrial.memberName(of: home))")
             then?()
         }
@@ -71,7 +71,7 @@ extension LibraryController {
         if let name = locked(among: members) { refuse(locked: name); return }
         let noun = SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased()
         let what = "Its \(plural(members.count, SchemaTrial.memberName(of: c).lowercased(), noun))" + (holdings(of: members).map { ", with their \($0)," } ?? "") + " are deleted, not moved."
-        SlideConfirm.ask(over: window, title: "Remove \(f.name) From \(c.name)", note: what + " This cannot be undone.") { [weak self] in
+        SlideConfirm.ask(over: window, title: "Remove \(c.folderName ?? "Folder")", note: "You are about to remove \(f.name) from \(c.name). " + what + " This cannot be undone.") { [weak self] in
             self?.erase(projects: members, as: "Remove \(c.folderName ?? "Folder")")
             SchemaTrial.changeCollection(collection) { $0.folders.removeAll { $0.id == folder } }
             then?()
@@ -91,7 +91,7 @@ extension LibraryController {
         if let name = locked(among: members) { refuse(locked: name); return }
         let member = SchemaTrial.memberName(of: c)
         let what = "Its \(plural(members.count, member.lowercased(), SchemaTrial.plural(member).lowercased()))" + (holdings(of: members).map { ", with their \($0)," } ?? "") + " are deleted, not moved."
-        SlideConfirm.ask(over: window, title: "Remove The \(c.name) Collection", note: what + " This cannot be undone.") { [weak self] in
+        SlideConfirm.ask(over: window, title: "Remove Collection", note: "You are about to remove \(c.name). " + what + " This cannot be undone.") { [weak self] in
             self?.erase(projects: members, as: "Remove Collection")
             SchemaTrial.collections = SchemaTrial.collections.filter { $0.id != id }
             then?()
@@ -133,7 +133,7 @@ extension LibraryController {
         case .tags: what = "Its \(plural(names.count, "tag")) are deleted, and come off every swatch that wears them."
         case .information: return
         }
-        SlideConfirm.ask(over: window, title: "Empty \(group) In \(p.name)", note: what + " This cannot be undone.", commit: "Empty") { [weak self] in
+        SlideConfirm.ask(over: window, title: "Empty \(group)", note: "You are about to empty \(group) in \(p.name). " + what + " This cannot be undone.", commit: "Empty") { [weak self] in
             self?.erase(role: role, of: project)
             then?()
         }

@@ -499,8 +499,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate {
 
     private func askAboutContents(of node: SchemaNode, level: Int, in c: SchemaCollection, holding n: Int) {
         let role = SchemaTrial.role(of: node), things = "\(n) \(noun(role, n))"
-        let note = "Its \(things) are spread over the \(c.name) \(SchemaTrial.plural(member(c)).lowercased()) that follow this stack, and would be left with nowhere to show. The group can be renamed and they stay where they are; to delete them, do it member by member."
-        SwissConfirm.ask(over: window, title: "\(node.name) Holds \(things.prefix(1).uppercased() + things.dropFirst())", note: note, commit: "Go On",
+        let note = "You are about to remove \(node.name), which holds \(things), spread over the \(c.name) \(SchemaTrial.plural(member(c)).lowercased()) that follow this stack. They would be left with nowhere to show. The group can be renamed and they stay where they are; to delete them, do it member by member."
+        SwissConfirm.ask(over: window, title: "Remove Group", note: note, commit: "Go On",
                          options: ["Keep the \(noun(role, n)) and rename the group"]) { [weak self] _ in self?.keepAndRename() }
     }
     private func keepAndRename() {

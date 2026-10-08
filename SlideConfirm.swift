@@ -15,11 +15,13 @@ enum SlideConfirm {
         let run: () -> Void
     }
 
-    /// Asks over `window` (or wherever the app is, without one) and runs `then` only when the slide completes and `commit` is pressed.
-    /// `options` are the safer choices, if there are any, offered before the track.
+    /// Asks on the window's own confirm panel, the one primitive for anything that cannot be undone: the safer choices as rows
+    /// before the slide, the slide itself the act. The chosen row runs instead of the act; the last row is the act.
     static func ask(over window: NSWindow?, title: String, note: String, options: [Option] = [], commit: String = "Remove", then: @escaping () -> Void) {
-        let panel = SlidePanel(title: title, note: note, options: options, commit: commit)
-        panel.present(over: window, then: then)
+        if options.isEmpty { SwissConfirm.ask(over: window, title: title, note: note, commit: commit, then: then); return }
+        SwissConfirm.ask(over: window, title: title, note: note, commit: commit, options: options.map { $0.title } + [commit]) { choice in
+            if options.indices.contains(choice) { options[choice].run() } else { then() }
+        }
     }
 }
 
