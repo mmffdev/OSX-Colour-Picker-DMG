@@ -364,7 +364,7 @@ final class LibraryController: NSObject {
         NotificationCenter.default.post(name: .statusMessage, object: self, userInfo: ["text": text])
     }
 
-    func show(_ error: Error) { present(NSAlert(error: error)) }
+    func show(_ error: Error) { Diagnostics.log("library", error: error); present(NSAlert(error: error)) }
 
     private func present(_ alert: NSAlert, then: ((NSApplication.ModalResponse) -> Void)? = nil) {
         if let w = window { alert.beginSheetModal(for: w) { then?($0) } }

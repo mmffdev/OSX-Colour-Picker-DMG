@@ -211,6 +211,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     }
 
     private func complain(_ text: String) {
+        Diagnostics.log("setup step \(step + 1)", text)
         guard let w = window else { return }
         let a = NSAlert()
         a.messageText = text
@@ -591,6 +592,8 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
                 name = try Catalogues.standard.create(catalogueName, under: catalogueParent)
             }
             Catalogues.currentName = name
+            // The schema chosen here is the new catalogue's own: point the store at its folder before writing it.
+            SchemaTrial.use(directory: Catalogues.standard.directory(for: name))
             SchemaTrial.changeCollection(SchemaTrial.collections[0].id) { c in
                 c.name = collectionName.trimmingCharacters(in: .whitespaces)
                 c.stack.name = memberName.trimmingCharacters(in: .whitespaces)
@@ -610,6 +613,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
             created = name
             show(step: Step.halo)
         } catch {
+            Diagnostics.log("setup create", error: error)
             complain(error.localizedDescription)
         }
     }

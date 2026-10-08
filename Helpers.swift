@@ -908,3 +908,22 @@ final class DropTargetView: NSView {
         return true
     }
 }
+
+/// Every error the app shows is also written to a log, so one that was clicked away can still be read:
+/// ~/Library/Logs/Colorgain/colorgain.log, one line per entry with the time and where it came from.
+enum Diagnostics {
+    static var logURL: URL {
+        let dir = (FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library"))
+            .appendingPathComponent("Logs").appendingPathComponent("Colorgain")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("colorgain.log")
+    }
+    static func log(_ where_: String, _ text: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "\(stamp)  \(where_)  \(text.replacingOccurrences(of: "\n", with: " / "))\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: logURL) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: logURL) }
+    }
+    static func log(_ where_: String, error: Error) { log(where_, "\(error.localizedDescription)  [\(error)]") }
+}

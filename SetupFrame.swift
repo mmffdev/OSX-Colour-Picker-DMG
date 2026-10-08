@@ -307,8 +307,17 @@ enum Relaunch {
         if bundle.pathExtension == "app" {
             let c = NSWorkspace.OpenConfiguration()
             c.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: bundle, configuration: c) { _, _ in
-                DispatchQueue.main.async { NSApp.terminate(nil) }
+            NSWorkspace.shared.openApplication(at: bundle, configuration: c) { _, error in
+                DispatchQueue.main.async {
+                    // A relaunch that did not start leaves this copy running and says so, rather than quitting into nothing.
+                    if let error = error {
+                        Diagnostics.log("relaunch", error: error)
+                        let a = NSAlert(); a.messageText = "Colorgain could not reopen itself"; a.informativeText = error.localizedDescription + " Quit and open it again from Applications."
+                        a.runModal()
+                        return
+                    }
+                    NSApp.terminate(nil)
+                }
             }
         } else if let exe = Bundle.main.executableURL {   // the bare binary Xcode runs
             let p = Process()
