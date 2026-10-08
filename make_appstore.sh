@@ -77,5 +77,5 @@ echo "installed: $COLORGAIN ($(/usr/libexec/PlistBuddy -c 'Print :ColourBuildCom
 
 if [ "${COLORGAIN_OPEN:-1}" = "1" ]; then
     echo "opening as a new user..."
-    open -n -a "$COLORGAIN" --args --new-user --studio
+    open -n -a "$COLORGAIN" --args --new-user
 fi

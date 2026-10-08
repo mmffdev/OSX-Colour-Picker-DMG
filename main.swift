@@ -129,8 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func revealMainWindow() {
         guard let main = main else { return }
-        // --studio: the window on Colorgain's own grid, in place of the old one while it is built.
-        if CommandLine.arguments.contains("--studio") { StudioWindowController.show(library: library) } else { main.showWindow(nil) }
+        // The Studio window, Colorgain's own, is the window; the old one opens only with --classic, for the few pages not yet redrawn.
+        if CommandLine.arguments.contains("--classic") { main.showWindow(nil) } else { StudioWindowController.show(library: library) }
         splash?.close()
         splash = nil
         NSApp.activate(ignoringOtherApps: true)

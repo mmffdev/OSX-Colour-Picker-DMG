@@ -49,5 +49,5 @@ echo "installed: $APP"
 # What Rick sees after every build is the Studio window, Colorgain's own. OPEN=0 skips it.
 if [ "${OPEN:-1}" = "1" ]; then
     pkill -f "$APP/Contents/MacOS/" 2>/dev/null && sleep 1 || true
-    open -n -a "$APP" --args --studio
+    open -n -a "$APP"
 fi

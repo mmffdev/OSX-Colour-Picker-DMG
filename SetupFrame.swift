@@ -307,6 +307,8 @@ enum Relaunch {
         if bundle.pathExtension == "app" {
             let c = NSWorkspace.OpenConfiguration()
             c.createsNewApplicationInstance = true
+            // The flags this copy was opened with go with it, so a restart comes back the same way.
+            c.arguments = Array(CommandLine.arguments.dropFirst())
             NSWorkspace.shared.openApplication(at: bundle, configuration: c) { _, error in
                 DispatchQueue.main.async {
                     // A relaunch that did not start leaves this copy running and says so, rather than quitting into nothing.

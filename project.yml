@@ -128,7 +128,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "--new-user": false
-        "--studio": true
+        "--classic": false
         "--self-test": false
     archive:
       config: Release

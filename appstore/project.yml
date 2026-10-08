@@ -95,7 +95,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "--new-user": true
-        "--studio": true
+        "--classic": false
     archive:
       config: Release
   # As yourself: the Store container with its own settings and catalogues, setup already done.
@@ -107,6 +107,6 @@ schemes:
       config: Debug
       commandLineArguments:
         "--new-user": false
-        "--studio": true
+        "--classic": false
     archive:
       config: Release

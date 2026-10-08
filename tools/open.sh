@@ -7,8 +7,9 @@
 #                                     app (Screen Recording, Documents), so it asks again; this one
 #                                     reaches your own copy too, which asks again next time you open it
 #   tools/open.sh new 3               a new user, opened straight at setup step 3
-#   tools/open.sh me                  the installed app as you, with your catalogues
-#   tools/open.sh studio              as you, in the Studio window: the app on Colorgain's own grid
+#   tools/open.sh me                  the installed app as you, with your catalogues, in the Studio window
+#   tools/open.sh studio              the same
+#   tools/open.sh classic             as you, in the old window, for the pages not yet redrawn
 #
 # A new user here keeps everything in the throwaway home, so it never asks for Documents; the
 # Documents question is seen as yourself, after "new permissions".
@@ -32,11 +33,11 @@ case "${1:-}" in
     open -n -a "$APP" --args --new-user $STEP
     echo "Opened as a new user, in a throwaway home that is wiped on the next new-user open."
     ;;
-  me)
-    open -a "$APP"
+  me|studio)
+    open -n -a "$APP"
     ;;
-  studio)
-    open -n -a "$APP" --args --studio
+  classic)
+    open -n -a "$APP" --args --classic
     ;;
   *)
     sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'

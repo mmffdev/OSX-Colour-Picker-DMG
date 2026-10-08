@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 // a 64 header, the library rail, the context rail, the page, the history rail and a 48 footer, on
 // twelve columns inside 24 margins with 16 gutters. Everything is placed by frame from the grid and
 // drawn in the ten text styles; no macOS control is on the window but the search field. It opens
-// beside the old window with --studio (tools/open.sh studio) until it replaces it. Begun 2026-10-07
+// the window the app opens since 2026-10-08; the old window opens only with --classic. Begun 2026-10-07
 // on Rick's free run: the library and palettes views only, their assets' layout and presentation.
 
 final class StudioWindow: NSWindow {
