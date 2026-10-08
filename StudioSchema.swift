@@ -345,8 +345,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         g.mapTop = 5 * u
         g.form = form()
         g.formTop = 5 * u
-        g.nameRow = NSRect(x: g.rx, y: g.formTop, width: g.rw, height: u)
-        var y = g.formTop + (g.form.canName ? u : 0)
+        // The name is the right column's header, on the first line with its icon and template; under the Type rule comes the description alone, then the types.
+        g.nameRow = NSRect(x: g.rx, y: 0, width: g.rw, height: u)
+        var y = g.formTop
         if g.form.said != nil { g.aboutRow = NSRect(x: g.rx, y: y, width: g.rw, height: u); y += u }
         g.typesTop = y
         return g
@@ -369,14 +370,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         map.frame = NSRect(x: 0, y: 0, width: mapScroll.frame.width, height: max(mapScroll.frame.height, mapHeight))
         mapScroll.verticalScrollElasticity = mapHeight > mapScroll.frame.height ? .allowed : .none
         rowRects = mapRows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
-        typeScroll.frame = NSRect(x: g.rx, y: g.typesTop, width: g.rw, height: max(0, bounds.height - g.typesTop))
+        let lead = Design.App.gutter / 2
+        typeScroll.frame = NSRect(x: g.rx - lead, y: g.typesTop, width: g.rw + lead, height: max(0, bounds.height - g.typesTop))
         let typesHeight = CGFloat(typeRows.count) * u + u
-        types.frame = NSRect(x: 0, y: 0, width: g.rw, height: max(typeScroll.frame.height, typesHeight))
+        types.frame = NSRect(x: 0, y: 0, width: g.rw + lead, height: max(typeScroll.frame.height, typesHeight))
         typeScroll.verticalScrollElasticity = typesHeight > typeScroll.frame.height ? .allowed : .none
         typeScroll.isHidden = typeRows.isEmpty
         // A 13 field's text sits 15 below its top: on the line.
         nameField.isHidden = selected == nil || !g.form.canName
-        nameField.frame = NSRect(x: g.nameRow.minX, y: g.nameRow.minY + line - 15, width: g.nameRow.width - 130, height: 20)
+        nameField.font = Design.Text.body.font()
+        nameField.frame = NSRect(x: g.nameRow.minX - 2, y: g.nameRow.minY + line - 15, width: g.nameRow.width - 150, height: 20)
         if nameField.currentEditor() == nil { nameField.stringValue = g.form.name }
         about.isHidden = g.aboutRow == nil
         if let r = g.aboutRow { about.frame = NSRect(x: r.minX, y: r.minY + line - 15, width: r.width, height: 20) }
@@ -394,15 +397,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
         hairline(x: l, y: g.mapTop - 1, width: g.lw, Design.rule)
         guard selected != nil else { return }
         let rx = g.rx
-        Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
+        // The header line: the name itself, typed over where it stands, with its icon and template at the right; the title where there is no name to type.
+        if g.form.canName {
+            trailing(in: NSRect(x: rx, y: 0, width: g.rw - 16, height: u), baseline: line, symbol: g.form.symbol)
+            if nameField.currentEditor() != nil { hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw - 150, Design.ink) }
+        } else {
+            Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
+        }
         Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
         Design.attributed("Type", .body).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
-        // The name's row: the field, then the icon and the template at the right, as every type row has them; its rule beneath.
-        if g.form.canName {
-            trailing(in: g.nameRow, baseline: g.nameRow.minY + line, symbol: g.form.symbol)
-            hairline(x: rx, y: g.nameRow.maxY - 1, width: g.rw, nameField.currentEditor() != nil ? Design.ink : Design.mist)
-        }
         if let r = g.aboutRow { hairline(x: rx, y: r.maxY - 1, width: g.rw, about.currentEditor() != nil ? Design.ink : Design.mist) }
     }
     /// The icon and the template at the right of a row on the Type side: the icon picker and the template to come, shown for now.
@@ -476,24 +480,25 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, PageSection {
     }
 
     private func drawTypes() {
-        let u = Self.u, line = Self.line, w = types.bounds.width
+        let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.gutter / 2, air: CGFloat = 16
         typeHits = []
         for (i, t) in typeRows.enumerated() {
             let box = NSRect(x: 0, y: CGFloat(i) * u, width: w, height: u), b = box.minY + line
             if t.chosen { fill(NSRect(x: 0, y: box.minY - 1, width: w, height: u + 1), Design.mist) }
             let name = Design.attributed(t.name, t.chosen ? .bodyStrong : .body, colour: t.locked ? Design.soft : t.chosen ? Design.ink : Design.quiet)
+            // The pane: from the middle of the gutter, over the square and the name, to the name's end plus a step.
             if let v = reveal[.type(t.name)], v > 0 {
-                let full = 24 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
+                let full = lead + 24 + name.size().width + Self.step, eased = 1 - pow(1 - v, 3)
                 fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: u + 1), Design.App.gridColour)
             }
             // The square: filled for the chosen type and for one a sibling holds, which cannot be chosen again.
-            let sq = NSRect(x: 0, y: b - 10, width: 12, height: 12)
+            let sq = NSRect(x: lead, y: b - 10, width: 12, height: 12)
             fill(sq, t.chosen || t.locked ? Design.ink : Design.card)
             Design.ink.setStroke()
             let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-            name.draw(x: 24, baseline: b, width: w - 24 - 130)
-            trailing(in: box, baseline: b, symbol: t.symbol)
-            hairline(x: 0, y: box.maxY - 1, width: w, Design.mist)
+            name.draw(x: lead + 24, baseline: b, width: w - lead - 24 - 150)
+            trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol)
+            hairline(x: lead, y: box.maxY - 1, width: w - lead - air, Design.mist)
             if !t.locked { typeHits.append((box, t.name)) }
         }
     }
