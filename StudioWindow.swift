@@ -1060,6 +1060,8 @@ final class LibraryRail: StudioRail {
         private var renaming: StudioFrame.Place?
         /// The palette under the mouse at mouseDown, so a drag can take it; the member a drag is over.
         private var pressed: (UUID, String, [NSColor])?
+        /// Where and when the mouse went down, so a drag starts only once the pointer has clearly left the press.
+        private var pressedAt: (NSPoint, TimeInterval) = (.zero, 0)
         private var target: UUID?
 
         override init(frame: NSRect) { super.init(frame: frame); registerForDraggedTypes([PaletteDrag.type]) }
@@ -1217,7 +1219,7 @@ final class LibraryRail: StudioRail {
                 return
             }
             if event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) { rename(h, at: p); return }
-            pressed = palette(at: p)
+            pressed = palette(at: p); pressedAt = (event.locationInWindow, event.timestamp)
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
         }
         /// A double-click on a name: the cursor goes into the words where they are, and the name is written when the typing ends.
@@ -1229,7 +1231,7 @@ final class LibraryRail: StudioRail {
             }
         }
         override func mouseDragged(with event: NSEvent) {
-            guard let (id, name, colours) = pressed else { return }
+            guard let (id, name, colours) = pressed, PaletteDrag.counts(event, from: pressedAt) else { return }
             pressed = nil
             PaletteDrag.begin(id, name: name, colours: colours, event: event, in: self)
         }
@@ -1275,6 +1277,13 @@ final class LibraryRail: StudioRail {
 /// A palette on the pasteboard while it is dragged between the rails: its id under a type of the app's own.
 enum PaletteDrag {
     static let type = NSPasteboard.PasteboardType("com.mmffdev.colorgain.palette")
+
+    /// A drag begins only once the pointer is a clear distance from where the mouse went down and a beat has passed,
+    /// so a click, or the small wobble in one, never lifts a palette.
+    static let threshold: CGFloat = 8, beat: TimeInterval = 0.12
+    static func counts(_ event: NSEvent, from press: (NSPoint, TimeInterval)) -> Bool {
+        hypot(event.locationInWindow.x - press.0.x, event.locationInWindow.y - press.0.y) >= threshold && event.timestamp - press.1 >= beat
+    }
 
     static func palette(on board: NSPasteboard) -> UUID? {
         board.pasteboardItems?.first?.string(forType: type).flatMap { UUID(uuidString: $0) }
@@ -1353,6 +1362,8 @@ final class PaletteTable: StudioRail {
         private var nameHits: [(NSRect, StudioFrame.Place, String, Design.Text)] = []
         private var renaming: StudioFrame.Place?
         private var pressed: (UUID, String, [NSColor])?
+        /// Where and when the mouse went down, so a drag starts only once the pointer has clearly left the press.
+        private var pressedAt: (NSPoint, TimeInterval) = (.zero, 0)
         static func height(of r: Row) -> CGFloat {
             switch r { case .group: return group; case .divider: return divider; default: return row }
         }
@@ -1427,11 +1438,11 @@ final class PaletteTable: StudioRail {
                 }
                 return
             }
-            pressed = palette(at: p)
+            pressed = palette(at: p); pressedAt = (event.locationInWindow, event.timestamp)
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
         }
         override func mouseDragged(with event: NSEvent) {
-            guard let (id, name, colours) = pressed else { return }
+            guard let (id, name, colours) = pressed, PaletteDrag.counts(event, from: pressedAt) else { return }
             pressed = nil
             PaletteDrag.begin(id, name: name, colours: colours, event: event, in: self)
         }
