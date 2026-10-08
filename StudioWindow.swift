@@ -1935,7 +1935,7 @@ final class StudioPage: NSView, Overlay {
     var onFormat: (() -> Void)?
     private var formatRect = NSRect.zero
     private var dropped: SwissDropdown.MenuPanel?
-    static let models: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab, .float, .linear]
+    static let models: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab, .lch, .luv, .oklch, .oklab, .xyz, .float, .linear]
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
     func dismissOverlay() { closeFormats() }
     private func closeFormats() {

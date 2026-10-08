@@ -570,6 +570,15 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(ColourFormat.rgb.fields(fiji) == ["79", "128", "147"] && ColourFormat.cmyk.fields(fiji).count == 4,
           "card rows split into columns")
     check(ColourFormat.allCases.allSatisfy { !$0.text("#123456").isEmpty && !$0.title.isEmpty }, "every format produces text")
+    // Oklab's reference: white is L 1, a and b 0; sRGB red is L 0.628, C 0.258, h 29.2.
+    check(ColourFormat.oklch.fields("#FFFFFF") == ["1.000", "0.000", "0.0"] && ColourFormat.oklch.fields("#FF0000") == ["0.628", "0.258", "29.2"]
+          && ColourFormat.oklab.fields("#FFFFFF") == ["1.000", "0.000", "0.000"],
+          "OKLCH and Oklab come from the master and match Ottosson's reference values")
+    // CIELAB against the published values: the D50 white is L 100, a and b 0; sRGB red adapted to D50 by Bradford is L 54.3, a 80.8, b 69.9,
+    // and as CIELCh, C 106.8 at h 40.9; CIELUV puts the white at 100, 0, 0 too.
+    check(ColourFormat.lab.fields("#FFFFFF") == ["100.0", "0.0", "0.0"] && ColourFormat.lab.fields("#FF0000") == ["54.3", "80.8", "69.9"]
+          && ColourFormat.lch.fields("#FF0000") == ["54.3", "106.8", "40.9"] && ColourFormat.luv.fields("#FFFFFF") == ["100.0", "0.0", "0.0"],
+          "CIELAB, CIELCh and CIELUV come from the master against the D50 white and match the published values")
 
     print("round trips")
     let samples = ["#4F8093", "#FF6600", "#0033FF", "#C22832", "#76507A", "#101010", "#EEEEEE", "#00FF7F"]

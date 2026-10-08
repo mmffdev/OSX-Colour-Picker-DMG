@@ -140,6 +140,8 @@ func labOf(_ rgb: (r: Double, g: Double, b: Double)) -> (l: Double, a: Double, b
 enum ColourFormat: String, CaseIterable {
     case hex, hexBare, rgb, cssRGB, hsl, cssHSL, hsv, cmyk, float, linear, swiftUI, nsColor, uiColor
     case p3, adobeRGB, rec2020, lab
+    /// The perceptual spaces CSS Color 4 uses, and the CIE ones every colour-managed tool reads: OKLCH, Oklab, LCh, and XYZ, the master itself.
+    case oklch, oklab, lch, luv, xyz
 
     /// The rows a colour card can show, in order.
     static let cardRows: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab]
@@ -164,7 +166,12 @@ enum ColourFormat: String, CaseIterable {
         case .p3: return "Display P3  \u{2014}  " + text("#4F8093")
         case .adobeRGB: return "Adobe RGB  \u{2014}  " + text("#4F8093")
         case .rec2020: return "BT.2020  \u{2014}  " + text("#4F8093")
-        case .lab: return "L*a*b* (D50)  \u{2014}  " + text("#4F8093")
+        case .lab: return "CIELAB, L*a*b* (D50)  \u{2014}  " + text("#4F8093")
+        case .oklch: return "OKLCH  \u{2014}  " + text("#4F8093")
+        case .oklab: return "Oklab  \u{2014}  " + text("#4F8093")
+        case .lch: return "CIELCh (D50)  \u{2014}  " + text("#4F8093")
+        case .luv: return "CIELUV (D50)  \u{2014}  " + text("#4F8093")
+        case .xyz: return "XYZ (D50), the master  \u{2014}  " + text("#4F8093")
         }
     }
 
@@ -184,7 +191,12 @@ enum ColourFormat: String, CaseIterable {
         case .p3: return "P3"
         case .adobeRGB: return "Adobe"
         case .rec2020: return "BT.2020"
-        case .lab: return "L*a*b*"
+        case .lab: return "CIELAB"
+        case .oklch: return "OKLCH"
+        case .oklab: return "Oklab"
+        case .lch: return "CIELCh"
+        case .luv: return "CIELUV"
+        case .xyz: return "CIE XYZ"
         }
     }
 
@@ -206,9 +218,13 @@ enum ColourFormat: String, CaseIterable {
         case .swiftUI: return "Color(red: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)))"
         case .nsColor: return "NSColor(srgbRed: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)), alpha: 1)"
         case .uiColor: return "UIColor(red: \(f(u.r)), green: \(f(u.g)), blue: \(f(u.b)), alpha: 1)"
-        case .p3, .adobeRGB, .rec2020, .lab: return fields(raw).joined(separator: ", ")
+        case .p3, .adobeRGB, .rec2020, .lab, .oklab, .luv, .xyz: return fields(raw).joined(separator: ", ")
+        case .oklch, .lch: let f = fields(raw); return f.count == 3 ? "\(f[0]), \(f[1]), \(f[2])\u{00B0}" : f.joined(separator: ", ")
         }
     }
+
+    /// The colour's master: its own for a colour kept whole, worked out from the hex for one that is a plain sRGB value.
+    static func master(of raw: String) -> XYZ? { ColourKeys.definition(of: raw)?.master ?? ColourDefinition.of(hex: raw)?.master }
 
     /// The separate numbers shown across a card row.
     func fields(_ raw: String, lowercase: Bool = false) -> [String] {
@@ -221,6 +237,25 @@ enum ColourFormat: String, CaseIterable {
             case .adobeRGB: return bytes(.adobeRGB)
             case .rec2020: return bytes(.rec2020)
             case .lab: let lab = wide.master.lab; return [lab.l, lab.a, lab.b].map { String(format: "%.1f", $0 == 0 ? 0 : $0) }
+            default: break
+            }
+        }
+        // The perceptual and CIE models come from the master, never the eight-bit value, so a wide colour reads true.
+        if let m = ColourFormat.master(of: raw) {
+            func n(_ d: Double, _ places: Int) -> String { String(format: "%.\(places)f", abs(d) < 0.5 * pow(10, -Double(places)) ? 0 : d) }
+            switch self {
+            case .oklch: let o = m.oklch; return [n(o.l, 3), n(o.c, 3), n(o.h, 1)]
+            case .oklab: let o = m.oklab; return [n(o.l, 3), n(o.a, 3), n(o.b, 3)]
+            case .lch:
+                let lab = m.lab, c = (lab.a * lab.a + lab.b * lab.b).squareRoot()
+                let h = c < 1e-4 ? 0 : ((atan2(lab.b, lab.a) * 180 / .pi).truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+                return [n(lab.l, 1), n(c, 1), n(h, 1)]
+            case .xyz: return [n(m.x, 4), n(m.y, 4), n(m.z, 4)]
+            case .luv:
+                // CIELUV against the same D50 white: L* as in CIELAB, u* and v* from the chromaticity u'v'.
+                func uv(_ c: XYZ) -> (Double, Double) { let d = c.x + 15 * c.y + 3 * c.z; return d == 0 ? (0, 0) : (4 * c.x / d, 9 * c.y / d) }
+                let l = m.lab.l, (u, v) = uv(m), (un, vn) = uv(XYZ.d50)
+                return [n(l, 1), n(13 * l * (u - un), 1), n(13 * l * (v - vn), 1)]
             default: break
             }
         }
