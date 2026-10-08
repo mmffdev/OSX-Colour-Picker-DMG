@@ -391,7 +391,7 @@ final class StudioFrame: NSView {
         halo = h
         h.label = s.name
         h.actions = actions
-        h.open(from: view, rect: rect)
+        h.open(centredOn: rect, in: view)
     }
 
     /// The halo on a colour: the old swatch ring, over the tile that was clicked.
@@ -403,7 +403,7 @@ final class StudioFrame: NSView {
         h.label = colourName(hex)
         h.caption = page.format.text(hex, lowercase: Prefs.lowercaseHex)
         h.actions = SwatchMenu.ring(for: hex, in: inPalette, library: library, editTags: { [weak self] hexes in self?.tag(swatches: hexes) })
-        h.open(from: page.grid, rect: rect)
+        h.open(centredOn: rect, in: page.grid)
     }
     /// Tags typed on the window's own panel, separated by commas; the words already there are the tags it has.
     private func tag(swatches hexes: [String]) {

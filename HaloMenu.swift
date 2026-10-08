@@ -378,6 +378,18 @@ final class HaloMenu: NSResponder {
                 over: host, anchor: trigger, rect: nil, sticky: true, focus: true)
     }
 
+    /// Opens with its centre on a rect of a view, the icon or the tile that was pressed, so the pointer starts inside the dial:
+    /// placed anywhere else, the dial sees the pointer outside it and closes itself at once.
+    func open(centredOn rect: NSRect, in view: NSView) {
+        guard let host = view.window else { return }
+        if isOpen { close() }
+        let onScreen = host.convertToScreen(view.convert(rect, to: nil))
+        let visible = (host.screen ?? NSScreen.main)?.visibleFrame ?? onScreen
+        let reach = HaloGeometry.reach(rings: depth(of: actions, limit: HaloGeometry.outerRings))
+        present(HaloGeometry.frame(over: CGPoint(x: onScreen.midX, y: onScreen.midY), reach: reach, in: visible),
+                over: host, anchor: view, rect: rect, sticky: true, focus: true)
+    }
+
     /// How many rings deep these actions go beyond their own.
     private func depth(of actions: [HaloAction], limit: Int) -> Int {
         guard limit > 0 else { return 0 }
