@@ -90,6 +90,10 @@ final class StudioWindowController: NSWindowController {
         library.onAsk = { [weak c] title, message, choices in
             SwissConfirm.choose(over: c?.window, title: title, note: message, choices: choices.map { $0.title }) { i in if choices.indices.contains(i) { choices[i].run() } }
         }
+        library.onOpenContrast = { [weak c] palette, style in
+            c?.frame.go(.contrast)
+            c?.frame.contrastPage.edit(style, in: palette)
+        }
         library.onShow = { [weak c] s, _ in
             switch s {
             case .overview(let id): c?.frame.go(.project(id))
@@ -157,6 +161,8 @@ final class StudioFrame: NSView {
     let overlay = GridOverlay()
     /// The invisible strip across the top, around the window's three buttons: a press on it drags the window, and the pointer says so.
     let strip = TitleStrip()
+    /// Contrast, drawn on the page's columns; kept here so the window can open it on a typography palette.
+    let contrastPage: ContrastPage
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
     private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
     private var goal = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
@@ -166,6 +172,7 @@ final class StudioFrame: NSView {
 
     init(library: LibraryController) {
         self.library = library
+        contrastPage = ContrastPage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
@@ -185,7 +192,7 @@ final class StudioFrame: NSView {
             // The page takes the whole width: the history goes, rail2 goes, rail1 shuts; the arrow back gives the rails their width.
             self.expanded.toggle()
             self.page.expanded = self.expanded
-            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (1, 1, self.goal.history) }
+            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (1, self.railTwo, self.goal.history) }
             self.slide()
         }
         // A palette dropped on a member moves into its Palettes, and rail2 turns to that member to show it there.
@@ -228,17 +235,14 @@ final class StudioFrame: NSView {
         page.settings.onChange = { [weak self] in self?.reload() }
         page.schema.library = library
         page.schema.onChange = { [weak self] in self?.reload() }
-        // The New button makes a member where members are listed, and a typography palette on a member's Typography page.
-        page.onNew = { [weak self] in
-            guard let self = self else { return }
-            if case .group(let member, _) = self.place { self.library.addTypography(to: member) } else { self.newMember() }
-        }
+        // The New button makes a member where members are listed; on a member's Typography page, a typography palette, opened in Contrast for its first pairing.
+        page.onNew = { [weak self] in self?.newFromPage() }
         page.add(ShortcutsSettings(), as: .shortcuts)
         page.add(HaloSettings(), as: .halo)
         // Tags: the old editor, every tag with its colour, name, scope and the swatches that wear it, the one place for all of them.
         page.add(EmbeddedSection(TagEditorController(library: library, focus: nil)), as: .tags)
         page.add(LabPage(library: library), as: .lab)
-        page.add(EmbeddedSection(ContrastViewController(library: library)), as: .contrast)
+        page.add(contrastPage, as: .contrast)
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -329,9 +333,13 @@ final class StudioFrame: NSView {
     // MARK: What is shown
 
     func go(_ p: Place) {
+        if p == .contrast && place != .contrast { contrastPage.arrive(fromLab: place == .lab) }
         place = p
         reload()
     }
+
+    /// The Lab and Contrast have no rail2: its columns go to the page.
+    private var railTwo: CGFloat { expanded || place == .lab || place == .contrast ? 0 : 1 }
 
     private func choose(_ hex: String) {
         chosenHex = hex
@@ -353,6 +361,11 @@ final class StudioFrame: NSView {
         case .collection(let id) where !SchemaTrial.collections.contains(where: { $0.id == id }): place = .catalogue
         case .folder(let c, let f) where !(SchemaTrial.collections.first { $0.id == c }?.folders.contains { $0.id == f } ?? false): place = .catalogue
         default: break
+        }
+        if goal.rail2 != railTwo {
+            goal.rail2 = railTwo
+            // Before the window is on screen the rail is simply shut; after, it slides.
+            if window?.isVisible == true { slide() } else { open.rail2 = railTwo; needsLayout = true }
         }
         fillLibraryRail()
         fillContextRail()
@@ -441,6 +454,20 @@ final class StudioFrame: NSView {
         var seen = Set<String>(), out: [String] = []
         for t in typed.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !t.isEmpty && !seen.contains(t.lowercased()) { seen.insert(t.lowercased()); out.append(t) }
         return out
+    }
+
+    /// New on the page: on a member's Typography group, a typography palette in that member, opened in Contrast for its first pairing; anywhere else, a member.
+    private func newFromPage() {
+        if case .group(let pid, let nid) = place, let node = SchemaTrial.rows(of: SchemaTrial.schema(for: pid)).first(where: { $0.node.id == nid })?.node,
+           SchemaTrial.role(of: node) == .typography {
+            var made: UUID?
+            library.apply("New Typography Palette") { made = $0.createTypography(in: pid) }
+            guard let id = made, library.library.swatch(id) != nil else { return }
+            go(.contrast)
+            contrastPage.edit(nil, in: id)
+            return
+        }
+        newMember()
     }
 
     /// A member made where the page stands: in the collection or folder in view, else the first collection; named on the window's own panel.
@@ -580,12 +607,8 @@ final class StudioFrame: NSView {
             heading = "Settings"; labels = ("Section", "")
             rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
                     .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Tags", nil, 0, .tags, place == .tags)]
-        case .lab:
-            heading = "Colour Lab"; labels = ("Tool", "")
-            rows = [.item("Wheel", nil, 0, .lab, true), .item("Contrast", nil, 0, .contrast, false)]
-        case .contrast:
-            heading = "Contrast"; labels = ("Tool", "")
-            rows = [.item("Wheel", nil, 0, .lab, false), .item("Contrast", nil, 0, .contrast, true)]
+        case .lab, .contrast:
+            return   // no rail2: the page has its columns
         case .projects:
             heading = "Members"; labels = ("Collection", "Palettes")
             for c in SchemaTrial.collections {
