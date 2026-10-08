@@ -204,13 +204,15 @@ enum Design {
     // MARK: The mark
 
     /// The diagonal arrow: "go there", one thin stroke at 45°.
-    static func arrow(_ size: CGFloat, colour: NSColor = ink) -> NSImage {
+    /// `back` turns it 180: the same stroke pointing down and left, "close what is open".
+    static func arrow(_ size: CGFloat, colour: NSColor = ink, back: Bool = false) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { r in
             colour.setStroke()
             let p = NSBezierPath()
             let u = size / 16
-            p.move(to: NSPoint(x: 3.5 * u, y: 3.5 * u)); p.line(to: NSPoint(x: 12.5 * u, y: 12.5 * u))
-            p.move(to: NSPoint(x: 5.5 * u, y: 12.5 * u)); p.line(to: NSPoint(x: 12.5 * u, y: 12.5 * u)); p.line(to: NSPoint(x: 12.5 * u, y: 5.5 * u))
+            func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { back ? NSPoint(x: (16 - x) * u, y: (16 - y) * u) : NSPoint(x: x * u, y: y * u) }
+            p.move(to: pt(3.5, 3.5)); p.line(to: pt(12.5, 12.5))
+            p.move(to: pt(5.5, 12.5)); p.line(to: pt(12.5, 12.5)); p.line(to: pt(12.5, 5.5))
             p.lineWidth = size >= 24 ? 1.1 : 1.3
             p.lineCapStyle = .butt
             p.stroke()

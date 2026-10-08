@@ -133,6 +133,12 @@ final class StudioFrame: NSView {
     let overlay = GridOverlay()
     /// The invisible strip across the top, around the window's three buttons: a press on it drags the window, and the pointer says so.
     let strip = TitleStrip()
+    /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
+    private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
+    private var goal = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
+    private var slideClock: Timer?
+    private var lastSlide = Date()
+    private var expanded = false
 
     init(library: LibraryController) {
         self.library = library
@@ -145,6 +151,19 @@ final class StudioFrame: NSView {
         header.onSearch = { [weak self] _ in self?.fillPage() }
         page.onAcross = { [weak self] n in self?.page.grid.across = n }
         rail1.onPick = { [weak self] p in self?.go(p) }
+        rail1.onArrow = { [weak self] in guard let self = self else { return }; self.goal.rail1 = self.goal.rail1 < 1 ? 1 : 0; self.slide() }
+        rail2.arrow = .none
+        history.arrow = .close
+        history.onArrow = { [weak self] in self?.goal.history = 0; self?.slide() }
+        header.onHistory = { [weak self] in guard let self = self else { return }; self.goal.history = self.goal.history < 1 ? 1 : 0; self.slide() }
+        page.onArrow = { [weak self] in
+            guard let self = self else { return }
+            // The page takes the whole width: the history goes, rail2 goes, rail1 shuts; the arrow back gives the rails their width.
+            self.expanded.toggle()
+            self.page.expanded = self.expanded
+            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (1, 1, self.goal.history) }
+            self.slide()
+        }
         // A palette dropped on a member moves into its Palettes, and rail2 turns to that member to show it there.
         rail1.onDrop = { [weak self] palette, member in
             guard let self = self else { return }
@@ -172,27 +191,57 @@ final class StudioFrame: NSView {
 
     @objc private func libraryChanged() { reload() }
 
-    // The regions, from the grid: rails of two columns each side, the page in the six between.
+    /// Slides every panel towards where it is going, a quarter of a second for the whole way, eased; stops when all have arrived.
+    private func slide() {
+        header.historyOpen = goal.history > 0
+        guard slideClock == nil else { return }
+        lastSlide = Date()
+        slideClock = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastSlide) / 0.25)
+            self.lastSlide = now
+            func toward(_ v: CGFloat, _ g: CGFloat) -> CGFloat { v < g ? min(g, v + step) : max(g, v - step) }
+            self.open = (toward(self.open.rail1, self.goal.rail1), toward(self.open.rail2, self.goal.rail2), toward(self.open.history, self.goal.history))
+            self.needsLayout = true
+            self.layoutSubtreeIfNeeded()
+            self.needsDisplay = true
+            if self.open == self.goal { t.invalidate(); self.slideClock = nil }
+        }
+        RunLoop.main.add(slideClock!, forMode: .common)
+    }
+
+    // The regions, from the grid: rails of two columns each side, the page in the six between, each as open as it is.
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
         header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
-        rail1.frame = NSRect(x: 0, y: top, width: A.column(3, in: w) - A.gutter / 2, height: bodyH)
-        rail2.frame = NSRect(x: rail1.frame.maxX + 1, y: top, width: A.column(5, in: w) - A.gutter / 2 - rail1.frame.maxX - 1, height: bodyH)
-        history.frame = NSRect(x: A.column(11, in: w) - A.gutter / 2, y: top, width: w - A.column(11, in: w) + A.gutter / 2, height: bodyH)
-        page.frame = NSRect(x: rail2.frame.maxX + 1, y: top, width: history.frame.minX - rail2.frame.maxX - 2, height: bodyH)
+        func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
+        let r1Full = A.column(3, in: w) - A.gutter / 2, r1Min = LibraryRail.collapsedWidth
+        let r2Full = A.column(5, in: w) - A.gutter / 2 - r1Full - 1
+        let hFull = w - A.column(11, in: w) + A.gutter / 2
+        let r1W = (r1Min + (r1Full - r1Min) * ease(open.rail1)).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
+        rail1.frame = NSRect(x: 0, y: top, width: r1W, height: bodyH)
+        rail1.collapsed = open.rail1 < 0.5
+        rail1.arrow = goal.rail1 < 1 ? .open : .close
+        rail2.frame = NSRect(x: rail1.frame.maxX + 1, y: top, width: r2W, height: bodyH)
+        rail2.isHidden = r2W < 2
+        // The history slides in from the right edge, and off it completely, its width never changing.
+        history.frame = NSRect(x: w - hW, y: top, width: hFull, height: bodyH)
+        history.isHidden = hW < 1
+        page.frame = NSRect(x: rail2.frame.maxX + (rail2.isHidden ? 0 : 1), y: top, width: w - hW - (history.isHidden ? 0 : 1) - rail2.frame.maxX - (rail2.isHidden ? 0 : 1), height: bodyH)
         header.grid = (A.column(1, in: w), A.columnWidth(in: w))
         footer.grid = (A.column(1, in: w), A.columnWidth(in: w), A.column(5, in: w))
-        // Every area's words sit exactly on its columns: the left edge on the first, the right edge at the end of the last.
+        // Every area's words sit exactly on its columns: the left edge on the first, the right edge at the end of the last; the page's edges
+        // are half a gutter, which is a column's edge whichever columns it covers.
         func edges(_ v: NSView, _ from: Int, _ to: Int) -> (CGFloat, CGFloat) {
             (A.column(from, in: w) - v.frame.minX, v.frame.maxX - (A.column(to, in: w) + A.columnWidth(in: w)))
         }
-        (rail1.inset, rail1.insetRight) = edges(rail1, 1, 2)
-        (rail2.inset, rail2.insetRight) = edges(rail2, 3, 4)
-        (page.inset, page.insetRight) = edges(page, 5, 10)
-        (history.inset, history.insetRight) = edges(history, 11, 12)
+        (rail1.inset, rail1.insetRight) = (A.column(1, in: w), A.gutter / 2)
+        (rail2.inset, rail2.insetRight) = (A.gutter / 2 - 1, A.gutter / 2)
+        (page.inset, page.insetRight) = (A.gutter / 2 - 1, open.history > 0 ? A.gutter / 2 - 1 : A.margin)
+        (history.inset, history.insetRight) = (A.gutter / 2, A.margin)
         strip.frame = NSRect(x: 0, y: 0, width: w, height: TitleStrip.height)
         overlay.frame = bounds
         overlay.isHidden = !A.masterGrid
@@ -207,7 +256,10 @@ final class StudioFrame: NSView {
         let w = bounds.width
         hairline(x: 0, y: A.header, width: w)
         hairline(x: 0, y: bounds.height - A.footer - 1, width: w)
-        for x in [rail1.frame.maxX, rail2.frame.maxX, history.frame.minX - 1] { fill(NSRect(x: x, y: A.header + 1, width: 1, height: rail1.frame.height), Design.rule) }
+        var lines = [rail1.frame.maxX]
+        if !rail2.isHidden { lines.append(rail2.frame.maxX) }
+        if !history.isHidden { lines.append(history.frame.minX - 1) }
+        for x in lines { fill(NSRect(x: x, y: A.header + 1, width: 1, height: rail1.frame.height), Design.rule) }
     }
 
     // MARK: What is shown
@@ -510,6 +562,9 @@ final class StudioHeader: NSView, Overlay {
     var live: Int? = 0 { didSet { needsDisplay = true } }
     private var settingsRect = NSRect.zero
     var onTab: ((Int) -> Void)?
+    /// The clock: the history slides in or out; it is drawn in ink while the history is in.
+    var onHistory: (() -> Void)?
+    var historyOpen = false { didSet { needsDisplay = true } }
     /// The three window marks at the top of column 1, where macOS would put its buttons: close, minimise, and arrange, which drops its menu.
     private var markRects: [NSRect] = []
     private var markHover: Int?
@@ -573,21 +628,25 @@ final class StudioHeader: NSView, Overlay {
         // Settings as a quiet word before the window marks.
         let right = col(12) + grid.column
         let settings = Design.attributed("Settings", live == nil ? .bodyStrong : .body, colour: live == nil ? Design.ink : Design.quiet)
-        let sx = right - 24 - 2 * 36 - 24 - settings.size().width
+        let sx = right - 24 - 3 * 36 - 24 - settings.size().width
         settings.draw(x: sx, baseline: b)
         settingsRect = NSRect(x: sx - 8, y: 0, width: settings.size().width + 16, height: bounds.height)
-        // The three window marks at the right end, each a clean 24 glyph hung from the baseline, no box: the arrow that
-        // arranges, the dash that minimises, the cross that closes. Quiet until the pointer is on one.
+        // The four window marks at the right end, each a clean 24 glyph hung from the baseline, no box: the clock that
+        // slides the history in and out, the arrow that arranges, the dash that minimises, the cross that closes.
         markRects = []
-        for i in 0..<3 {
-            let r = NSRect(x: right - 24 - CGFloat(2 - i) * 36, y: b - 24, width: 24, height: 24)
-            (markHover == i ? Design.ink : Design.quiet).setStroke()
+        for i in 0..<4 {
+            let r = NSRect(x: right - 24 - CGFloat(3 - i) * 36, y: b - 24, width: 24, height: 24)
+            let c = markHover == i || (i == 0 && historyOpen) ? Design.ink : Design.quiet
+            c.setStroke()
             let p = NSBezierPath(); p.lineWidth = 1.3; p.lineCapStyle = .butt
             let g = r.insetBy(dx: 5, dy: 5)
             switch i {
-            case 2: p.move(to: NSPoint(x: g.minX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY)); p.move(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.minX, y: g.maxY))
-            case 1: p.move(to: NSPoint(x: g.minX, y: g.midY)); p.line(to: NSPoint(x: g.maxX, y: g.midY))
-            default: p.move(to: NSPoint(x: g.minX, y: g.maxY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.move(to: NSPoint(x: g.minX + 4, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY - 4))
+            case 3: p.move(to: NSPoint(x: g.minX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY)); p.move(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.minX, y: g.maxY))
+            case 2: p.move(to: NSPoint(x: g.minX, y: g.midY)); p.line(to: NSPoint(x: g.maxX, y: g.midY))
+            case 1: p.move(to: NSPoint(x: g.minX, y: g.maxY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.move(to: NSPoint(x: g.minX + 4, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY - 4))
+            default:
+                p.appendOval(in: g)
+                p.move(to: NSPoint(x: g.midX, y: g.minY + 3)); p.line(to: NSPoint(x: g.midX, y: g.midY)); p.line(to: NSPoint(x: g.midX + 3.5, y: g.midY + 2))
             }
             p.stroke()
             markRects.append(r.insetBy(dx: -6, dy: -6))
@@ -620,7 +679,7 @@ final class StudioHeader: NSView, Overlay {
                 win.setFrame(NSRect(x: s.midX - f.width / 2, y: s.midY - f.height / 2, width: min(f.width, s.width), height: min(f.height, s.height)), display: true, animate: true)
             }
         }
-        let origin = win.convertToScreen(convert(NSRect(x: markRects[0].maxX - 220, y: markRects[0].maxY, width: 1, height: 1), to: nil)).origin
+        let origin = win.convertToScreen(convert(NSRect(x: markRects[1].maxX - 220, y: markRects[1].maxY, width: 1, height: 1), to: nil)).origin
         panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
         win.addChildWindow(panel, ordered: .above)
         dropped = panel
@@ -636,9 +695,10 @@ final class StudioHeader: NSView, Overlay {
         let p = convert(event.locationInWindow, from: nil)
         if let i = markRects.firstIndex(where: { $0.contains(p) }) {
             switch i {
-            case 2: window?.performClose(nil)
-            case 1: window?.miniaturize(nil)
-            default: arrange()
+            case 3: window?.performClose(nil)
+            case 2: window?.miniaturize(nil)
+            case 1: arrange()
+            default: onHistory?()
             }
             return
         }
@@ -685,6 +745,14 @@ final class MiniSlider: NSView {
 class StudioRail: NSView {
     var inset: CGFloat = 24 { didSet { needsLayout = true } }
     var insetRight: CGFloat = 24 { didSet { needsLayout = true } }
+    /// The arrow in the header, and what a press on it does.
+    var arrow = AreaHeader.Arrow.open { didSet { needsDisplay = true } }
+    var onArrow: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if arrow != .none, AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
+        super.mouseDown(with: event)
+    }
     static let top: CGFloat = 22
     let scroll = NSScrollView()
     let body: RailBody
@@ -718,7 +786,7 @@ class StudioRail: NSView {
         body.needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
-        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset, insetRight: insetRight)
+        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset, insetRight: insetRight, arrow: arrow)
     }
 
     class RailBody: NSView {
@@ -740,10 +808,13 @@ enum AreaHeader {
     static let labelBaseline: CGFloat = headingBaseline + 33
     static let rule: CGFloat = StudioRail.top + 14 + 16 + 27
     static let height: CGFloat = rule + 1
-    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat, insetRight: CGFloat? = nil) {
+    /// The arrow at the right: none; "open", the stroke up and right, pressed to open or widen; "close", turned 180, pressed to close.
+    enum Arrow { case none, open, close }
+    static func arrowRect(in bounds: NSRect, insetRight: CGFloat) -> NSRect { NSRect(x: bounds.width - insetRight - 16, y: headingBaseline - 13, width: 16, height: 16) }
+    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat, insetRight: CGFloat? = nil, arrow: Arrow = .open) {
         let r = bounds.width - (insetRight ?? inset)
         Design.attributed(heading, .heading).draw(x: inset, baseline: headingBaseline, width: r - inset - 24)
-        Design.arrow(16).draw(in: NSRect(x: r - 16, y: headingBaseline - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if arrow != .none { Design.arrow(16, back: arrow == .close).draw(in: arrowRect(in: bounds, insetRight: insetRight ?? inset), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
         Design.attributed(left, .label, colour: Design.quiet).draw(x: inset, baseline: labelBaseline)
         Design.attributed(right, .label, colour: Design.quiet).draw(right: r, baseline: labelBaseline)
         hairline(x: inset, y: rule, width: r - inset, Design.rule)
@@ -759,13 +830,53 @@ final class LibraryRail: StudioRail {
     /// A palette dropped on a member: the palette, then the member it lands in.
     var onDrop: ((UUID, UUID) -> Void)?
     private var list: Body { body as! Body }
+    /// Shut to a narrow strip: the arrow to open it, then a mark for each of its groups, the chosen one's filled.
+    var collapsed = false { didSet { scroll.isHidden = collapsed; needsDisplay = true } }
+    static let collapsedWidth: CGFloat = 48
+    private var markHits: [(NSRect, StudioFrame.Place)] = []
     init() {
         super.init(body: Body()); heading = "Library"; labels = ("Name", "Count")
         list.onPick = { [weak self] p in self?.onPick?(p) }
         list.onDrop = { [weak self] s, m in self?.onDrop?(s, m) }
     }
     required init?(coder: NSCoder) { fatalError() }
-    func set(rows: [Row], chosen: StudioFrame.Place) { list.rows = rows; list.chosen = chosen; needsLayout = true }
+    func set(rows: [Row], chosen: StudioFrame.Place) { list.rows = rows; list.chosen = chosen; needsLayout = true; needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard collapsed else { super.draw(dirtyRect); return }
+        let x = (Self.collapsedWidth - 16) / 2
+        Design.arrow(16).draw(in: NSRect(x: x, y: AreaHeader.headingBaseline - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        hairline(x: x, y: AreaHeader.rule, width: 16, Design.rule)
+        // One mark per group, a 12 square on the unit's line; the group holding the chosen place is filled.
+        markHits = []
+        var y = AreaHeader.height, groupPlace: StudioFrame.Place? = nil, groupHas = false
+        var marks: [(StudioFrame.Place, Bool)] = []
+        for r in list.rows {
+            switch r {
+            case .group:
+                if let p = groupPlace { marks.append((p, groupHas)) }
+                groupPlace = nil; groupHas = false
+            case .row(_, _, let p, _), .palette(_, _, let p, _):
+                if groupPlace == nil { groupPlace = p }
+                if p == list.chosen { groupHas = true }
+            }
+        }
+        if let p = groupPlace { marks.append((p, groupHas)) }
+        for (p, on) in marks {
+            let sq = NSRect(x: (Self.collapsedWidth - 12) / 2, y: y + Design.App.textBaseline - 10, width: 12, height: 12)
+            fill(sq, on ? Design.ink : Design.card)
+            Design.ink.setStroke()
+            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+            markHits.append((NSRect(x: 0, y: y, width: Self.collapsedWidth, height: Design.App.unit), p))
+            y += Design.App.unit
+        }
+    }
+    override func mouseDown(with event: NSEvent) {
+        guard collapsed else { super.mouseDown(with: event); return }
+        let p = convert(event.locationInWindow, from: nil)
+        if p.y < AreaHeader.height { onArrow?(); return }
+        if let m = markHits.first(where: { $0.0.contains(p) }) { onArrow?(); onPick?(m.1) }
+    }
 
     final class Body: RailBody, NSDraggingSource {
         var rows: [Row] = []
@@ -1107,6 +1218,14 @@ final class StudioPage: NSView {
     var onAcross: ((Int) -> Void)?
     enum Section { case tiles, catalogues, schema }
     private var section = Section.tiles
+    /// Taking the whole width: the arrow turns to "close", and a press on it gives the rails back.
+    var expanded = false { didSet { needsDisplay = true } }
+    var onArrow: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
+        super.mouseDown(with: event)
+    }
     private var title = ""
     private var meta: (String, String) = ("", "")
     /// The area header, then 16 clear before the tiles.
@@ -1208,7 +1327,7 @@ final class StudioPage: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset, insetRight: insetRight)
+        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
     }
 }
 
@@ -1255,9 +1374,9 @@ final class TileGrid: NSView {
             Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 12, baseline: block.maxY + Design.App.textBaseline, width: r.width - 24)
             Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 12, baseline: block.maxY + Design.App.unit + Design.App.textBaseline, width: r.width - 24)
             if let h = it.hex, h == chosenHex {
-                // The chosen tile: the one orange, a 2 ring inside the card's edge.
-                Design.orange.setStroke()
-                let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+                // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
+                Design.rule.setStroke()
+                let p = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); p.lineWidth = 1; p.stroke()
             }
         }
         if items.isEmpty { Design.attributed("Nothing found", .lead, colour: Design.soft).draw(x: 0, baseline: Design.App.textBaseline) }
