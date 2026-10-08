@@ -24,7 +24,7 @@ import Foundation
 
 /// What every file of ours says about itself.
 enum ColourFiles {
-    static let generator = "MMFFDev Colour 3"
+    static let generator = Brand.name
     /// A space is one member of a collection, whatever the user calls it: a project, a client, a brand.
     static let project = "colspace", palette = "colpalette", swatch = "colswatch", history = "colhistory"
     static let catalogue = "colcatalogue", data = "coldata"
@@ -139,7 +139,7 @@ struct SwatchDocument: Codable, Equatable {
 struct ProjectFile: Codable, Equatable {
     var format = "mmffdev-colour-project"
     var version = 1
-    var generator = "MMFFDev Colour 3"
+    var generator = Brand.name
     var project: Project
     /// The project's palettes, colours and typography alike, in sidebar order.
     var palettes: [Swatch]

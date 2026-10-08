@@ -142,7 +142,7 @@ func runSelfTest() -> Never {
     try! fm.createDirectory(at: exportRoot, withIntermediateDirectories: true)
     let out1 = try! writeExport(exportLib, to: exportRoot, by: .oldest)
     let out2 = try! writeExport(exportLib, to: exportRoot, by: .oldest)
-    check(out1.lastPathComponent == "MMFFDev Colour 3 Export" && out2.lastPathComponent == "MMFFDev Colour 3 Export 2",
+    check(out1.lastPathComponent == "\(Brand.name) Export" && out2.lastPathComponent == "\(Brand.name) Export 2",
           "each export gets its own folder, never overwriting an earlier one")
     let written = Set((try? fm.contentsOfDirectory(atPath: out1.path)) ?? [])
     check(written == ["library.json", "All Colours.txt", "Brand.txt", "Brand 2.txt"], "export folder holds json and text files")
@@ -996,6 +996,8 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && fm.fileExists(atPath: movedTo.appendingPathComponent("Palettes/Winter.colpalette").path),
           "a project found in another folder is read from there with everything in it, and nothing is written over it on the way")
     try! catStore.mutate { $0.setProjectFolder(jobB, nil) }
+    // That save wrote the project under Projects again, its colour records now complete; the folder that was moved out holds the same work and goes back in its place.
+    try? fm.removeItem(at: catDir.appendingPathComponent("Projects/Job B"))
     try! fm.moveItem(at: movedTo, to: catDir.appendingPathComponent("Projects/Job B"))
     _ = try! catStore.load()
     // A palette moved from one project to another: in its new home, gone from its old one.

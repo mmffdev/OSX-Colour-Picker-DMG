@@ -9,6 +9,7 @@ import AppKit
 // spelling.
 
 enum Brand {
+    /// The one name the product calls itself by, in every window, menu, prompt and file it writes.
     static let name = "Colorgain"
     static let studio = "Colorgain Studio"
     static let light = "Colorgain Light"

@@ -104,6 +104,8 @@ final class LibraryController: NSObject {
         do { library = try store.load() } catch { show(error) }
         loadedStamp = store.modificationDate
         loadHistory()
+        // Once per catalogue: every colour known only by its hex gets its source and linear master, written back as one step.
+        if library.colours.contains(where: { $0.source == nil }) { apply("Complete Colour Records") { $0.completeColourRecords() } }
         changed()
         if let aside = store.quarantinedFile, aside != reportedQuarantine {
             reportedQuarantine = aside
@@ -446,7 +448,7 @@ final class LibraryController: NSObject {
         guard CGPreflightScreenCaptureAccess() else {
             // macOS asks once; the toolbar button works the next time, after the app is allowed.
             CGRequestScreenCaptureAccess()
-            flash("Allow Screen Recording for MMFFDev Colour 3 in System Settings \u{25B8} Privacy & Security, then try Sample again")
+            flash("Allow Screen Recording for \(Brand.name) in System Settings \u{25B8} Privacy & Security, then try Sample again")
             return
         }
         ScreenSampler.begin { [weak self] image in
@@ -1155,7 +1157,7 @@ final class LibraryController: NSObject {
                 try? fm.removeItem(at: staging)
                 try fm.createDirectory(at: staging, withIntermediateDirectories: true)
                 try writeExport(format, palettes, to: file, options: Prefs.exportOptions)
-                let prompt = "MMFFDev Colour 3 wants to save \u{201C}\(file.lastPathComponent)\u{201D} in the \u{201C}\(folder.lastPathComponent)\u{201D} folder."
+                let prompt = "\(Brand.name) wants to save \u{201C}\(file.lastPathComponent)\u{201D} in the \u{201C}\(folder.lastPathComponent)\u{201D} folder."
                 switch try copyIntoFolder([file], folder, prompt: prompt) {
                 case .copied:
                     Prefs.exportFormat = format

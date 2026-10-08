@@ -307,7 +307,7 @@ final class SetupWindowController: NSWindowController {
     convenience init() {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         self.init(window: win)
-        let title = NSTextField(labelWithString: "Welcome to MMFFDev Colour 3")
+        let title = NSTextField(labelWithString: "Welcome to \(Brand.name)")
         title.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         let intro = NSTextField(wrappingLabelWithString: "A few things macOS needs you to allow, so that from now on everything just works. You can change any of them later in Settings \u{25B8} Permissions.")
         intro.font = NSFont.systemFont(ofSize: 13)

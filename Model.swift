@@ -956,12 +956,12 @@ extension Library {
     }
 }
 
-/// Writes library.json and the text files into a new "MMFFDev Colour 3 Export" folder under `folder`.
+/// Writes library.json and the text files into a new "\(Brand.name) Export" folder under `folder`.
 /// Returns the folder written. Never overwrites: a second export gets "... Export 2".
 func writeExport(_ lib: Library, to folder: URL, by order: SortOrder) throws -> URL {
     let fm = FileManager.default
     let existing = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
-    let dir = folder.appendingPathComponent(uniqueName("MMFFDev Colour 3 Export", among: existing))
+    let dir = folder.appendingPathComponent(uniqueName("\(Brand.name) Export", among: existing))
     try fm.createDirectory(at: dir, withIntermediateDirectories: false)
     try JSONEncoder.library.encode(lib).write(to: dir.appendingPathComponent("library.json"), options: .atomic)
     for f in lib.exportFiles(by: order) {

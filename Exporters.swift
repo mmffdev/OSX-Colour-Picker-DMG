@@ -113,7 +113,7 @@ enum ExportFormat: String, CaseIterable {
     private func render(_ palettes: [ExportPalette], _ o: ExportOptions) -> String {
         let named = palettes.map { ($0, tokenNames(for: $0, among: palettes, o)) }
         func hex(_ c: ExportColour) -> String { o.lowercaseHex ? c.hex.lowercased() : c.hex.uppercased() }
-        let banner = "Exported from MMFFDev Colour 3"
+        let banner = "Exported from \(Brand.name)"
         var out: [String] = []
 
         switch self {
@@ -413,7 +413,7 @@ extension ExportFormat {
         // Adobe's own books use ids below 3000. Ours come from the title, so two books rarely share one.
         let id = 3000 + Int(crc32(Data(title.utf8)) % 60000)
         var d = Data("8BCB".utf8) + u16(1) + u16(id)
-        d += text(title) + text("") + text("") + text("Exported from MMFFDev Colour 3")
+        d += text(title) + text("") + text("") + text("Exported from \(Brand.name)")
         d += u16(colours.count) + u16(min(9, max(1, colours.count))) + u16(0) + u16(0)
         for (i, (name, v)) in colours.enumerated() {
             let code = String(i + 1).padding(toLength: 6, withPad: " ", startingAt: 0)
@@ -621,7 +621,7 @@ struct DesignPack {
 
     func readme() -> String {
         var l = ["# \(name) \u{2014} Design Pack", "",
-                 "Exported from MMFFDev Colour 3 on \(stamp.prefix(10)). See LICENSE.md for terms.", "",
+                 "Exported from \(Brand.name) on \(stamp.prefix(10)). See LICENSE.md for terms.", "",
                  "## What is inside", "",
                  "- `pack.json` \u{2014} every project, palette and swatch, with all colour formats and tags",
                  "- `proof-sheet.png` \u{2014} contact sheet of every palette",
@@ -646,7 +646,7 @@ struct DesignPack {
         func list(_ a: [String]) -> String { "[" + a.map(q).joined(separator: ", ") + "]" }
         func nums(_ s: String) -> String { "[" + s.replacingOccurrences(of: "%", with: "") + "]" }
         var l = ["{", "  \"format\": \"mmffdev-colour-pack\",", "  \"version\": 1,",
-                 "  \"generator\": \"MMFFDev Colour 3\",", "  \"exportedAt\": \(q(stamp)),", "  \"name\": \(q(name)),",
+                 "  \"generator\": \"\(Brand.name)\",", "  \"exportedAt\": \(q(stamp)),", "  \"name\": \(q(name)),",
                  "  \"licence\": { \"owner\": \(q(licenceOwner)), \"file\": \"LICENSE.md\" },", "  \"projects\": ["]
         for (pi, pr) in projects.enumerated() {
             l.append("    { \"name\": \(q(pr.name)), \"palettes\": [")

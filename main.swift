@@ -240,8 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m.addItem(item)
         }
 
-        menu("MMFFDev Colour 3") { m in
-            add(m, "About MMFFDev Colour 3", #selector(showAbout), "", self)
+        menu(Brand.name) { m in
+            add(m, "About \(Brand.name)", #selector(showAbout), "", self)
             add(m, "Setup Assistant\u{2026}", #selector(runSetupAssistant), "", self)
             #if !APPSTORE
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
@@ -249,8 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m.addItem(.separator())
             add(m, "Settings\u{2026}", #selector(showSettings), ",", self)
             m.addItem(.separator())
-            add(m, "Hide MMFFDev Colour 3", #selector(NSApplication.hide(_:)), "h")
-            add(m, "Quit MMFFDev Colour 3", #selector(NSApplication.terminate(_:)), "q")
+            add(m, "Hide \(Brand.name)", #selector(NSApplication.hide(_:)), "h")
+            add(m, "Quit \(Brand.name)", #selector(NSApplication.terminate(_:)), "q")
         }
         menu("File") { m in
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)

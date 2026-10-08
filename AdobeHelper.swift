@@ -127,7 +127,7 @@ enum AdobeAccess {
     static func turnOn() throws -> Bool {
         if way == .helper { try AdobeHelper.turnOn(); return true }
         let apps = AdobeDestination.installed().map { $0.app }
-        let prompt = "MMFFDev Colour 3 wants to let your account add swatch files to the library folders of \(list(apps))."
+        let prompt = "\(Brand.name) wants to let your account add swatch files to the library folders of \(list(apps))."
         return try runAsAdministrator(["/bin/chmod", "+a", "user:\(NSUserName()) \(grant)"] + folders.map { $0.path }, prompt: prompt) == .copied
     }
 
@@ -135,7 +135,7 @@ enum AdobeAccess {
         if way == .helper { try AdobeHelper.turnOff() }
         let open = folders.filter(unlocked)
         guard !open.isEmpty else { return true }
-        let prompt = "MMFFDev Colour 3 wants to take back your account's leave to add swatch files to Adobe's library folders."
+        let prompt = "\(Brand.name) wants to take back your account's leave to add swatch files to Adobe's library folders."
         return try runAsAdministrator(["/bin/chmod", "-a", "user:\(NSUserName()) \(grant)"] + open.map { $0.path }, prompt: prompt) == .copied
     }
 

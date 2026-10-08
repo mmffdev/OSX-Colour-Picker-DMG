@@ -193,3 +193,26 @@ extension Library {
         return copy.addColour(definition) ?? ""
     }
 }
+
+extension Library {
+    /// Fills in the record of every colour known only by its hex: its sRGB source and the linear XYZ master made from it,
+    /// so no colour in a catalogue is only eight bits. A record that already has a source is left as it is.
+    mutating func completeColourRecords() {
+        for i in colours.indices where colours[i].source == nil {
+            guard let def = ColourDefinition.of(hex: colours[i].hex) else { continue }
+            colours[i].source = def.source; colours[i].master = def.master; colours[i].kind = def.kind
+        }
+    }
+    /// The colour to draw for a key: from its master, through Display P3, so a colour is shown as it was captured and
+    /// not as its eight-bit hex; the hex itself for a colour with no record here.
+    func displayTable() -> [String: NSColor] {
+        var out: [String: NSColor] = [:]
+        for c in colours {
+            guard let m = c.master else { continue }
+            let v = RGBSpace.displayP3.values(of: m).map { min(max($0, 0), 1) }
+            guard v.count == 3 else { continue }
+            out[c.hex] = NSColor(displayP3Red: CGFloat(v[0]), green: CGFloat(v[1]), blue: CGFloat(v[2]), alpha: 1)
+        }
+        return out
+    }
+}
