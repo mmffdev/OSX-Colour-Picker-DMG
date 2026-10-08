@@ -172,6 +172,9 @@ struct TagInfo: Codable, Equatable {
     /// A deleted tag keeps its record, so that a sync does not bring it back.
     var removed: Bool?
     var changedAt: Date
+    /// The level-1 group of the schema the tag belongs to, a client, say: worn by anything in a member inside it. Used only
+    /// while `projectID` is nil; absent from files written before groups could hold tags.
+    var groupID: UUID? = nil
 }
 
 struct Library: Codable, Equatable {
@@ -641,10 +644,15 @@ extension Library {
         return hexes.dropFirst().reduce(projects(holding: first)) { $0.intersection(projects(holding: $1)) }
     }
 
-    /// Whether something in `projects` may wear the tag: a global tag always, a project's tag only inside that project.
+    /// Whether something in `projects` may wear the tag: a global tag always, a project's tag only inside that project,
+    /// a group's tag inside any member of that group.
     func mayWear(_ tag: String, in projects: Set<UUID>) -> Bool {
-        guard let home = project(ofTag: tag) else { return true }
-        return projects.contains(home)
+        if let home = project(ofTag: tag) { return projects.contains(home) }
+        if let group = group(ofTag: tag) {
+            let all = SchemaTrial.collections, places = SchemaTrial.places
+            return projects.contains { SchemaTrial.folder(of: $0, among: all, places: places) == group }
+        }
+        return true
     }
 
     /// `tags` without the project tags that do not belong here. One already worn is left alone.
@@ -726,21 +734,29 @@ extension Library {
         info(forTag: name)?.projectID.flatMap { project($0)?.id }
     }
 
-    /// The tags to offer when tagging something in `project` (nil = outside any project): the
-    /// global ones and that project's own.
-    func tags(offeredIn project: UUID?) -> [String] {
-        allTags.filter { let home = self.project(ofTag: $0); return home == nil || home == project }
+    /// The level-1 group a tag belongs to, while that group is still in the schema and the tag has no project; nil otherwise.
+    func group(ofTag name: String) -> UUID? {
+        guard project(ofTag: name) == nil, let g = info(forTag: name)?.groupID else { return nil }
+        return SchemaTrial.collections.contains { $0.folders.contains { $0.id == g } } ? g : nil
     }
 
-    /// Makes the tag, or changes its colour and scope.
-    mutating func setTag(_ raw: String, colour: String?, project: UUID?, at date: Date = Date()) {
+    /// The tags to offer when tagging something in `project` (nil = outside any project): the
+    /// global ones, that project's own, and those of the group it sits in.
+    func tags(offeredIn project: UUID?) -> [String] {
+        allTags.filter { mayWear($0, in: Set([project].compactMap { $0 })) }
+    }
+
+    /// Makes the tag, or changes its colour and scope. `group` left out keeps the group the tag has; given, it sets it, nil taking it off.
+    mutating func setTag(_ raw: String, colour: String?, project: UUID?, group: UUID?? = nil, at date: Date = Date()) {
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        let fresh = TagInfo(name: name, colour: colour.flatMap(normaliseHex), projectID: project, removed: nil, changedAt: date)
-        if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+        let existing = tagInfo.firstIndex(where: { $0.name.lowercased() == name.lowercased() })
+        let keptGroup: UUID? = group ?? existing.flatMap { tagInfo[$0].removed == true ? nil : tagInfo[$0].groupID }
+        let fresh = TagInfo(name: name, colour: colour.flatMap(normaliseHex), projectID: project, removed: nil, changedAt: date, groupID: project == nil ? keptGroup : nil)
+        if let i = existing {
             var kept = fresh
             kept.name = tagInfo[i].removed == true ? name : tagInfo[i].name
-            if tagInfo[i].colour != kept.colour || tagInfo[i].projectID != kept.projectID || tagInfo[i].removed == true { tagInfo[i] = kept }
+            if tagInfo[i].colour != kept.colour || tagInfo[i].projectID != kept.projectID || tagInfo[i].groupID != kept.groupID || tagInfo[i].removed == true { tagInfo[i] = kept }
         } else {
             tagInfo.append(fresh)
         }
@@ -762,7 +778,7 @@ extension Library {
         if new.lowercased() != old.lowercased() {
             if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == old.lowercased() }) { tagInfo[i].removed = true; tagInfo[i].changedAt = date }
             // The tag it merges into keeps its own colour and scope; a new name inherits the old one's.
-            if info(forTag: new) == nil { setTag(new, colour: was?.colour, project: was?.projectID, at: date) }
+            if info(forTag: new) == nil { setTag(new, colour: was?.colour, project: was?.projectID, group: .some(was?.groupID), at: date) }
         } else if let i = tagInfo.firstIndex(where: { $0.name.lowercased() == old.lowercased() }) {
             tagInfo[i].name = new
             tagInfo[i].changedAt = date

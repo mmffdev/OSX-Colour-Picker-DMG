@@ -228,8 +228,8 @@ final class StudioFrame: NSView {
         page.onNew = { [weak self] in self?.newMember() }
         page.add(ShortcutsSettings(), as: .shortcuts)
         page.add(HaloSettings(), as: .halo)
-        // Tags: the old editor, every tag with its colour, name, scope and the swatches that wear it, the one place for all of them.
-        page.add(EmbeddedSection(TagEditorController(library: library, focus: nil)), as: .tags)
+        // Tags: every tag with its colour, name, scope and what wears it, the one place for all of them (StudioTags.swift).
+        page.add(TagsSettings(library: library), as: .tags)
         page.add(EmbeddedSection(LabViewController(library: library)), as: .lab)
         page.add(EmbeddedSection(ContrastViewController(library: library)), as: .contrast)
         history.onPick = { [weak self] hex in self?.choose(hex) }
@@ -413,28 +413,9 @@ final class StudioFrame: NSView {
         h.actions = SwatchMenu.ring(for: hex, in: inPalette, library: library, editTags: { [weak self] hexes in self?.tag(swatches: hexes) })
         h.open(centredOn: rect, in: page.grid)
     }
-    /// Tags typed on the window's own panel, separated by commas; the words already there are the tags it has.
-    private func tag(swatches hexes: [String]) {
-        guard let first = hexes.first else { return }
-        let now = library.library.colours.first { $0.hex == first }?.tags ?? []
-        SwissConfirm.name(over: window, title: "Tags", note: "The tags on \(hexes.count == 1 ? colourName(first) : plural(hexes.count, "colour")), separated by commas. Scope and colour them under Settings, Tags.",
-                          placeholder: "Brand, Spring 2027, Approved", value: now.joined(separator: ", "), confirm: "Save Tags", check: { _ in nil }) { [weak self] typed in
-            self?.library.setTags(ofSwatches: hexes, Self.split(typed))
-        }
-    }
-    private func tag(palette id: UUID) {
-        guard let s = library.library.swatch(id) else { Diagnostics.log("tags", "no palette for \(id)"); return }
-        Diagnostics.log("tags", "panel for \(s.name)")
-        SwissConfirm.name(over: window, title: "Tags", note: "The tags on \(s.name), separated by commas. Scope and colour them under Settings, Tags.",
-                          placeholder: "Brand, Spring 2027, Approved", value: s.tagList.joined(separator: ", "), confirm: "Save Tags", check: { _ in nil }) { [weak self] typed in
-            self?.library.setTags(ofPalette: id, Self.split(typed))
-        }
-    }
-    private static func split(_ typed: String) -> [String] {
-        var seen = Set<String>(), out: [String] = []
-        for t in typed.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !t.isEmpty && !seen.contains(t.lowercased()) { seen.insert(t.lowercased()); out.append(t) }
-        return out
-    }
+    /// Tags typed on the window's own panel, separated by commas, with the scope a new one takes (StudioTags.swift).
+    private func tag(swatches hexes: [String]) { TagPanel.colours(hexes, library: library, over: window) }
+    private func tag(palette id: UUID) { TagPanel.palette(id, library: library, over: window) }
 
     /// A member made where the page stands: in the collection or folder in view, else the first collection; named on the window's own panel.
     private func newMember() {
@@ -1190,6 +1171,8 @@ final class LibraryRail: StudioRail {
         var onGear: ((UUID, NSView, NSRect) -> Void)?
         /// The icons on palette rows, with what a press on each does.
         private var iconHits: [(NSRect, Int, UUID)] = []
+        /// The Edit Tags rows, each with the member it is under.
+        private var tagLinks: [(NSRect, UUID)] = []
         static var row: CGFloat { unit }
         static var two: CGFloat { unit * 2 }
         static var groupAbove: CGFloat { unit }
@@ -1248,7 +1231,7 @@ final class LibraryRail: StudioRail {
 
         override func draw(_ dirtyRect: NSRect) {
             var y: CGFloat = 0
-            hits = []; iconHits = []; nameHits = []
+            hits = []; iconHits = []; nameHits = []; tagLinks = []
             let right = bounds.width - insetRight
             /// A member lit while a palette is dragged over it, or a group of its stack that takes the drop: a one-point ink edge.
             func edge(_ box: NSRect) {
@@ -1343,6 +1326,7 @@ final class LibraryRail: StudioRail {
                     Design.attributed(name, .body, colour: link ? Design.quiet : Design.ink).draw(x: x, baseline: b, width: right - x - countText.size().width - 12)
                     countText.draw(right: right, baseline: b)
                     hits.append((box, link ? .tags : .project(pid)))
+                    if link { tagLinks.append((box, pid)) }
                     y += Self.row
                 case .palette(let pr):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
@@ -1405,6 +1389,8 @@ final class LibraryRail: StudioRail {
             if let h = iconHits.first(where: { $0.0.contains(p) }) { pressedIcon = h; return }
             if event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) { rename(h, at: p); return }
             pressed = palette(at: p); pressedAt = (event.locationInWindow, event.timestamp)
+            // Edit Tags under a member opens Settings, Tags filtered to that member.
+            if let l = tagLinks.first(where: { $0.0.contains(p) }) { TagsSettings.pendingScope = .member(l.1) }
             if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
         }
         /// A double-click on a name: the cursor goes into the words where they are, and the name is written when the typing ends.
@@ -1872,6 +1858,12 @@ final class StudioPage: NSView, Overlay {
             e.scroll.frame = settingsScroll.frame
             let eh = e.view.height(forWidth: scroll.frame.width)
             e.view.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(e.scroll.frame.height, eh))
+            // Tags is laid out as the schema is: from the page's edge, its words a column in.
+            if let t = e.view as? TagsSettings {
+                e.scroll.frame = schemaScroll.frame
+                t.leading = inset
+                t.frame = NSRect(x: 0, y: 0, width: schemaScroll.frame.width, height: max(e.scroll.frame.height, eh))
+            }
             e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
         }
         grid.width = scroll.frame.width

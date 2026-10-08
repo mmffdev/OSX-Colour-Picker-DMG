@@ -339,6 +339,17 @@ enum SwissConfirm {
         panel.present(over: window) { _ in then(panel.text) }
     }
 
+    /// A name and one choice from a house dropdown under it: the field on its hairline, then the dropdown's label, its value
+    /// and chevron on a hairline of its own, its menu the house menu with its dividers and headings. `items` are the menu's
+    /// rows as `SwissDropdown.MenuPanel` takes them; `chosen` is the index of the one chosen to begin with. With `allowsEmpty`
+    /// the field may be left empty, as a list of tags may. The words and the chosen index come back with the act.
+    static func name(over window: NSWindow?, title: String, note: String, placeholder: String, value: String = "", pickLabel: String, items: [String], chosen: Int,
+                     confirm: String, allowsEmpty: Bool = false, check: @escaping (String) -> String?, then: @escaping (String, Int) -> Void) {
+        let panel = ConfirmPanel(title: title, note: note, commit: nil, options: [], must: confirm, naming: (placeholder, check), pick: (pickLabel, items, chosen), allowsEmpty: allowsEmpty)
+        panel.preset(value)
+        panel.present(over: window) { _ in then(panel.text, panel.picked) }
+    }
+
     /// A choice between ways on: rows to pick from, Go as the one button; Escape is the last way, the one that changes nothing.
     static func choose(over window: NSWindow?, title: String, note: String, choices: [String], then: @escaping (Int) -> Void) {
         let panel = ConfirmPanel(title: title, note: note, commit: nil, options: choices, must: "Go", escapes: true)
@@ -353,7 +364,7 @@ enum SwissConfirm {
     }
 
     final class ConfirmPanel: NSPanel, Overlay {
-        var overlayWindows: [NSWindow] { [self] }
+        var overlayWindows: [NSWindow] { [self] + (picker?.dropped.map { [$0] } ?? []) }
         func dismissOverlay() { let escape = onEscape; close(then: false); escape?() }
         private var done: ((Int) -> Void)?
         private let slide = SwissSlide()
@@ -365,14 +376,22 @@ enum SwissConfirm {
         private let field: NSTextField?
         private let problem = Design.text("", .caption, colour: Design.orange)
         private let check: ((String) -> String?)?
+        private let allowsEmpty: Bool
+        /// The dropdown under the field, when the panel asks for a choice as well as a name.
+        private let picker: PickRow?
+        /// The index of the dropdown's chosen row; 0 without a dropdown.
+        var picked: Int { picker?.chosen ?? 0 }
         var onEscape: (() -> Void)?
         var text: String { field?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
         /// Words already in the field when it opens, to be changed rather than typed from nothing.
         func preset(_ s: String) { field?.stringValue = s }
         private weak var host: NSWindow?
 
-        init(title: String, note: String, commit: String?, options: [String], must: String? = nil, escapes: Bool = false, naming: (String, (String) -> String?)? = nil) {
+        init(title: String, note: String, commit: String?, options: [String], must: String? = nil, escapes: Bool = false, naming: (String, (String) -> String?)? = nil,
+             pick: (label: String, items: [String], chosen: Int)? = nil, allowsEmpty: Bool = false) {
             self.commit = commit
+            self.allowsEmpty = allowsEmpty
+            picker = pick.map { PickRow(label: $0.label, items: $0.items, chosen: $0.chosen) }
             self.must = must
             self.escapes = escapes
             self.check = naming?.1
@@ -384,6 +403,9 @@ enum SwissConfirm {
                 f.font = Design.font(17, .regular)
                 f.textColor = Design.ink
                 f.placeholderAttributedString = Design.attributed(placeholder, .headline, size: 17, colour: Design.soft)
+                // The action goes on Return only. Sent when the editing ends as well, the panel acted on its own the moment the focus
+                // moved, which it does itself as it opens, and closed with the words still in it: the halo's Tags on a tagged palette.
+                f.cell?.sendsActionOnEndEditing = false
                 field = f
             } else { field = nil }
             button = must.map { SwissButton($0, .primary) } ?? SwissButton(commit == nil ? "Close" : "Keep It", .secondary)
@@ -407,19 +429,26 @@ enum SwissConfirm {
             button.fixedWidth = bw
             for v in [heading, words, slide, button] { card.addSubview(v) }
             if let c = choices { card.addSubview(c) }
-            if let f = field { f.target = self; f.action = #selector(pressed); card.addSubview(f); card.addSubview(problem); card.addSubview(Design.hairline(Design.rule)) }
+            let fieldLine = Design.hairline(Design.rule)
+            if let f = field { f.target = self; f.action = #selector(pressed); card.addSubview(f); card.addSubview(problem); card.addSubview(fieldLine) }
+            if let p = picker { card.addSubview(p) }
             // Placed by frame, top down: the title, the note, the choices, the slide, the button on its own row.
             let hs = heading.attributedStringValue.size()
             heading.frame = NSRect(x: margin, y: margin, width: w - 2 * margin, height: hs.height + 2)
             let wh = words.attributedStringValue.boundingRect(with: NSSize(width: w - 2 * margin, height: 400), options: [.usesLineFragmentOrigin]).height
             words.frame = NSRect(x: margin, y: heading.frame.maxY + 12, width: w - 2 * margin, height: wh + 4)
             var y = words.frame.maxY + 28
-            if let f = field, let line = card.subviews.last {
+            if let f = field {
                 // The field at 17 on a hairline, the problem's line under it.
                 f.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: 24)
-                line.frame = NSRect(x: margin, y: y + 28, width: w - 2 * margin, height: 1)
+                fieldLine.frame = NSRect(x: margin, y: y + 28, width: w - 2 * margin, height: 1)
                 problem.frame = NSRect(x: margin, y: y + 34, width: w - 2 * margin, height: 16)
                 y += 28 + 22 + 16
+            }
+            if let p = picker {
+                // The dropdown as the field above it: its label, then the value at 17 on a hairline, the chevron at the right.
+                p.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: PickRow.height)
+                y = p.frame.maxY + 28
             }
             if let c = choices {
                 c.frame = NSRect(x: margin, y: y, width: w - 2 * margin, height: c.height)
@@ -445,7 +474,7 @@ enum SwissConfirm {
         @objc private func pressed() {
             if let check = check {
                 // The name must do before the panel goes: the problem is said under the field, and the field keeps the focus.
-                if let wrong = check(text) ?? (text.isEmpty ? "Give it a name." : nil) {
+                if let wrong = check(text) ?? (text.isEmpty && !allowsEmpty ? "Give it a name." : nil) {
                     problem.attributedStringValue = Design.attributed(wrong, .caption, colour: Design.orange)
                     makeFirstResponder(field)
                     return
@@ -479,10 +508,18 @@ enum SwissConfirm {
             setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.midY - frame.height / 2))
             w.addChildWindow(self, ordered: .above)
             makeKeyAndOrderFront(nil)
-            if let f = field { makeFirstResponder(f) }
+            // Ordering the panel in already gives the field the focus; asked for again, the field would end its editing and begin anew.
+            if let f = field, f.currentEditor() == nil { makeFirstResponder(f) }
+            // The cursor at the end, so typing adds to the words already there; anything selected is paper on ink, not the system's colour.
+            if let tv = field?.currentEditor() as? NSTextView {
+                tv.insertionPointColor = Design.ink
+                tv.selectedTextAttributes = [.backgroundColor: Design.ink, .foregroundColor: Design.card]
+                tv.moveToEndOfDocument(nil)
+            }
         }
 
         private func close(then go: Bool) {
+            picker?.closeMenu()
             Overlays.closed(self)
             if let w = host {
                 w.removeChildWindow(self)
@@ -492,6 +529,57 @@ enum SwissConfirm {
             orderOut(nil)
             if go { done?(choices?.chosen ?? 0) }
             done = nil
+        }
+
+        /// The panel's dropdown: a label over the value at 17 on a hairline with the chevron at the right, as the field above it;
+        /// a click opens the house menu under it, a child of the panel, with the chosen row ticked.
+        final class PickRow: NSView {
+            static let height: CGFloat = 56
+            private let label: String, items: [String]
+            private(set) var chosen: Int
+            fileprivate(set) var dropped: SwissDropdown.MenuPanel?
+            init(label: String, items: [String], chosen: Int) {
+                self.label = label; self.items = items
+                self.chosen = items.indices.contains(chosen) ? chosen : 0
+                super.init(frame: .zero)
+            }
+            required init?(coder: NSCoder) { fatalError() }
+            override var isFlipped: Bool { true }
+            override func draw(_ dirtyRect: NSRect) {
+                let w = bounds.width
+                Design.attributed(label, .label, colour: Design.quiet).draw(x: 0, baseline: 12)
+                // The value without the indent a row has in the menu.
+                let value = items.indices.contains(chosen) ? items[chosen].trimmingCharacters(in: .whitespaces) : ""
+                Design.attributed(value, .body, size: 17).draw(x: 0, baseline: 40, width: w - 24)
+                // The chevron, turned up while the menu is open.
+                Design.quiet.setStroke()
+                let c = NSBezierPath(), up = dropped != nil
+                c.lineWidth = 1
+                c.move(to: NSPoint(x: w - 9, y: up ? 36 : 32)); c.line(to: NSPoint(x: w - 5, y: up ? 32 : 36)); c.line(to: NSPoint(x: w - 1, y: up ? 36 : 32))
+                c.stroke()
+                fill(NSRect(x: 0, y: bounds.height - 1, width: w, height: 1), up ? Design.ink : Design.rule)
+            }
+            override func mouseDown(with event: NSEvent) { toggle() }
+            /// Opens the menu under the row, or closes it when it is open.
+            func toggle() {
+                if dropped != nil { closeMenu(); return }
+                guard let win = window else { return }
+                let panel = SwissDropdown.MenuPanel(items: items, chosen: items.indices.contains(chosen) ? items[chosen] : "", width: bounds.width) { [weak self] i in
+                    guard let self = self else { return }
+                    self.closeMenu()
+                    if SwissDropdown.MenuPanel.kind(self.items[i]) == 0 { self.chosen = i; self.needsDisplay = true }
+                }
+                let s = win.convertToScreen(convert(bounds, to: nil))
+                panel.place(below: NSPoint(x: s.minX, y: s.minY - 4))
+                win.addChildWindow(panel, ordered: .above)
+                dropped = panel
+                needsDisplay = true
+            }
+            func closeMenu() {
+                if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
+                dropped = nil
+                needsDisplay = true
+            }
         }
 
         /// The choice rows: a square before each word, ink-filled on the chosen one, 28 to a row.
