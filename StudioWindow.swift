@@ -847,26 +847,45 @@ final class LibraryRail: StudioRail {
         let x = (Self.collapsedWidth - 16) / 2
         Design.arrow(16).draw(in: NSRect(x: x, y: AreaHeader.headingBaseline - 13, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         hairline(x: x, y: AreaHeader.rule, width: 16, Design.rule)
-        // One mark per group, a 12 square on the unit's line; the group holding the chosen place is filled.
+        // One icon per group on the unit's line, in the house stroke: the catalogue a grid of four, favourites a star, a collection a
+        // folder, palettes three bands. Ink for the group holding the chosen place, quiet for the rest.
         markHits = []
-        var y = AreaHeader.height, groupPlace: StudioFrame.Place? = nil, groupHas = false
-        var marks: [(StudioFrame.Place, Bool)] = []
+        var y = AreaHeader.height, groupPlace: StudioFrame.Place? = nil, groupHas = false, groupName = ""
+        var marks: [(StudioFrame.Place, Bool, String)] = []
         for r in list.rows {
             switch r {
-            case .group:
-                if let p = groupPlace { marks.append((p, groupHas)) }
-                groupPlace = nil; groupHas = false
+            case .group(let title):
+                if let p = groupPlace { marks.append((p, groupHas, groupName)) }
+                groupPlace = nil; groupHas = false; groupName = title
             case .row(_, _, let p, _), .palette(_, _, let p, _):
                 if groupPlace == nil { groupPlace = p }
                 if p == list.chosen { groupHas = true }
             }
         }
-        if let p = groupPlace { marks.append((p, groupHas)) }
-        for (p, on) in marks {
-            let sq = NSRect(x: (Self.collapsedWidth - 12) / 2, y: y + Design.App.textBaseline - 10, width: 12, height: 12)
-            fill(sq, on ? Design.ink : Design.card)
-            Design.ink.setStroke()
-            let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
+        if let p = groupPlace { marks.append((p, groupHas, groupName)) }
+        for (p, on, name) in marks {
+            let g = NSRect(x: (Self.collapsedWidth - 16) / 2, y: y + Design.App.textBaseline - 13, width: 16, height: 16)
+            (on ? Design.ink : Design.quiet).setStroke()
+            let path = NSBezierPath(); path.lineWidth = 1.2; path.lineJoinStyle = .miter
+            switch name {
+            case "Catalogue":
+                for (dx, dy) in [(0, 0), (9, 0), (0, 9), (9, 9)] as [(CGFloat, CGFloat)] { path.appendRect(NSRect(x: g.minX + dx + 0.5, y: g.minY + dy + 0.5, width: 6, height: 6)) }
+            case "Favourites":
+                let c = NSPoint(x: g.midX, y: g.midY + 0.5), r1: CGFloat = 7.5, r2: CGFloat = 3
+                for k in 0..<10 {
+                    let a = -CGFloat.pi / 2 + CGFloat(k) * CGFloat.pi / 5, r = k % 2 == 0 ? r1 : r2
+                    let pt = NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
+                    if k == 0 { path.move(to: pt) } else { path.line(to: pt) }
+                }
+                path.close()
+            case "Palettes":
+                for dx in [0, 5.5, 11] as [CGFloat] { path.appendRect(NSRect(x: g.minX + dx + 0.5, y: g.minY + 0.5, width: 4, height: 15)) }
+            default:
+                // A folder: the tab, then the body.
+                path.move(to: NSPoint(x: g.minX + 0.5, y: g.maxY - 0.5)); path.line(to: NSPoint(x: g.minX + 0.5, y: g.minY + 2.5)); path.line(to: NSPoint(x: g.minX + 6, y: g.minY + 2.5))
+                path.line(to: NSPoint(x: g.minX + 8, y: g.minY + 5)); path.line(to: NSPoint(x: g.maxX - 0.5, y: g.minY + 5)); path.line(to: NSPoint(x: g.maxX - 0.5, y: g.maxY - 0.5)); path.close()
+            }
+            path.stroke()
             markHits.append((NSRect(x: 0, y: y, width: Self.collapsedWidth, height: Design.App.unit), p))
             y += Design.App.unit
         }
