@@ -1337,14 +1337,16 @@ final class PaletteTable: StudioRail {
     required init?(coder: NSCoder) { fatalError() }
     func set(heading: String, labels: (String, String), rows: [Row]) {
         self.heading = heading; self.labels = labels; table.rows = rows; needsLayout = true
-        // The chosen row is brought into view, which the eye expects when it was chosen elsewhere.
+        // The chosen row is brought into view when it is out of it, which the eye expects when it was chosen elsewhere;
+        // a row already in view, clicked here, leaves the list exactly where it is.
         var y: CGFloat = 0
         for r in rows {
             let h = Body.height(of: r)
             switch r {
             case .palette(_, _, _, _, true, _), .item(_, _, _, _, true):
                 layoutSubtreeIfNeeded()
-                body.scrollToVisible(NSRect(x: 0, y: max(0, y - h), width: 1, height: h * 3))
+                let row = NSRect(x: 0, y: y, width: 1, height: h)
+                if !body.visibleRect.contains(row) { body.scrollToVisible(NSRect(x: 0, y: max(0, y - h), width: 1, height: h * 3)) }
                 return
             default: y += h
             }
@@ -1856,11 +1858,11 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         ticked = []
         guard let e = expanded, let lib = libraryFor(e) else { contents = nil; lines = []; return }
         contents = lib
-        lines = Self.lines(of: lib)
+        lines = Self.lines(of: lib, schema: SchemaTrial.read(in: Catalogues.standard.directory(for: e)))
     }
 
     /// The catalogue as rail1 lists it: Favourites; each collection with its folders and members, or a word that it is empty; the loose palettes.
-    private static func lines(of lib: Library) -> [Line] {
+    private static func lines(of lib: Library, schema: SchemaTrial.SchemaFile) -> [Line] {
         var out: [Line] = []
         func palette(_ s: Swatch, _ indent: Int) -> Line {
             Line(text: s.name, count: "\(s.entries.count)", item: .palette(s.id), indent: indent, heading: false, hexes: s.entries.map { $0.hex })
@@ -1870,7 +1872,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
             out.append(Line(text: "Favourites", count: "", item: nil, indent: 0, heading: true))
             out += favourites.map { palette($0, 0) }
         }
-        let all = SchemaTrial.collections, places = SchemaTrial.places
+        let all = schema.collections, places = schema.places
         func members(of c: SchemaCollection, folder: UUID?) -> [Project] {
             lib.orderedProjects.filter { p in
                 SchemaTrial.collection(of: p.id, among: all, places: places).id == c.id && SchemaTrial.folder(of: p.id, among: all, places: places) == folder
@@ -2340,7 +2342,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         guard let e = expanded else { return }
         var made: UUID?
         do { try edit(e, "New \(kind)") { lib in made = lib.createProject(named: "\(kind) 1") } } catch { library?.show(error) }
-        if let id = made { SchemaTrial.place(id, in: collection, folder: nil) }
+        if let id = made { SchemaTrial.place(id, in: collection, folder: nil, catalogue: Catalogues.standard.directory(for: e)) }
         loadContents(); refresh(); onChange?()
     }
 

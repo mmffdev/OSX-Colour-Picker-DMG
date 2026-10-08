@@ -361,7 +361,7 @@ struct Catalogues {
     func dropEmptyMain() {
         guard hasMain, let lib = try? store(for: Catalogues.mainName).load(), lib.colours.isEmpty, lib.swatches.isEmpty, lib.projects.isEmpty else { return }
         let fm = FileManager.default
-        for item in [CatalogueFiles.index(in: root)?.lastPathComponent, "library.json", "library.history.json", CatalogueFiles.unfiled].compactMap({ $0 }) {
+        for item in [CatalogueFiles.index(in: root)?.lastPathComponent, "library.json", "library.history.json", SchemaTrial.fileName, CatalogueFiles.unfiled].compactMap({ $0 }) {
             try? fm.removeItem(at: root.appendingPathComponent(item))
         }
     }
@@ -406,7 +406,7 @@ struct Catalogues {
             while fm.fileExists(atPath: dest.path) { dest = folder.appendingPathComponent(filesystemName(name) + " \(n)"); n += 1 }
             try fm.createDirectory(at: dest, withIntermediateDirectories: true)
             let index = CatalogueFiles.index(in: root)?.lastPathComponent
-            for item in [index, "library.json", "library.history.json", "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
+            for item in [index, "library.json", "library.history.json", SchemaTrial.fileName, "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }
@@ -431,7 +431,7 @@ struct Catalogues {
         if old == Catalogues.mainName {
             try fm.createDirectory(at: dest, withIntermediateDirectories: true)
             let index = CatalogueFiles.index(in: root)?.lastPathComponent
-            for item in [index, "library.json", "library.history.json", "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
+            for item in [index, "library.json", "library.history.json", SchemaTrial.fileName, "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }

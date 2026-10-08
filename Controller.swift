@@ -33,7 +33,8 @@ enum Selection: Equatable {
 }
 
 final class LibraryController: NSObject {
-    private(set) var store: LibraryStore
+    /// The open catalogue's files; its schema is read from the same folder.
+    private(set) var store: LibraryStore { didSet { SchemaTrial.use(directory: store.url.deletingLastPathComponent()) } }
     private(set) var library = Library()
     private(set) var catalogue: String
     weak var window: NSWindow?
@@ -74,6 +75,7 @@ final class LibraryController: NSObject {
         catalogue = name
         store = Catalogues.standard.store(for: name)
         super.init()
+        SchemaTrial.use(directory: store.url.deletingLastPathComponent())
     }
 
     // MARK: Reading

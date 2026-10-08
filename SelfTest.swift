@@ -1260,6 +1260,24 @@ func runHaloTests(check: (Bool, String) -> Void) {
           && HaloGeometry.halfWedge(of: 1, diameter: 344, count: 60) == .pi / 60, "an outer ring's cursor is as wide as its glyph, never more than one place")
     check(Theme.haloDefaultIsText("ring2.background") && !Theme.haloDefaultIsText("ring2.text") && !Theme.haloDefaultIsText("ring2.cursorBackground")
           && Theme.haloDefaultIsText("ring2.cursorText") && !Theme.haloDefaultIsText("centre.background") && Theme.haloDefaultIsText("centre.text"), "unset, a halo ring is the button colours turned round, and its cursor and centre are the button colours")
+    // A catalogue's schema lives in its folder: written there on a change, read back from there, and another folder has its own.
+    let schemaHomeA = FileManager.default.temporaryDirectory.appendingPathComponent("colorgain-schema-a-\(UUID().uuidString)")
+    let schemaHomeB = FileManager.default.temporaryDirectory.appendingPathComponent("colorgain-schema-b-\(UUID().uuidString)")
+    for d in [schemaHomeA, schemaHomeB] { try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+    SchemaTrial.use(directory: schemaHomeA)
+    SchemaTrial.collections = [SchemaCollection(name: "Clients", folderName: "Client", stack: SchemaTrial.start)]
+    let schemaMember = UUID()
+    SchemaTrial.place(schemaMember, in: SchemaTrial.collections[0].id, folder: nil)
+    let schemaFileA = schemaHomeA.appendingPathComponent(SchemaTrial.fileName)
+    let schemaOnDisk = (try? Data(contentsOf: schemaFileA)).flatMap { try? JSONDecoder().decode(SchemaTrial.SchemaFile.self, from: $0) }
+    SchemaTrial.use(directory: schemaHomeB)
+    let schemaFreshElsewhere = SchemaTrial.collections.map { $0.name } == ["Projects"] && SchemaTrial.places.isEmpty
+    SchemaTrial.use(directory: schemaHomeA)
+    check(schemaOnDisk?.collections.map { $0.name } == ["Clients"] && schemaOnDisk?.places[schemaMember.uuidString] != nil && schemaFreshElsewhere
+          && SchemaTrial.collections.map { $0.name } == ["Clients"] && SchemaTrial.read(in: schemaHomeB).collections.map { $0.name } == ["Projects"],
+          "a catalogue's schema is written to its folder as \(SchemaTrial.fileName), read back from it, and a catalogue without one starts fresh")
+    for d in [schemaHomeA, schemaHomeB] { try? FileManager.default.removeItem(at: d) }
+
     let schema = SchemaTrial.start, schemaOne = SchemaTrial.addingChild(to: schema.id, in: schema)
     let schemaTwo = SchemaTrial.addingSibling(after: schemaOne.added ?? UUID(), in: schemaOne.tree)
     let schemaThree = SchemaTrial.addingChild(to: schemaTwo.added ?? UUID(), in: schemaTwo.tree)

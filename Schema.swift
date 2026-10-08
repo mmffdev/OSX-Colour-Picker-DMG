@@ -90,17 +90,69 @@ enum SchemaTrial {
     /// The first collection is the one every project was in before there were collections, and is where a project with no place of its own still is.
     static let firstCollection = UUID(uuidString: "C0110000-0000-4000-8000-000000000001") ?? UUID()
 
-    /// Every collection, in rail1's order. Until one is made there is the one the app has always had, with the stack kept before collections.
+    // MARK: Where the schema is kept: in the catalogue
+
+    /// A catalogue's schema is the catalogue's own. It lives in the catalogue's folder as `schema.colschema`, plain JSON
+    /// beside the catalogue's index: its collections, and where every member sits. It travels with the catalogue, and
+    /// every other catalogue has a schema of its own. Until 2026-10-08 it sat with the app's settings, one for all.
+    struct SchemaFile: Codable {
+        var collections: [SchemaCollection]
+        var places: [String: SchemaPlace]
+        /// What a catalogue starts with: the one collection the app has always had.
+        static var fresh: SchemaFile { SchemaFile(collections: [SchemaCollection(id: firstCollection, name: "Projects", stack: start)], places: [:]) }
+    }
+    static let fileName = "schema.colschema"
+    private static var directory: URL?
+    private static var held: SchemaFile?
+
+    /// The controller points here at the open catalogue's folder whenever it opens one; the schema is read from there and written back on every change.
+    static func use(directory url: URL) {
+        guard url.standardizedFileURL != directory?.standardizedFileURL else { return }
+        directory = url; held = nil
+        NotificationCenter.default.post(name: .schemaDidChange, object: nil)
+    }
+    /// Another catalogue's schema, read from its folder; the open catalogue's is the live one.
+    static func read(in dir: URL) -> SchemaFile {
+        if dir.standardizedFileURL == directory?.standardizedFileURL { return file }
+        return decode(dir) ?? .fresh
+    }
+    private static func decode(_ dir: URL) -> SchemaFile? {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent(fileName)), let read = try? JSONDecoder().decode(SchemaFile.self, from: data), !read.collections.isEmpty else { return nil }
+        return read
+    }
+    private static func encode(_ f: SchemaFile, to dir: URL) {
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(f) { try? data.write(to: dir.appendingPathComponent(fileName), options: .atomic) }
+    }
+    private static var file: SchemaFile {
+        if let f = held { return f }
+        var f: SchemaFile
+        if let dir = directory, let read = decode(dir) { f = read }
+        else if let dir = directory, let moved = fromPreferences() { f = moved; encode(f, to: dir) }
+        else { f = .fresh }
+        held = f
+        return f
+    }
+    private static func write(_ f: SchemaFile) {
+        held = f
+        if let dir = directory { encode(f, to: dir) }
+        NotificationCenter.default.post(name: .schemaDidChange, object: nil)
+    }
+    /// The schema kept with the app's settings until 2026-10-08 goes into the first catalogue opened without one of its own, once; the settings are then cleared.
+    private static func fromPreferences() -> SchemaFile? {
+        let cols = preferences.data(forKey: "schema.collections").flatMap { try? JSONDecoder().decode([SchemaCollection].self, from: $0) } ?? []
+        let tree = preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) }
+        guard !cols.isEmpty || tree != nil else { return nil }
+        let places = preferences.data(forKey: "schema.places").flatMap { try? JSONDecoder().decode([String: SchemaPlace].self, from: $0) } ?? [:]
+        for key in ["schema.collections", "schema.tree", "schema.places", "schema.projects"] { preferences.removeObject(forKey: key) }
+        let collections = cols.isEmpty ? [SchemaCollection(id: firstCollection, name: plural(tree!.name.isEmpty ? "Project" : tree!.name), stack: tree!)] : cols
+        return SchemaFile(collections: collections, places: places)
+    }
+
+    /// Every collection, in rail1's order.
     static var collections: [SchemaCollection] {
-        get {
-            if let kept = preferences.data(forKey: "schema.collections").flatMap({ try? JSONDecoder().decode([SchemaCollection].self, from: $0) }), !kept.isEmpty { return kept }
-            let stack = preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) } ?? start
-            return [SchemaCollection(id: firstCollection, name: plural(stack.name.isEmpty ? "Project" : stack.name), stack: stack)]
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.collections") }
-            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
-        }
+        get { file.collections }
+        set { var f = file; f.collections = newValue; write(f) }
     }
 
     /// The first collection's default stack: what the schema was before there were collections.
@@ -110,11 +162,15 @@ enum SchemaTrial {
     }
 
     static var places: [String: SchemaPlace] {
-        get { preferences.data(forKey: "schema.places").flatMap { try? JSONDecoder().decode([String: SchemaPlace].self, from: $0) } ?? [:] }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) { preferences.set(data, forKey: "schema.places") }
-            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
-        }
+        get { file.places }
+        set { var f = file; f.places = newValue; write(f) }
+    }
+    /// Places a member in another catalogue's schema, written straight to that catalogue's folder.
+    static func place(_ project: UUID, in collection: UUID, folder: UUID?, catalogue dir: URL) {
+        if dir.standardizedFileURL == directory?.standardizedFileURL { place(project, in: collection, folder: folder); return }
+        var f = decode(dir) ?? .fresh
+        f.places[project.uuidString] = SchemaPlace(collection: collection, folder: folder)
+        encode(f, to: dir)
     }
 
     /// The collection a project is in: the one it was placed in, while that is still there; otherwise the first.
@@ -152,10 +208,7 @@ enum SchemaTrial {
     // changed. Anything still kept under the old key is dropped the first time it is written to.
     static var own: [String: SchemaNode] {
         get { [:] }
-        set {
-            preferences.removeObject(forKey: "schema.projects")
-            NotificationCenter.default.post(name: .schemaDidChange, object: nil)
-        }
+        set { NotificationCenter.default.post(name: .schemaDidChange, object: nil) }
     }
     static func hasOwn(_ project: UUID) -> Bool { own[project.uuidString] != nil }
     /// The stack a project shows: its own, or its collection's default.
