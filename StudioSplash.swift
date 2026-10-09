@@ -13,8 +13,9 @@ import AppKit
 // and out of the band's top edge as the next slides up under it and locks. Each section is exactly
 // the band's height and draws on the window's columns and on the beat counted from the band's top,
 // so a locked section leaves every baseline on the grid. Only the surface moves; nothing inside a
-// section is animated on its own. One gesture, one section: a swipe, a wheel turn, Return or the
-// down arrow moves exactly one, and a section whose answer is missing does not move on.
+// section is animated on its own. Only the buttons and the keys move a section: Return or the down
+// arrow moves exactly one, and a section whose answer is missing does not move on. The wheel and a
+// swipe never do (Rick, 2026-10-09): a section with more than fits scrolls inside its own pane.
 //
 // Back and Continue are the splash's own, locked at the bottom right for every section, their foot
 // as far from the window's foot as the wordmark's top is from its top.
@@ -44,7 +45,6 @@ final class StudioSplash: NSView {
     private var sections: [SplashSection] = []
     private(set) var at = 0
     private var moving = false
-    private var lastWheel = Date.distantPast
     /// The band starts one point under the header's height, where the app's beat starts.
     static var bandTop: CGFloat { A.header + 1 }
     /// The wordmark's top is this far from the window's top; the buttons' foot is as far from its foot.
@@ -145,6 +145,17 @@ final class StudioSplash: NSView {
     func begin() {
         window?.makeFirstResponder(sections.first?.firstField ?? self)
         settleButtons()
+        // --splash-filled, for the design loop: every answer given, with three streams of many groups, opened at the last section.
+        if CommandLine.arguments.contains("--splash-filled") {
+            let party = SplashDraft.Party(type: "Clients", name: "Alpha")
+            draft.types = ["Clients"]; draft.parties = [party]
+            draft.categoriesOf[party.id] = ["Projects"]
+            let key = SplashDraft.key(party.id, "Projects")
+            draft.streamsOf[key] = ["Design", "Print", "Web"]
+            draft.members[key] = "First"
+            for stream in ["Design", "Print", "Web"] { draft.groupsOf[SplashDraft.leafKey(party.id, "Projects", stream)] = Array(SplashDraft.groupOptions.prefix(stream == "Web" ? 3 : 9)) }
+            DispatchQueue.main.async { [weak self] in self?.go(to: 5) }
+        }
         if Self.showLighthouse {
             // --lighthouse-up raises the whole tower at once, for framing the picture while it is designed.
             let all = CommandLine.arguments.contains("--lighthouse-up")
@@ -248,12 +259,6 @@ final class StudioSplash: NSView {
         case 126: backPressed()           // up
         default: super.keyDown(with: event)
         }
-    }
-    override func scrollWheel(with event: NSEvent) {
-        // Momentum after a swipe is the same gesture still going: only the gesture itself, or a wheel's click, moves a section.
-        guard event.momentumPhase.isEmpty, abs(event.scrollingDeltaY) > 3, Date().timeIntervalSince(lastWheel) > Self.travel + 0.15 else { return }
-        lastWheel = Date()
-        if event.scrollingDeltaY < 0 { nextPressed() } else { backPressed() }
     }
 }
 
@@ -712,34 +717,86 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
 /// away. The Custom field opens under its block's cells, shows its word on the tree as it is typed, and the tick or Return adds it
 /// and keeps the field for the next. A `check` is the question's other answer, drawn last on a row of its own; it sets every
 /// block's choices aside without losing them.
-final class SplashBlocks: SplashSection, NSTextFieldDelegate {
+final class SplashBlocks: SplashSection {
     typealias Check = (title: String, read: () -> Bool, write: (Bool) -> Void)
     /// One block: a question asked for one answer to the one before. Its check, when it has one, sets its own list aside.
     struct Block { let key: String; let caption: String; let pending: SplashDraft.Pending; let read: () -> [String]; let write: ([String]) -> Void; var check: Check? = nil }
-    private let step: String, first: String, second: String, words: String, options: [String], word: String
-    private let blocks: () -> [Block], ready: () -> Bool
+    private let step: String, first: String, second: String, words: String
+    private let ready: () -> Bool
+    /// The blocks, in a pane of their own that scrolls when they run past the band's foot (Rick, 2026-10-09): the question and
+    /// the words stay, the pane takes the section's columns from row 11 down, and its wheel never reaches the splash.
+    private let pane: SplashBlocksPane
+    private let scroll = NSScrollView()
+
+    init(index: Int, step: String, first: String, second: String, words: String, options: [String], word: String,
+         blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
+        (self.step, self.first, self.second, self.words, self.ready) = (step, first, second, words, ready)
+        pane = SplashBlocksPane(index: index, options: options, word: word, blocks: blocks)
+        super.init(index: index)
+        pane.section = self
+        scroll.documentView = pane
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.verticalScrollElasticity = .none
+        addSubview(scroll)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var splash: StudioSplash? { didSet { pane.splash = splash } }
+    override var canContinue: Bool { ready() }
+    /// The section locks: the pane is drawn again for the answers before it, opened at its top.
+    override func arrive() {
+        super.arrive(); pane.refresh()
+        DispatchQueue.main.async { [weak self] in guard let s = self else { return }; s.scroll.contentView.scroll(to: .zero); s.scroll.reflectScrolledClipView(s.scroll.contentView) }
+    }
+    override func layout() {
+        super.layout()
+        let top = line(11)
+        scroll.frame = NSRect(x: left, y: top, width: width, height: max(0, bounds.height - top))
+        pane.frame = NSRect(x: 0, y: 0, width: width, height: max(scroll.contentSize.height, pane.height))
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawQuestion(step: step, first: first, second: second)
+        drawWords(words)
+    }
+}
+
+/// The blocks of a Choices section, drawn from their pane's top on the beat, so a row of the pane is a row of the band while
+/// it has not been scrolled; its columns are the section's own, from column 7.
+final class SplashBlocksPane: SplashSection, NSTextFieldDelegate {
+    typealias Block = SplashBlocks.Block
+    private let options: [String], word: String
+    private let blocks: () -> [Block]
     private let custom = SplashSection.field("Type one and press Return")
     /// The key of the block whose Custom field is open.
     private var customFor: String?
     private var handles: [(rect: NSRect, key: String)] = []
+    weak var section: SplashBlocks?
 
-    init(index: Int, step: String, first: String, second: String, words: String, options: [String], word: String,
-         blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
-        (self.step, self.first, self.second, self.words, self.options, self.word, self.blocks, self.ready) = (step, first, second, words, options, word, blocks, ready)
+    init(index: Int, options: [String], word: String, blocks: @escaping () -> [Block]) {
+        (self.options, self.word, self.blocks) = (options, word, blocks)
         super.init(index: index)
         custom.delegate = self
         custom.isHidden = true
         addSubview(custom)
     }
     required init?(coder: NSCoder) { fatalError() }
-    override var canContinue: Bool { ready() }
+    override var left: CGFloat { 0 }
+    override var width: CGFloat { bounds.width }
     private var typed: String { custom.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var splashDraft: SplashDraft? { splash?.draftForSections }
+    /// The pane's height: every block's rows, to the line after the last.
+    var height: CGFloat { line(metrics().rows) }
+    /// The wheel stays in the pane: it scrolls the blocks and never moves a section.
+    override func scrollWheel(with event: NSEvent) { enclosingScrollView?.contentView.scrollWheel(with: event) }
 
     private struct Placed { let block: Block; let captionRow: Int; let cells: [Cell]; let customRow: Int?; let listStart: Int; let listCount: Int; let checkRow: Int? }
-    private struct Metrics { let placed: [Placed] }
+    private struct Metrics { let placed: [Placed]; let rows: Int }
     private func metrics() -> Metrics {
-        var k = 11, placed: [Placed] = []
+        var k = 0, placed: [Placed] = []
         for b in blocks() {
             let captionRow = k
             let (cells, rows) = self.cells(options, apart: [("Custom", true)], x: left, width: width, baseline: row(k + 1))
@@ -755,7 +812,11 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
             placed.append(Placed(block: b, captionRow: captionRow, cells: cells, customRow: customRow, listStart: listStart, listCount: count, checkRow: checkRow))
             k += 1
         }
-        return Metrics(placed: placed)
+        return Metrics(placed: placed, rows: k)
+    }
+    override func refresh() {
+        super.refresh()
+        section?.needsLayout = true   // the section lays the pane out again to its new height
     }
     override func layout() {
         super.layout()
@@ -764,8 +825,6 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        drawQuestion(step: step, first: first, second: second)
-        drawWords(words)
         let m = metrics()
         handles = []
         for p in m.placed {
