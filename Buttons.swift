@@ -117,6 +117,8 @@ final class ThemedButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
+    /// Every button in the app says it can be pressed: the pointer becomes a hand over it (Rick, 2026-10-09).
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
     /// A press counts even when the app is not the active one. AppKit otherwise spends the first click on
     /// activating the app and the button does nothing, which is what a gate shown before the app opens meets.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -282,6 +284,7 @@ final class ToggleBar: NSControl {
     override func mouseMoved(with event: NSEvent) { let s = segment(at: event); if s != hovered { hovered = s; needsDisplay = true } }
     override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
     override func mouseExited(with event: NSEvent) { hovered = nil; needsDisplay = true }
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled, let s = segment(at: event), s != selectedSegment else { return }
@@ -342,7 +345,7 @@ final class SwissButton: NSButton {
     private var label: NSAttributedString { Design.attributed(title, .action, colour: ink) }
     private var ink: NSColor {
         if !isEnabled { return Design.ink.withAlphaComponent(0.35) }
-        return kind == .primary ? Design.card : Design.ink
+        return kind == .primary || reversed ? Design.card : Design.ink
     }
     /// The baseline sits where the text's does, so a row of these aligns with text beside it.
     override var firstBaselineOffsetFromTop: CGFloat { (Self.height - label.size().height) / 2 + Design.Text.action.font().ascender + 1 }
@@ -365,6 +368,9 @@ final class SwissButton: NSButton {
     }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
+    /// An outlined button under the pointer turns to ink with paper text, the reverse of itself: the one hover every drawn choice shares.
+    private var reversed: Bool { kind == .secondary && hovering && isEnabled }
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds
@@ -374,7 +380,7 @@ final class SwissButton: NSButton {
             let fill = !isEnabled ? Design.ink.withAlphaComponent(0.35) : isHighlighted ? NSColor.black : hovering ? Design.hex("#2C2C2C") : Design.ink
             fill.setFill(); box.fill()
         case .secondary:
-            if hovering && isEnabled { Design.mist.setFill(); box.fill() }
+            if reversed { Design.ink.setFill(); box.fill() }
             Design.ink.withAlphaComponent(isEnabled ? 1 : 0.35).setStroke(); box.lineWidth = 1
             NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)).stroke()
         case .quiet: break
@@ -395,7 +401,7 @@ final class SwissButton: NSButton {
         }
         if kind != .quiet && trailing != .none {
             let cell = NSRect(x: r.maxX - 22, y: 0, width: 22, height: r.height)
-            (kind == .primary ? Design.paper.withAlphaComponent(0.18) : Design.ink.withAlphaComponent(0.18)).setStroke()
+            (kind == .primary || reversed ? Design.paper.withAlphaComponent(0.18) : Design.ink.withAlphaComponent(0.18)).setStroke()
             let l = NSBezierPath(); l.move(to: NSPoint(x: cell.minX, y: 8)); l.line(to: NSPoint(x: cell.minX, y: r.height - 8)); l.lineWidth = 1; l.stroke()
             let glyph = trailing == .arrow ? "\u{2192}" : trailing == .tick ? "\u{2713}" : "\u{2715}"
             let a = Design.attributed(glyph, .action, colour: ink)

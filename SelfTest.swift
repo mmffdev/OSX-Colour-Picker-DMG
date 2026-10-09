@@ -1284,8 +1284,9 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(!fm.fileExists(atPath: staging.path), "a staging folder is gone once the share is in or set aside")
 
     print("the splash builds the tree")
-    func answered(_ who: String?, _ streams: [String], _ make: String, clients: [String], members: [String]) -> (SchemaTrial.SchemaFile, Library) {
-        let d = SplashDraft(); d.who = who; d.streams = streams; d.streamsAnswered = true; d.make = make; d.clients = clients; d.members = members
+    func answered(_ who: String?, _ streams: [String], _ make: String, kinds: [String] = [], groups: [String]? = nil, clients: [String], members: [String]) -> (SchemaTrial.SchemaFile, Library) {
+        let d = SplashDraft(); d.who = who; d.streams = streams; d.oneKind = streams.isEmpty; d.kinds = kinds.isEmpty ? [make] : kinds; d.clients = clients; d.members = members
+        if let g = groups { d.groups = g }
         var f = SchemaTrial.SchemaFile(collections: [], places: [:]), l = Library()
         d.build(into: &f, library: &l, at: tcat)
         return (f, l)
@@ -1308,6 +1309,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "Our own work with streams builds the streams as the one level, the first range in the first stream")
     check(SplashDraft.singular("Clients") == "Client" && SplashDraft.singular("Ranges") == "Range" && SplashDraft.singular("Companies") == "Company" && SplashDraft.singular("Campaigns") == "Campaign",
           "the word for one of them comes from the word for many")
+    let (twoKinds, tkLib) = answered("Clients", ["Web"], "", kinds: ["Products", "Projects"], groups: ["Palettes", "Assets", "Props"], clients: ["Acme"], members: ["Driftwood"])
+    let tkFolders = twoKinds.collections[0].folders, tkWeb = tkFolders.first { $0.name == "Web" }, tkProducts = tkFolders.first { $0.name == "Products" }
+    check(twoKinds.collections[0].levels == ["Client", "Stream", "Kind"] && tkFolders.map { $0.name } == ["Acme", "Web", "Products", "Projects"]
+          && tkProducts?.parent == tkWeb?.id && tkFolders.first { $0.name == "Projects" }?.parent == tkWeb?.id
+          && twoKinds.places[tkLib.projects[0].id.uuidString]?.folder == tkProducts?.id && twoKinds.collections[0].stack.name == "Product"
+          && twoKinds.collections[0].stack.children.map { $0.role } == [.palettes, nil, nil] && twoKinds.collections[0].stack.children.map { $0.kind } == ["Palettes", "Assets", "Props"],
+          "two kinds made are a level of their own under the stream, the first product in the first kind, and a custom group is a typed folder with no role")
     // The tree on disk nests the levels: Clients/Acme/Web/Spring Launch, and reads back with the same parents.
     let splashDir = root.appendingPathComponent("tree/Splash")
     let splashStore = LibraryStore(directory: splashDir, legacyURL: nil, name: "Splash")
