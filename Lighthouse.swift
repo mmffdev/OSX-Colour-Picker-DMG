@@ -126,11 +126,12 @@ final class LighthouseView: NSView {
     // MARK: The sea
 
     private var edges: [((CGFloat, CGFloat), (CGFloat, CGFloat), CGFloat)] { [((-AX, -AY), (AX, -AY), 1), ((AX, -AY), (AX, AY), 2), ((AX, AY), (-AX, AY), 3), ((-AX, AY), (-AX, -AY), 4)] }
-    /// The waterline along an edge: a slow swell and a quicker chop, moving along it.
-    private func waterline(_ p0: (CGFloat, CGFloat), _ p1: (CGFloat, CGFloat), _ t: CGFloat, _ phase: CGFloat, _ n: Int) -> [(CGFloat, CGFloat, CGFloat)] {
-        (0...n).map { i in
-            let u = CGFloat(i) / CGFloat(n)
-            let z = 0.07 * sin(u * 5.1 + t * 1.6 + phase) + 0.025 * sin(u * 11.7 - t * 2.9 + phase * 2)
+    /// The waterline along edge `k`: one wave the whole way round the block, so it meets itself at every corner; a slow swell and a quicker chop, moving along it.
+    private func waterline(_ k: Int, _ t: CGFloat, _ n: Int) -> [(CGFloat, CGFloat, CGFloat)] {
+        let p0 = edges[k].0, p1 = edges[k].1
+        return (0...n).map { i in
+            let u = CGFloat(i) / CGFloat(n), v = CGFloat(k) + u   // 0 to 4 round the block
+            let z = 0.07 * sin(2 * .pi * v * 1.25 + t * 1.6) + 0.025 * sin(2 * .pi * v * 2.75 - t * 2.9)
             return (p0.0 + (p1.0 - p0.0) * u, p0.1 + (p1.1 - p0.1) * u, z)
         }
     }
@@ -145,8 +146,16 @@ final class LighthouseView: NSView {
         let g = max(0, min(1, e))
         guard g > 0 else { return }
         NSGraphicsContext.saveGraphicsState()
-        let lines = edges.map { waterline($0.0, $0.1, t, $0.2 * 1.7, 28) }
-        // The two near faces: the sand at the sea bed over the brown beneath, flat, then the water above, translucent so the island's footing shows.
+        let lines = (0..<4).map { waterline($0, t, 28) }
+        // The sea bed and the far walls, seen faintly through the water: the floor in sand, the two far faces of the block from inside.
+        poly([P(-AX, -AY, -sea), P(AX, -AY, -sea), P(AX, AY, -sea), P(-AX, AY, -sea)], NSColor(srgbRed: 214 / 255, green: 200 / 255, blue: 160 / 255, alpha: 0.55 * g))
+        for k in [3, 0] {
+            let ed = edges[k], b0 = ed.0, b1 = ed.1
+            poly([P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea), P(b1.0, b1.1, 0), P(b0.0, b0.1, 0)], NSColor(srgbRed: 58 / 255, green: 122 / 255, blue: 140 / 255, alpha: 0.32 * g))
+            line(P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea), NSColor(srgbRed: 150 / 255, green: 136 / 255, blue: 104 / 255, alpha: 0.5 * g), width: 1)
+        }
+        drawFooting(e)
+        // The two near faces: the sand at the sea bed over the brown beneath, flat, then the water above, translucent so the sea bed and the island's footing show.
         for k in [1, 2] {
             let ed = edges[k], ang: CGFloat = k == 1 ? 0 : .pi / 2
             let b0 = ed.0, b1 = ed.1
@@ -215,7 +224,7 @@ final class LighthouseView: NSView {
         if e > 0.35 { prism(n: 4, rot: rot4, r0: 2.0 * sqrt(2), r1: 2.0 * sqrt(2), z: 0.36 * min(e, 1), h: 0.36 * max(0, (e - 0.35) / 0.65), stone) }
     }
     private struct Section { let paint: Int; let h: CGFloat; let r0: CGFloat; let r1: CGFloat; let door: Bool; let windows: [Int] }
-    private let sections = [Section(paint: 0, h: 1.9, r0: 1.36, r1: 1.22, door: true, windows: []),
+    private let sections = [Section(paint: 0, h: 1.9, r0: 1.36, r1: 1.22, door: true, windows: [1, 7]),
                             Section(paint: 1, h: 1.45, r0: 1.18, r1: 1.07, door: false, windows: [0]),
                             Section(paint: 0, h: 1.45, r0: 1.04, r1: 0.95, door: false, windows: [1, 7]),
                             Section(paint: 1, h: 1.3, r0: 0.92, r1: 0.85, door: false, windows: [0])]
@@ -231,11 +240,15 @@ final class LighthouseView: NSView {
         prism(r0: sec.r0 * grow, r1: sec.r1 * grow, z: z, h: h, sec.paint == 0 ? cream : red, roof: e < 0.55) { f, _, q in
             guard e >= 0.6 else { return }
             if sec.door && f == 0 {
-                let b0 = q(0.38, 0), b1 = q(0.62, 0), t1 = q(0.62, 0.36), t0 = q(0.38, 0.36), top = q(0.5, 0.46)
-                let d = NSBezierPath(); d.move(to: b0); d.line(to: b1); d.line(to: t1)
-                d.curve(to: t0, controlPoint1: CGPoint(x: top.x, y: top.y - 4), controlPoint2: CGPoint(x: top.x, y: top.y - 4)); d.close()
+                // A door a third of the face wide, straight-sided to a round arch, drawn on the face so it leans with it.
+                let d = NSBezierPath(); d.move(to: q(0.34, 0)); d.line(to: q(0.66, 0)); d.line(to: q(0.66, 0.3))
+                for k in 0...12 {
+                    let th = CGFloat(k) / 12 * .pi
+                    d.line(to: q(0.5 + 0.16 * cos(th), 0.3 + 0.1 * sin(th)))
+                }
+                d.close()
                 NSColor(srgbRed: 120 / 255, green: 56 / 255, blue: 50 / 255, alpha: 1).setFill(); d.fill()
-                self.windowOn(q, 0.42, 0.58, 0.62, 0.8)
+                NSColor(srgbRed: 90 / 255, green: 40 / 255, blue: 36 / 255, alpha: 1).setStroke(); d.lineWidth = 0.8; d.stroke()
             }
             if sec.windows.contains(f) { self.windowOn(q, 0.38, 0.62, 0.36, 0.7) }
         }
@@ -310,7 +323,6 @@ final class LighthouseView: NSView {
             let glow = NSGradient(starting: NSColor(srgbRed: 246 / 255, green: 214 / 255, blue: 120 / 255, alpha: 0.5 * pulse), ending: NSColor(srgbRed: 246 / 255, green: 214 / 255, blue: 120 / 255, alpha: 0))!
             glow.draw(fromCenter: lc, radius: 2, toCenter: lc, radius: radius, options: [])
         }
-        drawFooting(progress[0])
         drawSea(progress[0], t)
         drawIsland(progress[0])
         for i in 0..<4 { drawSection(i, progress[i + 1]) }
