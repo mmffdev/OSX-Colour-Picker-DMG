@@ -1,18 +1,22 @@
 import Foundation
 import CryptoKit
 
-// ---------- Sharing: a level of the catalogue as one checked file, and bringing one in ----------
+// ---------- Sharing: any level of the catalogue as one checked file, and bringing one in ----------
 //
-// Any of four levels goes out as one zip: the whole catalogue, a collection, a work group (a member,
-// or a level between with its members) or a palette. The zip holds the files as the tree keeps them,
-// under the subject's own folder, and a manifest naming the level, every file and its SHA-256. The
-// person exporting ticks what goes, down to a single palette.
+// A share is a small catalogue of its own. Any of four levels goes out: the whole catalogue, a
+// collection, a work group (a member, or a level between with its members) or a palette. The app
+// cuts that branch from the structure, with what is ticked beneath it and the collection and level
+// between it sat in, writes it as a catalogue in a scratch folder, and zips it with a manifest naming
+// the level, where the subject came from, and every file with its SHA-256. A palette goes as its one
+// file. The person exporting ticks what goes, down to a single palette.
 //
 // Coming in, a zip is opened into a staging folder and checked before the catalogue is touched: the
-// manifest, the structure the level calls for, every file's digest, and whether it can land where
-// it is pointed. What is already in the catalogue is found by id, by the colours themselves, or by
-// name in the same place, and each twin is replaced, skipped, renamed or kept beside the old. Only
-// then is anything written, as one change the history can undo.
+// manifest, the shape the level calls for, every file's digest, and whether it can land where it is
+// pointed. The staging folder is read as a catalogue, by the same reader as any other. The place it
+// came from is offered first, and any other place it may go is a choice. What is already in the
+// catalogue is found by id, by the colours themselves, or by name in the same place, and each twin is
+// replaced, skipped, renamed or kept beside the old. Only then is anything written, as one change the
+// history can undo.
 
 enum ShareLevel: String, Codable, CaseIterable {
     case catalogue, collection, workGroup, palette
@@ -29,29 +33,28 @@ enum ShareLevel: String, Codable, CaseIterable {
 struct ShareManifest: Codable, Equatable {
     struct Named: Codable, Equatable { var id: UUID; var name: String }
     struct File: Codable, Equatable { var path: String; var bytes: Int; var sha256: String }
+    /// Where the subject sat in the catalogue it came from, so bringing it in can follow the same blueprint.
+    struct Origin: Codable, Equatable { var collection: Named?; var group: Named?; var member: Named? }
     var format = "colour-share"
-    var version = 1
+    var version = 2
     var generator = ColourFiles.generator
     var level: ShareLevel
     var exportedAt: Date
     var catalogue: Named
     var subject: Named
+    var origin: Origin?
     var files: [File]
     static let fileName = "manifest.colmanifest"
 }
 
-/// One row of what a share holds, as the Contents step lists it: a folder or a file of the tree, with what is beneath it.
+/// One row of what a share holds, as the Contents step lists it, with what is beneath it.
 struct ShareNode: Equatable {
     enum Kind: Equatable { case catalogue, collection, group, member, bucket, library, pool, templates, template, palette }
-    /// The node's path, relative to the share's root; unique, and the key the ticks are kept by.
+    /// The id of what the row stands for; the Library, its pools, the Templates and a member's groups have ids of words. The key the ticks are kept by.
     let id: String
     let kind: Kind
     let name: String
-    /// The files that are the node's own: its document, or the palette itself, and any loose file beside its document.
-    var files: [String]
     var children: [ShareNode]
-    /// Every file the node and everything beneath it own.
-    var allFiles: [String] { files + children.flatMap { $0.allFiles } }
     /// Every node beneath, itself first.
     var flattened: [(node: ShareNode, level: Int)] {
         func walk(_ n: ShareNode, _ level: Int) -> [(ShareNode, Int)] { [(n, level)] + n.children.flatMap { walk($0, level + 1) } }
@@ -91,120 +94,192 @@ enum Sharing {
     static func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
     /// A path under `base`, with "/" between its parts.
-    static func relative(_ url: URL, to base: URL) -> String {
-        Array(url.pathComponents.dropFirst(base.pathComponents.count)).joined(separator: "/")
-    }
+    static func relative(_ url: URL, to base: URL) -> String { CatalogueTree.relative(url, to: base) }
 
     // MARK: What a level holds
 
-    /// The tree of a subject in a catalogue: the whole catalogue, a collection's or work group's folder, or one palette file.
-    /// Every node's id is its path relative to the share's root, which is the subject folder's parent, or the catalogue's root.
-    static func tree(level: ShareLevel, subject: URL, root: URL) -> ShareNode {
-        let base = level == .catalogue ? root : subject.deletingLastPathComponent()
-        func rel(_ u: URL) -> String { relative(u, to: base) }
-        func looseFiles(in dir: URL, except keep: Set<String>) -> [String] {
-            CatalogueTree.names(in: dir).map { dir.appendingPathComponent($0) }.filter { !CatalogueTree.isFolder($0) && !keep.contains($0.lastPathComponent) }.map(rel)
-        }
-        func paletteNodes(in dir: URL) -> [ShareNode] {
-            CatalogueTree.files(of: dir, extension: ColourFiles.palette).map { url in
-                let doc = CatalogueTree.read(PaletteDocument.self, at: url)
-                return ShareNode(id: rel(url), kind: .palette, name: doc?.palette.name ?? url.deletingPathExtension().lastPathComponent, files: [rel(url)], children: [])
+    /// The tree of a subject, from the library and schema: the whole catalogue, a collection, a member or a level between,
+    /// or one palette. Every node's id is the id of what it stands for, so a tick follows the thing, not a path.
+    static func tree(level: ShareLevel, subject: UUID?, in lib: Library, schema: SchemaTrial.SchemaFile, catalogueName: String) -> ShareNode {
+        func paletteNode(_ s: Swatch) -> ShareNode { ShareNode(id: s.id.uuidString, kind: .palette, name: s.name, children: []) }
+        func memberNode(_ p: Project) -> ShareNode {
+            let held = lib.palettes(in: p.id)
+            let tree = schema.stacks?[p.id.uuidString] ?? SchemaTrial.collection(of: p.id, among: schema.collections, places: schema.places).stack
+            func groups(_ n: SchemaNode) -> [ShareNode] {
+                n.children.map { child in
+                    var kids: [ShareNode] = []
+                    switch SchemaTrial.role(of: child) {
+                    case .palettes?: kids = held.filter { !$0.isTypography }.map(paletteNode)
+                    case .typography?: kids = held.filter { $0.isTypography }.map(paletteNode)
+                    default: break
+                    }
+                    return ShareNode(id: "bucket:\(p.id.uuidString):\(child.id.uuidString)", kind: .bucket, name: child.name, children: kids + groups(child))
+                }
             }
+            var children = groups(tree)
+            let roles = Set(SchemaTrial.rows(of: tree).compactMap { SchemaTrial.role(of: $0.node) })
+            // Palettes whose kind has no group in the member's schema still go, straight under the member.
+            if !roles.contains(.palettes) { children += held.filter { !$0.isTypography }.map(paletteNode) }
+            if !roles.contains(.typography) { children += held.filter { $0.isTypography }.map(paletteNode) }
+            return ShareNode(id: p.id.uuidString, kind: .member, name: p.name, children: children)
         }
-        /// A member's groups: every folder that is not a work group, with its palettes and the folders inside it.
-        func buckets(in dir: URL) -> [ShareNode] {
-            CatalogueTree.subfolders(of: dir).filter { CatalogueTree.document(in: $0, extension: TreeFiles.workGroup) == nil }.map { sub in
-                let palettes = paletteNodes(in: sub)
-                let keep = Set(palettes.map { ($0.id as NSString).lastPathComponent })
-                return ShareNode(id: rel(sub), kind: .bucket, name: sub.lastPathComponent, files: looseFiles(in: sub, except: keep), children: palettes + buckets(in: sub))
-            }
+        func members(of c: SchemaCollection, folder: UUID?) -> [Project] {
+            lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: schema.collections, places: schema.places).id == c.id
+                && SchemaTrial.folder(of: $0.id, among: schema.collections, places: schema.places) == folder }
         }
-        func workGroup(_ dir: URL) -> ShareNode? {
-            guard let file = CatalogueTree.document(in: dir, extension: TreeFiles.workGroup), let doc = CatalogueTree.read(WorkGroupDocument.self, at: file) else { return nil }
-            if doc.kind == .group {
-                let members = CatalogueTree.subfolders(of: dir).compactMap(workGroup)
-                return ShareNode(id: rel(dir), kind: .group, name: doc.name, files: [rel(file)] + looseFiles(in: dir, except: [file.lastPathComponent]), children: members)
-            }
-            return ShareNode(id: rel(dir), kind: .member, name: doc.name, files: [rel(file)] + looseFiles(in: dir, except: [file.lastPathComponent]), children: paletteNodes(in: dir) + buckets(in: dir))
+        func groupNode(_ f: SchemaFolder, in c: SchemaCollection) -> ShareNode {
+            ShareNode(id: f.id.uuidString, kind: .group, name: f.name, children: members(of: c, folder: f.id).map(memberNode))
         }
-        func collection(_ dir: URL) -> ShareNode? {
-            guard let file = CatalogueTree.document(in: dir, extension: TreeFiles.collection), let doc = CatalogueTree.read(CollectionDocument.self, at: file) else { return nil }
-            return ShareNode(id: rel(dir), kind: .collection, name: doc.name, files: [rel(file)] + looseFiles(in: dir, except: [file.lastPathComponent]), children: CatalogueTree.subfolders(of: dir).compactMap(workGroup))
+        func collectionNode(_ c: SchemaCollection) -> ShareNode {
+            ShareNode(id: c.id.uuidString, kind: .collection, name: c.name, children: c.folders.map { groupNode($0, in: c) } + members(of: c, folder: nil).map(memberNode))
         }
         switch level {
         case .palette:
-            let doc = CatalogueTree.read(PaletteDocument.self, at: subject)
-            return ShareNode(id: rel(subject), kind: .palette, name: doc?.palette.name ?? subject.deletingPathExtension().lastPathComponent, files: [rel(subject)], children: [])
+            guard let id = subject, let s = lib.swatch(id) else { return ShareNode(id: "", kind: .palette, name: "Palette", children: []) }
+            return paletteNode(s)
         case .workGroup:
-            return workGroup(subject) ?? ShareNode(id: rel(subject), kind: .member, name: subject.lastPathComponent, files: [], children: [])
+            if let id = subject, let p = lib.project(id) { return memberNode(p) }
+            for c in schema.collections { if let f = c.folders.first(where: { $0.id == subject }) { return groupNode(f, in: c) } }
+            return ShareNode(id: "", kind: .member, name: "Member", children: [])
         case .collection:
-            return collection(subject) ?? ShareNode(id: rel(subject), kind: .collection, name: subject.lastPathComponent, files: [], children: [])
+            guard let c = schema.collections.first(where: { $0.id == subject }) else { return ShareNode(id: "", kind: .collection, name: "Collection", children: []) }
+            return collectionNode(c)
         case .catalogue:
-            let index = CatalogueFiles.index(in: root)
-            var children: [ShareNode] = []
-            let library = root.appendingPathComponent(TreeFiles.library)
-            if CatalogueTree.isFolder(library) {
-                let pools = TreeFiles.pools.map { root.appendingPathComponent(TreeFiles.library).appendingPathComponent($0) }.filter(CatalogueTree.isFolder).map { pool -> ShareNode in
-                    let palettes = paletteNodes(in: pool)
-                    return ShareNode(id: rel(pool), kind: .pool, name: pool.lastPathComponent, files: looseFiles(in: pool, except: Set(palettes.map { ($0.id as NSString).lastPathComponent })), children: palettes)
-                }
-                children.append(ShareNode(id: rel(library), kind: .library, name: "Library", files: [], children: pools))
+            let loose = lib.palettes(in: nil)
+            let pools = [ShareNode(id: "pool:" + TreeFiles.palettesPool, kind: .pool, name: TreeFiles.palettesPool, children: loose.filter { !$0.isTypography }.map(paletteNode)),
+                         ShareNode(id: "pool:" + TreeFiles.typographyPool, kind: .pool, name: TreeFiles.typographyPool, children: loose.filter { $0.isTypography }.map(paletteNode))]
+            var children = [ShareNode(id: "library", kind: .library, name: TreeFiles.library, children: pools)]
+            if let t = schema.templates, !t.isEmpty {
+                children.append(ShareNode(id: "templates", kind: .templates, name: "Templates", children: t.map { ShareNode(id: $0.id.uuidString, kind: .template, name: $0.name, children: []) }))
             }
-            let templates = root.appendingPathComponent(TreeFiles.templates)
-            if CatalogueTree.isFolder(templates) {
-                let each = CatalogueTree.files(of: templates, extension: TreeFiles.template).map { url in
-                    ShareNode(id: rel(url), kind: .template, name: CatalogueTree.read(TemplateDocument.self, at: url)?.name ?? url.deletingPathExtension().lastPathComponent, files: [rel(url)], children: [])
-                }
-                children.append(ShareNode(id: rel(templates), kind: .templates, name: "Templates", files: [], children: each))
-            }
-            for sub in CatalogueTree.subfolders(of: root) where !TreeFiles.reserved.contains(sub.lastPathComponent) {
-                if let c = collection(sub) { children.append(c) }
-            }
-            let name = index.map { CatalogueTree.read(CatalogueIndex.self, at: $0)?.name ?? $0.deletingPathExtension().lastPathComponent } ?? root.lastPathComponent
-            return ShareNode(id: "", kind: .catalogue, name: name, files: index.map { [rel($0)] } ?? [], children: children)
+            children += schema.collections.map(collectionNode)
+            return ShareNode(id: "", kind: .catalogue, name: catalogueName, children: children)
         }
     }
 
-    /// The files a set of ticks takes: every ticked node's own files, with the files of its ancestors, which hold what it sits in.
-    static func files(ticked: Set<String>, in tree: ShareNode) -> [String] {
-        var out: [String] = [], seen = Set<String>()
-        for (node, _) in tree.flattened where ticked.contains(node.id) {
-            for f in ShareNode.ancestors(of: node.id, in: tree).compactMap({ tree.node($0) }).flatMap({ $0.files }) + node.files where seen.insert(f).inserted { out.append(f) }
+    /// The branch a share cuts: the subject and what is ticked beneath it, with the collection and level between it sits in,
+    /// as a library and schema of their own. With `ticked` nil everything beneath the subject goes.
+    static func cut(level: ShareLevel, subject: UUID?, ticked: Set<String>?, strip: (tags: Bool, notes: Bool) = (false, false),
+                    from lib: Library, schema: SchemaTrial.SchemaFile) -> (library: Library, schema: SchemaTrial.SchemaFile) {
+        func on(_ id: UUID) -> Bool { ticked.map { $0.contains(id.uuidString) } ?? true }
+        func collection(of p: UUID) -> SchemaCollection { SchemaTrial.collection(of: p, among: schema.collections, places: schema.places) }
+        func folder(of p: UUID) -> UUID? { SchemaTrial.folder(of: p, among: schema.collections, places: schema.places) }
+        var out = Library()
+        out.version = lib.version
+        var cut = SchemaTrial.SchemaFile(collections: [], places: [:])
+        var members: [Project] = [], palettes: [Swatch] = []
+        switch level {
+        case .palette:
+            if let id = subject, var s = lib.swatch(id) { s.projectID = nil; palettes = [s] }
+        case .workGroup:
+            if let id = subject, let p = lib.project(id) {
+                var home = collection(of: id)
+                home.folders = home.folders.filter { $0.id == folder(of: id) }
+                cut.collections = [home]
+                members = [p]
+            } else if let c = schema.collections.first(where: { $0.folders.contains { $0.id == subject } }) {
+                var home = c
+                home.folders = c.folders.filter { $0.id == subject }
+                cut.collections = [home]
+                members = lib.orderedProjects.filter { collection(of: $0.id).id == c.id && folder(of: $0.id) == subject && on($0.id) }
+            }
+        case .collection:
+            if let c = schema.collections.first(where: { $0.id == subject }) {
+                var home = c
+                home.folders = c.folders.filter { on($0.id) }
+                cut.collections = [home]
+                members = lib.orderedProjects.filter { p in collection(of: p.id).id == c.id && on(p.id) && (folder(of: p.id).map { f in home.folders.contains { $0.id == f } } ?? true) }
+            }
+        case .catalogue:
+            cut.collections = schema.collections.filter { on($0.id) }.map { c in var k = c; k.folders = c.folders.filter { on($0.id) }; return k }
+            members = lib.orderedProjects.filter { p in on(p.id) && cut.collections.contains { $0.id == collection(of: p.id).id }
+                && (folder(of: p.id).map { f in cut.collections.contains { $0.folders.contains { $0.id == f } } } ?? true) }
+            palettes = lib.palettes(in: nil).filter { on($0.id) }
+            cut.templates = (schema.templates ?? []).filter { on($0.id) }
+            if cut.templates?.isEmpty == true { cut.templates = nil }
         }
-        return out
+        for p in members {
+            cut.places[p.id.uuidString] = SchemaPlace(collection: collection(of: p.id).id, folder: folder(of: p.id))
+            if let own = schema.stacks?[p.id.uuidString] { cut.stacks = (cut.stacks ?? [:]).merging([p.id.uuidString: own]) { a, _ in a } }
+            palettes += lib.palettes(in: p.id).filter { on($0.id) }
+        }
+        out.projects = members.map { var m = $0; m.folder = nil; m.fileKnown = nil; return m }
+        out.swatches = palettes
+        // The colours the palettes use; the whole catalogue also takes the colours no palette holds.
+        let keys = Set(palettes.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
+        let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
+        out.colours = lib.colours.filter { keys.contains($0.hex) || (level == .catalogue && !used.contains($0.hex)) }
+        // The tags they wear and the members' own; the profiles they work to.
+        let kept = Set(members.map { $0.id })
+        let worn = Set(palettes.flatMap { $0.tags ?? [] } + out.colours.flatMap { $0.tags ?? [] })
+        out.tagInfo = lib.tagInfo.filter { t in t.projectID.map { kept.contains($0) } ?? (level == .catalogue || worn.contains(t.name)) }
+        let profiles = Set(palettes.compactMap { $0.profile } + members.compactMap { $0.profile })
+        out.colourProfiles = lib.colourProfiles.filter { level == .catalogue || profiles.contains($0.id) }
+        if strip.tags {
+            out.tagInfo = []
+            out.swatches = out.swatches.map { var s = $0; s.tags = nil; s.tagsChangedAt = nil; return s }
+            out.colours = out.colours.map { Colour(hex: $0.hex, pickedAt: $0.pickedAt, source: $0.source, master: $0.master, kind: $0.kind) }
+        }
+        if strip.notes { out.swatches = out.swatches.map { var s = $0; s.entries = s.entries.map { var x = $0; x.note = nil; x.noteChangedAt = nil; return x }; return s } }
+        return (out, cut)
+    }
+
+    /// Where the subject sits, by name and id, for the manifest.
+    static func origin(level: ShareLevel, subject: UUID?, in lib: Library, schema: SchemaTrial.SchemaFile) -> ShareManifest.Origin? {
+        func place(of p: Project) -> ShareManifest.Origin {
+            let c = SchemaTrial.collection(of: p.id, among: schema.collections, places: schema.places)
+            let g = SchemaTrial.folder(of: p.id, among: schema.collections, places: schema.places).flatMap { f in c.folders.first { $0.id == f } }
+            return ShareManifest.Origin(collection: .init(id: c.id, name: c.name), group: g.map { .init(id: $0.id, name: $0.name) }, member: nil)
+        }
+        switch level {
+        case .palette:
+            guard let id = subject, let member = lib.swatch(id)?.projectID, let p = lib.project(member) else { return nil }
+            var o = place(of: p)
+            o.member = .init(id: p.id, name: p.name)
+            return o
+        case .workGroup:
+            if let id = subject, let p = lib.project(id) { return place(of: p) }
+            if let c = schema.collections.first(where: { $0.folders.contains { $0.id == subject } }) { return ShareManifest.Origin(collection: .init(id: c.id, name: c.name), group: nil, member: nil) }
+            return nil
+        case .collection, .catalogue: return nil
+        }
+    }
+
+    /// The files of a share, path and bytes, before the manifest: the cut written as a catalogue in a scratch folder, or the palette's one file.
+    static func package(level: ShareLevel, subject: UUID?, ticked: Set<String>?, strip: (tags: Bool, notes: Bool) = (false, false),
+                        from lib: Library, schema: SchemaTrial.SchemaFile, catalogueName: String) throws -> [Zip.Entry] {
+        let (sub, cut) = self.cut(level: level, subject: subject, ticked: ticked, strip: strip, from: lib, schema: schema)
+        if level == .palette {
+            guard let s = sub.swatches.first else { throw ShareFault.notAShare("there is no palette to share") }
+            let doc = CatalogueTree.paletteDocument(s, in: sub, member: nil, file: filesystemName(s.name))
+            return [Zip.Entry(path: filesystemName(s.name) + "." + CatalogueTree.fileExtension(of: s), data: try e.encode(doc))]
+        }
+        let name = level == .catalogue ? catalogueName : tree(level: level, subject: subject, in: lib, schema: schema, catalogueName: catalogueName).name
+        let dir = stagingRoot.appendingPathComponent("Out-" + UUID().uuidString).appendingPathComponent(filesystemName(name))
+        defer { discard(dir.deletingLastPathComponent()) }
+        try CatalogueTree.write(sub, schema: cut, index: dir.appendingPathComponent(filesystemName(name) + "." + ColourFiles.catalogue), name: name)
+        var entries: [Zip.Entry] = []
+        func walk(_ folder: URL) throws {
+            for n in CatalogueTree.names(in: folder) {
+                let url = folder.appendingPathComponent(n)
+                if CatalogueTree.isFolder(url) { try walk(url) } else { entries.append(Zip.Entry(path: relative(url, to: dir), data: try Data(contentsOf: url))) }
+            }
+        }
+        try walk(dir)
+        return entries
     }
 
     // MARK: Export
 
-    /// Writes the share: the ticked files under their paths, and the manifest first. With `ticked` nil everything goes.
+    /// Writes the share: the manifest first, then the files of the cut. With `ticked` nil everything goes.
     @discardableResult
-    static func export(level: ShareLevel, subject: URL, root: URL, catalogue: ShareManifest.Named, ticked: Set<String>? = nil, strip: (tags: Bool, notes: Bool) = (false, false), to url: URL, now: Date = Date()) throws -> ShareManifest {
-        let tree = self.tree(level: level, subject: subject, root: root)
-        let base = level == .catalogue ? root : subject.deletingLastPathComponent()
-        let paths = ticked.map { files(ticked: $0, in: tree) } ?? tree.allFiles
-        var entries: [Zip.Entry] = [], listed: [ShareManifest.File] = []
-        for path in paths where !path.hasSuffix("." + ColourFiles.history) {
-            var data = try Data(contentsOf: base.appendingPathComponent(path))
-            // Tags and notes are the catalogue's own words: left out when asked, from each palette's file and from the index's global tags.
-            if (strip.tags || strip.notes), path.hasSuffix("." + ColourFiles.palette), var doc = try? d.decode(PaletteDocument.self, from: data) {
-                if strip.tags { doc.palette.tags = nil; doc.palette.tagsChangedAt = nil; doc.colours = doc.colours.map { c in Colour(hex: c.hex, pickedAt: c.pickedAt, source: c.source, master: c.master, kind: c.kind) } }
-                if strip.notes { doc.palette.entries = doc.palette.entries.map { e in var x = e; x.note = nil; x.noteChangedAt = nil; return x } }
-                data = try e.encode(doc)
-            }
-            if strip.tags, path.hasSuffix("." + ColourFiles.catalogue), var index = CatalogueTree.decode(data) { index.tags = []; data = try e.encode(index) }
-            if strip.tags, path.hasSuffix("." + TreeFiles.workGroup), var doc = try? d.decode(WorkGroupDocument.self, from: data) { doc.tags = nil; data = try e.encode(doc) }
-            entries.append(Zip.Entry(path: path, data: data))
-            listed.append(ShareManifest.File(path: path, bytes: data.count, sha256: sha256(data)))
-        }
-        let subjectID: UUID = {
-            switch level {
-            case .catalogue: return catalogue.id
-            case .collection: return CatalogueTree.document(in: subject, extension: TreeFiles.collection).flatMap { CatalogueTree.read(CollectionDocument.self, at: $0)?.id } ?? UUID()
-            case .workGroup: return CatalogueTree.document(in: subject, extension: TreeFiles.workGroup).flatMap { CatalogueTree.read(WorkGroupDocument.self, at: $0)?.id } ?? UUID()
-            case .palette: return CatalogueTree.read(PaletteDocument.self, at: subject)?.palette.id ?? UUID()
-            }
-        }()
-        let manifest = ShareManifest(level: level, exportedAt: now, catalogue: catalogue, subject: ShareManifest.Named(id: subjectID, name: tree.name), files: listed)
+    static func export(level: ShareLevel, subject: UUID?, from lib: Library, schema: SchemaTrial.SchemaFile, catalogue: ShareManifest.Named, ticked: Set<String>? = nil,
+                       strip: (tags: Bool, notes: Bool) = (false, false), to url: URL, now: Date = Date()) throws -> ShareManifest {
+        let entries = try package(level: level, subject: subject, ticked: ticked, strip: strip, from: lib, schema: schema, catalogueName: catalogue.name)
+        let listed = entries.map { ShareManifest.File(path: $0.path, bytes: $0.data.count, sha256: sha256($0.data)) }
+        let name = tree(level: level, subject: subject, in: lib, schema: schema, catalogueName: catalogue.name).name
+        let manifest = ShareManifest(level: level, exportedAt: now, catalogue: catalogue, subject: ShareManifest.Named(id: subject ?? catalogue.id, name: name),
+                                     origin: origin(level: level, subject: subject, in: lib, schema: schema), files: listed)
         try Zip.write([Zip.Entry(path: ShareManifest.fileName, data: try e.encode(manifest))] + entries, to: url, at: now)
         return manifest
     }
@@ -220,12 +295,15 @@ enum Sharing {
         var tree: ShareNode
     }
 
+    private static let paletteExtensions: Set<String> = [ColourFiles.palette, ColourFiles.typography, ColourFiles.legacyPalette]
+
     /// Opens the zip and checks it: the manifest, every file against its digest, nothing unlisted, and the shape its level calls for.
     static func inspect(_ url: URL) throws -> Inspection {
         let entries = try Zip.read(url)
         guard let m = entries.first(where: { $0.path == ShareManifest.fileName }) else { throw ShareFault.notAShare("there is no manifest in it") }
         guard let manifest = try? d.decode(ShareManifest.self, from: m.data), manifest.format == "colour-share" else { throw ShareFault.notAShare("its manifest could not be read") }
         var problems: [String] = []
+        if manifest.version < 2 { problems.append("it was made by an earlier version of Colorgain, whose shares this version no longer reads") }
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
         for f in manifest.files {
             guard let entry = byPath[f.path] else { problems.append("\(f.path) is listed but missing"); continue }
@@ -234,35 +312,26 @@ enum Sharing {
         }
         let listed = Set(manifest.files.map { $0.path })
         for entry in entries where entry.path != ShareManifest.fileName && !listed.contains(entry.path) { problems.append("\(entry.path) is in the file but not in its manifest") }
-        // The shape the level calls for.
-        let tops = Set(entries.filter { $0.path != ShareManifest.fileName }.map { $0.path.split(separator: "/").first.map(String.init) ?? "" })
+        // The shape the level calls for: a catalogue file at the top, or for a palette its one file.
+        let files = entries.filter { $0.path != ShareManifest.fileName }
+        let top = files.filter { !$0.path.contains("/") }
         switch manifest.level {
-        case .catalogue:
-            if !entries.contains(where: { !$0.path.contains("/") && $0.path.hasSuffix("." + ColourFiles.catalogue) }) { problems.append("a catalogue share needs its index at the top, and this has none") }
-        case .collection:
-            if tops.count != 1 || !entries.contains(where: { $0.path.hasSuffix("." + TreeFiles.collection) && $0.path.split(separator: "/").count == 2 }) { problems.append("a collection share is one folder with its collection file inside, and this is not") }
-        case .workGroup:
-            if tops.count != 1 || !entries.contains(where: { $0.path.hasSuffix("." + TreeFiles.workGroup) && $0.path.split(separator: "/").count == 2 }) { problems.append("a work group share is one folder with its work group file inside, and this is not") }
         case .palette:
-            if entries.filter({ $0.path != ShareManifest.fileName }).count != 1 || !entries.contains(where: { !$0.path.contains("/") && $0.path.hasSuffix("." + ColourFiles.palette) }) { problems.append("a palette share is one palette file, and this is not") }
+            if files.count != 1 || !top.contains(where: { paletteExtensions.contains(($0.path as NSString).pathExtension.lowercased()) }) { problems.append("a palette share is one palette file, and this is not") }
+        case .catalogue, .collection, .workGroup:
+            if top.filter({ ($0.path as NSString).pathExtension.lowercased() == ColourFiles.catalogue }).count != 1 { problems.append("a \(manifest.level.title.lowercased()) share carries one catalogue file at its top, and this does not") }
         }
-        // The tree, from the entries themselves, so the Contents step can list what is there before anything is written.
-        let staging = try stage(entries: entries)
-        defer { discard(staging) }
-        let tree = treeOfStaging(staging, level: manifest.level)
+        // The tree, read from the staged files themselves, so the Contents step can list what is there before anything is written.
+        var tree = ShareNode(id: "", kind: .catalogue, name: manifest.subject.name, children: [])
+        if problems.isEmpty {
+            let staging = try stage(entries: entries)
+            defer { discard(staging) }
+            if let staged = try? read(staging: staging, level: manifest.level) {
+                let subject = manifest.level == .palette ? staged.palette?.0.id : manifest.subject.id
+                tree = self.tree(level: manifest.level, subject: subject, in: staged.library, schema: staged.schema, catalogueName: manifest.catalogue.name)
+            } else { problems.append("its catalogue could not be read") }
+        }
         return Inspection(manifest: manifest, entries: entries, problems: problems, tree: tree)
-    }
-
-    private static func treeOfStaging(_ staging: URL, level: ShareLevel) -> ShareNode {
-        switch level {
-        case .catalogue: return tree(level: .catalogue, subject: staging, root: staging)
-        case .palette:
-            let file = CatalogueTree.files(of: staging, extension: ColourFiles.palette).first ?? staging
-            return tree(level: .palette, subject: file, root: staging)
-        case .collection, .workGroup:
-            let folder = CatalogueTree.subfolders(of: staging).first ?? staging
-            return tree(level: level, subject: folder, root: staging)
-        }
     }
 
     // MARK: Staging
@@ -287,8 +356,7 @@ enum Sharing {
     static func stage(_ inspection: Inspection) throws -> URL { try stage(entries: inspection.entries) }
     static func discard(_ staging: URL) { try? fm.removeItem(at: staging) }
 
-    /// What was staged, read as a library of its own: a catalogue whole, or a collection or work group wrapped in a makeshift
-    /// catalogue so the tree reader can take it; a palette on its own.
+    /// What was staged, read as a library of its own: the share's catalogue, or a palette on its own.
     struct Staged {
         var level: ShareLevel
         var root: URL
@@ -296,54 +364,33 @@ enum Sharing {
         var schema: SchemaTrial.SchemaFile
         /// For a palette share: the palette and the colours it uses.
         var palette: (Swatch, [Colour])?
-        /// Where each member, collection and palette of the staged library came from, by id, as the tree's node id.
+        /// The node of the Contents tree each member, collection, level between and palette of the staged library is ticked by.
         var paths: [UUID: String] = [:]
     }
 
     static func read(staging: URL, level: ShareLevel) throws -> Staged {
         var staged = Staged(level: level, root: staging, library: Library(), schema: .fresh, palette: nil)
-        switch level {
-        case .palette:
-            guard let file = CatalogueTree.files(of: staging, extension: ColourFiles.palette).first, let doc = CatalogueTree.read(PaletteDocument.self, at: file) else { throw ShareFault.notAShare("the palette could not be read") }
+        if level == .palette {
+            guard let file = CatalogueTree.names(in: staging).map({ staging.appendingPathComponent($0) }).first(where: { paletteExtensions.contains($0.pathExtension.lowercased()) }),
+                  let doc = CatalogueTree.read(PaletteDocument.self, at: file) else { throw ShareFault.notAShare("the palette could not be read") }
             var p = doc.palette
             p.projectID = nil
             staged.palette = (p, doc.colours)
-            staged.paths[p.id] = relative(file, to: staging)
+            staged.library.swatches = [p]
+            staged.library.colours = doc.colours
+            staged.paths[p.id] = p.id.uuidString
             return staged
-        case .catalogue:
-            break
-        case .collection:
-            // The one folder is a collection: an index naming it makes the staging a catalogue.
-            guard let folder = CatalogueTree.subfolders(of: staging).first, let file = CatalogueTree.document(in: folder, extension: TreeFiles.collection), let doc = CatalogueTree.read(CollectionDocument.self, at: file) else { throw ShareFault.notAShare("the collection could not be read") }
-            try writeIndex(at: staging, collections: [doc.id])
-        case .workGroup:
-            // The one folder is a work group: it goes inside a makeshift collection, which an index names.
-            guard let folder = CatalogueTree.subfolders(of: staging).first else { throw ShareFault.notAShare("the work group could not be read") }
-            let wrap = staging.appendingPathComponent("Imported")
-            try fm.createDirectory(at: wrap, withIntermediateDirectories: true)
-            try fm.moveItem(at: folder, to: wrap.appendingPathComponent(folder.lastPathComponent))
-            let id = UUID()
-            let collection = CollectionDocument(id: id, name: "Imported", about: "", folder: "Imported", groupName: nil, template: SchemaTrial.start, templateID: nil, members: [], changedAt: Date())
-            try e.encode(collection).write(to: wrap.appendingPathComponent("Imported." + TreeFiles.collection))
-            try writeIndex(at: staging, collections: [id])
         }
         let loaded = try CatalogueTree.read(root: staging)
         staged.library = loaded.library
         staged.schema = loaded.schema
-        for p in loaded.library.projects { if let url = CatalogueTree.folder(ofWorkGroup: p.id, in: staging) { staged.paths[p.id] = relative(url, to: staging) } }
+        for p in loaded.library.projects { staged.paths[p.id] = p.id.uuidString }
+        for s in loaded.library.swatches { staged.paths[s.id] = s.id.uuidString }
         for c in loaded.schema.collections {
-            for f in c.folders { if let url = CatalogueTree.folder(ofWorkGroup: f.id, in: staging) { staged.paths[f.id] = relative(url, to: staging) } }
-        }
-        for s in loaded.library.swatches { if let url = CatalogueTree.file(ofPalette: s.id, in: staging) { staged.paths[s.id] = relative(url, to: staging) } }
-        for sub in CatalogueTree.subfolders(of: staging) {
-            if let file = CatalogueTree.document(in: sub, extension: TreeFiles.collection), let doc = CatalogueTree.read(CollectionDocument.self, at: file) { staged.paths[doc.id] = relative(sub, to: staging) }
+            staged.paths[c.id] = c.id.uuidString
+            for f in c.folders { staged.paths[f.id] = f.id.uuidString }
         }
         return staged
-    }
-
-    private static func writeIndex(at root: URL, collections: [UUID], now: Date = Date()) throws {
-        let index = CatalogueIndex(id: UUID(), name: "Staged", createdAt: now, changedAt: now, library: 2, collections: collections, templates: [], colours: [], tags: [], activePalette: nil, deleted: [], about: nil)
-        try e.encode(index).write(to: root.appendingPathComponent("Staged." + ColourFiles.catalogue))
     }
 
     // MARK: Where it lands
@@ -359,8 +406,28 @@ enum Sharing {
         case pool
     }
 
-    /// The places a share of this level may land, in rail order, each with its name.
-    static func placements(for level: ShareLevel, in lib: Library, schema: SchemaTrial.SchemaFile) -> [(Placement, String)] {
+    /// The places a share of this level may land, each with its name: where it came from first, when this catalogue has that
+    /// place, by id or by name, so following the blueprint is the first choice; then every other place in rail order.
+    static func placements(for level: ShareLevel, in lib: Library, schema: SchemaTrial.SchemaFile, origin: ShareManifest.Origin? = nil) -> [(Placement, String)] {
+        var all = everyPlacement(for: level, in: lib, schema: schema)
+        func same(_ a: ShareManifest.Named?, id: UUID, name: String) -> Bool { a.map { $0.id == id || $0.name.lowercased() == name.lowercased() } ?? false }
+        let first: Int? = all.firstIndex { place, _ in
+            switch place {
+            case .collection(let c, let f):
+                guard let o = origin, let col = schema.collections.first(where: { $0.id == c }), same(o.collection, id: col.id, name: col.name) else { return false }
+                if let g = o.group { return f.flatMap { id in col.folders.first { $0.id == id } }.map { same(g, id: $0.id, name: $0.name) } ?? false }
+                return f == nil
+            case .member(let m):
+                guard let o = origin?.member, let p = lib.project(m) else { return false }
+                return p.id == o.id || (p.name.lowercased() == o.name.lowercased() && same(origin?.collection, id: SchemaTrial.collection(of: m, among: schema.collections, places: schema.places).id,
+                                                                                           name: SchemaTrial.collection(of: m, among: schema.collections, places: schema.places).name))
+            default: return false
+            }
+        }
+        if let i = first { all.insert(all.remove(at: i), at: 0) }
+        return all
+    }
+    private static func everyPlacement(for level: ShareLevel, in lib: Library, schema: SchemaTrial.SchemaFile) -> [(Placement, String)] {
         switch level {
         case .catalogue, .collection: return [(.catalogue, "This catalogue")]
         case .workGroup:

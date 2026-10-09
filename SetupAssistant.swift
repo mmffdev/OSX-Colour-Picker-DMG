@@ -79,8 +79,8 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
         #endif
     }
-    private var collectionName = SchemaTrial.collections[0].name
-    private var memberName = SchemaTrial.memberName(of: SchemaTrial.collections[0])
+    private var collectionName = (SchemaTrial.collections.first ?? SchemaTrial.SchemaFile.fresh.collections[0]).name
+    private var memberName = SchemaTrial.memberName(of: SchemaTrial.collections.first ?? SchemaTrial.SchemaFile.fresh.collections[0])
     private var firstMember = ""
     /// The catalogue opened when the assistant closes: set at Create.
     private var created: String?
@@ -365,7 +365,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue) ?? .data, .json]
+        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue) ?? .data, UTType(filenameExtension: ColourFiles.legacyCatalogue) ?? .data, .json]
         panel.prompt = "Bring In"
         #if APPSTORE
         // The sandbox grants what is picked: a catalogue is its folder, so the folder is what is picked.
@@ -383,7 +383,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
                 url = index
             }
             do {
-                let name = url.pathExtension.lowercased() == ColourFiles.catalogue
+                let name = [ColourFiles.catalogue, ColourFiles.legacyCatalogue].contains(url.pathExtension.lowercased())
                     ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
                 self.imported = name
                 self.next.isEnabled = false
@@ -574,7 +574,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
             Catalogues.currentName = name
             // The schema chosen here is the new catalogue's own: point the store at its folder before writing it.
             SchemaTrial.use(directory: Catalogues.standard.directory(for: name))
-            SchemaTrial.changeCollection(SchemaTrial.collections[0].id) { c in
+            SchemaTrial.changeCollection(SchemaTrial.homeForNewMember().id) { c in
                 c.name = collectionName.trimmingCharacters(in: .whitespaces)
                 c.stack.name = memberName.trimmingCharacters(in: .whitespaces)
             }

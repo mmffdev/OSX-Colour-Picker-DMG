@@ -338,6 +338,21 @@ if CommandLine.arguments.contains("--self-test") {
     controller.reload()
     for p in controller.library.orderedProjects { print(controller.memberFolderURL(p.id)?.path ?? p.name) }
     exit(0)
+} else if let at = CommandLine.arguments.firstIndex(of: "--bring-across"), CommandLine.arguments.indices.contains(at + 1) {
+    // Brings the catalogue in the given folder across to the catalogue file of version 3, with its backup beside it, and says
+    // what is there afterwards. For checking a copy of a catalogue before the app opens the real one: never run on a folder
+    // the app has open.
+    let dir = URL(fileURLWithPath: CommandLine.arguments[at + 1])
+    let store = LibraryStore(directory: dir, legacyURL: nil, name: CatalogueFiles.anyIndex(in: dir)?.deletingPathExtension().lastPathComponent ?? dir.lastPathComponent)
+    do {
+        let lib = try store.load()
+        if let r = store.takeMigration() { print("brought across: \(r.members) members, \(r.palettes) palettes; backup at \(r.backup.path)") } else { print("already version 3: nothing brought across") }
+        print("collections: \(store.schema.collections.map { $0.name })")
+        print("members: \(lib.projects.map { $0.name })")
+        print("palettes: \(lib.swatches.count), of which in the Library: \(lib.palettes(in: nil).count); colours: \(lib.colours.count)")
+        for n in store.notes { print("note: \(n)") }
+        exit(0)
+    } catch { print("could not bring it across: \(error.localizedDescription)"); exit(1) }
 } else if CommandLine.arguments.contains("--pick") {
     runPickMode()
 } else if CommandLine.arguments.contains("--halo-demo") {

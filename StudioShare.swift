@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 
 final class SharePage: NSView, PageSection, Overlay {
     enum Mode { case export, bringIn }
-    struct Level { let level: ShareLevel; let subject: URL; let name: String }
+    struct Level { let level: ShareLevel; let subject: UUID?; let name: String }
 
     private let library: LibraryController
     var onResize: (() -> Void)?
@@ -127,34 +127,34 @@ final class SharePage: NSView, PageSection, Overlay {
 
     // MARK: Starting
 
+    /// The schema of the open catalogue, as it stands.
+    private var schema: SchemaTrial.SchemaFile { SchemaTrial.schema(for: library.store.root) ?? library.store.schema }
+
     /// Export from a place: the level pressed, and every level above it, up to the whole catalogue.
-    func beginExport(level: ShareLevel, subject: URL, name: String) {
+    func beginExport(level: ShareLevel, subject: UUID?, name: String) {
         clear()
         mode = .export
         var chain: [Level] = [Level(level: level, subject: subject, name: name)]
-        let root = library.store.root
+        let lib = library.library, f = schema
         func upward(_ l: Level) -> Level? {
+            let top = Level(level: .catalogue, subject: nil, name: library.catalogue)
             switch l.level {
             case .palette:
-                let folder = l.subject.deletingLastPathComponent()
-                // The palette's member, found by walking up to the folder with a work group file; a palette in the Library has only the catalogue above it.
-                var dir = folder
-                while dir.path.count > root.path.count {
-                    if let file = CatalogueTree.document(in: dir, extension: TreeFiles.workGroup), let doc = CatalogueTree.read(WorkGroupDocument.self, at: file), doc.kind == .member {
-                        return Level(level: .workGroup, subject: dir, name: doc.name)
-                    }
-                    dir = dir.deletingLastPathComponent()
-                }
-                return Level(level: .catalogue, subject: root, name: library.catalogue)
+                // A palette's member, then on up; a palette in the Library has only the catalogue above it.
+                guard let id = l.subject, let m = lib.swatch(id)?.projectID, let p = lib.project(m) else { return top }
+                return Level(level: .workGroup, subject: p.id, name: p.name)
             case .workGroup:
-                var dir = l.subject.deletingLastPathComponent()
-                while dir.path.count > root.path.count {
-                    if let file = CatalogueTree.document(in: dir, extension: TreeFiles.collection), let doc = CatalogueTree.read(CollectionDocument.self, at: file) { return Level(level: .collection, subject: dir, name: doc.name) }
-                    if let file = CatalogueTree.document(in: dir, extension: TreeFiles.workGroup), let doc = CatalogueTree.read(WorkGroupDocument.self, at: file) { return Level(level: .workGroup, subject: dir, name: doc.name) }
-                    dir = dir.deletingLastPathComponent()
+                guard let id = l.subject else { return top }
+                if lib.project(id) != nil {
+                    let c = SchemaTrial.collection(of: id, among: f.collections, places: f.places)
+                    if let g = SchemaTrial.folder(of: id, among: f.collections, places: f.places), let folder = c.folders.first(where: { $0.id == g }) {
+                        return Level(level: .workGroup, subject: folder.id, name: folder.name)
+                    }
+                    return Level(level: .collection, subject: c.id, name: c.name)
                 }
-                return Level(level: .catalogue, subject: root, name: library.catalogue)
-            case .collection: return Level(level: .catalogue, subject: root, name: library.catalogue)
+                if let c = f.collections.first(where: { $0.folders.contains { $0.id == id } }) { return Level(level: .collection, subject: c.id, name: c.name) }
+                return top
+            case .collection: return top
             case .catalogue: return nil
             }
         }
@@ -185,7 +185,7 @@ final class SharePage: NSView, PageSection, Overlay {
         case .export:
             guard levels.indices.contains(levelIndex) else { tree = nil; return }
             let l = levels[levelIndex]
-            tree = Sharing.tree(level: l.level, subject: l.subject, root: library.store.root)
+            tree = Sharing.tree(level: l.level, subject: l.subject, in: library.library, schema: schema, catalogueName: library.catalogue)
         case .bringIn:
             tree = inspection?.tree
         }
@@ -250,11 +250,10 @@ final class SharePage: NSView, PageSection, Overlay {
                     Row(text: "Carry the notes", strong: carryNotes, square: carryNotes, trailing: "The words written on each colour", act: .option(1))]
         case (.export, "Check"):
             guard let t = tree else { return [] }
-            let files = Sharing.files(ticked: ticked, in: t).filter { !$0.hasSuffix("." + ColourFiles.history) }
-            let base = levels[levelIndex].level == .catalogue ? library.store.root : levels[levelIndex].subject.deletingLastPathComponent()
-            let sizes = files.map { ((try? FileManager.default.attributesOfItem(atPath: base.appendingPathComponent($0).path)[.size]) as? Int) ?? 0 }
-            var out = [Row(text: "\(plural(files.count, "file")), \(bytes(sizes.reduce(0, +))), \(plural(t.flattened.filter { ticked.contains($0.node.id) && $0.node.kind == .palette }.count, "palette"))", strong: true, square: nil)]
-            out += zip(files, sizes).map { Row(text: $0.0, square: nil, mark: "doc", trailing: bytes($0.1)) }
+            let l = levels[levelIndex]
+            let entries = (try? Sharing.package(level: l.level, subject: l.subject, ticked: ticked, strip: (!carryTags, !carryNotes), from: library.library, schema: schema, catalogueName: library.catalogue)) ?? []
+            var out = [Row(text: "\(plural(entries.count, "file")), \(bytes(entries.reduce(0) { $0 + $1.data.count })), \(plural(t.flattened.filter { ticked.contains($0.node.id) && $0.node.kind == .palette }.count, "palette"))", strong: true, square: nil)]
+            out += entries.map { Row(text: $0.path, square: nil, mark: "doc", trailing: bytes($0.data.count)) }
             return out
         case (.export, "Save"):
             if let url = savedTo { return [Row(text: url.lastPathComponent, caption: nil, strong: true, square: nil, mark: "checkmark", trailing: (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)] }
@@ -316,8 +315,8 @@ final class SharePage: NSView, PageSection, Overlay {
         case (.export, "Contents"): return "Tick what goes. Untick a group and everything beneath it stays home; tick one palette and the folders above it go with it, so it lands where it belongs."
         case (.export, "Options"): return "Tags and the notes written on colours are yours; leave them out when the share is for someone outside the work."
         case (.export, "Check"): return "Every file that will go, with its size. Nothing is written until Save."
-        case (.export, "Save"): return savedTo == nil ? "Choose where the file goes. It is one .colshare file: a zip anyone can open, with its manifest inside." : "Saved. Send it as it is; the manifest lets the other end check it arrived whole."
-        case (.bringIn, "Choose"): return chosenFile == nil ? "Choose a .colshare file. It is opened into a staging folder and read there; nothing reaches the catalogue until Confirm." : "What the share says it is. Next reads its contents."
+        case (.export, "Save"): return savedTo == nil ? "Choose where the file goes. It is one .colshr file: a zip anyone can open, with its manifest inside." : "Saved. Send it as it is; the manifest lets the other end check it arrived whole."
+        case (.bringIn, "Choose"): return chosenFile == nil ? "Choose a .colshr file. It is opened into a staging folder and read there; nothing reaches the catalogue until Confirm." : "What the share says it is. Next reads its contents."
         case (.bringIn, "Contents"): return "Tick what comes in, down to a single palette. Anything left unticked stays in the file."
         case (.bringIn, "Check"): return inspection?.ok == true ? "The manifest, every file's digest and the shape its level calls for all hold." : "The share failed its check. Nothing has been written; ask for it to be sent again."
         case (.bringIn, "Twins"): return "What is already here, found by id, by the colours themselves, or by name in the same place. Replace puts the share's version in its place; Skip leaves it out; Rename brings it in under the next free name; Keep Both brings it in as it is, under a new id."
@@ -515,7 +514,7 @@ final class SharePage: NSView, PageSection, Overlay {
                 let s = try Sharing.read(staging: dir, level: i.manifest.level)
                 staged = s
                 let lib = library.library, schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
-                placements = Sharing.placements(for: i.manifest.level, in: lib, schema: schema)
+                placements = Sharing.placements(for: i.manifest.level, in: lib, schema: schema, origin: i.manifest.origin)
                 placementIndex = 0
                 twins = Sharing.duplicates(in: s, ticked: ticked, into: lib, schema: schema, placement: placements.first?.0 ?? .catalogue)
                 resolutions = [:]
@@ -542,17 +541,17 @@ final class SharePage: NSView, PageSection, Overlay {
         guard levels.indices.contains(levelIndex) else { return }
         let l = levels[levelIndex]
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = filesystemName(l.name) + ".colshare"
-        panel.allowedContentTypes = [UTType(exportedAs: "com.mmffdev.colorgain.colshare", conformingTo: .zip)]
+        panel.nameFieldStringValue = filesystemName(l.name) + "." + ColourFiles.share
+        panel.allowedContentTypes = [UTType(exportedAs: "com.mmffdev.colour.share", conformingTo: .zip)]
         panel.canCreateDirectories = true
         panel.prompt = "Save Share"
         panel.message = "One zip with its manifest inside, for anyone to open"
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
-                let index = CatalogueTree.index(in: self.library.store.root)
-                let named = ShareManifest.Named(id: index?.id ?? UUID(), name: self.library.catalogue)
-                _ = try Sharing.export(level: l.level, subject: l.subject, root: self.library.store.root, catalogue: named, ticked: self.ticked, strip: (!self.carryTags, !self.carryNotes), to: url)
+                let named = ShareManifest.Named(id: CatalogueTree.catalogue(in: self.library.store.root)?.id ?? UUID(), name: self.library.catalogue)
+                _ = try Sharing.export(level: l.level, subject: l.subject, from: self.library.library, schema: self.schema, catalogue: named, ticked: self.ticked,
+                                       strip: (!self.carryTags, !self.carryNotes), to: url)
                 self.savedTo = url
                 self.library.flash("Exported \(l.name) to \(url.lastPathComponent)")
                 if self.steps[self.step] != "Save" { self.step = self.steps.firstIndex(of: "Save") ?? self.step }
@@ -567,9 +566,9 @@ final class SharePage: NSView, PageSection, Overlay {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType(exportedAs: "com.mmffdev.colorgain.colshare", conformingTo: .zip), .zip]
+        panel.allowedContentTypes = [UTType(exportedAs: "com.mmffdev.colour.share", conformingTo: .zip), .zip]
         panel.prompt = "Open Share"
-        panel.message = "Choose a .colshare file to bring into \(library.catalogue)"
+        panel.message = "Choose a .\(ColourFiles.share) file to bring into \(library.catalogue)"
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {

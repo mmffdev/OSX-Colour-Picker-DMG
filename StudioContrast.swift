@@ -781,22 +781,19 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
             if !lead.isEmpty { lead.append(.divider) }
             lead.append(.item("Add To \(current.name)", { [weak self] in self?.addStyle(to: current.id) }))
         }
+        // Every member is listed, one with no typography palette yet too: its own, then a new one made in its Typography group.
         var groups: [Group] = []
         for p in lib.orderedProjects {
             let type = lib.palettes(in: p.id).filter { $0.isTypography }
-            if !type.isEmpty { groups.append(Group(heading: p.name, items: type.map { s in ("Add To \(s.name)", { [weak self] in self?.addStyle(to: s.id) }) })) }
+            var items: [(String, () -> Void)] = type.map { s in ("Add To \(s.name)", { [weak self] in self?.addStyle(to: s.id) }) }
+            items.append(("New Typography Palette", { [weak self] in self?.addToNewTypography(in: p.id) }))
+            groups.append(Group(heading: p.name, items: items))
         }
         let loose = lib.palettes(in: nil).filter { $0.isTypography }
-        if !loose.isEmpty { groups.append(Group(heading: "In No Member", items: loose.map { s in ("Add To \(s.name)", { [weak self] in self?.addStyle(to: s.id) }) })) }
-        openMenu(under: buttonRect(toTypography), width: toTypography.frame.width, lead: lead, groups: groups,
-                 tail: [.item("New Typography Palette\u{2026}", { [weak self] in self?.newTypography() })])
-    }
-    /// A new typography palette, in the member chosen next or in none, with this pairing as its first.
-    private func newTypography() {
-        let members = library.library.orderedProjects
-        let items: [(String, () -> Void)] = members.map { p in ("In \(p.name)", { [weak self] in self?.addToNewTypography(in: p.id) }) }
-        openMenu(under: buttonRect(toTypography), width: toTypography.frame.width, groups: [Group(heading: "New Typography Palette", items: items)],
-                 tail: [.item("In No Member", { [weak self] in self?.addStyle(to: nil) })])
+        var libraryItems: [(String, () -> Void)] = loose.map { s in ("Add To \(s.name)", { [weak self] in self?.addStyle(to: s.id) }) }
+        libraryItems.append(("New Typography Palette", { [weak self] in self?.addStyle(to: nil) }))
+        groups.append(Group(heading: "Library", items: libraryItems))
+        openMenu(under: buttonRect(toTypography), width: toTypography.frame.width, lead: lead, groups: groups)
     }
     private func addToNewTypography(in member: UUID) {
         var made: UUID?
@@ -819,16 +816,20 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         openMenu(under: buttonRect(toPalette), width: toPalette.frame.width, groups: groups,
                  tail: [.item("New Palette", { [weak self] in self?.library.keep(colours, named: name, in: nil) })])
     }
-    /// Add To Project: the pair as a new palette in a member, collection by collection, or in a new member.
+    /// Add To Project: the pair as a new palette in a member. Every collection is listed, one holding no member too, each with
+    /// its members and a new member of its own, so an empty collection is somewhere the pair can go.
     @objc private func projectTapped() {
         let lib = library.library, colours = pairHexes, name = chosenName
+        let all = SchemaTrial.collections
         var groups: [Group] = []
-        for c in SchemaTrial.collections {
+        for c in all {
             let inside = lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id).id == c.id }
-            if !inside.isEmpty { groups.append(Group(heading: c.name, items: inside.map { p in (p.name, { [weak self] in self?.library.keep(colours, named: name, in: p.id) }) })) }
+            var items: [(String, () -> Void)] = inside.map { p in (p.name, { [weak self] in self?.library.keep(colours, named: name, in: p.id) }) }
+            items.append(("New \(SchemaTrial.memberName(of: c))\u{2026}", { [weak self] in self?.library.startProject(keeping: colours, named: name, in: c) }))
+            groups.append(Group(heading: c.name, items: items))
         }
         openMenu(under: buttonRect(toProject), width: toProject.frame.width, groups: groups,
-                 tail: [.item("New Project\u{2026}", { [weak self] in self?.library.startProject(keeping: colours, named: name) })])
+                 tail: all.isEmpty ? [.item("New Project\u{2026}", { [weak self] in self?.library.startProject(keeping: colours, named: name) })] : [])
     }
     private func buttonRect(_ b: NSView) -> NSRect { b.frame }
 

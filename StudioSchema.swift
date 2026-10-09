@@ -201,7 +201,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
 
     func reload() {
         all = SchemaTrial.collections
-        if selected == nil || !stillThere(selected!) { selected = .collection(all[0].id) }
+        if selected == nil || !stillThere(selected!) { selected = all.first.map { .collection($0.id) } }
         refresh()
     }
     private func stillThere(_ t: Target) -> Bool {
@@ -216,7 +216,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         }
     }
     private func refresh() { needsLayout = true; needsDisplay = true; map.needsDisplay = true; types.needsDisplay = true; onResize?() }
-    private func show() { all = SchemaTrial.collections; if selected == nil || !stillThere(selected!) { selected = .collection(all[0].id) }; refresh(); settle(); onChange?() }
+    private func show() { all = SchemaTrial.collections; if selected == nil || !stillThere(selected!) { selected = all.first.map { .collection($0.id) } }; refresh(); settle(); onChange?() }
     private func keep(_ c: UUID, _ tree: SchemaNode) { SchemaTrial.changeCollection(c) { $0.stack = tree }; all = SchemaTrial.collections }
 
     // MARK: What a group holds
@@ -247,7 +247,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         for c in all {
             let inside = members(of: c), cid = c.id, hasTier = c.folderName != nil
             var does: [(Act, () -> Void)] = [(.child, { [weak self] in if hasTier { self?.addFolder(cid) } else { self?.addTier(cid) } }), (.sibling, { [weak self] in self?.newCollection(after: cid) })]
-            if c.id != all[0].id { does.append((.bin, { [weak self] in self?.removeCollection(cid) })) }
+            does.append((.bin, { [weak self] in self?.removeCollection(cid) }))
             out.append(MapRow(target: .collection(cid), text: c.name.isEmpty ? "Unnamed" : c.name, level: 0,
                               holds: inside.isEmpty ? nil : "\(inside.count) " + (inside.count == 1 ? member(c) : SchemaTrial.plural(member(c))).lowercased(), strong: true, does: does))
             if let tier = c.folderName {
@@ -834,9 +834,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         }
     }
     private func removeCollection(_ cid: UUID) {
-        guard cid != all[0].id, let lib = library else { return }
+        guard let lib = library else { return }
         lib.dump(collection: cid, over: window) { [weak self] in
-            self?.selected = .collection(SchemaTrial.firstCollection)
+            self?.selected = SchemaTrial.collections.first.map { .collection($0.id) }
             self?.show()
         }
     }

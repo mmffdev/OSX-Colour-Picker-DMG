@@ -442,11 +442,13 @@ final class LibraryController: NSObject {
         })
     }
 
-    /// Asks for a project's name, makes it, and keeps `hexes` in it as a palette. The page stays
-    /// where it is: this is for a tool, such as Colour Lab, saving its colours without leaving.
-    func startProject(keeping hexes: [String], named paletteName: String) {
-        onPrompt?(ModalPrompt(title: "New Project", message: "Name the project. These colours go into it as the palette \u{201C}\(paletteName)\u{201D}.",
-                              placeholder: "Client, product or piece of work", confirm: "Create Project", symbol: "folder.badge.plus",
+    /// Asks for a member's name, makes it in `collection` (the first collection when none is given, made then if the catalogue
+    /// has none), and keeps `hexes` in it as a palette. The page stays where it is: this is for a tool, such as Colour Lab or
+    /// Contrast, saving its colours without leaving.
+    func startProject(keeping hexes: [String], named paletteName: String, in collection: SchemaCollection? = nil) {
+        let kind = SchemaTrial.memberName(of: collection ?? SchemaTrial.collections.first ?? SchemaTrial.SchemaFile.fresh.collections[0])
+        onPrompt?(ModalPrompt(title: "New \(kind)", message: "Name the \(kind.lowercased()). These colours go into it as the palette \u{201C}\(paletteName)\u{201D}.",
+                              placeholder: "Client, product or piece of work", confirm: "Create \(kind)", symbol: "folder.badge.plus",
                               check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
@@ -458,6 +460,9 @@ final class LibraryController: NSObject {
                 id = made
             }
             guard let made = id, self.library.project(made) != nil else { return }
+            // It goes where it was asked for, so it shows under that collection in rail1 at once.
+            let home = collection.flatMap { c in SchemaTrial.collections.first { $0.id == c.id } } ?? SchemaTrial.homeForNewMember()
+            SchemaTrial.place(made, in: home.id, folder: nil)
             self.keep(hexes, named: paletteName, in: made)
         })
     }
@@ -1507,10 +1512,10 @@ extension LibraryController {
         case paletteFiles, tokens
         var title: String { self == .paletteFiles ? "Import Palette Files" : "Import CSS Tokens" }
         var message: String {
-            self == .paletteFiles ? "Choose .colpalette files. Each becomes a palette, or merges into one of the same name."
+            self == .paletteFiles ? "Choose .colpal or .coltyp files. Each becomes a palette, or merges into one of the same name."
                 : "Choose CSS, SCSS or design-token JSON files. Their colours merge in; duplicates are skipped."
         }
-        var extensions: [String] { self == .paletteFiles ? [ColourFiles.palette] : ["css", "scss", "json", "txt"] }
+        var extensions: [String] { self == .paletteFiles ? [ColourFiles.palette, ColourFiles.typography, ColourFiles.legacyPalette] : ["css", "scss", "json", "txt"] }
     }
 
     /// Reads the chosen files into the palettes of `project`, or the stock list when nil, and says what happened.
@@ -1544,14 +1549,14 @@ extension LibraryController {
         export(library.palettes(in: project).filter { !$0.isTypography }.compactMap { library.exportPalette($0.id, by: paletteSort) })
     }
 
-    /// One palette as a .colpalette, the app's own file, for another catalogue to import.
+    /// One palette as a .colpal, or a .coltyp for a typography palette, the app's own file, for another catalogue to import.
     func exportPaletteFile(_ id: UUID) {
         guard let s = library.swatch(id) else { return }
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.message = "Export \u{201C}\(s.name)\u{201D} as a palette file"
-        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.palette)].compactMap { $0 }
-        panel.nameFieldStringValue = filesystemName(s.name) + "." + ColourFiles.palette
+        panel.allowedContentTypes = [UTType(filenameExtension: CatalogueTree.fileExtension(of: s))].compactMap { $0 }
+        panel.nameFieldStringValue = filesystemName(s.name) + "." + CatalogueTree.fileExtension(of: s)
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
@@ -1590,13 +1595,13 @@ extension LibraryController {
         if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
     }
 
-    /// The .colpalette bytes for some palettes, each on its own (no project), named for the palette.
+    /// The palette files for some palettes, each on its own (no project), named for the palette.
     private func paletteFiles(_ palettes: [Swatch]) throws -> [(name: String, data: Data)] {
         var taken: [String] = []
         return try palettes.map { palette in
             let name = uniqueName(filesystemName(palette.name), among: taken)
             taken.append(name)
-            return (name: name + "." + ColourFiles.palette, data: try ColourFiles.encoder().encode(CatalogueTree.paletteDocument(palette, in: library, member: nil, file: name)))
+            return (name: name + "." + CatalogueTree.fileExtension(of: palette), data: try ColourFiles.encoder().encode(CatalogueTree.paletteDocument(palette, in: library, member: nil, file: name)))
         }
     }
 }

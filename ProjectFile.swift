@@ -23,12 +23,16 @@ import Foundation
 enum ColourFiles {
     static let generator = Brand.name
     /// A space is one member of a collection, whatever the user calls it: a project, a client, a brand.
-    static let project = "colspace", palette = "colpalette", swatch = "colswatch", history = "colhistory"
-    static let catalogue = "colcatalogue", data = "coldata"
+    static let project = "colspace", swatch = "colswatch", data = "coldata"
+    /// Since version 3 every kind of file has an extension of its own, ".col" and three letters, that says which place in the app it opens.
+    static let catalogue = "colcat", history = "colhis", palette = "colpal", typography = "coltyp", information = "colinf"
+    static let swatches = "colswa", profiles = "colprf", share = "colshr"
+    /// The extensions earlier versions gave the same files, read only to bring them across.
+    static let legacyCatalogue = "colcatalogue", legacyHistory = "colhistory", legacyPalette = "colpalette", legacyShare = "colshare"
     /// The names earlier versions gave the same file: ".colproject", and before that one "config" file.
     static let earlierProject = "colproject", legacyProject = "config"
     /// Every extension found in a project's Palettes folder.
-    static var paletteFolder: [String] { [palette] + Purpose.allCases.map { $0.fileExtension } }
+    static var paletteFolder: [String] { [legacyPalette] + Purpose.allCases.map { $0.fileExtension } }
 
     static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
@@ -83,6 +87,8 @@ struct PaletteDocument: Codable, Equatable {
     var colours: [Colour]
     /// The name the file was written under, without its extension: a file found under another name was renamed in Finder.
     var file: String? = nil
+    /// The catalogue it was written in.
+    var catalogue: UUID? = nil
 }
 
 /// "Brand.colprint": a palette's settings for one purpose.
@@ -227,7 +233,7 @@ enum ProjectFiles {
         let d = ColourFiles.decoder(), fm = FileManager.default
         var palettes: [Swatch] = [], colours: [Colour] = [], seen = Set<String>(), settings: [UUID: [PurposeConfig]] = [:]
         func files(_ dir: URL) -> [URL] { ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent } }
-        for url in files(folder) where url.pathExtension.lowercased() == ColourFiles.palette {
+        for url in files(folder) where url.pathExtension.lowercased() == ColourFiles.legacyPalette {
             guard let found = try? Data(contentsOf: url), let p = try? d.decode(PaletteDocument.self, from: found), p.project == project else { continue }
             palettes.append(p.palette)
             for colour in p.colours where seen.insert(colour.hex).inserted { colours.append(colour) }
@@ -272,7 +278,7 @@ enum ProjectFiles {
         }
         whole.colours = CatalogueFiles.ordered(held.colours, by: doc.colours) { $0.hex }
         for folder in historyFiles {
-            if let found = try? Data(contentsOf: folder.appendingPathComponent(base + "." + ColourFiles.history)),
+            if let found = try? Data(contentsOf: folder.appendingPathComponent(base + "." + ColourFiles.legacyHistory)),
                let h = try? d.decode(HistoryDocument.self, from: found), h.project == doc.project.id { whole.history = h.steps; break }
         }
         return whole

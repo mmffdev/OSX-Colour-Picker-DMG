@@ -174,8 +174,8 @@ enum SchemaTrial {
 
     /// The first collection's default stack: what the schema was before there were collections.
     static var saved: SchemaNode {
-        get { collections[0].stack }
-        set { var all = collections; all[0].stack = newValue; collections = all }
+        get { collections.first?.stack ?? start }
+        set { var all = collections.isEmpty ? SchemaFile.fresh.collections : collections; all[0].stack = newValue; collections = all }
     }
 
     static var places: [String: SchemaPlace] {
@@ -227,9 +227,16 @@ enum SchemaTrial {
         setSchema(stack, for: pid)
     }
 
-    /// The collection a project is in: the one it was placed in, while that is still there; otherwise the first.
+    /// The collection a project is in: the one it was placed in, while that is still there; otherwise the first; with none at
+    /// all, the one a catalogue starts with, which the writer makes the moment a member needs it.
     static func collection(of project: UUID, among all: [SchemaCollection], places: [String: SchemaPlace]) -> SchemaCollection {
-        places[project.uuidString].flatMap { place in all.first { $0.id == place.collection } } ?? all[0]
+        places[project.uuidString].flatMap { place in all.first { $0.id == place.collection } } ?? all.first ?? SchemaFile.fresh.collections[0]
+    }
+    /// Where a new member goes when nothing says otherwise: the first collection, made now if the catalogue has none.
+    static func homeForNewMember() -> SchemaCollection {
+        if let first = collections.first { return first }
+        collections = SchemaFile.fresh.collections
+        return collections[0]
     }
     static func collection(of project: UUID) -> SchemaCollection { collection(of: project, among: collections, places: places) }
 
@@ -612,7 +619,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     private var lib: Library { library.library }
     private var all: [SchemaCollection] = SchemaTrial.collections
-    private var collection: SchemaCollection { all.first { $0.id == collectionID } ?? all[0] }
+    private var collection: SchemaCollection { all.first { $0.id == collectionID } ?? all.first ?? SchemaTrial.SchemaFile.fresh.collections[0] }
     /// What a member of the collection showing is called: Project, Contract.
     private var member: String { SchemaTrial.memberName(of: collection) }
     /// How far the stack's levels are pushed down: by one when the collection groups its members.
@@ -853,7 +860,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     /// Reads what is showing from where it is kept.
     private func load() {
         all = SchemaTrial.collections
-        if !all.contains(where: { $0.id == collectionID }) { collectionID = all[0].id; stack = nil }
+        if !all.contains(where: { $0.id == collectionID }) { collectionID = (all.first ?? SchemaTrial.SchemaFile.fresh.collections[0]).id; stack = nil }
         // A project that has gone, or has moved to another collection, takes its stack off the panel.
         if let id = stack, !members.contains(where: { $0.id == id }) { stack = nil }
         root = stack.map { SchemaTrial.schema(for: $0) } ?? collection.stack
@@ -956,7 +963,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         if here.folderName == nil {
             does.append(("arrow.turn.down.right", "Add A Level Beneath, To Group The Members", { [weak self] in self?.addTier() }))
         }
-        if here.id != all[0].id {
+        if here.id != all.first?.id {
             does.append(("trash", inside.isEmpty ? "Remove This Collection" : "Remove This Collection And Everything In It", { [weak self] in self?.removeCollection() }))
         }
         add(SchemaRowView(here.name, level: 0, tip: SchemaTrial.title(forLevel: 0), selected: selected == collectionID,
@@ -1309,7 +1316,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
 
     /// Takes a collection away. Its members are not touched: with no collection of their own they are in the first one again.
     private func removeCollection() {
-        guard collectionID != all[0].id else { return }
+        guard collectionID != all.first?.id else { return }
         library.dump(collection: collectionID, over: view.window) { [weak self] in
             guard let self = self else { return }
             self.collectionID = SchemaTrial.firstCollection
@@ -1330,7 +1337,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             return
         }
         making = .nothing
-        collectionID = collectionPopup.selectedItem?.representedObject as? UUID ?? all[0].id
+        collectionID = collectionPopup.selectedItem?.representedObject as? UUID ?? (all.first ?? SchemaTrial.SchemaFile.fresh.collections[0]).id
         stack = nil
         load()
         selected = collectionID

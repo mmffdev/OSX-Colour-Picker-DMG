@@ -78,10 +78,11 @@ extension LibraryController {
         }
     }
 
-    /// A collection: every member in it, in any folder, and everything they hold, then the heading. The first collection stays: it is where things land.
+    /// A collection: every member in it, in any folder, and everything they hold, then the heading. Any collection may go, the
+    /// last one too: a catalogue may hold none, and the next member made brings the first one back to hold it.
     func dump(collection id: UUID, over window: NSWindow?, then: (() -> Void)? = nil) {
         let all = SchemaTrial.collections
-        guard let c = all.first(where: { $0.id == id }), id != SchemaTrial.firstCollection else { return }
+        guard let c = all.first(where: { $0.id == id }) else { return }
         let members = library.orderedProjects.map { $0.id }.filter { SchemaTrial.collection(of: $0, among: all, places: SchemaTrial.places).id == id }
         if members.isEmpty {
             SchemaTrial.collections = all.filter { $0.id != id }

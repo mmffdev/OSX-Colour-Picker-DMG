@@ -264,7 +264,7 @@ final class StudioFrame: NSView {
         sharePage.onLeave = { [weak self] in self?.go(.catalogue) }
         page.onExport = { [weak self] in self?.exportFromPage() }
         page.settings.onImport = { [weak self] in self?.startImport() }
-        page.settings.onExport = { [weak self] in guard let self = self else { return }; self.startExport(.catalogue, subject: self.library.store.root, name: self.library.catalogue) }
+        page.settings.onExport = { [weak self] in guard let self = self else { return }; self.startExport(.catalogue, subject: nil, name: self.library.catalogue) }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -404,9 +404,8 @@ final class StudioFrame: NSView {
     // MARK: Sharing
 
     /// The wizard on a level of the catalogue: the whole catalogue from its settings, a collection or member from its page, a palette from its halo.
-    func startExport(_ level: ShareLevel, subject: URL?, name: String) {
-        guard let url = subject else { library.flash("\(name) has no folder on disk yet"); return }
-        sharePage.beginExport(level: level, subject: url, name: name)
+    func startExport(_ level: ShareLevel, subject: UUID?, name: String) {
+        sharePage.beginExport(level: level, subject: subject, name: name)
         go(.share)
     }
     func startImport() {
@@ -414,14 +413,13 @@ final class StudioFrame: NSView {
         go(.share)
     }
     private func exportFromPage() {
-        let root = library.store.root
         switch place {
-        case .project(let id): startExport(.workGroup, subject: library.memberFolderURL(id), name: library.library.project(id)?.name ?? "Member")
+        case .project(let id): startExport(.workGroup, subject: id, name: library.library.project(id)?.name ?? "Member")
         case .folder(let cid, let fid):
             let name = SchemaTrial.collections.first { $0.id == cid }?.folders.first { $0.id == fid }?.name ?? "Group"
-            startExport(.workGroup, subject: CatalogueTree.folder(ofWorkGroup: fid, in: root), name: name)
-        case .collection(let id): startExport(.collection, subject: CatalogueTree.folder(ofCollection: id, in: root), name: SchemaTrial.collections.first { $0.id == id }?.name ?? "Collection")
-        default: startExport(.catalogue, subject: root, name: library.catalogue)
+            startExport(.workGroup, subject: fid, name: name)
+        case .collection(let id): startExport(.collection, subject: id, name: SchemaTrial.collections.first { $0.id == id }?.name ?? "Collection")
+        default: startExport(.catalogue, subject: nil, name: library.catalogue)
         }
     }
 
@@ -459,7 +457,7 @@ final class StudioFrame: NSView {
                 }
             },
             HaloAction(id: "copy-all", label: "Copy All", symbol: "doc.on.doc") { library.copy(lib.hexes(inSwatch: id, by: .oldest), from: s.name) },
-            HaloAction(id: "export", label: "Export Palette\u{2026}", symbol: "square.and.arrow.up", onSelect: { [weak self] in self?.startExport(.palette, subject: library.paletteFileURL(id), name: s.name) }),
+            HaloAction(id: "export", label: "Export Palette\u{2026}", symbol: "square.and.arrow.up", onSelect: { [weak self] in self?.startExport(.palette, subject: id, name: s.name) }),
             HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id) },
         ]
         if s.projectID != nil { actions.insert(HaloAction(id: "open", label: "Open Member", symbol: "arrow.up.right", onSelect: { [weak self] in if let p = s.projectID { self?.go(.project(p)) } }), at: 0) }
@@ -499,16 +497,17 @@ final class StudioFrame: NSView {
         newMember()
     }
 
-    /// A member made where the page stands: in the collection or folder in view, else the first collection; named on the window's own panel.
+    /// A member made where the page stands: in the collection or folder in view, else the first collection, made now if there is none; named on the window's own panel.
     private func newMember() {
         let all = SchemaTrial.collections
-        var c = all[0], folder: UUID? = nil
+        var c = all.first ?? SchemaTrial.SchemaFile.fresh.collections[0], folder: UUID? = nil
         switch place {
         case .collection(let id): c = all.first { $0.id == id } ?? c
         case .folder(let id, let f): c = all.first { $0.id == id } ?? c; folder = f
         default: break
         }
         library.startProject(moving: nil, called: SchemaTrial.memberName(of: c), in: c) { [weak self] id in
+            if !SchemaTrial.collections.contains(where: { $0.id == c.id }) { c = SchemaTrial.homeForNewMember() }
             SchemaTrial.place(id, in: c.id, folder: folder)
             self?.go(.project(id))
         }
@@ -757,7 +756,7 @@ final class StudioFrame: NSView {
             let all = SchemaTrial.collections
             items = memberCards(lib.orderedProjects)
             title = "Members"; meta = (plural(items.count, "member"), plural(all.count, "collection"))
-            page.showNew(newWord(all[0]))
+            page.showNew(newWord(all.first ?? SchemaTrial.SchemaFile.fresh.collections[0]))
         case .schema:
             let all = SchemaTrial.collections
             title = "Schema"; meta = (plural(all.count, "collection"), plural(lib.projects.count, "member"))
@@ -3037,13 +3036,13 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue), .json].compactMap { $0 }
+        panel.allowedContentTypes = [UTType(filenameExtension: ColourFiles.catalogue), UTType(filenameExtension: ColourFiles.legacyCatalogue), .json].compactMap { $0 }
         panel.prompt = "Open"
         panel.message = "Choose a catalogue's .colcatalogue file to open it where it is, or a library.json to make a catalogue from it."
         panel.beginSheetModal(for: w) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             do {
-                let name = url.pathExtension.lowercased() == ColourFiles.catalogue ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
+                let name = [ColourFiles.catalogue, ColourFiles.legacyCatalogue].contains(url.pathExtension.lowercased()) ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
                 lib.open(catalogue: name)
             } catch { lib.show(error) }
             self?.onChange?()

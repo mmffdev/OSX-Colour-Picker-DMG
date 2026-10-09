@@ -740,19 +740,26 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
             if list.indices.contains(k) { self.library.add(colours, to: list[k].id) }
         }
     }
+    /// Add To Project: every collection, one holding no member too, with its members and a new member of its own.
     @objc private func projectTapped() {
         let M = SwissDropdown.MenuPanel.self
-        let fits = min(20, room(above: toProject.frame) - 3)
-        let projects = Array(library.library.orderedProjects.prefix(fits))
-        var items = [M.heading("Projects")] + (projects.isEmpty ? [M.heading("None yet")] : projects.map { $0.name })
-        items += [M.divider, "New Project\u{2026}"]
-        let colours = keys, name = chosenName
-        openMenu(items: items, chosen: "", width: max(240, toProject.frame.width), from: toProject.frame, upward: true) { [weak self] i in
-            guard let self = self else { return }
-            if i == items.count - 1 { self.library.startProject(keeping: colours, named: name); return }
-            let k = i - 1
-            if projects.indices.contains(k) { self.library.keep(colours, named: name, in: projects[k].id) }
+        let lib = library.library, colours = keys, name = chosenName
+        var items: [String] = [], acts: [Int: () -> Void] = [:]
+        for c in SchemaTrial.collections {
+            if !items.isEmpty { items.append(M.divider) }
+            items.append(M.heading(c.name))
+            for p in lib.orderedProjects where SchemaTrial.collection(of: p.id).id == c.id {
+                acts[items.count] = { [weak self] in self?.library.keep(colours, named: name, in: p.id) }
+                items.append(p.name)
+            }
+            acts[items.count] = { [weak self] in self?.library.startProject(keeping: colours, named: name, in: c) }
+            items.append("New \(SchemaTrial.memberName(of: c))\u{2026}")
         }
+        if items.isEmpty {
+            acts[0] = { [weak self] in self?.library.startProject(keeping: colours, named: name) }
+            items.append("New Project\u{2026}")
+        }
+        openMenu(items: items, chosen: "", width: max(240, toProject.frame.width), from: toProject.frame, upward: true) { i in acts[i]?() }
     }
     private func openFormats(under rect: NSRect) {
         let models = StudioPage.models

@@ -1033,8 +1033,10 @@ final class LibraryStore {
     /// `name` is the catalogue's, which its file is named for.
     init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let found = CatalogueFiles.index(in: directory)
-        self.url = found ?? directory.appendingPathComponent(filesystemName(name ?? directory.lastPathComponent) + "." + ColourFiles.catalogue)
+        // The structure file is "<name>.colcat"; an earlier version's index beside it gives the name until it is brought across.
+        let found = CatalogueFiles.anyIndex(in: directory)
+        let base = found?.deletingPathExtension().lastPathComponent ?? filesystemName(name ?? directory.lastPathComponent)
+        self.url = directory.appendingPathComponent(base + "." + ColourFiles.catalogue)
         self.name = name ?? found?.deletingPathExtension().lastPathComponent ?? directory.lastPathComponent
         self.earlierURL = directory.appendingPathComponent("library.json")
         self.legacyURL = legacyURL

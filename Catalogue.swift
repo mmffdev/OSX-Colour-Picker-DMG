@@ -140,10 +140,15 @@ enum CatalogueFiles {
         return known + items.filter { place[key($0)] == nil }
     }
 
-    /// The catalogue file in a folder, if there is one.
-    static func index(in directory: URL) -> URL? {
+    /// The catalogue's structure file in a folder, ".colcat", if there is one.
+    static func index(in directory: URL) -> URL? { file(in: directory, extension: ColourFiles.catalogue) }
+    /// An earlier version's index, ".colcatalogue", if there is one: read only to bring it across.
+    static func legacyIndex(in directory: URL) -> URL? { file(in: directory, extension: ColourFiles.legacyCatalogue) }
+    /// Either: whatever says a catalogue lives in this folder.
+    static func anyIndex(in directory: URL) -> URL? { index(in: directory) ?? legacyIndex(in: directory) }
+    private static func file(in directory: URL, extension ext: String) -> URL? {
         ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
-            .filter { ($0 as NSString).pathExtension.lowercased() == ColourFiles.catalogue && !$0.hasPrefix(".") }
+            .filter { ($0 as NSString).pathExtension.lowercased() == ext && !$0.hasPrefix(".") }
             .sorted().first.map { directory.appendingPathComponent($0) }
     }
 }

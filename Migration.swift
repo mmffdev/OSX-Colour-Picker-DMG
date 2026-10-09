@@ -8,6 +8,11 @@ import Foundation
 // everything. The first time this version opens either, it copies the old folders whole into a
 // backup, reads everything, clears the old layout and writes the tree. Nothing is read from the
 // old layout after that; the backup is kept for the user to look at or go back to.
+//
+// Version 2, the tree of folders each with a file describing it, comes across in place: backed up the
+// same way, read, written as version 3 into the same folders, which move and rename only where the
+// structure says, and then the old documents of each level are taken out. Anything else the user put
+// in the folders stays where it is.
 
 enum Migration {
     struct Report: Equatable {
@@ -39,24 +44,28 @@ enum Migration {
     /// What belongs to the app's home, not to the catalogue at its root.
     private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", TreeFiles.backups]
 
-    /// Whether a folder holds a catalogue in an earlier layout: a version 1 index, or the one file.
+    /// Whether a folder holds a catalogue in an earlier layout: a version 2 tree, a version 1 index, or the one file.
     static func needed(in root: URL) -> Bool {
-        if let url = CatalogueFiles.index(in: root) {
+        if CatalogueFiles.index(in: root) != nil { return false }
+        if let url = CatalogueFiles.legacyIndex(in: root) {
             guard let data = try? Data(contentsOf: url) else { return false }
-            if CatalogueTree.decode(data) != nil { return false }
+            if LegacyTree.decode(data) != nil { return true }
             return (try? ColourFiles.decoder().decode(CatalogueDocument.self, from: data))?.format == "colour-catalogue"
         }
         return fm.fileExists(atPath: root.appendingPathComponent("library.json").path)
     }
+    /// Whether what is there is a version 2 tree.
+    static func isVersion2(_ root: URL) -> Bool { LegacyTree.index(in: root) != nil }
 
     /// Brings the catalogue in `root` across: backup first, then read, clear, write.
     @discardableResult
     static func run(root: URL, name: String, now: Date = Date()) throws -> Report {
+        if isVersion2(root) { return try runVersion2(root: root, name: name, now: now) }
         let backup = try backUp(root: root, name: name, now: now)
         var notes: [String] = [], orphans: [String] = []
         var lib: Library
         // The members, as the index knew them; an earlier version's one file; or nothing readable.
-        if let index = CatalogueFiles.index(in: root) {
+        if let index = CatalogueFiles.legacyIndex(in: root) {
             let master = root.standardizedFileURL == Catalogues.standard.root.standardizedFileURL ? ProjectFiles.folder : nil
             guard let loaded = try? CatalogueFiles.read(index: index, master: master) else { throw Fault.unreadable(index) }
             lib = loaded.library
@@ -101,6 +110,39 @@ enum Migration {
         try CatalogueTree.write(lib, schema: schema, index: index, name: name, now: now)
         Diagnostics.log("migration", "\(name): \(lib.projects.count) members, \(lib.swatches.count) palettes, backup at \(backup.path)" + (notes.isEmpty ? "" : "; " + notes.joined(separator: "; ")))
         let report = Report(backup: backup, members: lib.projects.count, palettes: lib.swatches.count, orphans: orphans, notes: notes)
+        reports[root.standardizedFileURL.path] = report
+        return report
+    }
+
+    /// A version 2 tree brought across in place: backup, read, write version 3 into the same folders, then the old documents go.
+    private static func runVersion2(root: URL, name: String, now: Date) throws -> Report {
+        guard let legacy = CatalogueFiles.legacyIndex(in: root) else { throw Fault.unreadable(root) }
+        let backup = try backUp(root: root, name: name, now: now)
+        guard let loaded = try? LegacyTree.read(root: root) else { throw Fault.unreadable(legacy) }
+        let carry = LegacyTree.describe(root: root, loaded: loaded)
+        let index = root.appendingPathComponent(filesystemName(name) + "." + ColourFiles.catalogue)
+        // The history keeps its steps; only its extension changes.
+        let oldHistory = legacy.deletingPathExtension().appendingPathExtension(ColourFiles.legacyHistory)
+        let newHistory = HistoryStore.url(beside: index)
+        if fm.fileExists(atPath: oldHistory.path) && !fm.fileExists(atPath: newHistory.path) { try fm.moveItem(at: oldHistory, to: newHistory) }
+        try CatalogueTree.write(loaded.library, schema: loaded.schema, index: index, name: name, now: now, carry: carry)
+        // Each level's own document, the Library's lists and the template files: the structure file holds all of it now.
+        let old: Set<String> = [LegacyTree.collection, LegacyTree.workGroup, LegacyTree.assets, LegacyTree.template]
+        func clear(_ dir: URL, depth: Int) {
+            guard depth < 16 else { return }
+            for name in CatalogueTree.names(in: dir) {
+                let url = dir.appendingPathComponent(name)
+                if CatalogueTree.isFolder(url) { if !(depth == 0 && homeItems.contains(name)) { clear(url, depth: depth + 1) }; continue }
+                if old.contains((name as NSString).pathExtension.lowercased()) { try? fm.removeItem(at: url) }
+            }
+        }
+        clear(root, depth: 0)
+        try? fm.removeItem(at: legacy)
+        let templates = root.appendingPathComponent(TreeFiles.templates)
+        if CatalogueTree.isFolder(templates) && CatalogueTree.names(in: templates).isEmpty { try? fm.removeItem(at: templates) }
+        let lib = loaded.library
+        Diagnostics.log("migration", "\(name): version 2 to 3, \(lib.projects.count) members, \(lib.swatches.count) palettes, backup at \(backup.path)")
+        let report = Report(backup: backup, members: lib.projects.count, palettes: lib.swatches.count, orphans: [], notes: loaded.notes)
         reports[root.standardizedFileURL.path] = report
         return report
     }

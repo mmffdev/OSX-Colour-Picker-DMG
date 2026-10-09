@@ -360,8 +360,8 @@ struct Catalogues {
         let fm = FileManager.default
         let index = CatalogueFiles.index(in: root)
         var items = [index?.lastPathComponent, index.map { HistoryStore.url(beside: $0).lastPathComponent }, "library.json", TreeFiles.library, TreeFiles.templates].compactMap { $0 }
-        // The collections' folders, each holding nothing but its own file.
-        for sub in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where fm.fileExists(atPath: root.appendingPathComponent(sub).appendingPathComponent(sub + "." + TreeFiles.collection).path) { items.append(sub) }
+        // The collections' folders, which hold no members.
+        items += (CatalogueTree.catalogue(in: root)?.collections.map { $0.folder }) ?? []
         for item in items { try? fm.removeItem(at: root.appendingPathComponent(item)) }
     }
 
@@ -371,8 +371,11 @@ struct Catalogues {
         let fm = FileManager.default
         var items = [CatalogueFiles.index(in: root)?.lastPathComponent, CatalogueFiles.index(in: root).map { HistoryStore.url(beside: $0).lastPathComponent },
                      "library.json", "library.history.json", "schema.colschema", TreeFiles.library, TreeFiles.templates, TreeFiles.backups, CatalogueFiles.unfiled, "Projects"].compactMap { $0 }
+        // The collections' folders, as the structure file names them, or as an earlier version marked them with a file of their own.
+        items += (CatalogueTree.catalogue(in: root)?.collections.map { $0.folder } ?? []).filter { !items.contains($0) }
+        if let legacy = CatalogueFiles.legacyIndex(in: root) { items.append(legacy.lastPathComponent) }
         for sub in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where !items.contains(sub) && sub != "Catalogues" {
-            if fm.fileExists(atPath: root.appendingPathComponent(sub).appendingPathComponent(sub + "." + TreeFiles.collection).path) { items.append(sub) }
+            if fm.fileExists(atPath: root.appendingPathComponent(sub).appendingPathComponent(sub + "." + LegacyTree.collection).path) { items.append(sub) }
         }
         return items
     }
@@ -380,7 +383,7 @@ struct Catalogues {
     /// Whether a folder holds a catalogue: its file, or the one file of an earlier version.
     static func holdsCatalogue(_ dir: URL) -> Bool {
         let fm = FileManager.default
-        return CatalogueFiles.index(in: dir) != nil || fm.fileExists(atPath: dir.appendingPathComponent("library.json").path)
+        return CatalogueFiles.anyIndex(in: dir) != nil || fm.fileExists(atPath: dir.appendingPathComponent("library.json").path)
             || fm.fileExists(atPath: dir.appendingPathComponent(".library.json.icloud").path)
     }
 

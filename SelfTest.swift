@@ -432,7 +432,7 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
     check(studio == "Studio" && mine.names() == ["Studio"], "Main can be renamed, and then there is no Main")
     check((try! mine.store(for: "Studio").load()).colours.map { $0.hex } == ["#AA0000"], "the renamed catalogue keeps its colours")
     check(CatalogueFiles.index(in: mine.root) == nil && !fm.fileExists(atPath: mine.root.appendingPathComponent(CatalogueFiles.unfiled).path)
-          && fm.fileExists(atPath: mine.directory(for: "Studio").appendingPathComponent("Studio.colcatalogue").path),
+          && fm.fileExists(atPath: mine.directory(for: "Studio").appendingPathComponent("Studio.colcat").path),
           "Main's files move into a folder of their own, and the catalogue's file takes the catalogue's name")
     check(Set(SyncEngine.catalogues(in: shared)) == ["Studio"], "the sync folder is renamed too, and the old name no longer lists")
     check(SyncEngine.renamedName(in: shared, of: "Main") == "Studio", "the old sync folder says where it went")
@@ -858,132 +858,164 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     if canonical(treeBack) != canonical(treeLib) {
         print("        projects \(treeBack.projects == treeLib.projects)  swatches \(canonical(treeBack).swatches == canonical(treeLib).swatches)  colours \(canonical(treeBack).colours == canonical(treeLib).colours)  tags \(canonical(treeBack).tagInfo == canonical(treeLib).tagInfo)  profiles \(treeBack.colourProfiles == treeLib.colourProfiles)  deleted \(treeBack.deleted == treeLib.deleted)  version \(treeBack.version == treeLib.version)")
         for s in canonical(treeLib).swatches { if let b = treeBack.swatch(s.id), b != s { print("        differs: \(s.name)"); print("          was \(s)"); print("          now \(b)") } else if treeBack.swatch(s.id) == nil { print("        missing: \(s.name)") } }
+        for p in treeLib.projects where treeBack.project(p.id) != p { print("        member differs: \(p)\n          now \(String(describing: treeBack.project(p.id)))") }
     }
-    check(canonical(treeBack) == canonical(treeLib), "a catalogue written as the tree reads back whole: members, palettes, typography, tags, colours and profiles")
+    check(canonical(treeBack) == canonical(treeLib), "a catalogue written as its structure file and assets reads back whole: members, palettes, typography, tags, colours and profiles")
     check(treeBack.swatch(inA)?.purpose == .print && treeBack.swatch(looseOne)?.purpose == .video && treeBack.swatch(inA)?.purposeList == [.print] && treeBack.swatch(inA)?.profile == ColourProfiles.starters[1].id,
           "a palette's purposes, the one it is turned to, and its profile come back with it")
     check(treeStore.schema.collections == treeSchema.collections && treeStore.schema.places[acmeWeb.uuidString] == treeSchema.places[acmeWeb.uuidString]
           && treeStore.schema.places[jobA.uuidString]?.collection == SchemaTrial.firstCollection && treeStore.schema.stacks == nil,
-          "the schema comes back from the tree: the collections, where every member sits, and that each follows its Master Template")
+          "the schema comes back from the structure file: the collections, where every member sits, and that each follows its Master Template")
     let projectsDir = treeDir.appendingPathComponent("Projects"), jobADir = projectsDir.appendingPathComponent("Job A")
-    check(treeStore.url.lastPathComponent == "Studio.colcatalogue"
-          && fm.fileExists(atPath: projectsDir.appendingPathComponent("Projects.colcollection").path)
-          && fm.fileExists(atPath: jobADir.appendingPathComponent("Job A.colworkgroup").path)
-          && ["Information", "Palettes", "Typography", "Tags"].allSatisfy { fm.fileExists(atPath: jobADir.appendingPathComponent($0).path) }
-          && fm.fileExists(atPath: jobADir.appendingPathComponent("Palettes/Autumn.colpalette").path)
-          && fm.fileExists(atPath: jobADir.appendingPathComponent("Typography/Headings.colpalette").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Clients.colcollection").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Acme/Acme.colworkgroup").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Acme/Acme Web/Acme Web.colworkgroup").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Library/Palettes/Scratch.colpalette").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Library/Palettes/Palettes.colassets").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Library/Swatches/Swatches.colassets").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Library/Profiles/Profiles.colassets").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Templates").path)
-          && !fm.fileExists(atPath: jobADir.appendingPathComponent("Channels").path) && !fm.fileExists(atPath: jobADir.appendingPathComponent("Config").path)
-          && !fm.fileExists(atPath: treeDir.appendingPathComponent("Unfiled").path),
-          "every level is a folder named as the user named it, with one file describing it: the index, the Library's pools, each collection, each level between, each member with a folder for every group of its schema")
+    func exists(_ path: String) -> Bool { fm.fileExists(atPath: treeDir.appendingPathComponent(path).path) }
+    func anywhere(_ ext: String, under dir: URL) -> Bool { ((fm.enumerator(atPath: dir.path)?.allObjects as? [String]) ?? []).contains { ($0 as NSString).pathExtension == ext } }
+    check(treeStore.url.lastPathComponent == "Studio.colcat" && exists("Studio.colcat")
+          && ["Information", "Palettes", "Typography", "Tags"].allSatisfy { exists("Projects/Job A/" + $0) }
+          && exists("Projects/Job A/Palettes/Autumn.colpal") && exists("Projects/Job A/Typography/Headings.coltyp") && exists("Projects/Job A/Information/Job A.colinf")
+          && exists("Clients/Acme/Acme Web/Information/Acme Web.colinf")
+          && exists("Library/Palettes/Scratch.colpal") && exists("Library/Swatches/Studio Swatches.colswa") && exists("Library/Profiles/Studio Profiles.colprf")
+          && !exists("Templates") && ![LegacyTree.collection, LegacyTree.workGroup, LegacyTree.assets, LegacyTree.template, ColourFiles.legacyPalette].contains { anywhere($0, under: treeDir) },
+          "the catalogue is one structure file and its assets: every collection, level between, member and group a folder named as the user named it, holding only assets")
     let d = ColourFiles.decoder()
-    let autumnDoc = try? d.decode(PaletteDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Palettes/Autumn.colpalette")))
-    let jobADoc = try? d.decode(WorkGroupDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Job A.colworkgroup")))
-    let acmeDoc = try? d.decode(WorkGroupDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Clients/Acme/Acme.colworkgroup")))
-    let projectsDoc = try? d.decode(CollectionDocument.self, from: Data(contentsOf: projectsDir.appendingPathComponent("Projects.colcollection")))
-    let swatchesDoc = try? d.decode(AssetsDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Swatches/Swatches.colassets")))
-    let profilesDoc = try? d.decode(AssetsDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Profiles/Profiles.colassets")))
-    let treeIndex = CatalogueTree.index(in: treeDir)
-    check(autumnDoc?.palette.purposes?.map { $0.purpose } == [.print] && autumnDoc?.palette.purpose == nil && autumnDoc?.file == "Autumn" && autumnDoc?.project == jobA,
-          "a palette's file carries its settings inside it, the name it was written under, and the member it sits in")
-    check(jobADoc?.kind == .member && jobADoc?.followsTemplate == true && jobADoc?.schema == treeSchema.collections[0].stack && jobADoc?.palettes == [inA, typeA]
-          && jobADoc?.tags?.map { $0.name } == ["client"] && jobADoc?.buckets?.count == 4 && jobADoc?.turned?.first?.purpose == .print,
-          "a member's file carries its record, its tree, its tags, the order of its palettes and the folder of every group")
-    check(acmeDoc?.kind == .group && acmeDoc?.members == [acmeWeb] && projectsDoc?.members == [jobA, jobB] && projectsDoc?.template == treeSchema.collections[0].stack,
-          "a level between lists the members inside it; a collection carries its Master Template and lists what is directly inside it")
-    check(treeIndex?.version == 2 && treeIndex?.collections == [SchemaTrial.firstCollection, clients.id] && treeIndex?.tags.map { $0.name } == ["brand"]
-          && swatchesDoc?.colours?.map { $0.hex } == ["#EEEEEE"] && profilesDoc?.profiles?.map { $0.id } == [ColourProfiles.starters[1].id],
-          "the index carries the global tags and the order of the collections; the Library's pools carry the colours no palette holds and the profiles")
+    let treeCat = CatalogueTree.catalogue(in: treeDir)
+    let autumnDoc = try? d.decode(PaletteDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Palettes/Autumn.colpal")))
+    let headingsDoc = try? d.decode(PaletteDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Typography/Headings.coltyp")))
+    let jobAInfo = try? d.decode(InformationDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Information/Job A.colinf")))
+    let swatchesDoc = try? d.decode(SwatchesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Swatches/Studio Swatches.colswa")))
+    let profilesDoc = try? d.decode(ProfilesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Profiles/Studio Profiles.colprf")))
+    let projectsEntry = treeCat?.collections.first { $0.id == SchemaTrial.firstCollection }
+    let jobAEntry = projectsEntry?.members.first { $0.id == jobA }
+    check(autumnDoc?.palette.purposes?.map { $0.purpose } == [.print] && autumnDoc?.palette.purpose == nil && autumnDoc?.file == "Autumn" && autumnDoc?.project == jobA
+          && autumnDoc?.catalogue == treeCat?.id && headingsDoc?.format == "colour-typography" && jobAInfo?.member == jobA && jobAInfo?.record.name == "Job A" && jobAInfo?.catalogue == treeCat?.id,
+          "every asset carries itself whole and says which catalogue and member it belongs to: a palette its settings, a typography palette its own format, a member's information pack its record")
+    check(treeCat?.version == 3 && treeCat?.collections.map { $0.id } == [SchemaTrial.firstCollection, clients.id] && projectsEntry?.members.map { $0.id } == [jobA, jobB]
+          && projectsEntry?.template == treeSchema.collections[0].stack && jobAEntry?.schema == nil && jobAEntry?.assets.map { $0.id } == [inA, typeA]
+          && jobAEntry?.assets.map { $0.kind } == [.palette, .typography] && jobAEntry?.assets.first?.file == "Projects/Job A/Palettes/Autumn.colpal"
+          && jobAEntry?.buckets.count == 4 && jobAEntry?.turned?.first?.purpose == .print && jobAEntry?.information == "Projects/Job A/Information/Job A.colinf"
+          && treeCat?.collections.last?.groups.map { $0.name } == ["Acme"] && treeCat?.collections.last?.groups.first?.members.map { $0.id } == [acmeWeb]
+          && treeCat?.libraryAssets.map { $0.id } == [looseOne] && Set(treeCat?.tags.map { $0.name } ?? []) == ["brand", "client"],
+          "the structure file holds the whole tree and an index of every asset: collections with their Master Templates, levels between, members with their groups' folders and palettes in order, the Library, the tags")
+    check(swatchesDoc?.colours.map { $0.hex } == ["#EEEEEE"] && profilesDoc?.profiles.map { $0.id } == [ColourProfiles.starters[1].id],
+          "the Library's loose colours and its profiles are files of their own, named for the catalogue")
     // Renamed in the app: the folder or file takes the new name at once. Moved to another collection: the folder moves.
     var renamedLib = treeBack
     _ = renamedLib.renameProject(jobA, to: "Job A Plus", at: tcat.addingTimeInterval(5))
     _ = renamedLib.renameSwatch(inA, to: "Autumn Range", at: tcat.addingTimeInterval(5))
     try! treeStore.save(renamedLib)
     let plusDir = projectsDir.appendingPathComponent("Job A Plus")
-    check(fm.fileExists(atPath: plusDir.appendingPathComponent("Job A Plus.colworkgroup").path) && !fm.fileExists(atPath: jobADir.path)
-          && fm.fileExists(atPath: plusDir.appendingPathComponent("Palettes/Autumn Range.colpalette").path) && !fm.fileExists(atPath: plusDir.appendingPathComponent("Palettes/Autumn.colpalette").path)
-          && (try? treeStore.load())?.project(jobA)?.name == "Job A Plus" && (try? fm.contentsOfDirectory(atPath: plusDir.path))?.filter { $0.hasSuffix(".colworkgroup") }.count == 1,
-          "renaming a member or a palette in the app renames its folder or file the same instant, and nothing is left under the old name")
+    check(exists("Projects/Job A Plus/Palettes/Autumn Range.colpal") && !exists("Projects/Job A") && !exists("Projects/Job A Plus/Palettes/Autumn.colpal")
+          && exists("Projects/Job A Plus/Information/Job A Plus.colinf") && !exists("Projects/Job A Plus/Information/Job A.colinf")
+          && (try? treeStore.load())?.project(jobA)?.name == "Job A Plus",
+          "renaming a member or a palette in the app renames its folder, its information pack or its file the same instant, and nothing is left under the old name")
     var movedSchema = treeStore.schema
     movedSchema.places[jobB.uuidString] = SchemaPlace(collection: clients.id, folder: acme.id)
     try! treeStore.save(renamedLib, schema: movedSchema)
     _ = try! treeStore.load()
-    check(fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Acme/Job B/Job B.colworkgroup").path) && !fm.fileExists(atPath: projectsDir.appendingPathComponent("Job B").path),
-          "placing a member in another collection, or under a client, moves its folder there")
-    if !fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Acme/Job B/Palettes/Winter.colpalette").path) {
-        print("        Winter is at \(CatalogueTree.file(ofPalette: inB, in: treeDir)?.path ?? "nowhere")")
-        if let e = fm.enumerator(atPath: treeDir.path) { for case let f as String in e { print("          \(f)") } }
-    }
-    check(fm.fileExists(atPath: treeDir.appendingPathComponent("Clients/Acme/Job B/Palettes/Winter.colpalette").path), "with everything in it")
+    check(exists("Clients/Acme/Job B/Palettes/Winter.colpal") && !exists("Projects/Job B"), "placing a member in another collection, or under a client, moves its folder there with everything in it")
     check(SchemaTrial.folder(of: jobB, among: treeStore.schema.collections, places: treeStore.schema.places) == acme.id, "and the tree read back says where it is now")
     movedSchema = treeStore.schema
     movedSchema.collections[1].name = "Customers"
     movedSchema.collections[1].folders[0].name = "Acme Ltd"
     try! treeStore.save(renamedLib, schema: movedSchema)
-    check(fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Customers.colcollection").path) && fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Acme Ltd/Job B/Job B.colworkgroup").path)
-          && !fm.fileExists(atPath: treeDir.appendingPathComponent("Clients").path) && !fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Clients.colcollection").path),
-          "renaming a collection or a level between renames its folder and its file")
+    check(exists("Customers/Acme Ltd/Job B/Palettes/Winter.colpal") && !exists("Clients") && CatalogueTree.catalogue(in: treeDir)?.collections.last?.folder == "Customers",
+          "renaming a collection or a level between renames its folder, and the structure file says so")
     var shaped = treeStore.schema
     var ownTree = SchemaTrial.start
     ownTree.children[1].name = "Colourways"
     shaped.stacks = [jobA.uuidString: ownTree]
     try! treeStore.save(renamedLib, schema: shaped)
-    let jobAPlusDoc = try? d.decode(WorkGroupDocument.self, from: Data(contentsOf: plusDir.appendingPathComponent("Job A Plus.colworkgroup")))
-    check(fm.fileExists(atPath: plusDir.appendingPathComponent("Colourways/Autumn Range.colpalette").path) && !fm.fileExists(atPath: plusDir.appendingPathComponent("Palettes").path)
-          && jobAPlusDoc?.followsTemplate == nil && jobAPlusDoc?.schema?.children[1].name == "Colourways" && treeStore.schema.stacks?[jobA.uuidString] == ownTree,
-          "renaming a group in a member's own schema renames its folder, palettes and all, and the member's file says the tree is its own")
-    // Renamed in Finder: the app takes the new name. Dropped in Finder: taken in. Deleted in Finder: gone.
+    check(exists("Projects/Job A Plus/Colourways/Autumn Range.colpal") && !exists("Projects/Job A Plus/Palettes")
+          && CatalogueTree.catalogue(in: treeDir)?.collections.first?.members.first { $0.id == jobA }?.schema?.children[1].name == "Colourways" && treeStore.schema.stacks?[jobA.uuidString] == ownTree,
+          "renaming a group in a member's own schema renames its folder, palettes and all, and the structure file keeps the member's own tree")
+    // Renamed in Finder: the app takes the new name, and the structure file catches up.
     try! fm.moveItem(at: plusDir, to: projectsDir.appendingPathComponent("Job Alpha"))
     let alphaDir = projectsDir.appendingPathComponent("Job Alpha")
     let afterFinder = try! treeStore.load()
-    let alphaDoc = try? d.decode(WorkGroupDocument.self, from: Data(contentsOf: alphaDir.appendingPathComponent("Job Alpha.colworkgroup")))
-    check(afterFinder.project(jobA)?.name == "Job Alpha" && alphaDoc?.folder == "Job Alpha" && alphaDoc?.name == "Job Alpha" && !fm.fileExists(atPath: alphaDir.appendingPathComponent("Job A Plus.colworkgroup").path),
-          "a member folder renamed in Finder gives the member its new name, and its file catches up")
+    check(afterFinder.project(jobA)?.name == "Job Alpha" && CatalogueTree.catalogue(in: treeDir)?.collections.first?.members.first { $0.id == jobA }?.folder == "Job Alpha"
+          && exists("Projects/Job Alpha/Information/Job Alpha.colinf") && afterFinder.palettes(in: jobA).count == 2,
+          "a member folder renamed in Finder gives the member its new name, keeps its palettes, and the structure file catches up")
     var dropped = Swatch(id: UUID(), name: "Dropped", createdAt: tcat, entries: [SwatchEntry(hex: "#ABCDEF", addedAt: tcat)])
     dropped.projectID = nil
     let droppedDoc = PaletteDocument(project: nil, palette: dropped, colours: [Colour(hex: "#ABCDEF", pickedAt: tcat)], file: "Dropped")
-    try! ColourFiles.encoder().encode(droppedDoc).write(to: alphaDir.appendingPathComponent("Colourways/Dropped.colpalette"))
+    try! ColourFiles.encoder().encode(droppedDoc).write(to: alphaDir.appendingPathComponent("Colourways/Dropped.colpal"))
     let adopted = try! treeStore.load()
-    let alphaAfterDrop = try? d.decode(WorkGroupDocument.self, from: Data(contentsOf: alphaDir.appendingPathComponent("Job Alpha.colworkgroup")))
-    check(adopted.swatch(dropped.id)?.projectID == jobA && adopted.colours.contains { $0.hex == "#ABCDEF" } && alphaAfterDrop?.palettes?.contains(dropped.id) == true,
-          "a palette file dropped into a member's folder in Finder is taken in, and listed by the member's file")
-    try! fm.removeItem(at: treeDir.appendingPathComponent("Customers/Acme Ltd/Job B"))
+    check(adopted.swatch(dropped.id)?.projectID == jobA && adopted.colours.contains { $0.hex == "#ABCDEF" }
+          && CatalogueTree.catalogue(in: treeDir)?.collections.first?.members.first { $0.id == jobA }?.assets.contains { $0.id == dropped.id } == true,
+          "a palette file dropped into a member's folder in Finder is taken in, and the structure file lists it")
+    // Moved in Finder, out of its client: known by its palettes, it sits where it was put.
+    try! fm.moveItem(at: treeDir.appendingPathComponent("Customers/Acme Ltd/Job B"), to: treeDir.appendingPathComponent("Customers/Job B"))
+    let afterMove = try! treeStore.load()
+    check(afterMove.project(jobB)?.name == "Job B" && afterMove.swatch(inB)?.projectID == jobB && treeStore.schema.places[jobB.uuidString] == SchemaPlace(collection: clients.id, folder: nil),
+          "a member folder moved in Finder is known by the assets inside it, and the member sits where it was put, palettes and all")
+    try! fm.moveItem(at: treeDir.appendingPathComponent("Customers"), to: treeDir.appendingPathComponent("Clients Ltd"))
+    let afterCollectionRename = try! treeStore.load()
+    check(treeStore.schema.collections.map { $0.name } == ["Projects", "Clients Ltd"] && treeStore.schema.collections[1].id == clients.id && afterCollectionRename.project(jobB) != nil
+          && treeStore.schema.collections[1].folders.map { $0.name } == ["Acme Ltd"],
+          "a collection folder renamed in Finder renames the collection, and everything in it stays")
+    try! fm.removeItem(at: treeDir.appendingPathComponent("Clients Ltd/Job B"))
     let afterDelete = try! treeStore.load()
     check(afterDelete.project(jobB) == nil && afterDelete.swatch(inB) == nil && afterDelete.project(jobA) != nil,
           "a member folder deleted in Finder is gone from the catalogue, with its palettes, and nothing else is touched")
+    // Added in Finder: a folder in a collection is a new member; a folder at the root is a new collection, its folders its members.
+    try! fm.createDirectory(at: treeDir.appendingPathComponent("Clients Ltd/Newco"), withIntermediateDirectories: true)
+    try! fm.createDirectory(at: treeDir.appendingPathComponent("Archive/Old Work"), withIntermediateDirectories: true)
+    let afterAdd = try! treeStore.load()
+    let newco = afterAdd.projects.first { $0.name == "Newco" }, oldWork = afterAdd.projects.first { $0.name == "Old Work" }
+    let archive = treeStore.schema.collections.first { $0.name == "Archive" }
+    check(newco != nil && oldWork != nil && archive != nil && treeStore.schema.places[newco?.id.uuidString ?? ""]?.collection == clients.id
+          && treeStore.schema.places[oldWork?.id.uuidString ?? ""]?.collection == archive?.id && exists("Clients Ltd/Newco/Information/Newco.colinf") && exists("Archive/Old Work/Palettes")
+          && !exists("Clients Ltd/Newco 2") && !exists("Archive 2"),
+          "a folder made in Finder inside a collection is taken in as a member, one at the root as a collection, and each gets its groups' folders where it is")
+    // Copied in from elsewhere: a member's folder brings its information pack, and with it the member's id and details.
+    let visitor = UUID()
+    var visitorRecord = Project(id: visitor, name: "Visitor", createdAt: tcat)
+    visitorRecord.details = ["studio": "Elsewhere"]
+    let visitorDir = treeDir.appendingPathComponent("Clients Ltd/Visitor")
+    try! fm.createDirectory(at: visitorDir.appendingPathComponent("Information"), withIntermediateDirectories: true)
+    try! fm.createDirectory(at: visitorDir.appendingPathComponent("Palettes"), withIntermediateDirectories: true)
+    try! ColourFiles.encoder().encode(InformationDocument(catalogue: UUID(), member: visitor, record: visitorRecord)).write(to: visitorDir.appendingPathComponent("Information/Visitor.colinf"))
+    var guest = Swatch(id: UUID(), name: "Guest", createdAt: tcat, entries: [SwatchEntry(hex: "#0A0B0C", addedAt: tcat)])
+    guest.projectID = visitor
+    try! ColourFiles.encoder().encode(PaletteDocument(project: visitor, palette: guest, colours: [Colour(hex: "#0A0B0C", pickedAt: tcat)], file: "Guest"))
+        .write(to: visitorDir.appendingPathComponent("Palettes/Guest.colpal"))
+    let afterCopy = try! treeStore.load()
+    check(afterCopy.project(visitor)?.details?["studio"] == "Elsewhere" && afterCopy.swatch(guest.id)?.projectID == visitor && !exists("Clients Ltd/Visitor 2"),
+          "a member's folder copied in from another catalogue keeps its id and details, and its palettes come with it")
     // Deleted in the app: the file or folder goes.
-    var fewer = afterDelete
+    var fewer = afterCopy
     fewer.deleteSwatch(dropped.id, at: tcat.addingTimeInterval(9))
     fewer.deleteProject(acmeWeb, at: tcat.addingTimeInterval(9))
     try! treeStore.save(fewer)
-    check(!fm.fileExists(atPath: alphaDir.appendingPathComponent("Colourways/Dropped.colpalette").path) && !fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Acme Ltd/Acme Web").path)
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Acme Ltd/Acme Ltd.colworkgroup").path),
+    check(!exists("Projects/Job Alpha/Colourways/Dropped.colpal") && !exists("Clients Ltd/Acme Ltd/Acme Web") && exists("Clients Ltd/Acme Ltd"),
           "a palette or a member deleted in the app loses its file or folder, and the level above stays")
     let signatureBefore = CatalogueTree.signature(root: treeDir)
     try! treeStore.mutate { $0.addPick("#123456", at: tcat.addingTimeInterval(10)) }
     check(signatureBefore != CatalogueTree.signature(root: treeDir) && CatalogueTree.signature(root: treeDir) == CatalogueTree.signature(root: treeDir),
           "the tree's signature changes when anything in it does, and not otherwise")
-    // Templates are files of the catalogue's own.
+    // Templates are the structure file's own.
     var withTemplate = treeStore.schema
     withTemplate.templates = [SchemaTemplate(name: "Agency Job", about: "For agencies", stack: ownTree, changedAt: tcat)]
     try! treeStore.save(fewer, schema: withTemplate)
-    let templateFile = treeDir.appendingPathComponent("Templates/Agency Job.coltemplate")
-    let templateDoc = try? d.decode(TemplateDocument.self, from: Data(contentsOf: templateFile))
     _ = try! treeStore.load()
-    check(templateDoc?.stack == ownTree && templateDoc?.about == "For agencies" && treeStore.schema.templates?.map { $0.name } == ["Agency Job"] && CatalogueTree.index(in: treeDir)?.templates == [templateDoc?.id ?? UUID()],
-          "a template is a file in the catalogue's Templates folder, listed by the index, and reads back")
-    try! fm.copyItem(at: templateFile, to: treeDir.appendingPathComponent("Templates/Agency Job Copy.coltemplate"))
-    var copyDoc = templateDoc!; copyDoc.id = UUID()
-    try! ColourFiles.encoder().encode(copyDoc).write(to: treeDir.appendingPathComponent("Templates/Agency Job Copy.coltemplate"))
-    _ = try! treeStore.load()
-    check(treeStore.schema.templates?.map { $0.name } == ["Agency Job", "Agency Job Copy"], "a template file dropped into the folder is taken in under its file's name")
+    check(treeStore.schema.templates?.map { $0.name } == ["Agency Job"] && treeStore.schema.templates?.first?.stack == ownTree
+          && CatalogueTree.catalogue(in: treeDir)?.templates.first?.about == "For agencies" && !exists("Templates"),
+          "a template is held in the structure file, with no file or folder of its own, and reads back")
+    // No collection at all is a catalogue too; the first member brings the first collection back.
+    let bareDir = root.appendingPathComponent("tree/Bare")
+    let bareStore = LibraryStore(directory: bareDir, legacyURL: nil, name: "Bare")
+    var bare = Library()
+    _ = bare.createSwatch(at: tcat)
+    try! bareStore.save(bare, schema: SchemaTrial.SchemaFile(collections: [], places: [:]))
+    var bareBack = try! bareStore.load()
+    check(bareStore.schema.collections.isEmpty && CatalogueTree.subfolders(of: bareDir).map { $0.lastPathComponent } == ["Library"] && CatalogueTree.catalogue(in: bareDir)?.collections.isEmpty == true
+          && bareBack.swatches.count == 1,
+          "a catalogue may hold no collection: no folder is made for one, and none is invented when it is read")
+    let firstMember = bareBack.createProject(named: "First", at: tcat)
+    try! bareStore.save(bareBack, schema: bareStore.schema)
+    bareBack = try! bareStore.load()
+    check(bareStore.schema.collections.map { $0.id } == [SchemaTrial.firstCollection] && bareBack.project(firstMember) != nil
+          && fm.fileExists(atPath: bareDir.appendingPathComponent("Projects/First/Information/First.colinf").path),
+          "a member made in a catalogue with no collection brings the first collection back to hold it")
     check(filesystemName("Red/Blue 50:50?") == "Red-Blue 50-50-" && filesystemName("aux") == "aux_" && filesystemName("COM1.old") == "COM1.old_"
           && filesystemName("Final. ") == "Final" && filesystemName("e\u{0301}") == "\u{00E9}" && filesystemName("...") == "Untitled",
           "a file name is safe on Windows and Linux as well as the Mac: no forbidden characters, no reserved names, no trailing dot")
@@ -1045,14 +1077,14 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(brought.project(oldJob)?.name == "Old Job" && brought.swatch(oldPal)?.projectID == oldJob && brought.swatch(oldPal)?.purpose == .print && brought.swatch(oldPal)?.purposeList == [.print]
           && brought.swatch(loosePal)?.projectID == nil && brought.colours.contains { $0.hex == "#404040" } && brought.info(forTag: "global")?.colour == "#00FF00" && brought.project(ofTag: "mine") == oldJob,
           "every member, palette, tag, colour and channel comes across")
-    check(brought.project(orphanID) == nil && brought.swatch(orphanPal.id)?.projectID == nil && fm.fileExists(atPath: oldDir.appendingPathComponent("Library/Palettes/Lost.colpalette").path),
+    check(brought.project(orphanID) == nil && brought.swatch(orphanPal.id)?.projectID == nil && fm.fileExists(atPath: oldDir.appendingPathComponent("Library/Palettes/Lost.colpal").path),
           "a member folder the index never listed sends its palettes to the Library")
-    check(fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Jobs.colcollection").path) && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Old Job.colworkgroup").path)
-          && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Palettes/Spring.colpalette").path)
+    check(fm.fileExists(atPath: oldDir.appendingPathComponent("Earlier.colcat").path) && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Information/Old Job.colinf").path)
+          && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Palettes/Spring.colpal").path)
           && !fm.fileExists(atPath: oldDir.appendingPathComponent("schema.colschema").path) && !fm.fileExists(atPath: oldDir.appendingPathComponent("library.history.json").path)
           && !fm.fileExists(atPath: oldDir.appendingPathComponent("Unfiled").path) && !fm.fileExists(atPath: oldDir.appendingPathComponent("Projects").path)
           && migratedStore.schema.collections.map { $0.name } == ["Jobs"] && !Migration.needed(in: oldDir) && (try? migratedStore.load()).map { canonical($0) } == canonical(brought),
-          "the schema's collection becomes the folder the member sits in, nothing of the old layout is left, and the catalogue reads back as a tree from then on")
+          "the schema's collection becomes the folder the member sits in, nothing of the old layout is left, and the catalogue reads back as version 3 from then on")
     let report = migratedStore.takeMigration()
     if report?.orphans != ["Client 3 in Projects/Client 3"] { print("        report: \(String(describing: report))") }
     check(report?.orphans == ["Client 3 in Projects/Client 3"] && report?.members == 1 && migratedStore.takeMigration() == nil, "what was done is reported, once")
@@ -1060,17 +1092,66 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! fm.createDirectory(at: oneDir, withIntermediateDirectories: true)
     try! JSONEncoder.library.encode(oldLib).write(to: oneDir.appendingPathComponent("library.json"))
     let oneLib = try! LibraryStore(directory: oneDir, legacyURL: nil, name: "One").load()
-    check(oneLib.project(oldJob) != nil && oneLib.swatch(oldPal)?.entries.count == 2 && fm.fileExists(atPath: oneDir.appendingPathComponent("One.colcatalogue").path)
+    check(oneLib.project(oldJob) != nil && oneLib.swatch(oldPal)?.entries.count == 2 && fm.fileExists(atPath: oneDir.appendingPathComponent("One.colcat").path)
           && !fm.fileExists(atPath: oneDir.appendingPathComponent("library.json").path)
           && ((try? fm.contentsOfDirectory(atPath: root.appendingPathComponent("tree").path)) ?? []).contains { $0.hasPrefix("One Before Migration ") },
           "a catalogue an earlier version kept in one file comes across the same way")
+    // Version 2, the tree of folders each with a file of its own, comes across in place.
+    let secondDir = root.appendingPathComponent("tree/Second")
+    let secondMember = UUID(), secondCollection = UUID(), secondGroup = UUID(), secondTemplate = UUID()
+    var secondPal = Swatch(id: UUID(), name: "Dawn", createdAt: tcat, entries: [SwatchEntry(hex: "#123123", addedAt: tcat)])
+    secondPal.projectID = secondMember
+    let secondLoose = Swatch(id: UUID(), name: "Dusk", createdAt: tcat, entries: [SwatchEntry(hex: "#321321", addedAt: tcat)])
+    let secondStack = SchemaTrial.start
+    let secondMemberDir = secondDir.appendingPathComponent("Studios/North/Harbour")
+    for sub in ["Information", "Palettes", "Typography", "Tags"] { try! fm.createDirectory(at: secondMemberDir.appendingPathComponent(sub), withIntermediateDirectories: true) }
+    for sub in ["Library/Palettes", "Library/Typography", "Library/Swatches", "Library/Profiles", "Templates"] { try! fm.createDirectory(at: secondDir.appendingPathComponent(sub), withIntermediateDirectories: true) }
+    try! e.encode(CollectionDocument(id: secondCollection, name: "Studios", about: "", folder: "Studios", groupName: "Region", template: secondStack, templateID: nil, members: [secondGroup], changedAt: tcat))
+        .write(to: secondDir.appendingPathComponent("Studios/Studios.colcollection"))
+    try! e.encode(WorkGroupDocument(id: secondGroup, name: "North", folder: "North", kind: .group, members: [secondMember], changedAt: tcat))
+        .write(to: secondDir.appendingPathComponent("Studios/North/North.colworkgroup"))
+    try! e.encode(WorkGroupDocument(id: secondMember, name: "Harbour", folder: "Harbour", kind: .member, project: Project(id: secondMember, name: "Harbour", createdAt: tcat), schema: secondStack,
+                                    followsTemplate: true, tags: [TagInfo(name: "harbour", colour: nil, projectID: secondMember, removed: nil, changedAt: tcat)], palettes: [secondPal.id],
+                                    colours: ["#123123"], buckets: Dictionary(uniqueKeysWithValues: secondStack.children.map { ($0.id.uuidString, $0.name) }), changedAt: tcat))
+        .write(to: secondMemberDir.appendingPathComponent("Harbour.colworkgroup"))
+    try! e.encode(PaletteDocument(project: secondMember, palette: secondPal, colours: [Colour(hex: "#123123", pickedAt: tcat)], file: "Dawn")).write(to: secondMemberDir.appendingPathComponent("Palettes/Dawn.colpalette"))
+    try! e.encode(PaletteDocument(project: nil, palette: secondLoose, colours: [Colour(hex: "#321321", pickedAt: tcat)], file: "Dusk")).write(to: secondDir.appendingPathComponent("Library/Palettes/Dusk.colpalette"))
+    try! e.encode(AssetsDocument(pool: "Palettes", items: [secondLoose.id], changedAt: tcat)).write(to: secondDir.appendingPathComponent("Library/Palettes/Palettes.colassets"))
+    try! e.encode(AssetsDocument(pool: "Swatches", colours: [Colour(hex: "#999999", pickedAt: tcat)], changedAt: tcat)).write(to: secondDir.appendingPathComponent("Library/Swatches/Swatches.colassets"))
+    try! e.encode(AssetsDocument(pool: "Profiles", profiles: [], changedAt: tcat)).write(to: secondDir.appendingPathComponent("Library/Profiles/Profiles.colassets"))
+    try! e.encode(TemplateDocument(id: secondTemplate, name: "Agency", about: "", file: "Agency", stack: secondStack, changedAt: tcat)).write(to: secondDir.appendingPathComponent("Templates/Agency.coltemplate"))
+    try! e.encode(CatalogueIndex(id: UUID(), name: "Second", createdAt: tcat, changedAt: tcat, library: 2, collections: [secondCollection], templates: [secondTemplate],
+                                 colours: ["#123123", "#321321", "#999999"], tags: [], activePalette: nil, deleted: [], about: "Notes kept"))
+        .write(to: secondDir.appendingPathComponent("Second.colcatalogue"))
+    try! Data("brief".utf8).write(to: secondMemberDir.appendingPathComponent("Information/Brief.pdf"))
+    try! Data("{}".utf8).write(to: secondDir.appendingPathComponent("Second.colhistory"))
+    let secondMeasure = Migration.measure(secondDir)
+    check(Migration.needed(in: secondDir) && Migration.isVersion2(secondDir), "a version 2 tree, each level with a file of its own, is seen as one to bring across")
+    let secondStore = LibraryStore(directory: secondDir, legacyURL: nil, name: "Second")
+    let secondLib = try! secondStore.load()
+    let secondBackups = ((try? fm.contentsOfDirectory(atPath: root.appendingPathComponent("tree").path)) ?? []).filter { $0.hasPrefix("Second Before Migration ") }
+    check(secondBackups.count == 1 && Migration.measure(root.appendingPathComponent("tree").appendingPathComponent(secondBackups[0])) == secondMeasure,
+          "a version 2 tree is copied whole beside itself, every file and byte, before anything changes")
+    check(secondLib.project(secondMember)?.name == "Harbour" && secondLib.swatch(secondPal.id)?.projectID == secondMember && secondLib.swatch(secondLoose.id)?.projectID == nil && secondLib.colours.contains { $0.hex == "#999999" }
+          && secondLib.project(ofTag: "harbour") == secondMember && secondStore.schema.collections.map { $0.name } == ["Studios"] && secondStore.schema.collections.first?.folders.map { $0.name } == ["North"]
+          && SchemaTrial.folder(of: secondMember, among: secondStore.schema.collections, places: secondStore.schema.places) == secondGroup && secondStore.schema.templates?.map { $0.name } == ["Agency"]
+          && CatalogueTree.catalogue(in: secondDir)?.about == "Notes kept",
+          "every collection, level between, member, palette, tag, colour and template comes across, with the catalogue's notes")
+    func inSecond(_ p: String) -> Bool { fm.fileExists(atPath: secondDir.appendingPathComponent(p).path) }
+    check(inSecond("Second.colcat") && !inSecond("Second.colcatalogue") && inSecond("Second.colhis") && !inSecond("Second.colhistory")
+          && inSecond("Studios/North/Harbour/Palettes/Dawn.colpal") && !inSecond("Studios/North/Harbour/Palettes/Dawn.colpalette") && inSecond("Studios/North/Harbour/Information/Harbour.colinf")
+          && inSecond("Studios/North/Harbour/Information/Brief.pdf") && inSecond("Library/Palettes/Dusk.colpal") && inSecond("Library/Swatches/Second Swatches.colswa")
+          && !inSecond("Studios/Studios.colcollection") && !inSecond("Studios/North/North.colworkgroup") && !inSecond("Studios/North/Harbour/Harbour.colworkgroup")
+          && !inSecond("Library/Palettes/Palettes.colassets") && !inSecond("Library/Swatches/Swatches.colassets") && !inSecond("Templates")
+          && !Migration.needed(in: secondDir) && (try? secondStore.load()).map { canonical($0) } == canonical(secondLib),
+          "in place: each asset takes its new name where it lies, the old file of every level goes, the user's own files stay, and it reads back as version 3 from then on")
     let lockedParent = root.appendingPathComponent("locked"), lockedDir = lockedParent.appendingPathComponent("Stuck")
     try! fm.createDirectory(at: lockedDir, withIntermediateDirectories: true)
     try! JSONEncoder.library.encode(oldLib).write(to: lockedDir.appendingPathComponent("library.json"))
     try! fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: lockedParent.path)
     let stuck = try? LibraryStore(directory: lockedDir, legacyURL: nil, name: "Stuck").load()
     try! fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedParent.path)
-    check(stuck == nil && fm.fileExists(atPath: lockedDir.appendingPathComponent("library.json").path) && !fm.fileExists(atPath: lockedDir.appendingPathComponent("Stuck.colcatalogue").path),
+    check(stuck == nil && fm.fileExists(atPath: lockedDir.appendingPathComponent("library.json").path) && !fm.fileExists(atPath: lockedDir.appendingPathComponent("Stuck.colcat").path),
           "when the backup cannot be written nothing is brought across and the catalogue is left exactly as it was")
 
     print("sharing: zip, manifest, staging, twins, bringing in")
@@ -1089,42 +1170,46 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! Data(repeating: 7, count: 300).write(to: zipDir.appendingPathComponent("junk.zip"))
     check((try? Zip.read(zipDir.appendingPathComponent("broken.zip"))) == nil && (try? Zip.read(zipDir.appendingPathComponent("junk.zip"))) == nil,
           "a zip with a byte changed, or a file that is no zip, is refused rather than read wrong")
-    // A collection goes out: its folder, every member and palette in it, and a manifest naming each file's digest.
-    let catalogueNamed = ShareManifest.Named(id: CatalogueTree.index(in: treeDir)!.id, name: "Studio")
-    let shareFile = zipDir.appendingPathComponent("Projects.colshare.zip")
-    let manifest = try! Sharing.export(level: .collection, subject: projectsDir, root: treeDir, catalogue: catalogueNamed, to: shareFile, now: tcat)
-    let shareTree = Sharing.tree(level: .collection, subject: projectsDir, root: treeDir)
-    check(manifest.level == .collection && manifest.subject.name == "Projects" && Set(manifest.files.map { $0.path }).isSuperset(of: ["Projects/Projects.colcollection", "Projects/Job Alpha/Job Alpha.colworkgroup", "Projects/Job Alpha/Colourways/Autumn Range.colpalette", "Projects/Job Alpha/Typography/Headings.colpalette"])
+    // A collection goes out: a small catalogue of its own, every member and palette in it, and a manifest naming each file's digest.
+    let catalogueNamed = ShareManifest.Named(id: CatalogueTree.catalogue(in: treeDir)!.id, name: "Studio")
+    let shareLib = try! treeStore.load(), shareSchema = treeStore.schema
+    let projectsID = SchemaTrial.firstCollection
+    let shareFile = zipDir.appendingPathComponent("Projects.colshr")
+    let manifest = try! Sharing.export(level: .collection, subject: projectsID, from: shareLib, schema: shareSchema, catalogue: catalogueNamed, to: shareFile, now: tcat)
+    let shareTree = Sharing.tree(level: .collection, subject: projectsID, in: shareLib, schema: shareSchema, catalogueName: "Studio")
+    if !Set(manifest.files.map { $0.path }).isSuperset(of: ["Projects.colcat", "Projects/Job Alpha/Colourways/Autumn Range.colpal"]) { print("        share files: \(manifest.files.map { $0.path })") }
+    check(manifest.level == .collection && manifest.subject.name == "Projects" && manifest.version == 2
+          && Set(manifest.files.map { $0.path }).isSuperset(of: ["Projects.colcat", "Projects/Job Alpha/Colourways/Autumn Range.colpal", "Projects/Job Alpha/Typography/Headings.coltyp", "Projects/Job Alpha/Information/Job Alpha.colinf"])
           && manifest.files.allSatisfy { $0.sha256.count == 64 } && shareTree.palettes == 2 && shareTree.children.map { $0.name } == ["Job Alpha"]
-          && shareTree.flattened.map { $0.node.kind }.contains(.bucket) && shareTree.node("Projects/Job Alpha/Colourways/Autumn Range.colpalette")?.name == "Autumn Range",
-          "a collection exports as one zip holding its folder whole, with a manifest listing every file and its digest, and the tree of what it holds reads from the files")
+          && shareTree.flattened.map { $0.node.kind }.contains(.bucket) && shareTree.node(inA.uuidString)?.name == "Autumn Range",
+          "a collection exports as one zip holding a catalogue of its own, with a manifest listing every file and its digest, and the tree of what it holds comes from the structure")
     let inspected = try! Sharing.inspect(shareFile)
     check(inspected.ok && inspected.manifest == manifest && inspected.tree.name == "Projects" && inspected.tree.palettes == 2, "the share checks clean: manifest, digests, shape, and the tree is read from the zip before anything is written")
     // One byte changed inside a file: the check names it.
     var tampered = try! Zip.read(shareFile)
-    if let at = tampered.firstIndex(where: { $0.path.hasSuffix("Autumn Range.colpalette") }) { var d2 = tampered[at].data; d2[d2.count / 2] ^= 1; tampered[at] = Zip.Entry(path: tampered[at].path, data: d2) }
+    if let at = tampered.firstIndex(where: { $0.path.hasSuffix("Autumn Range.colpal") }) { var d2 = tampered[at].data; d2[d2.count / 2] ^= 1; tampered[at] = Zip.Entry(path: tampered[at].path, data: d2) }
     try! Zip.write(tampered, to: zipDir.appendingPathComponent("tampered.zip"))
     let badCheck = try? Sharing.inspect(zipDir.appendingPathComponent("tampered.zip"))
-    check(badCheck?.ok == false && badCheck?.problems.first?.contains("Autumn Range.colpalette") == true, "a share with one byte changed stops at the check, naming the file")
+    check(badCheck?.ok == false && badCheck?.problems.first?.contains("Autumn Range.colpal") == true, "a share with one byte changed stops at the check, naming the file")
     try! Zip.write(tampered.filter { $0.path != ShareManifest.fileName }, to: zipDir.appendingPathComponent("nomanifest.zip"))
     check((try? Sharing.inspect(zipDir.appendingPathComponent("nomanifest.zip"))) == nil && (try? Sharing.inspect(zipFile)) == nil, "a zip without a manifest is not a share")
-    // Ticks: a palette left out is absent from the zip; what is ticked carries the folders it sits in.
+    // Ticks: a palette left out is absent from the zip; what is ticked goes with the member and collection above it.
     let partial = zipDir.appendingPathComponent("partial.zip")
-    let ticks: Set<String> = ["Projects", "Projects/Job Alpha", "Projects/Job Alpha/Colourways", "Projects/Job Alpha/Colourways/Autumn Range.colpalette"]
-    let partialManifest = try! Sharing.export(level: .collection, subject: projectsDir, root: treeDir, catalogue: catalogueNamed, ticked: ticks, to: partial, now: tcat)
-    let carried = Sharing.files(ticked: ["Projects/Job Alpha/Colourways/Autumn Range.colpalette"], in: shareTree)
-    check(!partialManifest.files.contains { $0.path.hasSuffix("Headings.colpalette") } && partialManifest.files.contains { $0.path.hasSuffix("Autumn Range.colpalette") } && partialManifest.files.contains { $0.path == "Projects/Projects.colcollection" }
-          && carried.contains("Projects/Projects.colcollection") && carried.contains("Projects/Job Alpha/Job Alpha.colworkgroup") && (try? Sharing.inspect(partial))?.ok == true,
-          "unticking a palette leaves it out of the zip, a ticked palette carries the files of the folders above it, and the result still checks clean")
-    // Bringing in: staged, read as a library, placed, written into another catalogue as one change.
+    let colourways = shareTree.flattened.first { $0.node.kind == .bucket && $0.node.name == "Colourways" }?.node.id ?? ""
+    let ticks: Set<String> = [projectsID.uuidString, jobA.uuidString, colourways, inA.uuidString]
+    let partialManifest = try! Sharing.export(level: .collection, subject: projectsID, from: shareLib, schema: shareSchema, catalogue: catalogueNamed, ticked: ticks, to: partial, now: tcat)
+    check(!partialManifest.files.contains { $0.path.hasSuffix("Headings.coltyp") } && partialManifest.files.contains { $0.path.hasSuffix("Autumn Range.colpal") }
+          && partialManifest.files.contains { $0.path == "Projects.colcat" } && (try? Sharing.inspect(partial))?.ok == true,
+          "unticking a palette leaves it out of the zip, a ticked palette goes with the member and collection above it, and the result still checks clean")
+    // Bringing in: staged, read as a catalogue, placed, written into another catalogue as one change.
     let intoDir = root.appendingPathComponent("tree/Into")
     let intoStore = LibraryStore(directory: intoDir, legacyURL: nil, name: "Into")
     var intoLib = try! intoStore.load()
     var intoSchema = intoStore.schema
     let staging = try! Sharing.stage(inspected)
     let staged = try! Sharing.read(staging: staging, level: .collection)
-    check(staged.library.projects.map { $0.name } == ["Job Alpha"] && staged.library.swatches.count == 2 && staged.schema.collections.map { $0.name } == ["Projects"] && staged.paths[jobA] == "Projects/Job Alpha",
-          "a staged collection reads as a library of its own, each member and palette knowing the path it came from")
+    check(staged.library.projects.map { $0.name } == ["Job Alpha"] && staged.library.swatches.count == 2 && staged.schema.collections.map { $0.name } == ["Projects"] && staged.paths[jobA] == jobA.uuidString,
+          "a staged collection reads as a catalogue of its own, by the same reader as any other")
     check(Sharing.placements(for: .collection, in: intoLib, schema: intoSchema).map { $0.0 } == [.catalogue] && Sharing.placements(for: .palette, in: intoLib, schema: intoSchema).first?.0 == .pool
           && Sharing.placements(for: .workGroup, in: intoLib, schema: intoSchema).count == 1,
           "a share may land only where its level fits: a collection in the catalogue, a palette in the Library or a member, a work group in a collection")
@@ -1133,14 +1218,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let firstIn = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [SchemaTrial.firstCollection: .replace]), into: &intoLib, schema: &intoSchema, at: tcat)
     try! intoStore.save(intoLib, schema: intoSchema)
     let intoBack = try! intoStore.load()
-    if !fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette").path) {
+    if !fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpal").path) {
         print("        stacks staged: \(staged.schema.stacks?.keys.map { $0 } ?? []) into: \(intoSchema.stacks?.keys.map { $0 } ?? [])  places: \(intoSchema.places)")
         if let e = fm.enumerator(atPath: intoDir.path) { for case let f as String in e { print("          \(f)") } }
     }
-    print("        firstTwin \(firstTwin.map { "\($0.kind) \($0.why)" })  firstIn \(firstIn)  project \(String(describing: intoBack.project(jobA)?.name)) palettes \(intoBack.palettes(in: jobA).count) collections \(intoStore.schema.collections.map { $0.name }) stacks \(intoStore.schema.stacks?[jobA.uuidString]?.children.map { $0.name } ?? [])")
     check(firstTwin.map { $0.kind } == [.collection] && firstIn.members == 1 && firstIn.palettes == 2 && firstIn.added == 3 && firstIn.replaced == 1 && intoBack.project(jobA)?.name == "Job Alpha" && intoBack.palettes(in: jobA).count == 2
           && intoStore.schema.collections.map { $0.name } == ["Projects"] && intoStore.schema.stacks?[jobA.uuidString]?.children[1].name == "Colourways"
-          && fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette").path),
+          && fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpal").path),
           "into a fresh catalogue a collection lands whole: its member with its own tree, its palettes in their folders, the first collection folded into the one every catalogue starts with")
     // The same share again: every piece is a twin, by id; each answer does what it says.
     let twins = Sharing.duplicates(in: staged, ticked: nil, into: intoBack, schema: intoStore.schema, placement: .catalogue)
@@ -1151,7 +1235,6 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(skipped.skipped == 1 && skipLib == intoBack && skipSchema == intoStore.schema, "Skip on the collection leaves the catalogue exactly as it was")
     var bothLib = intoBack, bothSchema = intoStore.schema
     let both = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .keepBoth), into: &bothLib, schema: &bothSchema, at: tcat)
-    print("        both \(both) collections \(bothSchema.collections.map { $0.name }) projects \(bothLib.projects.map { $0.name }) swatches \(bothLib.swatches.count) ids \(Set(bothLib.swatches.map { $0.id }).count)")
     check(both.added == 4 && bothSchema.collections.map { $0.name } == ["Projects", "Projects 2"] && bothLib.projects.count == 2 && bothLib.swatches.count == 4 && Set(bothLib.swatches.map { $0.id }).count == 4
           && bothLib.projects.filter { $0.name == "Job Alpha" }.count == 2,
           "Keep Both brings the share in beside what is there, under new ids, the collection told apart by its name")
@@ -1165,12 +1248,11 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let renamed = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .skip), into: &renameLib, schema: &renameSchema, at: tcat)
     check(renamed.skipped == 1 && renamed.renamed == 0 && renameLib.projects.count == 1, "an answer for each thing is kept to: with the collection skipped nothing beneath it comes in")
     let renamedIn = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .replace), into: &renameLib, schema: &renameSchema, at: tcat)
-    print("        renamedIn \(renamedIn) projects \(renameLib.projects.map { $0.name }) swatches \(renameLib.swatches.map { $0.name })")
     check(renamedIn.renamed == 3 && renameLib.projects.map { $0.name }.sorted() == ["Job Alpha", "Job Alpha 2"] && renameLib.swatches.contains { $0.name == "Autumn Range 2" },
           "Rename brings a twin in under the next free name, beside the original")
-    // A palette on its own: the same colours under another name are a twin; it lands in a member or the Library.
-    let paletteShare = zipDir.appendingPathComponent("Autumn.zip")
-    _ = try! Sharing.export(level: .palette, subject: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette"), root: intoDir, catalogue: catalogueNamed, to: paletteShare, now: tcat)
+    // A palette on its own: one file; the same colours under another name are a twin; it lands in a member or the Library.
+    let paletteShare = zipDir.appendingPathComponent("Autumn.colshr")
+    let paletteManifest = try! Sharing.export(level: .palette, subject: inA, from: intoBack, schema: intoStore.schema, catalogue: catalogueNamed, to: paletteShare, now: tcat)
     let paletteInspected = try! Sharing.inspect(paletteShare)
     let paletteStaging = try! Sharing.stage(paletteInspected)
     var paletteStaged = try! Sharing.read(staging: paletteStaging, level: .palette)
@@ -1178,23 +1260,26 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let colourTwin = Sharing.duplicates(in: paletteStaged, ticked: nil, into: intoBack, schema: intoStore.schema, placement: .pool)
     var poolLib = intoBack, poolSchema = intoStore.schema
     let intoPool = Sharing.commit(paletteStaged, choices: Sharing.Choices(ticked: nil, placement: .pool, otherwise: .keepBoth), into: &poolLib, schema: &poolSchema, at: tcat)
-    check(paletteInspected.ok && paletteInspected.manifest.level == .palette && paletteInspected.tree.kind == .palette && colourTwin.map { $0.why } == [.sameColours] && colourTwin.first?.existing == "Autumn Range"
+    check(paletteInspected.ok && paletteInspected.manifest.level == .palette && paletteInspected.tree.kind == .palette && paletteManifest.files.map { $0.path } == ["Autumn Range.colpal"]
+          && paletteManifest.origin?.member?.name == "Job Alpha" && colourTwin.map { $0.why } == [.sameColours] && colourTwin.first?.existing == "Autumn Range"
           && intoPool.added == 1 && poolLib.palettes(in: nil).map { $0.name } == ["Autumn Again"],
-          "a palette shares as one file; the same colours under another name are seen as a twin; Keep Both puts it in the Library")
-    // A work group on its own lands in a collection of the user's choosing, or under a client in it.
-    let memberShare = zipDir.appendingPathComponent("JobAlpha.zip")
-    _ = try! Sharing.export(level: .workGroup, subject: intoDir.appendingPathComponent("Projects/Job Alpha"), root: intoDir, catalogue: catalogueNamed, to: memberShare, now: tcat)
+          "a palette shares as its one file and says whose it was; the same colours under another name are seen as a twin; Keep Both puts it in the Library")
+    // A work group on its own says where it sat: that place is offered first, and it lands wherever it is pointed.
+    let memberShare = zipDir.appendingPathComponent("JobAlpha.colshr")
+    _ = try! Sharing.export(level: .workGroup, subject: jobA, from: intoBack, schema: intoStore.schema, catalogue: catalogueNamed, to: memberShare, now: tcat)
     let memberInspected = try! Sharing.inspect(memberShare)
     let memberStaged = try! Sharing.read(staging: try! Sharing.stage(memberInspected), level: .workGroup)
     var wgLib = try! treeStore.load(), wgSchema = treeStore.schema
-    let customers = wgSchema.collections.first { $0.name == "Customers" }!
-    let underAcme = Sharing.commit(memberStaged, choices: Sharing.Choices(ticked: nil, placement: .collection(customers.id, customers.folders[0].id), otherwise: .keepBoth), into: &wgLib, schema: &wgSchema, at: tcat)
+    let clientsLtd = wgSchema.collections.first { $0.name == "Clients Ltd" }!
+    let blueprint = Sharing.placements(for: .workGroup, in: wgLib, schema: wgSchema, origin: memberInspected.manifest.origin)
+    let underAcme = Sharing.commit(memberStaged, choices: Sharing.Choices(ticked: nil, placement: .collection(clientsLtd.id, clientsLtd.folders[0].id), otherwise: .keepBoth), into: &wgLib, schema: &wgSchema, at: tcat)
     try! treeStore.save(wgLib, schema: wgSchema)
     let landed = wgLib.projects.first { $0.name == "Job Alpha" && $0.id != jobA }
-    check(memberInspected.ok && memberInspected.manifest.level == .workGroup && memberStaged.library.projects.count == 1 && underAcme.members == 1 && underAcme.palettes == 2
-          && landed != nil && SchemaTrial.folder(of: landed!.id, among: wgSchema.collections, places: wgSchema.places) == customers.folders[0].id
-          && fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Acme Ltd/Job Alpha/Colourways/Autumn Range.colpalette").path),
-          "a work group shares as its folder and lands where it is pointed, under a client, with its own tree and its palettes")
+    check(memberInspected.ok && memberInspected.manifest.level == .workGroup && memberInspected.manifest.origin?.collection?.name == "Projects" && blueprint.first?.0 == .collection(SchemaTrial.firstCollection, nil)
+          && memberStaged.library.projects.count == 1 && underAcme.members == 1 && underAcme.palettes == 2
+          && landed != nil && SchemaTrial.folder(of: landed!.id, among: wgSchema.collections, places: wgSchema.places) == clientsLtd.folders[0].id
+          && fm.fileExists(atPath: treeDir.appendingPathComponent("Clients Ltd/Acme Ltd/Job Alpha/Colourways/Autumn Range.colpal").path),
+          "a work group shares as a catalogue of its own and says where it sat: that place is offered first, and it lands wherever it is pointed, under a client, with its own tree and its palettes")
     for dir in [staging, paletteStaging] { Sharing.discard(dir) }
     check(!fm.fileExists(atPath: staging.path), "a staging folder is gone once the share is in or set aside")
 
@@ -1204,16 +1289,16 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let inside = try! cats.create("Inside")
     let outside = try! cats.create("Outside", under: awayDir)
     check(cats.directory(for: inside) == homeDir.appendingPathComponent("Catalogues/Inside") && cats.directory(for: outside) == awayDir.appendingPathComponent("Outside")
-          && fm.fileExists(atPath: awayDir.appendingPathComponent("Outside/Outside.colcatalogue").path) && Set(cats.names()).isSuperset(of: ["Inside", "Outside"]),
+          && fm.fileExists(atPath: awayDir.appendingPathComponent("Outside/Outside.colcat").path) && Set(cats.names()).isSuperset(of: ["Inside", "Outside"]),
           "a catalogue is made under Catalogues in the app's home, or under any folder the user chose, and both are listed")
-    let adoptedName = try! Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).adopt(awayDir.appendingPathComponent("Outside/Outside.colcatalogue"))
+    let adoptedName = try! Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).adopt(awayDir.appendingPathComponent("Outside/Outside.colcat"))
     check(adoptedName == "Outside" && Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).directory(for: "Outside") == awayDir.appendingPathComponent("Outside"),
-          "a .colcatalogue file chosen from anywhere is opened where it is, under its own name, with nothing copied")
+          "a .colcat file chosen from anywhere is opened where it is, under its own name, with nothing copied")
     let renamedOut = try! cats.rename("Outside", to: "Outer")
-    check(renamedOut == "Outer" && cats.directory(for: "Outer") == awayDir.appendingPathComponent("Outer") && fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outer.colcatalogue").path),
+    check(renamedOut == "Outer" && cats.directory(for: "Outer") == awayDir.appendingPathComponent("Outer") && fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outer.colcat").path),
           "a catalogue kept awayDir is renamed where it is, folder and file alike")
     try! Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").mutate { lib in _ = lib.createProject(named: "Cookra") }
-    check(fm.fileExists(atPath: homeDir.appendingPathComponent("Catalogues/Inside/Projects/Cookra/Cookra.colworkgroup").path)
+    check(fm.fileExists(atPath: homeDir.appendingPathComponent("Catalogues/Inside/Projects/Cookra/Information/Cookra.colinf").path)
           && (try? Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").load().projects.first?.name) == "Cookra",
           "a member made in a catalogue is a folder inside its collection's folder, and reads back")
 
@@ -1340,12 +1425,12 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let backSchema = withSchema.go(to: 0, from: hLib, schema: changedSchema)
     check(backSchema?.schema == fresh && withSchema.go(to: 1, from: hLib, schema: fresh)?.schema == changedSchema && withSchema.steps[1].delta.schema != nil,
           "a change to the schema is a step, undone and redone with the rest")
-    let hIndex = root.appendingPathComponent("history/Hist.colcatalogue")
+    let hIndex = root.appendingPathComponent("history/Hist.colcat")
     try! fm.createDirectory(at: hIndex.deletingLastPathComponent(), withIntermediateDirectories: true)
     try! HistoryStore.save(hist, beside: hIndex)
-    check(HistoryStore.load(beside: hIndex) == hist && HistoryStore.url(beside: hIndex).lastPathComponent == "Hist.colhistory",
+    check(HistoryStore.load(beside: hIndex) == hist && HistoryStore.url(beside: hIndex).lastPathComponent == "Hist.colhis",
           "history is kept in a file of its own beside the catalogue's index and reads back whole")
-    check(HistoryStore.load(beside: root.appendingPathComponent("nowhere/x.colcatalogue")).isEmpty, "no file, no history")
+    check(HistoryStore.load(beside: root.appendingPathComponent("nowhere/x.colcat")).isEmpty, "no file, no history")
     var big = StepHistory()
     var bLib = Library()
     big.record("Opened", library: bLib, before: nil, limit: 0, at: th)
@@ -1444,7 +1529,7 @@ func runHaloTests(check: (Bool, String) -> Void) {
     SchemaTrial.use(directory: schemaHomeB)
     let schemaFreshElsewhere = SchemaTrial.collections.map { $0.name } == ["Projects"] && SchemaTrial.places.isEmpty
     SchemaTrial.use(directory: schemaHomeA)
-    check(schemaOnDisk?.collections.map { $0.name } == ["Clients"] && FileManager.default.fileExists(atPath: schemaHomeA.appendingPathComponent("Clients/Clients.colcollection").path) && placedInMemory && schemaFreshElsewhere
+    check(schemaOnDisk?.collections.map { $0.name } == ["Clients"] && CatalogueTree.catalogue(in: schemaHomeA)?.collections.map { $0.folder } == ["Clients"] && CatalogueTree.isFolder(schemaHomeA.appendingPathComponent("Clients")) && placedInMemory && schemaFreshElsewhere
           && SchemaTrial.collections.map { $0.name } == ["Clients"] && SchemaTrial.read(in: schemaHomeB).collections.map { $0.name } == ["Projects"],
           "a catalogue's schema is written into its tree of folders, read back from it, and a catalogue without one starts fresh")
     // A tag on a level-1 group is worn inside the members in that group and nowhere else; a colour change or a rename keeps the group.
@@ -2514,14 +2599,14 @@ func runImportTests(check: (Bool, String) -> Void) {
     check(read.first?.colours == [ExportColour(name: "Ember", hex: "#B55226"), ExportColour(name: "Steel Blue", hex: "#4F8093")],
           "a token's description names it, else its key does; both value forms read")
 
-    // A .colpalette the app wrote reads back whole, with the names given in it.
+    // A .colpal the app wrote reads back whole, with the names given in it.
     var lib = Library()
     let id = lib.createSwatch(named: "Brand", hexes: ["#4F8093", "#B55226"])
     lib.setName("Steel Blue", of: "#4F8093", in: id)
     if let data = try? ColourFiles.encoder().encode(CatalogueTree.paletteDocument(lib.swatch(id)!, in: lib, member: nil, file: "Brand")) {
         let own = PaletteImport.read(data, fallback: "x")
         check(own.first?.name == "Brand" && own.first?.colours.first?.name == "Steel Blue" && own.first?.colours.count == 2,
-              "a .colpalette reads back as its palette, with its names")
+              "a .colpal reads back as its palette, with its names")
     } else { check(false, "the palette document writes") }
 
     // Merging: a new palette is made; the same again changes nothing; a name clash is numbered; a project keeps it.

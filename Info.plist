@@ -32,7 +32,7 @@
             <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.catalogue</string>
             <key>UTTypeDescription</key>
-            <string>Colour Catalogue</string>
+            <string>Colorgain Catalogue</string>
             <key>UTTypeIconFile</key>
             <string>colcatalogue</string>
             <key>UTTypeConformsTo</key>
@@ -43,6 +43,7 @@
             <dict>
                 <key>public.filename-extension</key>
                 <array>
+                    <string>colcat</string>
                     <string>colcatalogue</string>
                 </array>
             </dict>
@@ -108,7 +109,7 @@
             <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.palette</string>
             <key>UTTypeDescription</key>
-            <string>Colour Palette</string>
+            <string>Colorgain Palette</string>
             <key>UTTypeIconFile</key>
             <string>colpalette</string>
             <key>UTTypeConformsTo</key>
@@ -119,6 +120,7 @@
             <dict>
                 <key>public.filename-extension</key>
                 <array>
+                    <string>colpal</string>
                     <string>colpalette</string>
                 </array>
             </dict>
@@ -146,7 +148,7 @@
             <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.history</string>
             <key>UTTypeDescription</key>
-            <string>Colour History</string>
+            <string>Colorgain History</string>
             <key>UTTypeIconFile</key>
             <string>colhistory</string>
             <key>UTTypeConformsTo</key>
@@ -157,6 +159,7 @@
             <dict>
                 <key>public.filename-extension</key>
                 <array>
+                    <string>colhis</string>
                     <string>colhistory</string>
                 </array>
             </dict>
@@ -310,6 +313,101 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>colsynccatalogue</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.typography</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Typography Palette</string>
+            <key>UTTypeIconFile</key>
+            <string>colpalette</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>coltyp</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.information</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Information Pack</string>
+            <key>UTTypeIconFile</key>
+            <string>coldata</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colinf</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.swatches</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Swatches</string>
+            <key>UTTypeIconFile</key>
+            <string>colswatch</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colswa</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.profiles</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Profiles</string>
+            <key>UTTypeIconFile</key>
+            <string>coldata</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colprf</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.share</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Share</string>
+            <key>UTTypeIconFile</key>
+            <string>colcatalogue</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.zip-archive</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colshr</string>
                 </array>
             </dict>
         </dict>
@@ -511,6 +609,76 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.mmffdev.colour.sync.catalogue</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Typography Palette</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colpalette</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.typography</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Information Pack</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>coldata</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.information</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Swatches</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colswatch</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.swatches</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Profiles</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>coldata</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.profiles</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Share</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>colcatalogue</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.share</string>
             </array>
         </dict>
     </array>
