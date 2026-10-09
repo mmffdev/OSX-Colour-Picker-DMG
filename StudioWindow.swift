@@ -776,7 +776,7 @@ final class StudioFrame: NSView {
             title = "Colour Lab"; meta = ("The wheel", "Build on a colour")
             page.show(.lab)
         case .contrast:
-            title = "Contrast"; meta = ("Text And Background", "WCAG 2 \u{00B7} APCA")
+            title = "Contrast"; meta = ("Check a pair", "WCAG 2 \u{00B7} APCA")
             page.show(.contrast)
         case .catalogue:
             items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
@@ -1173,7 +1173,8 @@ enum AreaHeader {
     static let headingBaseline: CGFloat = StudioRail.top + 14
     static let labelBaseline: CGFloat = headingBaseline + 33
     static let rule: CGFloat = StudioRail.top + 14 + 16 + 27
-    static let height: CGFloat = rule + 1
+    /// Where an area's own content starts: a unit of air under the Rule, in every rail and on every page (Rick, 2026-10-09).
+    static var height: CGFloat { rule + 1 + Design.App.unit }
     /// The arrow at the right: none; "open", the stroke up and right, pressed to open or widen; "close", turned 180, pressed to close.
     enum Arrow { case none, open, close }
     static func arrowRect(in bounds: NSRect, insetRight: CGFloat) -> NSRect { NSRect(x: bounds.width - insetRight - 16, y: headingBaseline - 13, width: 16, height: 16) }
