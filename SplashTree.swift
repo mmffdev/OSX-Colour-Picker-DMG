@@ -149,7 +149,8 @@ final class SplashTreeView: NSView {
             if l.depth > 0 {
                 let vx = left + CGFloat(l.depth - 1) * step + 6
                 fill(NSRect(x: vx, y: top, width: 1, height: continues(after: k, at: l.depth) ? A.unit : A.unit / 2 + 1), Design.rule)
-                fill(NSRect(x: vx, y: top + A.unit / 2, width: x - 2 - vx, height: 1), Design.rule)
+                // The elbow runs into the caret, or, where the row has none, on to the name.
+                fill(NSRect(x: vx, y: top + A.unit / 2, width: (l.key == nil ? x + caret - 4 : x - 2) - vx, height: 1), Design.rule)
             }
             // The caret, for a node that holds others.
             if let key = l.key {
