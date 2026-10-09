@@ -1286,8 +1286,13 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     print("the splash builds the tree")
     func answered(_ who: [(String, [String])], kinds: [String], streams: [String], oneKind: Bool = false, groups: [String]? = nil, members: [String]) -> (SchemaTrial.SchemaFile, Library) {
         let d = SplashDraft()
-        for (type, names) in who { if type == SplashDraft.ownWork { d.parties.append(SplashDraft.Party(type: type, name: "")) } else { for n in names { d.parties.append(SplashDraft.Party(type: type, name: n)) } } }
-        d.kinds = kinds; for k in kinds { d.streamsOf[k] = streams }; d.oneKind = oneKind; d.members = members
+        for (type, names) in who {
+            d.types.append(type)
+            if type == SplashDraft.ownWork { d.parties.append(SplashDraft.Party(type: type, name: "")) } else { for n in names { d.parties.append(SplashDraft.Party(type: type, name: n)) } }
+        }
+        for p in d.parties { d.categoriesOf[p.id] = kinds; for k in kinds { d.streamsOf[SplashDraft.key(p.id, k)] = streams } }
+        if let first = d.parties.first, let k = kinds.first, let m = members.first { d.members[SplashDraft.key(first.id, k)] = m }
+        d.oneKind = oneKind
         if let g = groups { d.groups = g }
         var f = SchemaTrial.SchemaFile(collections: [], places: [:]), l = Library()
         d.build(into: &f, library: &l, at: tcat)
@@ -1299,43 +1304,45 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     }
     let (withStreams, wsLib) = answered([("Clients", ["Acme"])], kinds: ["Projects"], streams: ["Web", "Print"], members: ["Spring Launch"])
     let acmeF = folder(withStreams, "Acme"), projectsF = folder(withStreams, "Projects", under: "Acme"), webF = folder(withStreams, "Web", under: "Projects")
-    check(withStreams.collections.map { $0.name } == ["Clients"] && withStreams.collections[0].levels == ["Client", "Kind", "Stream"]
+    check(withStreams.collections.map { $0.name } == ["Clients"] && withStreams.collections[0].levels == ["Client", "Category", "Stream"]
           && withStreams.collections[0].folders.map { $0.name } == ["Acme", "Projects", "Web", "Print"] && projectsF?.parent == acmeF?.id && webF?.parent == projectsF?.id
           && wsLib.projects.map { $0.name } == ["Spring Launch"] && withStreams.places[wsLib.projects[0].id.uuidString] == SchemaPlace(collection: withStreams.collections[0].id, folder: webF?.id)
           && withStreams.collections[0].stack.name == "Project" && withStreams.collections[0].stack.children.map { $0.role } == SchemaRole.allCases.map { Optional($0) },
-          "Clients making projects in two streams build Clients, then the client, the kind, the streams inside it, and the first project in the first stream, holding the four groups")
+          "Clients making projects in two streams build Clients, then the client, the category, the streams inside it, and the first project in the first stream, holding the four groups")
     let (oneKind, okLib) = answered([("Customers", ["Acme"])], kinds: ["Jobs"], streams: ["Web"], oneKind: true, members: ["Fit Out"])
-    check(oneKind.collections[0].levels == ["Customer", "Kind"] && oneKind.collections[0].folders.map { $0.name } == ["Acme", "Jobs"]
+    check(oneKind.collections[0].levels == ["Customer", "Category"] && oneKind.collections[0].folders.map { $0.name } == ["Acme", "Jobs"]
           && oneKind.places[okLib.projects[0].id.uuidString]?.folder == folder(oneKind, "Jobs", under: "Acme")?.id && SchemaTrial.memberName(of: oneKind.collections[0]) == "Job",
-          "one kind of work keeps the streams chosen but makes no level of them: the customer, then the kind, with the first job in it")
+          "one kind of work keeps the streams chosen but makes no level of them: the customer, then the category, with the first job in it")
     let (own, ownLib) = answered([(SplashDraft.ownWork, [])], kinds: ["Products"], streams: [], members: ["Driftwood Star"])
-    check(own.collections[0].name == "My Products" && own.collections[0].levels == ["Kind"] && own.collections[0].folders.map { $0.name } == ["Products"]
+    check(own.collections[0].name == "My Products" && own.collections[0].levels == ["Category"] && own.collections[0].folders.map { $0.name } == ["Products"]
           && own.places[ownLib.projects[0].id.uuidString]?.folder == own.collections[0].folders[0].id,
-          "Our own work builds My Products with the kind as its one level and the first product in it")
+          "Our own work builds My Products with the category as its one level and the first product in it")
     let (ownStreams, osLib) = answered([(SplashDraft.ownWork, [])], kinds: ["Ranges"], streams: ["Web", "Print"], members: ["Autumn 27"])
-    check(ownStreams.collections[0].levels == ["Kind", "Stream"] && ownStreams.collections[0].folders.map { $0.name } == ["Ranges", "Web", "Print"]
+    check(ownStreams.collections[0].levels == ["Category", "Stream"] && ownStreams.collections[0].folders.map { $0.name } == ["Ranges", "Web", "Print"]
           && folder(ownStreams, "Web", under: "Ranges") != nil && ownStreams.places[osLib.projects[0].id.uuidString]?.folder == folder(ownStreams, "Web", under: "Ranges")?.id,
-          "Our own work with streams builds the kind then the streams, the first range in the first stream")
+          "Our own work with streams builds the category then the streams, the first range in the first stream")
     check(SplashDraft.singular("Clients") == "Client" && SplashDraft.singular("Ranges") == "Range" && SplashDraft.singular("Companies") == "Company" && SplashDraft.singular("Campaigns") == "Campaign",
           "the word for one of them comes from the word for many")
     let (twoKinds, tkLib) = answered([("Clients", ["Acme"])], kinds: ["Products", "Projects"], streams: ["Web"], groups: ["Palettes", "Assets", "Props"], members: ["Driftwood"])
     let tkProducts = folder(twoKinds, "Products", under: "Acme"), tkProjects = folder(twoKinds, "Projects", under: "Acme")
     let tkWebs = twoKinds.collections[0].folders.filter { $0.name == "Web" }
-    check(twoKinds.collections[0].levels == ["Client", "Kind", "Stream"] && twoKinds.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Projects", "Web"]
+    check(twoKinds.collections[0].levels == ["Client", "Category", "Stream"] && twoKinds.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Projects", "Web"]
           && tkWebs.map { $0.parent } == [tkProducts?.id, tkProjects?.id] && twoKinds.places[tkLib.projects[0].id.uuidString]?.folder == tkWebs[0].id
           && twoKinds.collections[0].stack.name == "Product" && twoKinds.collections[0].stack.children.map { $0.role } == [.palettes, nil, nil]
           && twoKinds.collections[0].stack.children.map { $0.kind } == ["Palettes", "Assets", "Props"],
-          "two kinds made sit side by side under the client, each with the stream inside it, the first product in the first kind's stream, and a custom group is a typed folder with no role")
-    let ownStreamsDraft = SplashDraft()
-    ownStreamsDraft.parties = [SplashDraft.Party(type: "Clients", name: "Acme")]; ownStreamsDraft.kinds = ["Products", "Projects"]; ownStreamsDraft.streamsOf = ["Products": ["Web", "Print"]]; ownStreamsDraft.members = ["Shoes"]
+          "two categories sit side by side under the client, each with the stream inside it, the first product in the first category's stream, and a custom group is a typed folder with no role")
+    let pkDraft = SplashDraft(), pkAcme = SplashDraft.Party(type: "Clients", name: "Acme")
+    pkDraft.types = ["Clients"]; pkDraft.parties = [pkAcme]; pkDraft.categoriesOf[pkAcme.id] = ["Products", "Projects"]
+    pkDraft.streamsOf[SplashDraft.key(pkAcme.id, "Products")] = ["Web", "Print"]; pkDraft.members[SplashDraft.key(pkAcme.id, "Products")] = "Shoes"; pkDraft.members[SplashDraft.key(pkAcme.id, "Projects")] = "Relaunch"
     var perKind = SchemaTrial.SchemaFile(collections: [], places: [:]), pkLib = Library()
-    ownStreamsDraft.build(into: &perKind, library: &pkLib, at: tcat)
-    check(perKind.collections[0].levels == ["Client", "Kind", "Stream"] && perKind.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Print", "Projects"]
-          && perKind.places[pkLib.projects[0].id.uuidString]?.folder == folder(perKind, "Web", under: "Products")?.id,
-          "each kind has streams of its own: Products with Web and Print inside it, Projects with none, and the first product in Products' Web")
+    pkDraft.build(into: &perKind, library: &pkLib, at: tcat)
+    check(perKind.collections[0].levels == ["Client", "Category", "Stream"] && perKind.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Print", "Projects"]
+          && pkLib.projects.map { $0.name } == ["Shoes", "Relaunch"] && perKind.places[pkLib.projects[0].id.uuidString]?.folder == folder(perKind, "Web", under: "Products")?.id
+          && perKind.places[pkLib.projects[1].id.uuidString]?.folder == folder(perKind, "Projects", under: "Acme")?.id,
+          "each category has streams of its own: Products with Web and Print inside it, Projects with none, the first product in Products' Web and the first project straight in Projects")
     let (mixed, mxLib) = answered([("Clients", ["Acme", "Bolt"]), ("Brands", ["Nike"]), (SplashDraft.ownWork, [])], kinds: ["Projects"], streams: [], oneKind: true, members: ["Launch"])
-    check(mixed.collections.map { $0.name } == ["Clients", "Brands", "My Projects"] && mixed.collections[0].folders.map { $0.name } == ["Acme", "Bolt", "Projects", "Projects"]
-          && mixed.collections[1].levels == ["Brand", "Kind"] && mixed.collections[2].levels == ["Kind"]
+    check(mixed.collections.map { $0.name } == ["Clients", "Brands", "My Projects"] && mixed.collections[0].folders.map { $0.name } == ["Acme", "Projects", "Bolt", "Projects"]
+          && mixed.collections[1].levels == ["Brand", "Category"] && mixed.collections[2].levels == ["Category"]
           && mixed.places[mxLib.projects[0].id.uuidString]?.collection == mixed.collections[0].id,
           "clients, brands and our own work together are three collections, each with its own levels, and the first member is in the first")
     // The tree on disk nests the levels: Clients/Acme/Projects/Web/Spring Launch, and reads back with the same parents.
@@ -1345,7 +1352,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let splashBack = try! splashStore.load()
     check(fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Projects/Web/Spring Launch/Palettes").path) && fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Projects/Print").path)
           && splashBack.project(wsLib.projects[0].id) != nil && splashStore.schema.collections[0].folders.first { $0.name == "Web" }?.parent == projectsF?.id
-          && splashStore.schema.collections[0].levels == ["Client", "Kind", "Stream"] && SchemaTrial.folder(of: wsLib.projects[0].id, among: splashStore.schema.collections, places: splashStore.schema.places) == webF?.id,
+          && splashStore.schema.collections[0].levels == ["Client", "Category", "Stream"] && SchemaTrial.folder(of: wsLib.projects[0].id, among: splashStore.schema.collections, places: splashStore.schema.places) == webF?.id,
           "the levels nest on disk, Clients/Acme/Projects/Web/Spring Launch, and read back with their parents and the member in the deepest")
     try! fm.moveItem(at: splashDir.appendingPathComponent("Clients/Acme/Projects/Web"), to: splashDir.appendingPathComponent("Clients/Acme/Projects/Online"))
     _ = try! splashStore.load()

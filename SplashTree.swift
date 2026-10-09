@@ -5,10 +5,11 @@ import AppKit
 // From the first section on, the left of the splash shows the catalogue as rail1 will show it, from
 // the catalogue itself down to the groups inside each member, every branch drawn in full, and every
 // answer changes it at once: the teaching aid is the tree, not a page at the end. A word being typed
-// on the right shows on the tree before it is taken. The tree scrolls, and a caret before each node
-// that holds others opens and closes it. It is a toy until Set: click a name to change it, add
-// another of anything from the words the splash offered or a word of your own, take any away. Each
-// level carries a caption saying what it is.
+// on the right shows on the tree before it is taken, and what a later section asks for stands as a
+// placeholder until that section is reached. The tree scrolls, and a caret before each node that
+// holds others opens and closes it. It is a toy until Set: click a name to change it, add another of
+// anything from the words the splash offered or a word of your own, take any away. Each level
+// carries a caption saying what it is.
 //
 // The tree's lines join: a row's elbow comes down from its parent's caret and runs into its own,
 // and where a level goes on below (Web, then Print) the vertical runs through the rows between.
@@ -20,12 +21,14 @@ final class SplashTreeView: NSView {
     /// Called after any change made on the tree, so the splash can settle its buttons.
     var onChange: (() -> Void)?
 
-    enum Level: Equatable { case party(String), kind, stream(String), member, group }
-    private enum Kind { case catalogue, collection(String), party(Int), kind(Int), stream(String, Int), member(Int), placeholder, pending, group(String), add(Level) }
+    enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group }
+    private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
         /// A node that holds others has a key the caret opens and closes it by.
         var key: String? = nil
+        /// Drawn soft: a placeholder, a word being typed, a member not yet named.
+        var soft = false
     }
     private var hits: [(NSRect, () -> Void)] = []
     private var collapsed: Set<String> = []
@@ -59,70 +62,63 @@ final class SplashTreeView: NSView {
         func pending(_ w: SplashDraft.Pending) -> String? { d.pending.flatMap { $0.level == w && !$0.text.isEmpty ? $0.text : nil } }
         func add(_ level: Level, _ name: String, at depth: Int) { out.append(Line(kind: .add(level), name: name, depth: depth, caption: "", removable: false)) }
         func groups(at depth: Int) {
-            guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Asset Collection", depth: depth, caption: "Groups", removable: false)); return }
+            guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Asset Collection", depth: depth, caption: "Groups", removable: false, soft: true)); return }
             for g in d.groups { out.append(Line(kind: .group(g), name: d.groupNames[g] ?? g, depth: depth, caption: "Group", removable: d.groups.count > 1)) }
-            if let p = pending(.group) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false)) }
+            if let p = pending(.group) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false, soft: true)) }
             add(.group, "Another group", at: depth)
         }
-        func members(under key: String, at depth: Int, first: Bool) {
-            let word = d.memberWord
-            if first, !d.members.isEmpty {
-                for (i, m) in d.members.enumerated() {
-                    let k = key + "/m\(i)"
-                    out.append(Line(kind: .member(i), name: m, depth: depth, caption: word, removable: d.members.count > 1, key: k))
-                    if open(k) { groups(at: depth + 1) }
-                }
-                add(.member, "Another \(word.lowercased())", at: depth)
-            } else {
-                let k = key + "/m"
-                out.append(Line(kind: .placeholder, name: (first ? pending(.member) : nil) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: false, key: k))
-                if open(k) { groups(at: depth + 1) }
-            }
+        func member(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
+            let word = SplashDraft.memberWord(category), named = d.member(of: p.id, category)
+            let k = key + "/m"
+            out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil))
+            if open(k) { groups(at: depth + 1) }
         }
-        func streams(under key: String, at depth: Int, first: Bool, kind: String) {
-            let active = d.activeStreams(of: kind)
-            guard !active.isEmpty || (first && pending(.stream(kind)) != nil) else { members(under: key, at: depth, first: first); return }
+        func streams(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
+            let active = d.activeStreams(of: p.id, category)
+            guard !active.isEmpty || pending(.stream(p.id, category)) != nil else { member(p, category, under: key, at: depth); return }
             for (j, s) in active.enumerated() {
                 let k = key + "/s\(j)"
-                out.append(Line(kind: .stream(kind, j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
-                if open(k) { members(under: k, at: depth + 1, first: first && j == 0) }
+                out.append(Line(kind: .stream(p.id, category, j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
+                if open(k) { member(p, category, under: k, at: depth + 1) }
             }
-            if first, let p = pending(.stream(kind)) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Stream", removable: false)) }
-            if !active.isEmpty { add(.stream(kind), "Another stream", at: depth) }
+            if let w = pending(.stream(p.id, category)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Stream", removable: false, soft: true)) }
+            if !active.isEmpty { add(.stream(p.id, category), "Another stream", at: depth) }
         }
-        func kinds(under key: String, at depth: Int, first: Bool) {
-            guard !d.kinds.isEmpty || (first && pending(.kind) != nil) else { members(under: key, at: depth, first: first); return }
-            for (i, name) in d.kinds.enumerated() {
-                let k = key + "/k\(i)"
-                out.append(Line(kind: .kind(i), name: name, depth: depth, caption: "Kind", removable: true, key: k))
-                if open(k) { streams(under: k, at: depth + 1, first: first && i == 0, kind: name) }
+        func categories(_ p: SplashDraft.Party, under key: String, at depth: Int) {
+            let mine = d.categories(of: p.id)
+            if mine.isEmpty {
+                let k = key + "/c"
+                out.append(Line(kind: .placeholder, name: pending(.category(p.id)) ?? "First category", depth: depth, caption: "Category", removable: false, key: k, soft: true))
+                if open(k) { groups(at: depth + 1) }
+                return
             }
-            if first, let p = pending(.kind) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Kind", removable: false)) }
-            if !d.kinds.isEmpty { add(.kind, "Another kind", at: depth) }
+            for (i, c) in mine.enumerated() {
+                let k = key + "/c\(i)"
+                out.append(Line(kind: .category(p.id, i), name: c, depth: depth, caption: "Category", removable: true, key: k))
+                if open(k) { streams(p, c, under: k, at: depth + 1) }
+            }
+            if let w = pending(.category(p.id)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Category", removable: false, soft: true)) }
+            add(.category(p.id), "Another category", at: depth)
         }
         guard open("cat") else { return out }
-        for (n, type) in d.types.enumerated() {
+        for type in d.types {
             let ck = "c:" + type
             out.append(Line(kind: .collection(type), name: d.collectionTitle(type), depth: 1, caption: "Collection", removable: false, key: ck))
             guard open(ck) else { continue }
-            if type == SplashDraft.ownWork { kinds(under: ck, at: 2, first: n == 0); continue }
-            var firstParty = true
+            if type == SplashDraft.ownWork {
+                if let own = d.parties.first(where: { $0.isOwnWork }) { categories(own, under: ck, at: 2) }
+                continue
+            }
             for (i, p) in d.parties.enumerated() where p.type == type {
                 let pk = ck + "/p\(i)"
                 out.append(Line(kind: .party(i), name: p.name, depth: 2, caption: SplashDraft.singular(type), removable: true, key: pk))
-                if open(pk) { kinds(under: pk, at: 3, first: n == 0 && firstParty) }
-                firstParty = false
+                if open(pk) { categories(p, under: pk, at: 3) }
             }
-            if let p = pending(.party(type)) { out.append(Line(kind: .pending, name: p, depth: 2, caption: SplashDraft.singular(type), removable: false)) }
+            if let w = pending(.party(type)) { out.append(Line(kind: .pending, name: w, depth: 2, caption: SplashDraft.singular(type), removable: false, soft: true)) }
+            else if d.parties(of: type).isEmpty { out.append(Line(kind: .placeholder, name: "First \(SplashDraft.singular(type).lowercased())", depth: 2, caption: SplashDraft.singular(type), removable: false, soft: true)) }
             add(.party(type), "Another \(SplashDraft.singular(type).lowercased())", at: 2)
         }
-        // A type being named before any of it exists shows as its collection, the name beneath it.
-        if let p = d.pending, case .party(let type) = p.level, !d.types.contains(type) {
-            out.append(Line(kind: .pending, name: d.collectionTitle(type), depth: 1, caption: "Collection", removable: false))
-            if !p.text.isEmpty { out.append(Line(kind: .pending, name: p.text, depth: 2, caption: SplashDraft.singular(type), removable: false)) }
-        } else if d.types.isEmpty {
-            out.append(Line(kind: .placeholder, name: "Your first collection", depth: 1, caption: "Collection", removable: false))
-        }
+        if d.types.isEmpty { out.append(Line(kind: .placeholder, name: "Your first collection", depth: 1, caption: "Collection", removable: false, soft: true)) }
         return out
     }
 
@@ -177,7 +173,7 @@ final class SplashTreeView: NSView {
                 Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 110, baseline: b - 1)
             default:
                 let style: Design.Text = l.depth < 2 ? .bodyStrong : .body
-                Design.attributed(l.name, style).draw(x: nx, baseline: b, width: nameWidth)
+                Design.attributed(l.name, style, colour: l.soft ? Design.soft : Design.ink).draw(x: nx, baseline: b, width: nameWidth)
                 Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 110, baseline: b - 1)
                 hits.append((rowRect, { [weak self] in self?.rename(l, x: nx, baseline: b, width: nameWidth, style: style) }))
                 if l.removable {
@@ -208,47 +204,58 @@ final class SplashTreeView: NSView {
         super.mouseDown(with: event)
     }
     private func rename(_ l: Line, x: CGFloat, baseline: CGFloat, width: CGFloat, style: Design.Text) {
-        InlineName.edit(l.name, style: style, in: self, x: x, baseline: baseline, width: width, at: NSPoint(x: x, y: baseline)) { [weak self] typed in
+        let d = draft
+        let was: String
+        if case .member(let id, let c) = l.kind, d.member(of: id, c) == nil { was = "" } else { was = l.name }
+        InlineName.edit(was, style: style, in: self, x: x, baseline: baseline, width: width, at: NSPoint(x: x, y: baseline)) { [weak self] typed in
             guard let self = self, let t = typed?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { self?.needsDisplay = true; return }
-            let d = self.draft
             switch l.kind {
             case .catalogue: d.catalogueName = t
             case .collection(let type): d.collectionNames[type] = t
             case .party(let i): if d.parties.indices.contains(i) { d.parties[i].name = t }
-            case .kind(let i): if d.kinds.indices.contains(i) { d.kinds[i] = t }
-            case .stream(let kind, let j): if var list = d.streamsOf[kind], list.indices.contains(j) { list[j] = t; d.streamsOf[kind] = list }
-            case .member(let i): if d.members.indices.contains(i) { d.members[i] = t }
+            case .category(let id, let i):
+                if var list = d.categoriesOf[id], list.indices.contains(i) {
+                    // The category's streams and member go with its name.
+                    let old = list[i]; list[i] = t; d.categoriesOf[id] = list
+                    d.streamsOf[SplashDraft.key(id, t)] = d.streamsOf.removeValue(forKey: SplashDraft.key(id, old))
+                    d.members[SplashDraft.key(id, t)] = d.members.removeValue(forKey: SplashDraft.key(id, old))
+                }
+            case .stream(let id, let c, let j): if var list = d.streamsOf[SplashDraft.key(id, c)], list.indices.contains(j) { list[j] = t; d.streamsOf[SplashDraft.key(id, c)] = list }
+            case .member(let id, let c): d.members[SplashDraft.key(id, c)] = t
             case .group(let g): d.groupNames[g] = t
             default: break
             }
             self.changed()
         }
     }
-    /// Another of a level: a client or a member is typed straight in; a kind, a stream or a group is picked from the words
-    /// the splash offered, less those already there, or typed as a word of your own.
+    /// Another of a level: a client is typed straight in; a category, a stream or a group is picked from the words the splash
+    /// offered, less those already there, or typed as a word of your own.
     private func add(_ level: Level, below r: NSRect) {
         let d = draft
         switch level {
         case .party(let type):
             d.parties.append(SplashDraft.Party(type: type, name: uniqueName(SplashDraft.singular(type) + " 2", among: d.names(of: type))))
             changed(); edit(.party(d.parties.count - 1))
-        case .member:
-            d.members.append(uniqueName(d.memberWord + " 2", among: d.members)); changed(); edit(.member(d.members.count - 1))
-        case .kind, .stream, .group:
+        case .category, .stream, .group:
             let offered: [String], taken: [String]
             switch level {
-            case .kind: offered = SplashDraft.makeOptions; taken = d.kinds
-            case .stream(let kind): offered = SplashDraft.streamOptions; taken = d.streams(of: kind)
+            case .category(let id): offered = SplashDraft.categoryOptions; taken = d.categories(of: id)
+            case .stream(let id, let c): offered = SplashDraft.streamOptions; taken = d.streams(of: id, c)
             default: offered = SplashDraft.groupOptions; taken = d.groups
             }
             let m = SplashMenu(items: offered.filter { !taken.contains($0) }, own: "A word of your own") { [weak self] choice in
                 guard let self = self else { return }
                 self.options?.removeFromSuperview(); self.options = nil
-                let word = choice ?? uniqueName(level == .kind ? "Kind 2" : level == .group ? "Group 2" : "Stream 2", among: taken)
                 switch level {
-                case .kind: d.kinds.append(word); self.changed(); if choice == nil { self.edit(.kind(d.kinds.count - 1)) }
-                case .stream(let kind): d.streamsOf[kind, default: []].append(word); d.oneKind = false; self.changed(); if choice == nil { self.edit(.stream(kind, d.streams(of: kind).count - 1)) }
-                default: d.groups.append(word); self.changed(); if choice == nil { self.edit(.group(word)) }
+                case .category(let id):
+                    let word = choice ?? uniqueName("Category 2", among: taken)
+                    d.categoriesOf[id, default: []].append(word); self.changed(); if choice == nil { self.edit(.category(id, d.categories(of: id).count - 1)) }
+                case .stream(let id, let c):
+                    let word = choice ?? uniqueName("Stream 2", among: taken)
+                    d.streamsOf[SplashDraft.key(id, c), default: []].append(word); d.oneKind = false; self.changed(); if choice == nil { self.edit(.stream(id, c, d.streams(of: id, c).count - 1)) }
+                default:
+                    let word = choice ?? uniqueName("Group 2", among: taken)
+                    d.groups.append(word); self.changed(); if choice == nil { self.edit(.group(word)) }
                 }
             }
             m.frame = NSRect(x: r.minX, y: r.maxY, width: min(220, bounds.width - r.minX - A.gutter), height: m.wanted)
@@ -270,8 +277,9 @@ final class SplashTreeView: NSView {
         }
         func same(_ a: Kind, _ b: Kind) -> Bool {
             switch (a, b) {
-            case (.party(let i), .party(let j)), (.kind(let i), .kind(let j)), (.member(let i), .member(let j)): return i == j
-            case (.stream(let a, let i), .stream(let b, let j)): return a == b && i == j
+            case (.party(let i), .party(let j)): return i == j
+            case (.category(let a, let i), .category(let b, let j)): return a == b && i == j
+            case (.stream(let a, let c, let i), .stream(let b, let e, let j)): return a == b && c == e && i == j
             case (.group(let g), .group(let h)): return g == h
             default: return false
             }
@@ -280,10 +288,10 @@ final class SplashTreeView: NSView {
     private func remove(_ kind: Kind) {
         let d = draft
         switch kind {
-        case .party(let i): if d.parties.indices.contains(i) { d.parties.remove(at: i) }
-        case .kind(let i): if d.kinds.indices.contains(i) { d.kinds.remove(at: i) }
-        case .stream(let kind, let j): if var list = d.streamsOf[kind], list.indices.contains(j) { list.remove(at: j); d.streamsOf[kind] = list }
-        case .member(let i): if d.members.count > 1, d.members.indices.contains(i) { d.members.remove(at: i) }
+        case .party(let i): if d.parties.indices.contains(i) { let p = d.parties.remove(at: i); if d.parties(of: p.type).isEmpty { d.types.removeAll { $0 == p.type } } }
+        case .category(let id, let i): if var list = d.categoriesOf[id], list.indices.contains(i) { list.remove(at: i); d.categoriesOf[id] = list }
+        case .stream(let id, let c, let j): if var list = d.streamsOf[SplashDraft.key(id, c)], list.indices.contains(j) { list.remove(at: j); d.streamsOf[SplashDraft.key(id, c)] = list }
+        case .member(let id, let c): d.members[SplashDraft.key(id, c)] = nil
         case .group(let g): if d.groups.count > 1 { d.groups.removeAll { $0 == g } }
         default: break
         }
