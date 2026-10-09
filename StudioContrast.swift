@@ -563,13 +563,13 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
                 let size = max(11, (min(cell.width, cell.height) * 0.25).rounded())
                 let t = Design.attributed(text, .caption, size: size, colour: readable.withAlphaComponent(weak ? 0.5 : 1))
                 let tw = t.size().width.rounded(), gap = (size * 0.5).rounded()
-                let withSquare = cell.width >= size + gap + tw + 2 * gap
-                let groupW = withSquare ? size + gap + tw : tw
-                let x0 = (cell.midX - groupW / 2).rounded(), capHeight = (size * 0.72).rounded()
-                let b = (cell.midY + capHeight / 2).rounded()
+                // The square is the numeral's cap height, so the two sit on one line.
+                let capHeight = (size * 0.72).rounded(), withSquare = cell.width >= capHeight + gap + tw + 2 * gap
+                let groupW = withSquare ? capHeight + gap + tw : tw
+                let x0 = (cell.midX - groupW / 2).rounded(), b = (cell.midY + capHeight / 2).rounded()
                 if withSquare {
-                    fill(NSRect(x: x0, y: b - capHeight, width: size, height: capHeight), colour(inkHex))
-                    t.draw(x: x0 + size + gap, baseline: b, width: cell.width - (x0 + size + gap - cell.minX))
+                    fill(NSRect(x: x0, y: b - capHeight, width: capHeight, height: capHeight), colour(inkHex))
+                    t.draw(x: x0 + capHeight + gap, baseline: b, width: cell.width - (x0 + capHeight + gap - cell.minX))
                 } else { t.draw(x: x0, baseline: b, width: cell.width - (x0 - cell.minX)) }
                 if same(inkHex, state.pair.ink) && same(paperHex, state.pair.paper) {
                     readable.setStroke()
