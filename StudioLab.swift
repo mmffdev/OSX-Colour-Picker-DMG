@@ -168,7 +168,8 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         proof = Proof(master: m.display, masterLab: lab, print: print.shown?.display, printLab: printLab, difference: difference,
                       inRange: difference.map { $0 <= Rendering.visible } ?? false)
         values = [
-            Value(label: "Source", value: d.sourceText, note: d.kind == .light ? "Light" : "Surface"),
+            // The source's note names the white its numbers came in under, the "in" to the Values Under row's "out", then what the colour is.
+            Value(label: "Source", value: d.sourceText, note: d.source.whiteName + "  \u{00B7}  " + (d.kind == .light ? "Light" : "Surface")),
             Value(label: ill == .d50 ? "Master XYZ" : "XYZ", value: String(format: "%.4f, %.4f, %.4f", under.x, under.y, under.z), note: ill.label),
             Value(label: "L*a*b*", value: String(format: "%.2f, %.2f, %.2f", lab.l, lab.a, lab.b), note: ill.label),
             Value(label: "OKLCH", value: String(format: "%.3f, %.3f, %.1f\u{00B0}", ok.l, ok.c, ok.h), note: ""),

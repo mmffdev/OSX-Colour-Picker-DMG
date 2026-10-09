@@ -35,6 +35,13 @@ struct ColourSource: Codable, Equatable {
     var values: [Double]
     /// For a CMYK source: the press profile the build belongs to.
     var press: String? = nil
+
+    /// The white the numbers came in under: fixed by the space for RGB, D50 for a press build and for L*a*b* or XYZ
+    /// typed in, which is the ICC standard until a reading keeps its own illuminant.
+    var whiteName: String {
+        if let space = RGBSpace(rawValue: self.space) { return space.whiteName }
+        return Illuminant.d50.label
+    }
 }
 
 /// A colour's full definition: what was given, the master worked out from it, and its kind.
@@ -152,6 +159,17 @@ enum RGBSpace: String, CaseIterable, Codable {
         case .adobeRGB: return ((0.640, 0.330), (0.210, 0.710), (0.150, 0.060), d65)
         case .rec2020: return ((0.708, 0.292), (0.170, 0.797), (0.131, 0.046), d65)
         case .acescg: return ((0.713, 0.293), (0.165, 0.830), (0.128, 0.044), (x: 0.32168, y: 0.33767))
+        }
+    }
+
+    /// The white the space's own standard fixes, as the source row names it: the "in" the master was carried from.
+    /// Every one is for the 2 degree observer; DCI's is the projector's calibration white, not a CIE illuminant.
+    var whiteName: String {
+        switch self {
+        case .srgb, .rec709, .linearSRGB, .displayP3, .p3D65, .adobeRGB, .rec2020: return "D65 \u{00B7} 2\u{00B0}"
+        case .prophoto: return "D50 \u{00B7} 2\u{00B0}"
+        case .dciP3: return "DCI White"
+        case .acescg: return "D60 \u{00B7} 2\u{00B0}"
         }
     }
 

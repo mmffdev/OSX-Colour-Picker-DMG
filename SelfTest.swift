@@ -1986,6 +1986,10 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && { let d65 = Illuminant.named("d65-2")!, under = someLab.xyz.adapted(to: d65).lab(under: d65)
                return near(under.l, 51.2366, 0.001) && near(under.a, 67.4450, 0.001) && near(under.b, 46.0526, 0.001) }(),
           "the twelve illuminants each carry the D50 white to their own by Bradford and read it as L 100 with no colour, D50 is left as it is, and a red reads under D65 as worked out independently")
+    check(ColourSource(space: "srgb", values: [1, 0, 0]).whiteName == "D65 \u{00B7} 2\u{00B0}" && ColourSource(space: "prophoto", values: [1, 0, 0]).whiteName == "D50 \u{00B7} 2\u{00B0}"
+          && ColourSource(space: "cmyk", values: [0, 1, 1, 0], press: "Generic CMYK").whiteName == "D50 \u{00B7} 2\u{00B0}" && ColourSource(space: "lab", values: [50, 0, 0]).whiteName == "D50 \u{00B7} 2\u{00B0}"
+          && RGBSpace.allCases.allSatisfy { !$0.whiteName.isEmpty },
+          "a source names the white its numbers came in under: D65 for sRGB, D50 for ProPhoto, a press build and a typed L*a*b*")
     let steel = ColourDefinition.of(hex: "#4F8093")!
     let steelOnScreen = Rendering.of(steel, in: ProfileChannel(space: "srgb"))
     check(steel.source.space == "srgb" && steel.kind == .surface && steel.sourceText == "sRGB  #4F8093"
