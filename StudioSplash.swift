@@ -25,8 +25,8 @@ import AppKit
 // page. A question with choices is a row of cells to click, with Custom apart from them for words of
 // your own; what is chosen lists beneath in its order, each with a handle to drag it by. Set builds the
 // collections, their levels and the first member as one change. The splash is never a lock: it
-// opens again from the Schema page. The lighthouse (Lighthouse.swift) is kept but not shown: the
-// tree needs the room (Rick, 2026-10-09).
+// opens again from the Schema page. The lighthouse (Lighthouse.swift) stands at the bottom left,
+// under the tree, and rises a level as each section locks.
 
 final class StudioSplash: NSView {
     typealias A = Design.App
@@ -35,7 +35,7 @@ final class StudioSplash: NSView {
     private let library: LibraryController
     private let draft: SplashDraft
     private let lighthouse = LighthouseView()
-    private static let showLighthouse = false
+    private static let showLighthouse = true
     private let tree: SplashTreeView
     private let scroll = NSScrollView()
     private let band = SplashBand()
@@ -142,7 +142,11 @@ final class StudioSplash: NSView {
     func begin() {
         window?.makeFirstResponder(sections.first?.firstField ?? self)
         settleButtons()
-        if Self.showLighthouse { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.lighthouse.set(level: 0, to: 1) } }
+        if Self.showLighthouse {
+            // --lighthouse-up raises the whole tower at once, for framing the picture while it is designed.
+            let all = CommandLine.arguments.contains("--lighthouse-up")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in for k in 0..<(all ? 7 : 1) { self?.lighthouse.set(level: k, to: 1) } }
+        }
     }
 
     func settleButtons() {

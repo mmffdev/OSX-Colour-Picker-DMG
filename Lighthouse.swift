@@ -1,391 +1,489 @@
 import AppKit
+import SceneKit
 
 // ---------- The lighthouse: the splash's picture, one level a section ----------
 //
-// A lighthouse on a stepped stone island in a cut-away block of sea, drawn in a gentle two-point
-// perspective from a low camera: what stands nearer is drawn a little larger, every vertical stays
-// vertical. Each section of the splash raises one level: the sea and the island, the foot of the
-// tower, a red band, the middle, a second red band, the gallery, then the lamp, which lights when
-// the last section locks. A level rises out of the roof of the one below over 720 ms with a little
-// overshoot, and sinks back in 380 ms. The water moves the whole time: the edges lap, ripples
-// spread from the island, crests bob at the stone. With Reduce Motion on, levels simply appear and
-// the water holds still.
+// A spiral-striped lighthouse on a turfed slate island in a cut-away block of turquoise sea, drawn in
+// SceneKit from the motion study in design/lighthouse-demo (demo.js, sceneFor('spiral', true)): true
+// perspective with upright verticals, the camera's axis horizontal and the picture shifted up in the
+// projection. Seven stages: the island, four tower sections, the gallery, the lantern. Each section of
+// the splash raises one: a 120 ms lead-in of smoke at the construction joint, then the section grows
+// upward, twisting about its axis as it comes, overshoots, compresses, rebounds and settles over
+// 1.25 s. A step back collapses it in 600 ms and releases the same smoke ring as it goes. The water
+// moves the whole time: edge waves, foam at the shore, three island-shaped ripples expanding and
+// fading. With Reduce Motion on, levels simply appear and the water holds still.
 //
-// Agreed with Rick on 2026-10-09 on the design page "Colorgain Lighthouse Finished", version 3.
+// Agreed with Rick on 2026-10-09 on the demo's spiral tower.
 
-final class LighthouseView: NSView {
-    /// How far each level has risen, 0 to 1: the sea and island, four sections of the tower, the gallery, the lamp.
+final class LighthouseView: NSView, SCNSceneRendererDelegate {
+    /// How far each level has risen, 0 to 1: the island, four sections of the tower, the gallery, the lamp.
     private(set) var progress: [CGFloat] = Array(repeating: 0, count: 7)
+    /// Kept for the splash's layout; the camera frames the scene itself.
+    var headroom: CGFloat = 84
     private struct Move { let from: CGFloat, to: CGFloat, start: TimeInterval, length: TimeInterval }
+    private struct Burst { let start: TimeInterval, length: TimeInterval }
     private var moves: [Int: Move] = [:]
-    private var timer: Timer?
-    private let born = Date()
-    private var lampCentre: CGPoint?
-    private var beamStart: TimeInterval = 0
-    private var lit = false
+    private var bursts: [Int: Burst] = [:]
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private let scnView = SCNView()
+    private let scene = SCNScene()
+    private let camera = SCNCamera()
+    private var stages: [SCNNode] = []
+    private var smokeRings: [SmokeRing] = []
+    private var halo: SCNNode?
+    private var edge: SCNNode?, ripples: [SCNNode] = [], foam: [SCNNode] = []
+    private var outline: [(CGFloat, CGFloat)] = []
+    private var shore: [(CGFloat, CGFloat)] = []
+    private var seed: UInt32 = 83
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    // MARK: The camera
-
-    private let C = cos(CGFloat.pi / 6), S: CGFloat = 0.3, persp: CGFloat = 0.028
-    private let AX: CGFloat = 3.6, AY: CGFloat = 3.6, sea: CGFloat = 1.5, sand: CGFloat = 0.16, brown: CGFloat = 0.32, top: CGFloat = 10.1
-    private let margin: CGFloat = 16
-    private var s: CGFloat = 1, cx: CGFloat = 0, cy: CGFloat = 0
-    /// Where the finial's top is wanted, from the view's top; the block's foot stands a margin above the view's foot.
-    var headroom: CGFloat = 84 { didSet { needsDisplay = true } }
-
-    private func fit() {
-        let kNear = 1 / (1 - (AX + AY) * persp)
-        s = (bounds.height - margin - headroom) / (top + ((AX + AY) * S + sea + sand + brown) * kNear)
-        cx = bounds.midX
-        cy = headroom + top * s
-    }
-    private func P(_ x: CGFloat, _ y: CGFloat, _ z: CGFloat) -> CGPoint {
-        let k = 1 / (1 - (x + y) * persp)
-        return CGPoint(x: cx + (x - y) * C * s * k, y: cy + (x + y) * S * s * k - z * s * k)
+    private struct SmokeRing {
+        let joint: SCNNode
+        let puffs: [Puff]
+        let radius: CGFloat
+        struct Puff { let node: SCNNode; let material: SCNMaterial; let size: CGFloat; let angle: CGFloat; let spread: CGFloat; let lift: CGFloat }
     }
 
-    // MARK: Colour and drawing
+    // MARK: Numbers from the study
 
-    private struct Paint { let face: (CGFloat, CGFloat, CGFloat); let roof: (CGFloat, CGFloat, CGFloat) }
-    private let cream = Paint(face: (241, 236, 226), roof: (251, 249, 244))
-    private let red = Paint(face: (182, 98, 88), roof: (205, 130, 118))
-    private let iron = Paint(face: (44, 44, 46), roof: (60, 60, 62))   // the cornices, the rails, the lamp's frame
-    private let stone = Paint(face: (216, 210, 199), roof: (232, 228, 220))
-    private let stone2 = Paint(face: (196, 189, 177), roof: (222, 217, 208))
-    private let glass = Paint(face: (246, 226, 158), roof: (246, 226, 158))
-    private func rgb(_ c: (CGFloat, CGFloat, CGFloat), _ a: CGFloat = 1) -> NSColor { NSColor(srgbRed: c.0 / 255, green: c.1 / 255, blue: c.2 / 255, alpha: a) }
-    /// Light from the upper left: faces turned that way are lit, faces turned right fall into shade.
-    private func shade(_ c: (CGFloat, CGFloat, CGFloat), _ angle: CGFloat, _ lift: CGFloat = 0) -> NSColor {
-        let k = 0.6 + 0.4 * (0.5 + 0.5 * cos(angle - 1.95)) + lift
-        func v(_ x: CGFloat) -> CGFloat { min(255, max(0, x * k)) / 255 }
-        return NSColor(srgbRed: v(c.0), green: v(c.1), blue: v(c.2), alpha: 1)
+    private static let tau = CGFloat.pi * 2
+    private func random() -> CGFloat { seed = seed &* 1664525 &+ 1013904223; return CGFloat(seed) / 4294967296 }
+    private static let slate: [UInt32] = [0x454e60, 0x576174, 0x65717b, 0x384655]
+    private static let grass: [UInt32] = [0xb4c960, 0xc8d56a, 0x9eb95b, 0xd4db7a, 0x85a760]
+    private static func colour(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: alpha)
     }
-    private func path(_ pts: [CGPoint], close: Bool = true) -> NSBezierPath {
-        let p = NSBezierPath()
-        p.move(to: pts[0])
-        for q in pts.dropFirst() { p.line(to: q) }
-        if close { p.close() }
-        p.lineJoinStyle = .round
-        return p
+    private static func material(_ hex: UInt32, doubleSided: Bool = false) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .physicallyBased
+        m.diffuse.contents = colour(hex)
+        m.roughness.contents = 0.88
+        m.metalness.contents = 0
+        m.isDoubleSided = doubleSided
+        return m
     }
-    private func poly(_ pts: [CGPoint], _ fill: NSColor?, _ stroke: NSColor? = nil, width: CGFloat = 0.8) {
-        let p = path(pts)
-        if let f = fill { f.setFill(); p.fill() }
-        if let st = stroke { st.setStroke(); p.lineWidth = width; p.stroke() }
-    }
-    private func line(_ a: CGPoint, _ b: CGPoint, _ colour: NSColor, width: CGFloat) {
-        colour.setStroke()
-        let p = NSBezierPath(); p.move(to: a); p.line(to: b); p.lineWidth = width; p.lineCapStyle = .round; p.stroke()
-    }
-    private func mix(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint { CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t) }
-    private func ring(_ r: CGFloat, _ z: CGFloat, _ n: Int, _ rot: CGFloat) -> [(CGFloat, CGFloat, CGFloat)] {
-        (0..<n).map { i in let a = rot + CGFloat(i) * 2 * .pi / CGFloat(n); return (r * cos(a), r * sin(a), z) }
-    }
-    private let rot8 = CGFloat.pi / 8, rot4 = CGFloat.pi / 4
-    /// A face is seen when it turns toward the viewer, whose eye looks along x + y.
-    private func seen(_ a: CGFloat) -> Bool { cos(a - .pi / 4) > 0.01 }
+    private let cream = LighthouseView.material(0xf5efdc), iron = LighthouseView.material(0x33434c), coral = LighthouseView.material(0xe56f5d), sand = LighthouseView.material(0xd8cda4)
+    private static let towerBase: CGFloat = 1.01, sectionHeight: CGFloat = 1.34
 
-    /// A prism with n sides, tapering from r0 to r1, with an optional decoration on any face given (face, angle, a map from face coordinates to the view).
-    private func prism(n: Int = 8, rot: CGFloat? = nil, r0: CGFloat, r1: CGFloat, z: CGFloat, h: CGFloat, _ c: Paint, roof: Bool = true,
-                       decorate: ((Int, CGFloat, (CGFloat, CGFloat) -> CGPoint) -> Void)? = nil) {
-        let rot = rot ?? rot8
-        let bot = ring(r0, z, n, rot), top = ring(r1, z + h, n, rot)
-        var faces: [(i: Int, a: CGFloat, d: CGFloat)] = []
-        for i in 0..<n {
-            let a = rot + (CGFloat(i) + 0.5) * 2 * .pi / CGFloat(n)
-            if seen(a) { faces.append((i, a, cos(a - .pi / 4))) }
-        }
-        for f in faces.sorted(by: { $0.d < $1.d }) {
-            let j = (f.i + 1) % n
-            let b0 = P(bot[f.i].0, bot[f.i].1, bot[f.i].2), b1 = P(bot[j].0, bot[j].1, bot[j].2)
-            let t1 = P(top[j].0, top[j].1, top[j].2), t0 = P(top[f.i].0, top[f.i].1, top[f.i].2)
-            poly([b0, b1, t1, t0], shade(c.face, f.a), shade(c.face, f.a, -0.12))
-            decorate?(f.i, f.a) { u, v in self.mix(self.mix(b0, b1, u), self.mix(t0, t1, u), v) }
-        }
-        if roof { poly(top.map { P($0.0, $0.1, $0.2) }, rgb(c.roof), rgb((c.face.0 * 0.82, c.face.1 * 0.82, c.face.2 * 0.82))) }
-    }
-    /// An octagonal roof rising to a point.
-    private func pyramid(z: CGFloat, r: CGFloat, h: CGFloat, _ c: Paint) {
-        let base = ring(r, z, 8, rot8), apex = P(0, 0, z + h)
-        var faces: [(i: Int, a: CGFloat, d: CGFloat)] = []
-        for i in 0..<8 { let a = rot8 + (CGFloat(i) + 0.5) * .pi / 4; if seen(a) { faces.append((i, a, cos(a - .pi / 4))) } }
-        for f in faces.sorted(by: { $0.d < $1.d }) {
-            let j = (f.i + 1) % 8
-            poly([P(base[f.i].0, base[f.i].1, base[f.i].2), P(base[j].0, base[j].1, base[j].2), apex], shade(c.face, f.a, 0.04), shade(c.face, f.a, -0.1))
-        }
-    }
-    private func windowOn(_ q: (CGFloat, CGFloat) -> CGPoint, _ u0: CGFloat, _ u1: CGFloat, _ v0: CGFloat, _ v1: CGFloat) {
-        poly([q(u0, v0), q(u1, v0), q(u1, v1), q(u0, v1)], NSColor(srgbRed: 40 / 255, green: 46 / 255, blue: 52 / 255, alpha: 0.88))
-        let a = q(u0, v0), b = q(u1, v0)
-        line(CGPoint(x: a.x, y: a.y + 1.5), CGPoint(x: b.x, y: b.y + 1.5), NSColor.white.withAlphaComponent(0.55), width: 1)
-    }
+    // MARK: Building the scene
 
-    // MARK: The sea
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        scnView.scene = scene
+        scnView.backgroundColor = .clear
+        scnView.antialiasingMode = .multisampling4X
+        scnView.allowsCameraControl = false
+        scnView.autoenablesDefaultLighting = false
+        scnView.delegate = self
+        scnView.rendersContinuously = true
+        scnView.isPlaying = true
+        addSubview(scnView)
+        build()
+    }
+    required init?(coder: NSCoder) { fatalError() }
 
-    private var edges: [((CGFloat, CGFloat), (CGFloat, CGFloat), CGFloat)] { [((-AX, -AY), (AX, -AY), 1), ((AX, -AY), (AX, AY), 2), ((AX, AY), (-AX, AY), 3), ((-AX, AY), (-AX, -AY), 4)] }
-    /// The waterline along edge `k`: one wave the whole way round the block, so it meets itself at every corner; a slow swell and a quicker chop, moving along it.
-    private func waterline(_ k: Int, _ t: CGFloat, _ n: Int) -> [(CGFloat, CGFloat, CGFloat)] {
-        let p0 = edges[k].0, p1 = edges[k].1
-        return (0...n).map { i in
-            let u = CGFloat(i) / CGFloat(n), v = CGFloat(k) + u   // 0 to 4 round the block
-            let z = 0.07 * sin(2 * .pi * v * 1.25 + t * 1.6) + 0.025 * sin(2 * .pi * v * 2.75 - t * 2.9)
-            return (p0.0 + (p1.0 - p0.0) * u, p0.1 + (p1.1 - p0.1) * u, z)
-        }
+    override func layout() {
+        super.layout()
+        scnView.frame = bounds
+        // The camera's axis is horizontal, so verticals stay vertical; the picture is then shifted up in the projection,
+        // as the study does, so the island sits in the frame with the tower above it.
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        let f = 1 / tan(camera.fieldOfView * .pi / 360), zn = camera.zNear, zf = camera.zFar
+        var p = SCNMatrix4Identity
+        p.m11 = f / (size.width / size.height); p.m22 = f
+        p.m33 = (zf + zn) / (zn - zf); p.m34 = -1; p.m43 = 2 * zf * zn / (zn - zf); p.m44 = 0
+        p.m32 = -1.34
+        camera.projectionTransform = p
     }
-    /// A rounded square in the plane, for the ripples.
-    private func rounded(_ r: CGFloat, _ z: CGFloat, _ n: Int) -> [CGPoint] {
-        (0..<n).map { i in
-            let t = CGFloat(i) * 2 * .pi / CGFloat(n), c = cos(t), si = sin(t)
-            return P(r * (c < 0 ? -1 : 1) * sqrt(abs(c)), r * (si < 0 ? -1 : 1) * sqrt(abs(si)), z)
-        }
-    }
-    private func drawSea(_ e: CGFloat, _ t: CGFloat) {
-        let g = max(0, min(1, e))
-        guard g > 0 else { return }
-        NSGraphicsContext.saveGraphicsState()
-        let lines = (0..<4).map { waterline($0, t, 28) }
-        // The sea bed and the far walls, seen faintly through the water: the floor in sand, the two far faces of the block from inside.
-        poly([P(-AX, -AY, -sea), P(AX, -AY, -sea), P(AX, AY, -sea), P(-AX, AY, -sea)], NSColor(srgbRed: 214 / 255, green: 200 / 255, blue: 160 / 255, alpha: 0.55 * g))
-        for k in [3, 0] {
-            // Each far wall rises to the same waterline as the surface, so the two never show as separate lines through the water.
-            let ed = edges[k], b0 = ed.0, b1 = ed.1
-            let topLine = lines[k].map { P($0.0, $0.1, $0.2) }
-            poly([P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea)] + topLine.reversed(), NSColor(srgbRed: 58 / 255, green: 122 / 255, blue: 140 / 255, alpha: 0.32 * g))
-            line(P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea), NSColor(srgbRed: 150 / 255, green: 136 / 255, blue: 104 / 255, alpha: 0.5 * g), width: 1)
-        }
-        drawFooting(e)
-        // The two near faces: the sand at the sea bed over the brown beneath, flat, then the water above, translucent so the sea bed and the island's footing show.
-        for k in [1, 2] {
-            let ed = edges[k], ang: CGFloat = k == 1 ? 0 : .pi / 2
-            let b0 = ed.0, b1 = ed.1
-            poly([P(b0.0, b0.1, -sea - sand - brown), P(b1.0, b1.1, -sea - sand - brown), P(b1.0, b1.1, -sea - sand), P(b0.0, b0.1, -sea - sand)], shade((122, 96, 66), ang), shade((122, 96, 66), ang, -0.2))
-            poly([P(b0.0, b0.1, -sea - sand), P(b1.0, b1.1, -sea - sand), P(b1.0, b1.1, -sea), P(b0.0, b0.1, -sea)], shade((214, 200, 160), ang), shade((214, 200, 160), ang, -0.2))
-            let topLine = lines[k].map { P($0.0, $0.1, $0.2) }
-            let face = path(topLine + [P(b1.0, b1.1, -sea), P(b0.0, b0.1, -sea)])
-            NSGraphicsContext.saveGraphicsState()
-            face.addClip()
-            let gr = NSGradient(colorsAndLocations: (NSColor(srgbRed: 124 / 255, green: 196 / 255, blue: 206 / 255, alpha: 0.82 * g), 0),
-                                (NSColor(srgbRed: 80 / 255, green: 162 / 255, blue: 178 / 255, alpha: 0.86 * g), 0.3),
-                                (NSColor(srgbRed: 40 / 255, green: 98 / 255, blue: 120 / 255, alpha: 0.92 * g), 1))!
-            gr.draw(from: CGPoint(x: 0, y: topLine[0].y), to: CGPoint(x: 0, y: P(b0.0, b0.1, -sea).y), options: [.drawsBeforeStartingLocation, .drawsAfterEndingLocation])
-            NSGraphicsContext.restoreGraphicsState()
-            NSColor.white.withAlphaComponent(0.5 * g).setStroke()
-            let lp = path(topLine, close: false); lp.lineWidth = 1.2; lp.stroke()
-        }
-        // The surface, drawn on all four lapping edges, with light drifting across it.
-        var surface: [CGPoint] = []
-        for l in lines { for p in l.dropLast() { surface.append(P(p.0, p.1, p.2)) } }
-        poly(surface, NSColor(srgbRed: 196 / 255, green: 226 / 255, blue: 230 / 255, alpha: 0.9 * g))
-        NSGraphicsContext.saveGraphicsState()
-        path(surface).addClip()
-        for k in 0..<7 {
-            let u = -AX + (CGFloat(k) * 1.03 + t * 0.35).truncatingRemainder(dividingBy: 2 * AX)
-            poly([P(u, -AY, 0), P(u + 0.9, -AY, 0), P(u + 0.3, AY, 0), P(u - 0.6, AY, 0)], NSColor.white.withAlphaComponent(0.07 * g))
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        // Foam along every edge.
-        NSColor.white.withAlphaComponent(0.85 * g).setStroke()
-        let sp = path(surface); sp.lineWidth = 1.6; sp.stroke()
-        NSColor.white.withAlphaComponent(0.35 * g).setStroke(); sp.lineWidth = 4; sp.stroke()
-        // The ripples: rounded squares spreading from the island, fading as they go, three in flight at once.
-        for r in 0..<3 {
-            let ph = ((t / 3.6) + CGFloat(r) / 3).truncatingRemainder(dividingBy: 1), rad = 2.75 + ph * (AY - 2.85)
-            let fade = (1 - ph) * (ph < 0.12 ? ph / 0.12 : 1) * g
-            let rp = path(rounded(rad, 0.01, 64)); rp.lineWidth = 1.4 - ph * 0.6
-            NSColor.white.withAlphaComponent(0.7 * fade).setStroke(); rp.stroke()
-            let rq = path(rounded(rad + 0.06, 0.01, 64)); rq.lineWidth = 2.2
-            NSColor(srgbRed: 60 / 255, green: 130 / 255, blue: 150 / 255, alpha: 0.22 * fade).setStroke(); rq.stroke()
-        }
-        // Crests bobbing at the stone.
-        for w in 0..<12 {
-            let ang = CGFloat(w) * 0.524 + 0.3, rr = 2.85 + 0.15 * sin(t * 1.3 + CGFloat(w))
-            let xx = rr * cos(ang) * 1.15, yy = rr * sin(ang) * 1.15
-            if abs(xx) > AX - 0.3 || abs(yy) > AY - 0.3 { continue }
-            let c0 = P(xx - 0.16, yy, 0), c1 = P(xx, yy + 0.02, 0.02 + 0.015 * sin(t * 2 + CGFloat(w))), c2 = P(xx + 0.16, yy, 0)
-            NSColor.white.withAlphaComponent(0.8 * g).setStroke()
-            let cp = NSBezierPath(); cp.move(to: c0); cp.curve(to: c2, controlPoint1: CGPoint(x: c1.x, y: c1.y - 2), controlPoint2: CGPoint(x: c1.x, y: c1.y - 2)); cp.lineWidth = 1.2; cp.stroke()
-        }
-        // The island's shadow on the water, cast to the lower right.
-        poly([P(-2.3, -2.3, 0), P(2.9, -2.3, 0), P(2.9, 2.9, 0), P(-2.3, 2.9, 0)], NSColor(srgbRed: 30 / 255, green: 70 / 255, blue: 80 / 255, alpha: 0.14 * g))
-        NSGraphicsContext.restoreGraphicsState()
-    }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
 
-    // MARK: The island and the tower
+    private func build() {
+        seed = 83
+        let cameraNode = SCNNode()
+        cameraNode.camera = camera
+        camera.fieldOfView = 28
+        camera.projectionDirection = .vertical
+        camera.zNear = 0.1; camera.zFar = 100
+        cameraNode.position = SCNVector3(19, 11.6, 26)
+        cameraNode.look(at: SCNVector3(0, 11.6, 0))
+        scene.rootNode.addChildNode(cameraNode)
 
-    private let islandTop: CGFloat = 0.72
-    private func drawFooting(_ e: CGFloat) {
-        guard e > 0 else { return }
-        prism(n: 4, rot: rot4, r0: 2.75 * sqrt(2), r1: 2.55 * sqrt(2), z: -sea, h: sea, Paint(face: (168, 160, 146), roof: (168, 160, 146)), roof: false)
-    }
-    private func drawIsland(_ e: CGFloat) {
-        guard e > 0 else { return }
-        prism(n: 4, rot: rot4, r0: 2.55 * sqrt(2), r1: 2.55 * sqrt(2), z: 0, h: 0.36 * e, stone2)
-        if e > 0.35 { prism(n: 4, rot: rot4, r0: 2.0 * sqrt(2), r1: 2.0 * sqrt(2), z: 0.36 * min(e, 1), h: 0.36 * max(0, (e - 0.35) / 0.65), stone) }
-    }
-    private struct Section { let paint: Int; let h: CGFloat; let r0: CGFloat; let r1: CGFloat; let door: Bool; let windows: [Int] }
-    private let sections = [Section(paint: 0, h: 1.9, r0: 1.36, r1: 1.22, door: true, windows: [1, 7]),
-                            Section(paint: 1, h: 1.45, r0: 1.18, r1: 1.07, door: false, windows: [0]),
-                            Section(paint: 0, h: 1.45, r0: 1.04, r1: 0.95, door: false, windows: [1, 7]),
-                            Section(paint: 1, h: 1.3, r0: 0.92, r1: 0.85, door: false, windows: [0])]
-    private let cornice: CGFloat = 0.13
-    private var zAt: [CGFloat] {
-        var out = [islandTop + 0.14]
-        for (i, sec) in sections.enumerated() { out.append(out[i] + sec.h + cornice) }
-        return out
-    }
-    private func drawSection(_ i: Int, _ e: CGFloat) {
-        guard e > 0 else { return }
-        let sec = sections[i], z = zAt[i], grow = 0.8 + 0.2 * min(1, e), h = sec.h * e
-        prism(r0: sec.r0 * grow, r1: sec.r1 * grow, z: z, h: h, sec.paint == 0 ? cream : red, roof: e < 0.55) { f, _, q in
-            guard e >= 0.6 else { return }
-            if sec.door && f == 0 {
-                // A door a third of the face wide, straight-sided to a round arch, drawn on the face so it leans with it.
-                let d = NSBezierPath(); d.move(to: q(0.34, 0)); d.line(to: q(0.66, 0)); d.line(to: q(0.66, 0.3))
-                for k in 0...12 {
-                    let th = CGFloat(k) / 12 * .pi
-                    d.line(to: q(0.5 + 0.16 * cos(th), 0.3 + 0.1 * sin(th)))
+        let sky = SCNLight(); sky.type = .ambient; sky.color = Self.colour(0xcfd9df); sky.intensity = 900
+        let skyNode = SCNNode(); skyNode.light = sky; scene.rootNode.addChildNode(skyNode)
+        let sun = SCNLight(); sun.type = .directional; sun.color = Self.colour(0xfff0d1); sun.intensity = 1400
+        sun.castsShadow = true; sun.shadowMode = .deferred; sun.shadowRadius = 3; sun.shadowSampleCount = 8
+        sun.shadowColor = NSColor.black.withAlphaComponent(0.28); sun.orthographicScale = 10; sun.shadowMapSize = CGSize(width: 2048, height: 2048)
+        let sunNode = SCNNode(); sunNode.light = sun; sunNode.position = SCNVector3(-6, 15, 7); sunNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(sunNode)
+
+        // The pale studio surface takes the island's shadow and nothing else.
+        let ground = SCNNode(geometry: SCNPlane(width: 200, height: 200))
+        let shadowOnly = SCNMaterial(); shadowOnly.lightingModel = .shadowOnly; shadowOnly.transparency = 0.12
+        ground.geometry?.materials = [shadowOnly]
+        ground.eulerAngles.x = -.pi / 2; ground.position.y = -2.27
+        scene.rootNode.addChildNode(ground)
+
+        let root = SCNNode(); scene.rootNode.addChildNode(root)
+        let island = SCNNode(); root.addChildNode(island)
+        stages = [island]
+        let bed = SCNNode(geometry: SCNBox(width: 8.6, height: 0.15, length: 8.6, chamferRadius: 0))
+        bed.geometry?.materials = [sand]; bed.position.y = -2.15; island.addChildNode(bed)
+        for _ in 0..<32 { let a = random() * Self.tau, r = 2.8 + random() * 1.2; rock(island, cos(a) * r, sin(a) * r, 0.16 + random() * 0.37, 0.18 + random() * 0.55, -2.02) }
+        // A quiet web of refracted light on the visible seabed.
+        var web: [SCNVector3] = []
+        for i in 0..<21 { let z = -4.15 + CGFloat(i) * 0.41; for j in 0...32 { let x = -4.2 + CGFloat(j) * 0.262; web.append(SCNVector3(x, -2.062, z + 0.1 * sin(CGFloat(j) * 0.95 + CGFloat(i)))) } }
+        island.addChildNode(lines(web, runs: 21, each: 33, colour: 0xbef0d4, opacity: 0.24))
+        sea(in: island)
+        shore = turf(island)
+        // Large rear outcrops and smaller shore rocks frame the tower without hiding its doorway.
+        for (x, z, r, h) in [(-1.45, -0.95, 0.65, 1.8), (-1.95, -0.1, 0.53, 1.05), (1.4, -1.15, 0.7, 1.55), (2, -0.45, 0.48, 1.15), (-2.1, 1.03, 0.57, 0.95), (1.9, 1.25, 0.62, 0.9), (-0.8, -1.8, 0.6, 1.4), (0.3, -2, 0.45, 1.05)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
+            rock(island, x, z, r, h, 0.35)
+            let cap = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: r * 0.46, height: 0.035))
+            (cap.geometry as? SCNCone)?.radialSegmentCount = 6
+            cap.geometry?.materials = [Self.material(Self.grass[Int(random() * 5) % 5])]
+            cap.position = SCNVector3(x, 0.35 + h + 0.01 + 0.0175, z); cap.eulerAngles.y = 0.3
+            island.addChildNode(cap)
+        }
+        for _ in 0..<18 { let a = random() * Self.tau, r = 1.4 + random() * 1.35; rock(island, cos(a) * r, sin(a) * r, 0.10 + random() * 0.18, 0.16 + random() * 0.24, 0.67) }
+        // A narrow sandy path curves from the doorway down to the water.
+        let path: [(CGFloat, CGFloat, CGFloat)] = [(0.2, 0.99, 0.7), (0.45, 0.99, 1.2), (0.18, 0.91, 1.65), (0.65, 0.77, 2.13), (0.95, 0.55, 2.57)]
+        var pv: [SCNVector3] = []
+        for i in 0..<(path.count - 1) {
+            let a = path[i], b = path[i + 1], w: CGFloat = 0.14
+            pv += [SCNVector3(a.0 - w, a.1 + 0.03, a.2), SCNVector3(a.0 + w, a.1 + 0.03, a.2), SCNVector3(b.0 - w, b.1 + 0.03, b.2),
+                   SCNVector3(a.0 + w, a.1 + 0.03, a.2), SCNVector3(b.0 + w, b.1 + 0.03, b.2), SCNVector3(b.0 - w, b.1 + 0.03, b.2)]
+        }
+        island.addChildNode(SCNNode(geometry: flat(pv, material: Self.material(0xe1d39a, doubleSided: true))))
+        // Blades of grass, sixty of them, each a sliver.
+        for i in 0..<60 {
+            let a = random() * Self.tau, r = 1.05 + random() * 1.55, x = cos(a) * r, z = sin(a) * r
+            let g = flat([SCNVector3(x, 0.94, z), SCNVector3(x + 0.04, 0.94, z), SCNVector3(x - 0.02, 1.07 + random() * 0.16, z + 0.02)], material: Self.material(Self.grass[i % 5], doubleSided: true))
+            island.addChildNode(SCNNode(geometry: g))
+        }
+        for _ in 0..<3 { let n = lines([SCNVector3](repeating: SCNVector3(0, 0, 0), count: 145), runs: 1, each: 145, colour: 0xeaffed, opacity: 0.5); island.addChildNode(n); ripples.append(n) }
+        for _ in 0..<12 { let n = lines([SCNVector3](repeating: SCNVector3(0, 0, 0), count: 12), runs: 1, each: 12, colour: 0xf5ffef, opacity: 0.68); island.addChildNode(n); foam.append(n) }
+
+        // The tower: four sections, each a frustum with the spiral stripe wound on, windows on the way up and the door at the foot.
+        let spiral = spiralImage()
+        for i in 0..<4 {
+            let group = SCNNode(); group.position.y = Self.towerBase + CGFloat(i) * Self.sectionHeight; root.addChildNode(group); stages.append(group)
+            let r0 = 0.83 - CGFloat(i) * 0.105, r1 = 0.83 - CGFloat(i + 1) * 0.105
+            let striped = SCNMaterial()
+            striped.lightingModel = .physicallyBased; striped.roughness.contents = 0.88; striped.metalness.contents = 0
+            striped.diffuse.contents = spiral; striped.diffuse.wrapS = .repeat; striped.diffuse.wrapT = .repeat
+            group.addChildNode(SCNNode(geometry: frustum(bottom: r0, top: r1, height: Self.sectionHeight, sides: 12, material: striped, uvRow: CGFloat(i), uvRows: 4)))
+            window(on: group, radius: (r0 + r1) / 2 + 0.017, y: 0.43, angle: .pi / 6, door: i == 0)
+            if i == 0 { window(on: group, radius: r0 - 0.02, y: 0.54, angle: -.pi / 3) }
+        }
+        // The gallery: a flare of cream, an iron deck, two open rails on twelve posts.
+        let gallery = SCNNode(); gallery.position.y = Self.towerBase + 4 * Self.sectionHeight; root.addChildNode(gallery); stages.append(gallery)
+        cylinder(in: gallery, bottom: 0.42, top: 0.69, height: 0.23, material: cream, y: 0)
+        cylinder(in: gallery, bottom: 0.76, top: 0.76, height: 0.11, material: iron, y: 0.23)
+        for y in [0.43, 0.72] as [CGFloat] {
+            let rail = SCNNode(geometry: SCNTorus(ringRadius: 0.71, pipeRadius: 0.022)); rail.geometry?.materials = [iron]
+            (rail.geometry as? SCNTorus)?.ringSegmentCount = 12; (rail.geometry as? SCNTorus)?.pipeSegmentCount = 4
+            rail.position.y = y; gallery.addChildNode(rail)
+        }
+        for i in 0..<12 { let a = CGFloat(i) / 12 * Self.tau; let post = cylinderNode(bottom: 0.018, top: 0.018, height: 0.4, sides: 5, material: iron); post.position = SCNVector3(sin(a) * 0.71, 0.53, cos(a) * 0.71); gallery.addChildNode(post) }
+        // The lantern: amber glass in an iron frame under a coral cap, the bulb, its glow, and the halo.
+        let lamp = SCNNode(); lamp.position.y = Self.towerBase + 4 * Self.sectionHeight + 0.34; root.addChildNode(lamp); stages.append(lamp)
+        let glass = Self.material(0xffd580); glass.transparency = 0.47; glass.roughness.contents = 0.16; glass.emission.contents = Self.colour(0xffb944).withAlphaComponent(0.2); glass.writesToDepthBuffer = false
+        cylinder(in: lamp, bottom: 0.43, top: 0.43, height: 0.79, material: glass, y: 0)
+        cylinder(in: lamp, bottom: 0.46, top: 0.46, height: 0.065, material: iron, y: 0.79)
+        for i in 0..<8 { let a = CGFloat(i) / 8 * Self.tau; let bar = cylinderNode(bottom: 0.018, top: 0.018, height: 0.79, sides: 5, material: iron); bar.position = SCNVector3(sin(a) * 0.435, 0.395, cos(a) * 0.435); lamp.addChildNode(bar) }
+        cylinder(in: lamp, bottom: 0.62, top: 0.05, height: 0.48, material: coral, y: 0.85, sides: 8)
+        cylinder(in: lamp, bottom: 0.075, top: 0.035, height: 0.2, material: iron, y: 1.32, sides: 8)
+        let bulb = SCNNode(geometry: SCNSphere(radius: 0.145)); (bulb.geometry as? SCNSphere)?.segmentCount = 12
+        let bulbMaterial = Self.material(0xffeaa1); bulbMaterial.emission.contents = Self.colour(0xffbd45); bulb.geometry?.materials = [bulbMaterial]
+        bulb.position.y = 0.41; lamp.addChildNode(bulb)
+        let glow = SCNLight(); glow.type = .omni; glow.color = Self.colour(0xffb94e); glow.intensity = 600; glow.attenuationEndDistance = 3
+        let glowNode = SCNNode(); glowNode.light = glow; glowNode.position.y = 0.4; lamp.addChildNode(glowNode)
+        let haloNode = SCNNode(geometry: SCNPlane(width: 2.2, height: 2.2))
+        let haloMaterial = SCNMaterial(); haloMaterial.lightingModel = .constant; haloMaterial.diffuse.contents = haloImage(); haloMaterial.blendMode = .alpha
+        haloMaterial.writesToDepthBuffer = false; haloMaterial.isDoubleSided = true
+        haloNode.geometry?.materials = [haloMaterial]; haloNode.position.y = 0.41; haloNode.constraints = [SCNBillboardConstraint()]
+        lamp.addChildNode(haloNode); halo = haloNode
+
+        // Smoke lives in world space at each construction joint, never in the twisting tower group: overlapping lobes begin as
+        // a continuous horizontal cloud ring, then separate into uneven puffs.
+        let puffGeometry = SCNSphere(radius: 1); puffGeometry.segmentCount = 10
+        for index in 0..<6 {
+            let joint = SCNNode(); joint.position.y = stages[index + 1].position.y + 0.035; root.addChildNode(joint); joint.isHidden = true
+            var puffs: [SmokeRing.Puff] = []
+            for j in 0..<20 {
+                let group = SCNNode(); joint.addChildNode(group)
+                let m = SCNMaterial(); m.lightingModel = .physicallyBased; m.diffuse.contents = Self.colour(0xf7f3e8); m.roughness.contents = 1; m.transparency = 0; m.writesToDepthBuffer = false
+                let size = 0.21 + random() * 0.14
+                for k in 0..<3 {
+                    let cloud = SCNNode(geometry: puffGeometry); cloud.geometry = puffGeometry.copy() as? SCNGeometry; cloud.geometry?.materials = [m]
+                    cloud.position = SCNVector3(k == 0 ? 0 : (k == 1 ? -0.075 : 0.08), k == 0 ? 0 : 0.035, k == 0 ? 0 : (random() - 0.5) * 0.11)
+                    let s = k == 0 ? 1 : 0.65 + random() * 0.2; cloud.scale = SCNVector3(s, s, s); group.addChildNode(cloud)
                 }
-                d.close()
-                NSColor(srgbRed: 120 / 255, green: 56 / 255, blue: 50 / 255, alpha: 1).setFill(); d.fill()
-                NSColor(srgbRed: 90 / 255, green: 40 / 255, blue: 36 / 255, alpha: 1).setStroke(); d.lineWidth = 0.8; d.stroke()
+                puffs.append(SmokeRing.Puff(node: group, material: m, size: size, angle: CGFloat(j) / 20 * Self.tau + (random() - 0.5) * 0.06, spread: 0.83 + random() * 0.35, lift: random() * 0.18))
             }
-            if sec.windows.contains(f) { self.windowOn(q, 0.38, 0.62, 0.36, 0.7) }
+            smokeRings.append(SmokeRing(joint: joint, puffs: puffs, radius: index < 4 ? 0.83 - CGFloat(index) * 0.105 : 0.67))
         }
-        // The cornice: an iron band that oversails the level, its flat top the level's roof.
-        let t = max(0, min(1, (e - 0.55) / 0.45))
-        if t > 0 { prism(r0: (sec.r1 + 0.09) * grow, r1: (sec.r1 + 0.11) * grow, z: z + h, h: cornice * t, iron) }
+        // Everything starts down but the island, which the splash raises when it opens.
+        for (i, s) in stages.enumerated() where i > 0 { s.isHidden = true }
+        island.isHidden = true
     }
-    private func railing(_ r: CGFloat, _ z: CGFloat, _ hgt: CGFloat, front: Bool) {
-        let n = 16, pts = ring(r, z, n, rot8 / 2), colour = rgb(iron.face)
+
+    /// The cut-away sea: a translucent surface and four walls, the waves written into their vertices by a shader on every frame.
+    private func sea(in island: SCNNode) {
+        let waves = """
+        #pragma arguments
+        float motion;
+        #pragma body
+        float t = scn_frame.time * motion;
+        float x = _geometry.position.x, z = _geometry.position.z;
+        float w = 0.045 * sin(x * 2.3 + z * 0.9 + t * 1.4) + 0.025 * sin(z * 3.1 - x * 0.8 - t * 1.1);
+        _geometry.position.y += w * step(-0.5, _geometry.position.y);
+        """
+        func seaMaterial(_ hex: UInt32, opacity: CGFloat) -> SCNMaterial {
+            let m = SCNMaterial(); m.lightingModel = .physicallyBased; m.diffuse.contents = Self.colour(hex); m.transparency = opacity
+            m.roughness.contents = 0.2; m.metalness.contents = 0; m.isDoubleSided = true; m.writesToDepthBuffer = false
+            m.shaderModifiers = [.geometry: waves]; m.setValue(NSNumber(value: reduceMotion ? 0 : 1), forKey: "motion")
+            return m
+        }
+        // The surface: a 44 by 44 grid at the waterline.
+        var v: [SCNVector3] = []
+        let n = 44, half: CGFloat = 4.3, cell = 8.6 / CGFloat(n)
+        for i in 0..<n { for j in 0..<n {
+            let x0 = -half + CGFloat(j) * cell, z0 = -half + CGFloat(i) * cell, x1 = x0 + cell, z1 = z0 + cell
+            v += [SCNVector3(x0, 0, z0), SCNVector3(x0, 0, z1), SCNVector3(x1, 0, z0), SCNVector3(x1, 0, z0), SCNVector3(x0, 0, z1), SCNVector3(x1, 0, z1)]
+        } }
+        let surface = SCNNode(geometry: flat(v, material: seaMaterial(0x188e9f, opacity: 0.62), up: true)); surface.renderingOrder = 2; island.addChildNode(surface)
+        // The walls, in world space so the shader's x and z are the sea's own: each a strip of 50 panels from the bed to the waterline.
+        for side in 0..<4 {
+            var w: [SCNVector3] = []
+            for j in 0..<50 {
+                let q0 = -half + CGFloat(j) * 8.6 / 50, q1 = q0 + 8.6 / 50
+                func at(_ q: CGFloat, _ y: CGFloat) -> SCNVector3 {
+                    switch side { case 0: return SCNVector3(q, y, -half); case 1: return SCNVector3(half, y, q); case 2: return SCNVector3(-q, y, half); default: return SCNVector3(-half, y, -q) }
+                }
+                w += [at(q0, -2.1), at(q1, -2.1), at(q0, 0), at(q1, -2.1), at(q1, 0), at(q0, 0)]
+            }
+            let wall = SCNNode(geometry: flat(w, material: seaMaterial(side == 2 ? 0x08728d : 0x169ea9, opacity: 0.48), up: true)); wall.renderingOrder = 3; island.addChildNode(wall)
+        }
+        // The rim: a light line round the waterline, moved with the waves on every frame.
+        outline = []
+        for side in 0..<4 { for j in 0..<65 { let q = -4.3 + CGFloat(j) / 64 * 8.6; outline.append(side == 0 ? (q, -4.3) : side == 1 ? (4.3, q) : side == 2 ? (-q, 4.3) : (-4.3, -q)) } }
+        outline.append(outline[0])
+        let rim = lines(outline.map { SCNVector3($0.0, 0, $0.1) }, runs: 1, each: outline.count, colour: 0xe6ffff, opacity: 0.85); rim.renderingOrder = 5; island.addChildNode(rim); edge = rim
+    }
+
+    // MARK: Geometry
+
+    /// Triangles with a flat normal each, as the study's flat shading gives.
+    private func flat(_ v: [SCNVector3], colours: [NSColor]? = nil, uvs: [CGPoint]? = nil, material: SCNMaterial, up: Bool = false) -> SCNGeometry {
+        var normals: [SCNVector3] = []
+        var i = 0
+        while i + 2 < v.count {
+            let a = v[i], b = v[i + 1], c = v[i + 2]
+            let u = SCNVector3(b.x - a.x, b.y - a.y, b.z - a.z), w = SCNVector3(c.x - a.x, c.y - a.y, c.z - a.z)
+            var n = SCNVector3(u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x)
+            let l = max(1e-6, sqrt(n.x * n.x + n.y * n.y + n.z * n.z)); n = SCNVector3(n.x / l, n.y / l, n.z / l)
+            if up && n.y < 0 { n = SCNVector3(-n.x, -n.y, -n.z) }
+            normals += [n, n, n]; i += 3
+        }
+        var sources = [SCNGeometrySource(vertices: v), SCNGeometrySource(normals: normals)]
+        if let uvs = uvs { sources.append(SCNGeometrySource(textureCoordinates: uvs)) }
+        if let colours = colours {
+            var data = Data()
+            for c in colours { var f = [Float(c.redComponent), Float(c.greenComponent), Float(c.blueComponent), Float(1)]; data.append(Data(bytes: &f, count: 16)) }
+            sources.append(SCNGeometrySource(data: data, semantic: .color, vectorCount: colours.count, usesFloatComponents: true, componentsPerVector: 4, bytesPerComponent: 4, dataOffset: 0, dataStride: 16))
+        }
+        var indices = (0..<v.count).map { Int32($0) }
+        let element = SCNGeometryElement(data: Data(bytes: &indices, count: indices.count * 4), primitiveType: .triangles, primitiveCount: v.count / 3, bytesPerIndex: 4)
+        let g = SCNGeometry(sources: sources, elements: [element]); g.materials = [material]
+        return g
+    }
+    /// Line runs of `each` points, `runs` of them, in one geometry.
+    private func lines(_ v: [SCNVector3], runs: Int, each: Int, colour: UInt32, opacity: CGFloat) -> SCNNode {
+        var indices: [Int32] = []
+        for r in 0..<runs { for j in 0..<(each - 1) { indices += [Int32(r * each + j), Int32(r * each + j + 1)] } }
+        let element = SCNGeometryElement(data: Data(bytes: &indices, count: indices.count * 4), primitiveType: .line, primitiveCount: indices.count / 2, bytesPerIndex: 4)
+        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: v)], elements: [element])
+        let m = SCNMaterial(); m.lightingModel = .constant; m.diffuse.contents = Self.colour(colour); m.transparency = opacity; m.writesToDepthBuffer = false
+        g.materials = [m]
+        return SCNNode(geometry: g)
+    }
+    /// Moves a line node's points, keeping its element and material.
+    private func move(_ node: SCNNode, to v: [SCNVector3]) {
+        guard let g = node.geometry, let element = g.elements.first else { return }
+        let n = SCNGeometry(sources: [SCNGeometrySource(vertices: v)], elements: [element]); n.materials = g.materials
+        node.geometry = n
+    }
+    /// A tapered cylinder with flat sides and caps, its sides' texture row `uvRow` of `uvRows`.
+    private func frustum(bottom r0: CGFloat, top r1: CGFloat, height h: CGFloat, sides n: Int, material: SCNMaterial, uvRow: CGFloat = 0, uvRows: CGFloat = 1) -> SCNGeometry {
+        var v: [SCNVector3] = [], uv: [CGPoint] = []
         for i in 0..<n {
-            let a = rot8 / 2 + CGFloat(i) * 2 * .pi / CGFloat(n)
-            if (cos(a - .pi / 4) >= 0) != front { continue }
-            let b = P(pts[i].0, pts[i].1, z), t = P(pts[i].0, pts[i].1, z + hgt)
-            line(b, t, colour, width: 1.4)
-            let j = (i + 1) % n, aj = rot8 / 2 + (CGFloat(i) + 0.5) * 2 * .pi / CGFloat(n)
-            if (cos(aj - .pi / 4) >= 0) == front {
-                line(t, P(pts[j].0, pts[j].1, z + hgt), colour, width: 1.6)
-                line(P(pts[i].0, pts[i].1, z + hgt * 0.5), P(pts[j].0, pts[j].1, z + hgt * 0.5), colour, width: 0.9)
+            let a0 = CGFloat(i) / CGFloat(n) * Self.tau, a1 = CGFloat(i + 1) / CGFloat(n) * Self.tau
+            let b0 = SCNVector3(sin(a0) * r0, 0, cos(a0) * r0), b1 = SCNVector3(sin(a1) * r0, 0, cos(a1) * r0)
+            let t0 = SCNVector3(sin(a0) * r1, h, cos(a0) * r1), t1 = SCNVector3(sin(a1) * r1, h, cos(a1) * r1)
+            let u0 = CGFloat(i) / CGFloat(n), u1 = CGFloat(i + 1) / CGFloat(n), v0 = uvRow / uvRows, v1 = (uvRow + 1) / uvRows
+            v += [b0, t0, b1, b1, t0, t1]
+            uv += [CGPoint(x: u0, y: v0), CGPoint(x: u0, y: v1), CGPoint(x: u1, y: v0), CGPoint(x: u1, y: v0), CGPoint(x: u0, y: v1), CGPoint(x: u1, y: v1)]
+            v += [SCNVector3(0, h, 0), t1, t0, SCNVector3(0, 0, 0), b0, b1]
+            uv += [CGPoint](repeating: CGPoint(x: 0.5, y: v0), count: 6)
+        }
+        return flat(v, uvs: uv, material: material)
+    }
+    private func cylinderNode(bottom r0: CGFloat, top r1: CGFloat, height h: CGFloat, sides: Int = 12, material: SCNMaterial) -> SCNNode {
+        SCNNode(geometry: frustum(bottom: r0, top: r1, height: h, sides: sides, material: material))
+    }
+    private func cylinder(in parent: SCNNode, bottom r0: CGFloat, top r1: CGFloat, height h: CGFloat, material: SCNMaterial, y: CGFloat, sides: Int = 12) {
+        let n = cylinderNode(bottom: r0, top: r1, height: h, sides: sides, material: material); n.position.y = y; parent.addChildNode(n)
+    }
+    /// A slate rock: three rings of six, a point on top.
+    private func rock(_ parent: SCNNode, _ x: CGFloat, _ z: CGFloat, _ size: CGFloat, _ height: CGFloat, _ y: CGFloat) {
+        let n = 6
+        var rings: [[SCNVector3]] = [[], [], []]
+        for i in 0..<n {
+            let a = CGFloat(i) / CGFloat(n) * Self.tau, r = 0.85 + random() * 0.25
+            rings[0].append(SCNVector3(cos(a) * size * r, 0, sin(a) * size * r * 0.85))
+            rings[1].append(SCNVector3(cos(a + 0.16) * size * r * 0.9, height * 0.48, sin(a + 0.16) * size * r * 0.8))
+            rings[2].append(SCNVector3(cos(a) * size * r * 0.43, height, sin(a) * size * r * 0.43))
+        }
+        var v: [SCNVector3] = []
+        for k in 0..<2 { for i in 0..<n { let j = (i + 1) % n; v += [rings[k][i], rings[k + 1][i], rings[k][j], rings[k][j], rings[k + 1][i], rings[k + 1][j]] } }
+        for i in 0..<n { v += [rings[2][i], SCNVector3(0, height, 0), rings[2][(i + 1) % n]] }
+        let node = SCNNode(geometry: flat(v, material: Self.material(Self.slate[Int(random() * CGFloat(Self.slate.count)) % Self.slate.count], doubleSided: true)))
+        node.position = SCNVector3(x, y, z)
+        parent.addChildNode(node)
+    }
+    /// The turf: an irregular ring of grass over a slate cliff, with the shore ring returned for the ripples.
+    private func turf(_ parent: SCNNode) -> [(CGFloat, CGFloat)] {
+        let n = 18
+        var outer: [SCNVector3] = [], inner: [SCNVector3] = []
+        for i in 0..<n {
+            let a = CGFloat(i) / CGFloat(n) * Self.tau, r = 2.35 + random() * 0.48
+            outer.append(SCNVector3(cos(a) * r, 0.58 + random() * 0.3, sin(a) * r))
+            inner.append(SCNVector3(cos(a) * r * 0.6, 1.01 + random() * 0.09, sin(a) * r * 0.6))
+        }
+        // One geometry per shade: SceneKit's physically based shading leaves vertex colours alone.
+        var byShade: [UInt32: [SCNVector3]] = [:]
+        func tri(_ a: SCNVector3, _ b: SCNVector3, _ d: SCNVector3, _ hex: UInt32) { byShade[hex, default: []] += [a, b, d] }
+        for i in 0..<n {
+            let j = (i + 1) % n
+            let b = SCNVector3(outer[i].x * 1.04, -0.5, outer[i].z * 1.04), bj = SCNVector3(outer[j].x * 1.04, -0.5, outer[j].z * 1.04)
+            tri(outer[i], outer[j], inner[i], Self.grass[i % 5])
+            tri(outer[j], inner[j], inner[i], Self.grass[(i + 2) % 5])
+            tri(inner[i], inner[j], SCNVector3(0, 1.06, 0), Self.grass[(i + 1) % 5])
+            tri(outer[i], b, outer[j], Self.slate[i % 4])
+            tri(b, bj, outer[j], Self.slate[(i + 1) % 4])
+        }
+        for (hex, v) in byShade { parent.addChildNode(SCNNode(geometry: flat(v, material: Self.material(hex, doubleSided: true)))) }
+        return outer.map { ($0.x, $0.z) }
+    }
+    private func shoreRadius(_ a: CGFloat) -> CGFloat {
+        let f = ((a / Self.tau).truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1) * CGFloat(shore.count)
+        let i = Int(f) % shore.count, u = f - CGFloat(Int(f)), p = shore[i], q = shore[(i + 1) % shore.count]
+        return hypot(p.0, p.1) * (1 - u) + hypot(q.0, q.1) * u
+    }
+    /// A window, or the door at the foot: a cream frame, a dark pane, an iron bar and a sill.
+    private func window(on parent: SCNNode, radius r: CGFloat, y: CGFloat, angle: CGFloat, door: Bool = false) {
+        let holder = SCNNode(); holder.position = SCNVector3(sin(angle) * r, y, cos(angle) * r); holder.eulerAngles.y = angle; parent.addChildNode(holder)
+        let w: CGFloat = door ? 0.29 : 0.17, h: CGFloat = door ? 0.56 : 0.33
+        func box(_ bw: CGFloat, _ bh: CGFloat, _ bd: CGFloat, _ m: SCNMaterial, _ x: CGFloat, _ by: CGFloat, _ z: CGFloat) {
+            let b = SCNNode(geometry: SCNBox(width: bw, height: bh, length: bd, chamferRadius: 0)); b.geometry?.materials = [m]; b.position = SCNVector3(x, by, z); holder.addChildNode(b)
+        }
+        box(w + 0.07, h + 0.06, 0.045, cream, 0, h / 2, 0)
+        box(w, h, 0.052, Self.material(door ? 0x624c3e : 0x253e4b), 0, h / 2, 0.025)
+        if !door { box(0.022, h, 0.015, iron, 0, h / 2, 0.055); box(w + 0.1, 0.035, 0.09, cream, 0, -0.015, 0.02) }
+    }
+    /// The spiral stripe: coral parallelograms on cream, wound round the tower as it rises.
+    private func spiralImage() -> NSImage {
+        let size = NSSize(width: 1024, height: 2048)
+        return NSImage(size: size, flipped: true) { _ in
+            Self.colour(0xf5efdc).setFill(); NSRect(origin: .zero, size: size).fill()
+            Self.colour(0xe56f5d).setFill()
+            for i in -5..<6 {
+                let y = CGFloat(i) * 1024
+                let p = NSBezierPath(); p.move(to: NSPoint(x: 0, y: y)); p.line(to: NSPoint(x: 1024, y: y - 1024)); p.line(to: NSPoint(x: 1024, y: y - 610)); p.line(to: NSPoint(x: 0, y: y + 414)); p.close(); p.fill()
             }
+            return true
         }
     }
-    private func drawGallery(_ e: CGFloat, lamp: CGFloat) {
-        guard e > 0 else { return }
-        let g = min(1, e), zG = zAt[4]
-        prism(r0: 0.86, r1: 0.86 + 0.32 * g, z: zG, h: 0.26 * e, iron, roof: false)
-        let z = zG + 0.26 * e
-        prism(r0: 1.2 * (0.85 + 0.15 * g), r1: 1.2 * (0.85 + 0.15 * g), z: z, h: 0.14 * e, iron)
-        let deck = z + 0.14 * e, rh = 0.42 * max(0, (e - 0.4) / 0.6)
-        if rh > 0 { railing(1.1, deck, rh, front: false) }
-        drawLamp(lamp, deck: deck)
-        if rh > 0 { railing(1.1, deck, rh, front: true) }
-    }
-    private func drawLamp(_ e: CGFloat, deck: CGFloat) {
-        guard e > 0 else { return }
-        let g = min(1, e)
-        var z = deck
-        prism(r0: 0.72, r1: 0.72, z: z, h: 0.12 * e, iron)
-        z += 0.12 * e
-        let gh = 0.78 * e
-        prism(r0: 0.6 * (0.8 + 0.2 * g), r1: 0.6 * (0.8 + 0.2 * g), z: z, h: gh, glass, roof: false) { _, _, q in
-            // Mullions at the edges of each pane, and a bar across the middle.
-            for l in [(0, 0, 0, 1), (1, 0, 1, 1), (0, 0.5, 1, 0.5)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
-                self.line(q(l.0, l.1), q(l.2, l.3), self.rgb(self.iron.face), width: 1.2)
-            }
+    /// The lamp's halo: warm light fading out from its centre.
+    private func haloImage() -> NSImage {
+        let size = NSSize(width: 128, height: 128)
+        return NSImage(size: size, flipped: false) { _ in
+            let g = NSGradient(colorsAndLocations: (Self.colour(0xffd979, 0.55), 0), (Self.colour(0xffd979, 0.13), 0.3), (Self.colour(0xffd979, 0), 1))
+            g?.draw(in: NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)), relativeCenterPosition: .zero)
+            return true
         }
-        z += gh
-        let t = max(0, min(1, (e - 0.45) / 0.55))
-        if t > 0 {
-            prism(r0: 0.74, r1: 0.74, z: z, h: 0.08, iron)
-            pyramid(z: z + 0.08, r: 0.8, h: 0.62 * t, red)
-            if t > 0.8 {
-                let top = P(0, 0, z + 0.08 + 0.62 * t), tip = P(0, 0, z + 0.08 + 0.62 * t + 0.32)
-                line(top, tip, rgb(iron.face), width: 1.6)
-                rgb(iron.face).setFill()
-                NSBezierPath(ovalIn: CGRect(x: top.x - 0.09 * s, y: top.y - 0.19 * s, width: 0.18 * s, height: 0.18 * s)).fill()
-            }
-        }
-        lampCentre = P(0, 0, deck + 0.12 + 0.39)
-    }
-
-    // MARK: Drawing it all
-
-    override func draw(_ dirtyRect: NSRect) {
-        fit()
-        let now = Date().timeIntervalSince(born)
-        let t: CGFloat = reduceMotion ? 0 : CGFloat(now)
-        lit = progress[6] >= 1 && moves.isEmpty
-        if lit, let lc = lampCentre {
-            // The lamp lit: a warm glow behind everything, kept inside the picture.
-            let pulse: CGFloat = reduceMotion ? 1 : 0.85 + 0.15 * sin(CGFloat(now - beamStart) * 1.67)
-            let radius = min(3.2 * s, lc.y - margin)
-            let glow = NSGradient(starting: NSColor(srgbRed: 246 / 255, green: 214 / 255, blue: 120 / 255, alpha: 0.5 * pulse), ending: NSColor(srgbRed: 246 / 255, green: 214 / 255, blue: 120 / 255, alpha: 0))!
-            glow.draw(fromCenter: lc, radius: 2, toCenter: lc, radius: radius, options: [])
-        }
-        drawSea(progress[0], t)
-        drawIsland(progress[0])
-        for i in 0..<4 { drawSection(i, progress[i + 1]) }
-        // The beam turns about the tower's axis, once round in eight seconds: the half pointing away passes behind the lamp room,
-        // the half pointing toward the viewer passes in front of it.
-        let ang = CGFloat(now - beamStart) / 8 * 2 * .pi
-        let beams = lit && !reduceMotion ? [ang, ang + .pi] : []
-        for a in beams where cos(a) + sin(a) <= 0 { beam(a) }
-        drawGallery(progress[5], lamp: progress[6])
-        for a in beams where cos(a) + sin(a) > 0 { beam(a) }
-    }
-
-    /// One half of the beam, from the lamp along the ground direction `a` as the camera sees it, ending short of the picture's edge so its fade is complete.
-    private func beam(_ a: CGFloat) {
-        guard let lc = lampCentre else { return }
-        // The direction (cos a, sin a) on the ground, projected: a near-flat ellipse, dipping as the beam comes toward the viewer.
-        var dx = (cos(a) - sin(a)) * C, dy = (cos(a) + sin(a)) * S
-        let m = sqrt(dx * dx + dy * dy); dx /= m; dy /= m
-        var len = 6 * s
-        if dx > 0 { len = min(len, (bounds.width - margin - lc.x) / dx) } else if dx < 0 { len = min(len, (margin - lc.x) / dx) }
-        if dy > 0 { len = min(len, (bounds.height - margin - lc.y) / dy) } else if dy < 0 { len = min(len, (margin - lc.y) / dy) }
-        len = max(0, len)
-        let end = CGPoint(x: lc.x + dx * len, y: lc.y + dy * len)
-        let tri = path([lc, CGPoint(x: end.x - dy * len * 0.18, y: end.y + dx * len * 0.09), CGPoint(x: end.x + dy * len * 0.18, y: end.y - dx * len * 0.09)])
-        NSGraphicsContext.saveGraphicsState()
-        tri.addClip()
-        NSGradient(starting: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0.55), ending: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0))!.draw(from: lc, to: end, options: [])
-        NSGraphicsContext.restoreGraphicsState()
     }
 
     // MARK: Motion
 
-    /// Raises level `i` into place, or sinks it away, the water running meanwhile.
+    private var now: TimeInterval { CACurrentMediaTime() }
+    /// Raises level `i` into place, or sinks it away: a lead-in of smoke, the twisting rise and the settle, or the collapse and the smoke after it.
     func set(level i: Int, to value: CGFloat) {
         guard progress.indices.contains(i) else { return }
-        if reduceMotion { progress[i] = value; moves[i] = nil; if value >= 1 && i == 6 { beamStart = Date().timeIntervalSince(born) }; needsDisplay = true; return }
-        let now = Date().timeIntervalSince(born)
-        moves[i] = Move(from: progress[i], to: value, start: now, length: value > progress[i] ? 0.72 : 0.38)
-        run()
+        if i == 0 { progress[0] = value; stages[0].isHidden = value < 0.001; return }
+        if reduceMotion { progress[i] = value; moves[i] = nil; bursts[i] = nil; return }
+        let rising = value > progress[i]
+        if let m = moves[i], m.to == value { return }
+        bursts[i] = Burst(start: now + (rising ? 0 : 0.6), length: 1.4)
+        moves[i] = Move(from: progress[i], to: value, start: now + (rising ? 0.12 : 0), length: rising ? 1.25 : 0.6)
     }
-    private func run() {
-        guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
-    private func tick() {
-        let now = Date().timeIntervalSince(born)
+    /// A damped spring that crosses its destination twice: rise, overshoot, compression, a small rebound, settle.
+    private static func spring(_ t: CGFloat) -> CGFloat { t >= 1 ? 1 : 1 - exp(-7 * t) * (cos(13 * t) + 0.18 * sin(13 * t)) }
+    private static func wave(_ x: CGFloat, _ z: CGFloat, _ t: CGFloat) -> CGFloat { 0.045 * sin(x * 2.3 + z * 0.9 + t * 1.4) + 0.025 * sin(z * 3.1 - x * 0.8 - t * 1.1) }
+
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let t = now
         for (i, m) in moves {
-            let u = CGFloat(min(1, (now - m.start) / m.length))
-            // Rising overshoots a touch and settles; sinking just gathers pace.
-            let eased: CGFloat = m.to > m.from ? { let k: CGFloat = 1.55, x = u - 1; return x * x * ((k + 1) * x + k) + 1 }() : u * u * u
-            progress[i] = m.from + (m.to - m.from) * eased
-            if u >= 1 { progress[i] = m.to; moves[i] = nil; if i == 6, m.to >= 1 { beamStart = now } }
+            let u = CGFloat(max(0, min(1, (t - m.start) / m.length)))
+            let e = m.to > m.from ? Self.spring(u) : u * u * (3 - 2 * u)
+            progress[i] = m.from + (m.to - m.from) * e
+            if u >= 1 { progress[i] = m.to; moves[i] = nil }
         }
-        needsDisplay = true
-        // The water runs as long as the view is up, unless motion is reduced, when only a move needs the clock.
-        if reduceMotion && moves.isEmpty { timer?.invalidate(); timer = nil }
+        let time = reduceMotion ? 0 : CGFloat(t)
+        for (i, g) in stages.enumerated() where i > 0 {
+            let v = progress[i]
+            g.isHidden = v <= 0.001
+            g.scale = SCNVector3(1 + max(0, v - 1) * -0.16, max(0.001, v), 1 + max(0, v - 1) * -0.16)
+            g.eulerAngles.y = (1 - v) * -.pi * 1.35
+        }
+        if !reduceMotion {
+            if let e = edge { move(e, to: outline.map { SCNVector3($0.0, Self.wave($0.0, $0.1, time) + 0.012, $0.1) }) }
+            for (k, l) in ripples.enumerated() {
+                let phase = (time * 0.13 + CGFloat(k) / 3).truncatingRemainder(dividingBy: 1)
+                var v: [SCNVector3] = []
+                for j in 0..<145 { let a = CGFloat(j) / 144 * Self.tau, r = shoreRadius(a) + 0.12 + phase * 1.12, x = cos(a) * r, z = sin(a) * r; v.append(SCNVector3(x, Self.wave(x, z, time) + 0.055, z)) }
+                move(l, to: v); l.geometry?.firstMaterial?.transparency = sin(phase * .pi) * 0.42
+            }
+            for (k, l) in foam.enumerated() {
+                var v: [SCNVector3] = []
+                for j in 0..<12 { let a = CGFloat(k) / 12 * Self.tau + CGFloat(j) / 11 * 0.22, r = shoreRadius(a) + 0.12 + 0.04 * sin(time * 1.5 + CGFloat(k)), x = cos(a) * r, z = sin(a) * r; v.append(SCNVector3(x, Self.wave(x, z, time) + 0.07, z)) }
+                move(l, to: v); l.geometry?.firstMaterial?.transparency = 0.4 + 0.2 * sin(time + CGFloat(k))
+            }
+        }
+        smoke(at: t)
+        halo?.geometry?.firstMaterial?.transparency = 0.45 + 0.12 * sin(time * 1.7)
     }
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window == nil { timer?.invalidate(); timer = nil } else if !reduceMotion { run() }
+    private func smoke(at t: TimeInterval) {
+        for (index, ring) in smokeRings.enumerated() {
+            let age: CGFloat = bursts[index + 1].map { CGFloat((t - $0.start) / $0.length) } ?? 2
+            let live = !reduceMotion && age >= 0 && age < 1
+            ring.joint.isHidden = !live
+            if age >= 1 { bursts[index + 1] = nil }
+            guard live else { continue }
+            let expansion = 1 - pow(1 - age, 2), appear = min(1, age / 0.07)
+            for (j, p) in ring.puffs.enumerated() {
+                let radius = ring.radius + 0.06 + expansion * 1.3 * p.spread
+                let angle = p.angle + sin(CGFloat(j) * 2.1) * age * 0.07
+                p.node.position = SCNVector3(sin(angle) * radius, 0.025 + age * p.lift + sin(age * .pi) * 0.085, cos(angle) * radius)
+                let evaporation = 1 - pow(max(0, (age - 0.58) / 0.42), 1.3)
+                let size = p.size * (0.82 + expansion * 0.65) * evaporation
+                p.node.scale = SCNVector3(size, size * (0.78 + age * 0.35), size)
+                p.material.transparency = 0.86 * appear * pow(1 - age, 1.15)
+            }
+        }
     }
 }
