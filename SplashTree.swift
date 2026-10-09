@@ -162,7 +162,7 @@ final class SplashTreeView: NSView {
                 t.close(); Design.quiet.setFill(); t.fill()
                 hits.append((NSRect(x: x - 4, y: top, width: caret + 4, height: A.unit), { [weak self] in self?.toggle(key) }))
             }
-            let nx = x + caret, nameWidth = width - CGFloat(l.depth) * step - caret - 130
+            let nx = x + caret, nameWidth = width - CGFloat(l.depth) * step - caret - 118
             let rowRect = NSRect(x: nx, y: top, width: nameWidth, height: A.unit)
             switch l.kind {
             case .add(let level):
@@ -170,11 +170,11 @@ final class SplashTreeView: NSView {
                 hits.append((rowRect, { [weak self] in self?.add(level, below: rowRect) }))
             case .placeholder, .pending:
                 Design.attributed(l.name, .body, colour: Design.soft).draw(x: nx, baseline: b, width: nameWidth)
-                Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 110, baseline: b - 1)
+                Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 96, baseline: b - 1)
             default:
                 let style: Design.Text = l.depth < 2 ? .bodyStrong : .body
                 Design.attributed(l.name, style, colour: l.soft ? Design.soft : Design.ink).draw(x: nx, baseline: b, width: nameWidth)
-                Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 110, baseline: b - 1)
+                Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 96, baseline: b - 1)
                 hits.append((rowRect, { [weak self] in self?.rename(l, x: nx, baseline: b, width: nameWidth, style: style) }))
                 if l.removable {
                     let mark = NSRect(x: left + width - 24, y: top, width: 24, height: A.unit)
