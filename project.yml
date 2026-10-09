@@ -128,7 +128,9 @@ schemes:
     run:
       config: Debug
       commandLineArguments:
-        "--new-user": true
+        "--splash-loop": true
+        "--splash": false
+        "--new-user": false
         "--classic": false
         "--self-test": false
     archive:
