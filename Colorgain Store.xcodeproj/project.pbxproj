@@ -68,6 +68,7 @@
 		81A32F6C13F8ACF7AD1F8512 /* colswatch.icns in Resources */ = {isa = PBXBuildFile; fileRef = 3E3DDBEC4DB75A5B7562579B /* colswatch.icns */; };
 		89AA8FCF657408356778F2A7 /* colsynccatalogue.icns in Resources */ = {isa = PBXBuildFile; fileRef = CBD9E43C14980080CE9A9439 /* colsynccatalogue.icns */; };
 		89DBC23299D9CDB3D00A7C7A /* NewColour.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4EC46D28A2EDEF03355716 /* NewColour.swift */; };
+		8F75E11CC85D471C05D5A817 /* StudioSplash.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB802EBC2DFC294E5D236516 /* StudioSplash.swift */; };
 		956897F44AABA84DFE552470 /* HistoryRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B59196E281ED4D76ADE1639A /* HistoryRail.swift */; };
 		95AEB071D3B2F8AE62D82DED /* CatalogueWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC575DE2D5BE598297D1ABCE /* CatalogueWatch.swift */; };
 		9817C225744C925F07D85480 /* History.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63EF8DDCE386E1737985999 /* History.swift */; };
@@ -193,6 +194,7 @@
 		CC0B2C2F84A1EC8A94E2C3D7 /* PaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteView.swift; sourceTree = "<group>"; };
 		CC575DE2D5BE598297D1ABCE /* CatalogueWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogueWatch.swift; sourceTree = "<group>"; };
 		CF432AA3C31AFEDF27BA8AF6 /* CatalogueTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogueTree.swift; sourceTree = "<group>"; };
+		DB802EBC2DFC294E5D236516 /* StudioSplash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSplash.swift; sourceTree = "<group>"; };
 		E21FD6FEC7839EE5365B4D0E /* Histogram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Histogram.swift; sourceTree = "<group>"; };
 		E25DB28E304608D95821B6DF /* colphoto.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colphoto.icns; sourceTree = "<group>"; };
 		E60169F3A62E3C9491767150 /* StepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCards.swift; sourceTree = "<group>"; };
@@ -314,6 +316,7 @@
 				4558269298343A558D55123D /* StudioSchema.swift */,
 				680C0F7DF343637CFB7E02E6 /* StudioSettings.swift */,
 				CA3011D3917A4A1D3A92FC32 /* StudioShare.swift */,
+				DB802EBC2DFC294E5D236516 /* StudioSplash.swift */,
 				65F8EEF50E373A8F0B9B9E15 /* StudioTags.swift */,
 				9A1451250ED5E9CB05C38BC0 /* StudioWindow.swift */,
 				70AC418BF10E78198C2DE2A3 /* SwatchList.swift */,
@@ -517,6 +520,7 @@
 				28A65495003A764A47ECA6F2 /* StudioSchema.swift in Sources */,
 				3371CD8525C1663741DD3359 /* StudioSettings.swift in Sources */,
 				C7DE244162940875BBEDBB07 /* StudioShare.swift in Sources */,
+				8F75E11CC85D471C05D5A817 /* StudioSplash.swift in Sources */,
 				108D9AA86EF95186C6D0E955 /* StudioTags.swift in Sources */,
 				BF1041A4B9042D7D26D1CE8B /* StudioWindow.swift in Sources */,
 				DFFFC09CBA2000CE62B5CDDC /* SwatchList.swift in Sources */,

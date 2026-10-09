@@ -68,6 +68,8 @@ final class StudioWindowController: NSWindowController {
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        // --splash opens the splash that sets up the work, over the whole window, for looking at it straight away.
+        if args.contains("--splash") { c.frame.showSplash() }
         // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
         if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
             let to = URL(fileURLWithPath: args[i + 1])
@@ -342,6 +344,26 @@ final class StudioFrame: NSView {
 
     /// The backslash key: Master Inner on and off.
     func toggleGrid() { A.masterGrid.toggle(); overlay.isHidden = !A.masterGrid; overlay.needsDisplay = true }
+
+    /// The splash over the whole window (TH-299): nothing of the app shows but the wordmark until it is done.
+    private(set) var splash: StudioSplash?
+    func showSplash() {
+        guard splash == nil else { return }
+        let s = StudioSplash(library: library)
+        s.frame = bounds
+        s.autoresizingMask = [.width, .height]
+        s.onDone = { [weak self] in
+            self?.splash?.removeFromSuperview()
+            self?.splash = nil
+            self?.overlay.splash = false
+        }
+        addSubview(s)
+        // The grid stays on top of it, for measuring, and draws the splash's own beat.
+        addSubview(overlay)
+        overlay.splash = true
+        splash = s
+        s.begin()
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         // The hairlines that edge the regions: under the header, over the footer, beside each rail.
@@ -3085,6 +3107,8 @@ final class GridOverlay: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     /// The page's content, left edge and width: its columns are drawn as the page lays them, from its own width.
     var page = NSRect.zero { didSet { needsDisplay = true } }
+    /// While the splash is up: the window's twelve columns the whole way across, the header's baseline, and the beat from the band's top.
+    var splash = false { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
         typealias A = Design.App
         let w = bounds.width, h = bounds.height, c = A.gridColour
@@ -3093,6 +3117,17 @@ final class GridOverlay: NSView {
             fill(NSRect(x: x, y: 0, width: width, height: h), c.withAlphaComponent(0.05))
             fill(NSRect(x: x, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
             fill(NSRect(x: x + width - 1, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+        }
+        if splash {
+            for i in 1...A.columns { column(A.column(i, in: w), cw) }
+            fill(NSRect(x: 0, y: StudioHeader.baseline, width: w, height: 1), c.withAlphaComponent(0.6))
+            var y = StudioSplash.bandTop
+            while y < h {
+                fill(NSRect(x: 0, y: y, width: w, height: 1), c.withAlphaComponent(0.25))
+                fill(NSRect(x: 0, y: y + A.textBaseline, width: w, height: 1), c.withAlphaComponent(0.6))
+                y += A.unit
+            }
+            return
         }
         // The window's columns up to the page, then the page's own, then the window's again past it.
         for i in 1...A.columns {
