@@ -8,3 +8,7 @@ release/
 xcuserdata/
 .env
 appstore/build/
+.idea/
+.claude/worktrees/
+icons/.claude/
+appstore/*.xcodeproj/

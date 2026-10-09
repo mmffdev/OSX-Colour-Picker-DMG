@@ -1,0 +1,754 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Colorgain Style Sheet</title>
+<style>
+/* Layout: a Swiss style sheet. One family, a 12-column grid with 48 margins and 24 gutters, big light type over small dense type, and space doing half the work. Single light look by decision: the wizard has no dark version. */
+:root {
+  color-scheme: light;
+  /* Neutrals: warm paper greys, not pure white */
+  --paper: #EEEDEA;   /* the wizard's ground */
+  --card: #F8F7F5;    /* raised surfaces */
+  --mist: #E3E2DE;    /* quiet fills */
+  --rule: #CFCDC7;    /* hairlines */
+  --ink: #161616;     /* text, primary button */
+  --soft: #A3A19B;    /* the grey second line of a two-tone title */
+  --quiet: #6B6964;   /* captions, secondary text */
+  /* The eight step colours, mixed from orange, pale blue and teal */
+  --c1: #EFD5BC; --c2: #BCD3E3; --c3: #4C9A91; --c4: #E9DCC4;
+  --c5: #EC7A3C; --c6: #8DB3CE; --c7: #3E7F79; --c8: #B8362E;
+  /* One family, every role */
+  --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* Grid */
+  --cols: 12; --gutter: 24px; --margin: 48px; --max: 1160px;
+}
+* { box-sizing: border-box }
+html { -webkit-font-smoothing: antialiased }
+body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 13px; line-height: 1.5; font-weight: 400 }
+.sheet { position: relative; max-width: var(--max); margin: 0 auto; padding-inline: var(--margin); padding-block: 40px 120px }
+.g { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); column-gap: var(--gutter) }
+.g > * { min-width: 0 }
+
+/* ---------- The type styles ---------- */
+.t-display { font-weight: 200; font-size: 88px; line-height: .92; letter-spacing: -0.045em; margin: 0; text-wrap: balance }
+.t-title { font-weight: 300; font-size: 48px; line-height: 1; letter-spacing: -0.03em; margin: 0; text-wrap: balance }
+.t-headline { font-weight: 400; font-size: 30px; line-height: 1.1; letter-spacing: -0.018em; margin: 0; text-wrap: balance }
+.t-heading { font-weight: 500; font-size: 17px; line-height: 1.25; letter-spacing: -0.005em; margin: 0 }
+.t-lead { font-weight: 300; font-size: 20px; line-height: 1.38; letter-spacing: -0.01em; margin: 0; max-width: 34em }
+.t-body { font-weight: 400; font-size: 13px; line-height: 1.55; margin: 0; max-width: 60ch }
+.t-strong { font-weight: 500 }
+.t-caption { font-weight: 400; font-size: 11px; line-height: 1.45; color: var(--quiet); margin: 0 }
+.t-label { font-weight: 500; font-size: 11px; line-height: 1.2; letter-spacing: .06em; text-transform: uppercase; margin: 0; display: inline-flex; align-items: center; gap: 7px }
+.t-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor }
+.t-numeral { font-weight: 200; font-size: 64px; line-height: .9; letter-spacing: -0.04em; font-variant-numeric: tabular-nums }
+.hi { color: var(--ink) } .lo { color: var(--soft) }
+
+/* The target glyph: in front of every heading in the wizard */
+.target { display: inline-block; width: .62em; height: .62em; margin-right: .32em; vertical-align: .02em; flex: none }
+.target svg { width: 100%; height: 100%; display: block; overflow: visible }
+
+/* Buttons: three, no more */
+.btn { height: 32px; padding: 0 14px; border-radius: 4px; font: 500 13px var(--sans); display: inline-flex; align-items: center; gap: 10px; cursor: pointer; border: 0 }
+.btn-primary { background: var(--ink); color: var(--paper) }
+.btn-primary .arr { display: grid; place-items: center; width: 22px; height: 22px; margin-right: -9px; border-left: 1px solid rgba(255,255,255,.18) }
+.btn-secondary { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink) }
+.btn-quiet { background: none; padding: 0; height: auto; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px }
+.btn:focus-visible { outline: 2px solid var(--c5); outline-offset: 2px }
+
+/* ---------- Page furniture ---------- */
+.top { align-items: center; padding-bottom: 18px; border-bottom: 1px solid var(--rule) }
+.top .right { grid-column: 7 / -1; justify-self: end; display: flex; gap: 20px; align-items: center }
+.top .left { grid-column: 1 / 7 }
+.toggle { font: 500 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; background: none; border: 1px solid var(--ink); border-radius: 4px; height: 26px; padding: 0 10px; cursor: pointer; color: var(--ink) }
+.toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper) }
+
+section { padding-top: 96px }
+.sec-head { align-items: start; padding-bottom: 40px; border-bottom: 1px solid var(--rule); margin-bottom: 40px }
+.sec-head .n { grid-column: 1 / 2 }
+.sec-head .ttl { grid-column: 3 / 8 }
+.sec-head .txt { grid-column: 9 / -1 }
+
+/* Hero */
+.hero { padding-top: 88px; align-items: end }
+.hero .ttl { grid-column: 1 / 7 }
+.hero .txt { grid-column: 8 / -1; display: grid; gap: 22px; padding-bottom: 6px }
+.hero-meta { margin-top: 96px; align-items: start }
+.hero-meta > div { grid-column: span 3; padding-top: 14px; border-top: 1px solid var(--ink); display: grid; gap: 6px }
+
+/* Weights */
+.weights { row-gap: 32px }
+.weights > div { grid-column: span 2; display: grid; gap: 8px }
+.weights .aa { font-size: 64px; line-height: 1; letter-spacing: -0.04em }
+
+/* Hierarchy specimen */
+.spec { align-items: baseline; padding: 26px 0; border-bottom: 1px solid var(--rule) }
+.spec .meta { grid-column: 1 / 4; display: grid; gap: 4px }
+.spec .sample { grid-column: 4 / -1 }
+.spec .meta b { font-weight: 500; font-size: 13px }
+
+/* Grid demos */
+.demo { background: var(--card); border-radius: 6px; padding: 48px; margin-bottom: 24px; position: relative }
+.demo-tag { position: absolute; top: 16px; right: 20px }
+.split { align-items: start; min-height: 300px }
+.split .l { grid-column: 1 / 6 }
+.split .r { grid-column: 7 / -1; display: grid; gap: 28px }
+.split .foot { grid-column: 1 / 5; align-self: end; margin-top: 64px }
+.four { padding: 0; overflow: hidden }
+.four .cell { grid-column: span 3; padding: 28px 24px 32px; display: grid; gap: 52px; align-content: start; border-left: 1px solid var(--mist) }
+.four .cell:first-child { border-left: 0 }
+.four .cell div { display: grid; gap: 6px }
+.index { align-items: start }
+.index .n { grid-column: 1 / 2 }
+.index .ttl { grid-column: 2 / 7 }
+.index .txt { grid-column: 9 / -1 }
+.index .rowlbl { grid-column: 1 / 3; margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--rule) }
+.index .cards { grid-column: 3 / -1; margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 1fr 1fr; gap: var(--gutter) }
+.index .card { background: var(--paper); border-radius: 6px; padding: 18px 20px; min-height: 168px; display: grid; align-content: space-between; gap: 32px }
+.index .card .row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline }
+.index .card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px }
+.index .card li { font-size: 11px; display: flex; gap: 7px; align-items: center }
+.index .card li::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--ink) }
+
+/* Colour: the step cards */
+.tracker { position: relative; background: var(--card); border-radius: 6px; padding: 34px 32px 32px; overflow: hidden }
+.band { position: absolute; inset: 0 0 auto 0; height: 10px; overflow: hidden }
+.band i { position: absolute; inset: 0; transition: transform .55s cubic-bezier(.7,0,.2,1) }
+.steps { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px }
+.step { border: 0; padding: 0; background: var(--paper); text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; grid-template-rows: 86px 92px; border-radius: 3px; overflow: hidden; transition: transform .35s cubic-bezier(.2,.8,.2,1) }
+.step .lbl { padding: 12px 12px 0; font-size: 13px; line-height: 1.25 }
+.step .lbl small { display: block; font-size: 11px; color: var(--quiet); margin-top: 2px }
+.step .chip { position: relative; display: flex; align-items: end; justify-content: flex-end; padding: 0 10px 8px; background: var(--c); color: var(--on, var(--ink)) }
+.step .chip .t-numeral { font-size: 54px }
+.step .chip .side { position: absolute; left: 8px; bottom: 9px; font-size: 11px; writing-mode: vertical-rl; transform: rotate(180deg); opacity: .6; letter-spacing: .04em }
+.step.todo .chip { background: color-mix(in srgb, var(--c) 34%, var(--paper)) }
+.step.todo .chip .t-numeral, .step.todo .lbl { opacity: .55 }
+.step.cur .chip { background: repeating-linear-gradient(-45deg, var(--c) 0 10px, color-mix(in srgb, var(--c) 55%, var(--paper)) 10px 20px); background-size: 28.28px 28.28px; animation: pole 1.4s linear infinite }
+@keyframes pole { to { background-position: 28.28px 0 } }
+.tracker-note { margin-top: 18px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap }
+.neutrals { margin-top: 24px; row-gap: 16px }
+.neutrals > div { grid-column: span 2; display: grid; gap: 6px }
+.neutrals .sw { height: 56px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06) }
+
+/* Space */
+.space { row-gap: 10px; align-items: center }
+.space .k { grid-column: 1 / 3 }
+.space .bar { grid-column: 3 / -1; height: 10px; display: flex; align-items: center }
+.space .bar i { height: 10px; background: var(--c5); display: block; border-radius: 1px }
+.rules { margin-top: 48px }
+.rules > div { grid-column: span 3; padding-top: 14px; border-top: 1px solid var(--ink); display: grid; gap: 6px }
+
+/* Principles */
+.principles > div { grid-column: span 4; display: grid; gap: 14px; align-content: start }
+
+/* The grid overlay */
+.overlay { position: absolute; inset: 0 var(--margin); pointer-events: none; display: none; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); column-gap: var(--gutter); z-index: 10 }
+.overlay i { background: color-mix(in srgb, var(--c5) 12%, transparent); box-shadow: inset 1px 0 0 color-mix(in srgb, var(--c5) 45%, transparent), inset -1px 0 0 color-mix(in srgb, var(--c5) 45%, transparent) }
+body.show-grid .overlay { display: grid }
+
+/* Entrance: the step cards slide in from the right and settle together */
+.steps.enter .step { animation: arrive .9s cubic-bezier(.16,1,.3,1) backwards }
+@keyframes arrive { from { transform: translateX(120px); opacity: 0; filter: blur(6px) } }
+
+/* The diagonal arrow: Müller-Brockmann's "go there", one thin stroke */
+.ne { width: 1em; height: 1em; display: inline-block; vertical-align: -.1em; flex: none }
+.sec-head { position: relative }
+.sec-head .go { position: absolute; right: 0; top: 6px; font-size: 26px; line-height: 1 }
+
+/* ---------- Controls ---------- */
+.ctl { row-gap: 56px }
+.ctl > .grp { grid-column: span 6; display: grid; gap: 18px; align-content: start }
+.ctl > .grp.wide { grid-column: 1 / -1 }
+.ctl .row { display: flex; flex-wrap: wrap; gap: 16px 20px; align-items: center }
+.ctl .state { display: grid; gap: 8px; justify-items: start }
+.btn-primary:hover, .btn-primary.is-hover { background: #2C2C2C }
+.btn-primary:active, .btn-primary.is-pressed { background: #000; transform: translateY(1px) }
+.btn-secondary:hover, .btn-secondary.is-hover { background: var(--mist) }
+.btn[disabled] { opacity: .35; cursor: default }
+.btn-icon { width: 32px; height: 32px; padding: 0; justify-content: center; background: var(--card); box-shadow: inset 0 0 0 1px var(--rule); color: var(--ink) }
+.btn-icon:hover { box-shadow: inset 0 0 0 1px var(--ink) }
+.btn-split { display: inline-flex; height: 34px; border-radius: 4px; overflow: hidden; background: var(--ink); color: var(--paper); font: 500 13px var(--sans); border: 0; padding: 0; cursor: pointer }
+.btn-split span { display: flex; align-items: center; padding: 0 16px; min-width: 150px }
+.btn-split i { display: grid; place-items: center; width: 34px; border-left: 1px solid rgba(255,255,255,.2); font-style: normal }
+
+.slider { display: flex; align-items: center; gap: 12px; max-width: 360px }
+.slider .glyph { font-size: 11px; color: var(--quiet); width: 14px; text-align: center }
+.slider input { flex: 1; appearance: none; -webkit-appearance: none; height: 14px; background: transparent; margin: 0 }
+.slider input::-webkit-slider-runnable-track { height: 1px; background: var(--ink) }
+.slider input::-moz-range-track { height: 1px; background: var(--ink) }
+.slider input::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -6.5px; border-radius: 50%; background: var(--paper); border: 1px solid var(--ink); cursor: grab }
+.slider input::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--paper); border: 1px solid var(--ink); cursor: grab }
+.slider input:focus-visible { outline: 2px solid var(--c5); outline-offset: 4px }
+.slider output { font-size: 11px; color: var(--quiet); min-width: 44px; font-variant-numeric: tabular-nums }
+
+.field2 { display: grid; gap: 6px; max-width: 320px }
+.field2 .cap { font-size: 11px; color: var(--quiet) }
+.field2 input { font: 400 17px var(--sans); color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--rule); padding: 4px 0 7px; outline: none; letter-spacing: -0.005em }
+.field2 input:focus { border-bottom: 1px solid var(--ink); box-shadow: 0 1px 0 var(--ink) }
+
+.dd { position: relative; display: grid; gap: 6px; max-width: 320px }
+.dd .cap { font-size: 11px; color: var(--quiet) }
+.dd-btn { display: flex; justify-content: space-between; align-items: baseline; font: 400 17px var(--sans); color: var(--ink); background: none; border: 0; border-bottom: 1px solid var(--rule); padding: 4px 0 7px; cursor: pointer; text-align: left; letter-spacing: -0.005em }
+.dd-btn:focus-visible { outline: none; border-bottom-color: var(--ink); box-shadow: 0 1px 0 var(--ink) }
+.dd-btn .chev { font-size: 11px; color: var(--quiet); transition: transform .2s }
+.dd.open .chev { transform: rotate(180deg) }
+.dd-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--card); border-radius: 4px; box-shadow: 0 0 0 1px var(--rule), 0 14px 30px -14px rgba(0,0,0,.28); padding: 6px 0; list-style: none; margin: 0; z-index: 5; display: none }
+.dd.open .dd-menu { display: block }
+.dd-menu li { padding: 7px 14px; font-size: 13px; display: flex; justify-content: space-between; cursor: pointer }
+.dd-menu li:hover { background: var(--mist) }
+.dd-menu li[aria-selected="true"]::after { content: "\2713"; font-size: 11px }
+.dd-menu .sep { height: 1px; background: var(--rule); margin: 6px 0; padding: 0 }
+
+.tabs { display: flex; gap: 30px; align-items: flex-end }
+.tabs button { background: none; border: 0; padding: 0 0 6px; font: 400 17px var(--sans); color: var(--quiet); cursor: pointer; border-bottom: 1.5px solid transparent; letter-spacing: -0.005em }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink) }
+.seg { display: inline-flex; box-shadow: inset 0 0 0 1px var(--ink); border-radius: 4px; overflow: hidden }
+.seg button { background: none; border: 0; height: 28px; padding: 0 14px; font: 500 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); cursor: pointer }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper) }
+.check { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer }
+.check input { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1px solid var(--ink); border-radius: 2px; margin: 0; display: grid; place-items: center; cursor: pointer }
+.check input:checked { background: var(--ink) }
+.check input:checked::after { content: ""; width: 6px; height: 3px; border-left: 1.5px solid var(--paper); border-bottom: 1.5px solid var(--paper); transform: rotate(-45deg) translate(1px, -1px) }
+
+/* ---------- Layout elements ---------- */
+.el { margin-bottom: 56px }
+.el > .t-label { margin-bottom: 14px; display: inline-flex }
+.strip { background: var(--card); border-radius: 6px; overflow: hidden }
+.hdr-nav { display: grid; grid-template-columns: 180px 1fr 1fr auto; align-items: center; gap: 24px; height: 64px; padding: 0 28px }
+.wordmark { font-weight: 700; font-size: 19px; letter-spacing: -0.035em }
+.hdr-nav .search { color: var(--soft); font-size: 17px; border-bottom: 1px solid transparent }
+.hdr-nav .tools { display: flex; align-items: center; gap: 16px }
+.avatar { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(var(--c1), var(--c2), var(--c3), var(--c5), var(--c8), var(--c1)) }
+.mini-slider { display: flex; align-items: center; gap: 6px; color: var(--quiet); font-size: 11px }
+.mini-slider .track { position: relative; width: 70px; height: 1px; background: var(--ink) }
+.mini-slider .track i { position: absolute; left: 62%; top: -6px; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--ink); background: var(--card) }
+.hdr-page { padding: 36px 28px 30px; align-items: end }
+.hdr-page .n { grid-column: 1 / 2 } .hdr-page .ttl { grid-column: 2 / 8 } .hdr-page .meta { grid-column: 9 / 12; display: grid; gap: 6px } .hdr-page .go { grid-column: 12 / 13; justify-self: end; font-size: 26px; align-self: start }
+.hdr-wiz { position: relative; padding: 26px 28px 22px; display: flex; justify-content: space-between; align-items: center }
+.hdr-wiz .band10 { position: absolute; inset: 0 0 auto 0; height: 10px; background: var(--c2) }
+.rails { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter) }
+.rail { background: var(--card); border-radius: 6px; padding: 22px 0 18px; display: grid; gap: 4px; align-content: start; min-height: 360px }
+.rail .rh { display: flex; justify-content: space-between; align-items: center; padding: 0 20px 10px }
+.rail .grp-t { padding: 16px 20px 6px; font-size: 11px; color: var(--quiet) }
+.rail .it { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 20px; font-size: 13px; cursor: pointer }
+.rail .it span:last-child { font-size: 11px; color: var(--quiet); font-variant-numeric: tabular-nums }
+.rail .it:hover { background: var(--mist) }
+.rail .it.on { font-weight: 500; background: var(--mist) }
+.rail .it.on span:first-child::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); margin-left: 8px; vertical-align: 2px }
+.ctx { width: 100%; border-collapse: collapse; font-size: 13px }
+.ctx th { font: 400 11px var(--sans); color: var(--quiet); text-align: left; padding: 0 20px 6px; border-bottom: 1px solid var(--rule) }
+.ctx td { padding: 8px 20px; border-bottom: 1px solid var(--mist); font-variant-numeric: tabular-nums }
+.ctx td:last-child, .ctx th:last-child { text-align: right }
+.ctx .sw4 { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 8px } .ctx .sw4 i { width: 8px; height: 14px; border-radius: 1px }
+.hist .it { align-items: center; gap: 10px; justify-content: flex-start }
+.hist .it .dot { width: 22px; height: 22px; border-radius: 3px; flex: none }
+.hist .it .w { display: grid; gap: 1px; flex: 1 } .hist .it .w small { font-size: 11px; color: var(--quiet) }
+.hist .it .tm { font-size: 11px; color: var(--quiet); font-variant-numeric: tabular-nums }
+.ftr { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 48px; padding: 0 28px; gap: 24px; font-size: 13px }
+.ftr .l { display: flex; gap: 10px; align-items: baseline } .ftr .l .sq { width: 10px; height: 10px; border-radius: 2px; background: #2456F5; align-self: center }
+.ftr .c { display: flex; gap: 40px; color: var(--quiet) } .ftr .c b { color: var(--ink); font-weight: 500 }
+.ftr .r { display: flex; justify-content: flex-end; gap: 22px; align-items: center }
+.ftr .ver { font-size: 11px; color: var(--quiet); font-variant-numeric: tabular-nums }
+
+/* ---------- Frames: the wizard and the app drawn to scale on their grids ---------- */
+.frame { position: relative; width: 100%; overflow: hidden; border-radius: 10px; box-shadow: 0 30px 70px -30px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.05) }
+.frame-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: var(--paper); font-size: 13px }
+.cols { position: absolute; top: 0; bottom: 0; display: grid; pointer-events: none; z-index: 20 }
+.cols i { background: color-mix(in srgb, var(--c5) 9%, transparent); box-shadow: inset 1px 0 0 color-mix(in srgb, var(--c5) 40%, transparent), inset -1px 0 0 color-mix(in srgb, var(--c5) 40%, transparent) }
+body.hide-cols .cols { display: none }
+.frame-cap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 14px }
+.colsToggle { margin-left: 10px }
+
+/* wizard frame, 1040 x 620, margins 48, gutter 24 */
+.wz { width: 1040px; height: 620px }
+.wz .band10 { position: absolute; inset: 0 0 auto 0; height: 10px; background: var(--c2) }
+.wz .wtop { position: absolute; left: 48px; right: 48px; top: 34px; display: flex; justify-content: space-between; align-items: center }
+.wz .wgrid { position: absolute; left: 48px; right: 48px; top: 96px; display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 24px }
+.wz .wttl { grid-column: 1 / 6 }
+.wz .wtxt { grid-column: 7 / 13; display: grid; gap: 30px }
+.wz .wtxt .fld { display: grid; gap: 6px; padding-top: 16px; border-top: 1px solid var(--rule) }
+.wz .wtxt .fld .v { display: flex; justify-content: space-between; align-items: baseline; font-size: 17px; letter-spacing: -0.005em }
+.wz .wact { position: absolute; right: 48px; top: 360px; display: flex; gap: 22px; align-items: center }
+.wz .wsteps { position: absolute; left: 48px; right: 48px; bottom: 40px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px }
+.wz .ws { display: grid; grid-template-rows: 58px 66px; border-radius: 3px; overflow: hidden; background: var(--card) }
+.wz .ws .lbl { padding: 9px 10px 0; font-size: 13px }
+.wz .ws .chip { display: flex; justify-content: flex-end; align-items: end; padding: 0 8px 6px; background: var(--c); color: var(--on, var(--ink)) }
+.wz .ws .chip .t-numeral { font-size: 40px }
+.wz .ws.todo .chip { background: color-mix(in srgb, var(--c) 34%, var(--paper)) } .wz .ws.todo .chip .t-numeral, .wz .ws.todo .lbl { opacity: .55 }
+.wz .ws.cur .chip { background: repeating-linear-gradient(-45deg, var(--c) 0 10px, color-mix(in srgb, var(--c) 55%, var(--paper)) 10px 20px); background-size: 28.28px 28.28px; animation: pole 1.4s linear infinite }
+
+/* app frame, 1440 x 900, margins 24, gutter 16 */
+.ap { width: 1440px; height: 900px; display: grid; grid-template-rows: 64px 1fr 48px }
+.ap .hdr-nav { background: var(--card); border-bottom: 1px solid var(--rule); padding: 0 24px; grid-template-columns: 260px 1fr 1fr auto }
+.ap .body { display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 16px; padding: 0 24px; min-height: 0 }
+.ap .r1 { grid-column: 1 / 3; border-right: 1px solid var(--rule); padding: 22px 0 0 }
+.ap .r2 { grid-column: 3 / 5; border-right: 1px solid var(--rule); padding: 22px 0 0 }
+.ap .pg { grid-column: 5 / 11; padding: 34px 8px 0 }
+.ap .hi-r { grid-column: 11 / 13; border-left: 1px solid var(--rule); padding: 22px 0 0 }
+.ap .rail { background: none; border-radius: 0; min-height: 0; padding-top: 0 }
+.ap .rail .rh, .ap .rail .grp-t, .ap .rail .it { padding-left: 0; padding-right: 16px }
+.ap .r2 .ctx th, .ap .r2 .ctx td { padding-left: 0; padding-right: 10px }
+.ap .pg-head { display: grid; grid-template-columns: repeat(6, 1fr); column-gap: 16px; align-items: end; padding-bottom: 22px; border-bottom: 1px solid var(--rule) }
+.ap .pg-head .ttl { grid-column: 1 / 5 } .ap .pg-head .meta { grid-column: 5 / 7; display: grid; gap: 6px; justify-items: end; text-align: right }
+.ap .tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; padding-top: 22px }
+.ap .tile { background: var(--card); border-radius: 3px; overflow: hidden; display: grid; grid-template-rows: 116px auto }
+.ap .tile .c { background: var(--c) }
+.ap .tile .m { padding: 8px 10px 10px; display: grid; gap: 1px } .ap .tile .m small { font-size: 11px; color: var(--quiet) }
+.ap .ftr { background: var(--card); border-top: 1px solid var(--rule); padding: 0 24px }
+
+@media (max-width: 860px) {
+  :root { --margin: 20px; --gutter: 16px }
+  .t-display { font-size: 56px } .t-title { font-size: 36px } .t-numeral { font-size: 48px }
+  .g > * { grid-column: 1 / -1 !important }
+  .hero-meta > div, .weights > div, .neutrals > div, .rules > div, .principles > div { grid-column: span 6 !important }
+  .four .cell { border-left: 0; border-top: 1px solid var(--mist) }
+  .index .cards { grid-template-columns: 1fr }
+  .demo { padding: 28px }
+  .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px }
+  .ctl > .grp { grid-column: 1 / -1 !important }
+  .rails { grid-template-columns: 1fr }
+  .hdr-nav { grid-template-columns: auto 1fr; height: auto; padding: 16px 20px; row-gap: 12px }
+  .hdr-nav .search, .hdr-nav .tools { display: none }
+  .strip .tabs { gap: 16px; flex-wrap: wrap }
+  .ftr { grid-template-columns: 1fr; height: auto; padding: 14px 20px; gap: 8px }
+  .hdr-page .go { display: none }
+  .sec-head .txt, .hero .txt, .split .r { margin-top: 20px }
+  section { padding-top: 64px }
+}
+@media (max-width: 480px) {
+  .hero-meta > div, .weights > div, .neutrals > div, .rules > div, .principles > div { grid-column: 1 / -1 !important }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important } }
+</style>
+
+<div class="sheet" id="sheet">
+  <div class="overlay" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+  <header class="g top">
+    <div class="left"><span class="t-label">Colorgain Style Sheet</span></div>
+    <div class="right"><span class="t-caption">01 &mdash; Type And Grid</span><button class="toggle" id="gridToggle" aria-pressed="false">Show Grid</button></div>
+  </header>
+
+  <!-- Hero -->
+  <div class="g hero">
+    <h1 class="ttl t-display"><span class="hi">Type And</span><br><span class="lo">Grid</span></h1>
+    <div class="txt">
+      <p class="t-lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+      <p class="t-body">Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore.</p>
+    </div>
+  </div>
+  <div class="g hero-meta">
+    <div><span class="t-label">Family</span><span class="t-body">Helvetica Neue, on every Mac</span></div>
+    <div><span class="t-label">Grid</span><span class="t-body">12 columns, 24 gutters, 48 margins</span></div>
+    <div><span class="t-label">Smallest Text</span><span class="t-body">11 points, never below</span></div>
+    <div><span class="t-label">Look</span><span class="t-body">One light look, no dark version</span></div>
+  </div>
+
+  <!-- 01 Typeface -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">1</div>
+      <h2 class="ttl t-title"><span class="hi">Helvetica Neue</span><br><span class="lo">One Family</span></h2>
+      <p class="txt t-body">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer posuere erat a ante venenatis dapibus. Every role is a weight and a size of the one family, so nothing on a screen changes voice.</p>
+    </div>
+    <div class="g weights">
+      <div><span class="aa" style="font-weight:100">Aa</span><span class="t-caption">UltraLight 100</span></div>
+      <div><span class="aa" style="font-weight:200">Aa</span><span class="t-caption">Thin 200 &middot; numbers, display</span></div>
+      <div><span class="aa" style="font-weight:300">Aa</span><span class="t-caption">Light 300 &middot; titles, lead</span></div>
+      <div><span class="aa" style="font-weight:400">Aa</span><span class="t-caption">Regular 400 &middot; body, headline</span></div>
+      <div><span class="aa" style="font-weight:500">Aa</span><span class="t-caption">Medium 500 &middot; heading, label</span></div>
+      <div><span class="aa" style="font-weight:700">Aa</span><span class="t-caption">Bold 700 &middot; held back</span></div>
+    </div>
+  </section>
+
+  <!-- 02 Hierarchy -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">2</div>
+      <h2 class="ttl t-title"><span class="hi">Hierarchy</span><br><span class="lo">Ten Styles</span></h2>
+      <p class="txt t-body">Big and light over small and dense. Size and weight carry the order; colour is kept for the work. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+    </div>
+
+    <div class="g spec"><div class="meta"><b>Display</b><span class="t-caption">Thin 200 &middot; 88 / 0.92 &middot; &minus;4.5%</span></div>
+      <div class="sample t-display"><span class="hi">Colorgain</span></div></div>
+    <div class="g spec"><div class="meta"><b>Title</b><span class="t-caption">Light 300 &middot; 48 / 1.0 &middot; &minus;3% &middot; two-tone</span></div>
+      <div class="sample t-title"><span class="target"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="10" r="2.2" fill="currentColor"/><path d="M10 0v20M0 10h20" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="hi">Where Your Data</span> <span class="lo">Lives</span></div></div>
+    <div class="g spec"><div class="meta"><b>Headline</b><span class="t-caption">Regular 400 &middot; 30 / 1.1 &middot; &minus;1.8%</span></div>
+      <div class="sample t-headline">Bring in what you already have</div></div>
+    <div class="g spec"><div class="meta"><b>Heading</b><span class="t-caption">Medium 500 &middot; 17 / 1.25 &middot; with the target</span></div>
+      <div class="sample t-heading" style="display:flex;align-items:center"><span class="target"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="2.2" fill="currentColor"/><path d="M10 0v20M0 10h20" stroke="currentColor" stroke-width="1.6"/></svg></span>I have a catalogue</div></div>
+    <div class="g spec"><div class="meta"><b>Lead</b><span class="t-caption">Light 300 &middot; 20 / 1.38 &middot; &minus;1%</span></div>
+      <p class="sample t-lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p></div>
+    <div class="g spec"><div class="meta"><b>Body</b><span class="t-caption">Regular 400 &middot; 13 / 1.55 &middot; 60 characters wide</span></div>
+      <p class="sample t-body">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla vitae elit libero, a pharetra augue. <span class="t-strong">Body Strong is Medium 500,</span> used for the few words that must not be missed. Maecenas faucibus mollis interdum.</p></div>
+    <div class="g spec"><div class="meta"><b>Caption</b><span class="t-caption">Regular 400 &middot; 11 / 1.45 &middot; quiet grey</span></div>
+      <p class="sample t-caption">~/Library/Application Support/Colorgain &middot; set in the same family, never a monospace</p></div>
+    <div class="g spec"><div class="meta"><b>Label</b><span class="t-caption">Medium 500 &middot; 11 &middot; capitals +6% &middot; dot</span></div>
+      <div class="sample"><span class="t-label">Open Positions</span></div></div>
+    <div class="g spec"><div class="meta"><b>Numeral</b><span class="t-caption">Thin 200 &middot; 64 / 0.9 &middot; tabular, right-aligned</span></div>
+      <div class="sample t-numeral">02 &nbsp;16 &nbsp;21</div></div>
+    <div class="g spec"><div class="meta"><b>Actions</b><span class="t-caption">Medium 500 &middot; 13 &middot; three kinds only</span></div>
+      <div class="sample" style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary" id="demoPrimary">Continue <span class="arr">&rarr;</span></button>
+        <button class="btn btn-secondary" id="demoSecondary">Choose File&hellip;</button>
+        <button class="btn btn-quiet" id="demoQuiet">Change</button>
+      </div></div>
+  </section>
+
+  <!-- 03 Grid -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">3</div>
+      <h2 class="ttl t-title"><span class="hi">The Grid</span><br><span class="lo">Three Layouts</span></h2>
+      <p class="txt t-body">Twelve columns. Words take the columns their weight deserves and the rest is left empty on purpose. Press Show Grid at the top to see every edge land on a column.</p>
+    </div>
+
+    <div class="demo"><span class="demo-tag t-caption">A &middot; Split</span>
+      <div class="g split">
+        <h3 class="l t-title"><span class="hi">Imagery</span><br><span class="lo">Principles</span></h3>
+        <div class="r">
+          <p class="t-lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+          <p class="t-body">Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+          <div><button class="btn btn-primary" id="splitGo">Continue <span class="arr">&rarr;</span></button></div>
+        </div>
+        <p class="foot t-caption">Designing ideas into presence,<br>from vision to visible.</p>
+      </div>
+    </div>
+
+    <div class="demo four"><span class="demo-tag t-caption">B &middot; Four Up</span>
+      <div class="g">
+        <div class="cell"><span class="t-caption">001</span><div><span class="t-heading">Integrity</span><span class="t-body">Lorem ipsum dolor sit amet, consectetur.</span></div></div>
+        <div class="cell"><span class="t-caption">002</span><div><span class="t-heading">Clarity</span><span class="t-body">Sed do eiusmod tempor incididunt ut.</span></div></div>
+        <div class="cell"><span class="t-caption">003</span><div><span class="t-heading">Balance</span><span class="t-body">Ut enim ad minim veniam, quis nostrud.</span></div></div>
+        <div class="cell"><span class="t-caption">004</span><div><span class="t-heading">Precision</span><span class="t-body">Duis aute irure dolor in reprehenderit.</span></div></div>
+      </div>
+    </div>
+
+    <div class="demo"><span class="demo-tag t-caption">C &middot; Index</span>
+      <div class="g index">
+        <div class="n t-title">3</div>
+        <h3 class="ttl t-title"><span class="hi">Catalogues</span></h3>
+        <p class="txt t-caption" style="color:var(--quiet)">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aenean lacinia bibendum nulla sed consectetur. Cras mattis consectetur purus sit amet fermentum.</p>
+        <div class="rowlbl"><span class="t-label">On This Mac</span></div>
+        <div class="cards">
+          <div class="card"><div class="row"><span class="t-headline" style="font-size:22px">Studio</span><span class="t-caption">~/Documents</span></div>
+            <ul><li>14 projects</li><li>212 palettes</li><li>Synced</li></ul></div>
+          <div class="card"><div class="row"><span class="t-headline" style="font-size:22px">Archive</span><span class="t-caption">External drive</span></div>
+            <ul><li>63 projects</li><li>1,048 palettes</li><li>Local only</li></ul></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 Colour -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">4</div>
+      <h2 class="ttl t-title"><span class="hi">Colour</span><br><span class="lo">Eight Steps</span></h2>
+      <p class="txt t-body">Mixed from orange, pale blue and teal, kept muted so they sit together. Finished steps are solid, the step you are on carries the moving stripes, the rest wait faded. Click any step.</p>
+    </div>
+    <div class="tracker">
+      <div class="band" id="band"></div>
+      <div class="steps enter" id="steps"></div>
+      <div class="tracker-note"><span class="t-caption">The 10-point band along the top takes the step's colour and slides across when the step changes.</span><button class="btn btn-quiet" id="replay">Replay Entrance</button></div>
+    </div>
+    <div class="g neutrals">
+      <div><span class="sw" style="background:var(--paper)"></span><span class="t-strong">Paper</span><span class="t-caption">#EEEDEA &middot; the ground</span></div>
+      <div><span class="sw" style="background:var(--card)"></span><span class="t-strong">Card</span><span class="t-caption">#F8F7F5 &middot; raised</span></div>
+      <div><span class="sw" style="background:var(--mist)"></span><span class="t-strong">Mist</span><span class="t-caption">#E3E2DE &middot; quiet fill</span></div>
+      <div><span class="sw" style="background:var(--rule)"></span><span class="t-strong">Rule</span><span class="t-caption">#CFCDC7 &middot; hairlines</span></div>
+      <div><span class="sw" style="background:var(--soft)"></span><span class="t-strong">Soft</span><span class="t-caption">#A3A19B &middot; second line</span></div>
+      <div><span class="sw" style="background:var(--ink)"></span><span class="t-strong">Ink</span><span class="t-caption">#161616 &middot; text</span></div>
+    </div>
+  </section>
+
+  <!-- 05 Space -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">5</div>
+      <h2 class="ttl t-title"><span class="hi">Space</span><br><span class="lo">On A Four-Point Beat</span></h2>
+      <p class="txt t-body">Every gap is a step of this scale. Small steps inside a group, big steps between groups, and the biggest left empty so the eye has somewhere to rest.</p>
+    </div>
+    <div class="g space" id="space"></div>
+    <div class="g rules">
+      <div><span class="t-label">Margins</span><span class="t-body">48 on every side of the wizard</span></div>
+      <div><span class="t-label">Gutters</span><span class="t-body">24 between columns</span></div>
+      <div><span class="t-label">Within A Group</span><span class="t-body">8 to 16</span></div>
+      <div><span class="t-label">Between Groups</span><span class="t-body">48 to 96</span></div>
+    </div>
+  </section>
+
+  <!-- 06 Principles -->
+  <section>
+    <div class="g sec-head"><span class="go" aria-hidden="true"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      <div class="n t-title">6</div>
+      <h2 class="ttl t-title"><span class="hi">Three Rules</span><br><span class="lo">For Every Screen</span></h2>
+      <p class="txt t-body">The tests a layout has to pass before it ships.</p>
+    </div>
+    <div class="g principles">
+      <div><span class="t-numeral">01</span><span class="t-heading">Balance</span><p class="t-body">Weigh the two halves of a screen against each other. A big light title on one side earns a short dense paragraph on the other, never two heavy things side by side.</p></div>
+      <div><span class="t-numeral">02</span><span class="t-heading">The Right Word Count</span><p class="t-body">Write to the space. If a paragraph runs past its columns, cut words before moving a margin. Fewer words, set larger, read faster.</p></div>
+      <div><span class="t-numeral">03</span><span class="t-heading">Negative Space</span><p class="t-body">Empty columns are part of the design. They frame the work and tell the eye where to go next. Fill a gap only when the screen is worse without it.</p></div>
+    </div>
+  </section>
+  <!-- 07 Controls -->
+  <section>
+    <div class="g sec-head">
+      <div class="n t-title">7</div>
+      <h2 class="ttl t-title"><span class="hi">Controls</span><br><span class="lo">Owned, Not Borrowed</span></h2>
+      <p class="txt t-body">None of these are macOS controls. The app draws every one in the same family and greys, so a screen reads as one piece. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+    </div>
+    <div class="g ctl">
+      <div class="grp wide"><span class="t-label">Buttons</span>
+        <div class="row">
+          <div class="state"><button class="btn btn-primary" id="b1">Continue <span class="arr">&rarr;</span></button><span class="t-caption">Primary &middot; rest</span></div>
+          <div class="state"><button class="btn btn-primary is-hover" id="b2">Continue <span class="arr">&rarr;</span></button><span class="t-caption">Hover</span></div>
+          <div class="state"><button class="btn btn-primary is-pressed" id="b3">Continue <span class="arr">&rarr;</span></button><span class="t-caption">Pressed</span></div>
+          <div class="state"><button class="btn btn-primary" id="b4" disabled>Continue <span class="arr">&rarr;</span></button><span class="t-caption">Disabled</span></div>
+          <div class="state"><button class="btn btn-secondary" id="b5">Choose File&hellip;</button><span class="t-caption">Secondary</span></div>
+          <div class="state"><button class="btn btn-quiet" id="b6">Change</button><span class="t-caption">Quiet</span></div>
+          <div class="state"><button class="btn btn-icon" id="b7" aria-label="Open"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button><span class="t-caption">Open</span></div>
+          <div class="state"><button class="btn-split" id="b8"><span>Discover More</span><i>&rarr;</i></button><span class="t-caption">Lead &middot; one per screen</span></div>
+        </div>
+      </div>
+      <div class="grp"><span class="t-label">Slider</span>
+        <div class="slider"><span class="glyph">&#9675;</span><input id="sl1" type="range" min="84" max="140" value="108" aria-label="Tile size"><span class="glyph">&#9788;</span><output id="sl1o">108 pt</output></div>
+        <p class="t-caption">A hairline track and a hollow knob, a small glyph at each end saying which way is more.</p>
+      </div>
+      <div class="grp"><span class="t-label">Dropdown</span>
+        <div class="dd" id="dd1"><span class="cap">The Heading</span>
+          <button class="dd-btn" id="dd1b" aria-haspopup="listbox" aria-expanded="false"><span id="dd1v">Projects</span><span class="chev">&#9662;</span></button>
+          <ul class="dd-menu" role="listbox" id="dd1m">
+            <li role="option" aria-selected="false">Clients</li><li role="option" aria-selected="true">Projects</li><li role="option" aria-selected="false">Brands</li><li role="option" aria-selected="false">Campaigns</li><li class="sep" role="separator"></li><li role="option" aria-selected="false">Your Own Word&hellip;</li>
+          </ul>
+        </div>
+        <p class="t-caption">The label sits above, the value on the same baseline as every other field.</p>
+      </div>
+      <div class="grp"><span class="t-label">Text Field</span>
+        <label class="field2"><span class="cap">Catalogue Name</span><input id="tf1" type="text" value="Studio"></label>
+        <p class="t-caption">An underline, no box. It darkens while you type.</p>
+      </div>
+      <div class="grp"><span class="t-label">Tabs, Choices, Checks</span>
+        <div class="tabs" role="tablist" id="tabs1"><button role="tab" aria-selected="true">Library</button><button role="tab" aria-selected="false">Palettes</button><button role="tab" aria-selected="false">Lab</button><button role="tab" aria-selected="false">Projects</button></div>
+        <div class="row"><div class="seg" id="seg1"><button aria-pressed="true">Grid</button><button aria-pressed="false">List</button></div>
+          <label class="check"><input id="ck1" type="checkbox" checked> Show names</label></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 Layout Elements -->
+  <section>
+    <div class="g sec-head">
+      <div class="n t-title">8</div>
+      <h2 class="ttl t-title"><span class="hi">Layout Elements</span><br><span class="lo">Headers, Rails, Footer</span></h2>
+      <p class="txt t-body">The furniture every screen sits in. Plain cards on the paper, hairlines for edges, the arrow for anything that opens. Lorem ipsum dolor sit amet.</p>
+    </div>
+
+    <div class="el"><span class="t-label">Header &middot; The App</span>
+      <div class="strip hdr-nav"><span class="wordmark">colorgain</span>
+        <div class="tabs"><button aria-selected="true">Library</button><button aria-selected="false">Palettes</button><button aria-selected="false">Lab</button><button aria-selected="false">Projects</button></div>
+        <span class="search">Search</span>
+        <span class="tools"><span class="mini-slider">&#9675;<span class="track"><i></i></span>&#9788;</span><span class="avatar"></span></span></div>
+    </div>
+    <div class="el"><span class="t-label">Header &middot; A Page</span>
+      <div class="strip g hdr-page"><div class="n t-title">2</div><h3 class="ttl t-title"><span class="hi">Harbour Coffee</span><br><span class="lo">Brand Palette</span></h3>
+        <div class="meta"><span class="t-caption">12 colours &middot; Coated FOGRA39</span><span class="t-caption">Changed today, 14:20</span></div>
+        <span class="go"><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></span></div>
+    </div>
+    <div class="el"><span class="t-label">Header &middot; The Wizard</span>
+      <div class="strip hdr-wiz"><span class="band10"></span><span class="t-label">Step 02 Of 08</span><button class="btn btn-quiet" id="skipW">Skip Setup</button></div>
+    </div>
+
+    <div class="el"><span class="t-label">Rails</span>
+      <div class="rails">
+        <div class="rail"><div class="rh"><span class="t-heading">Library</span><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <div class="grp-t">Collections</div>
+          <div class="it on"><span>Clients</span><span>14</span></div><div class="it"><span>Brands</span><span>6</span></div><div class="it"><span>Studio</span><span>3</span></div>
+          <div class="grp-t">Palettes</div>
+          <div class="it"><span>Favourites</span><span>28</span></div><div class="it"><span>Recently Picked</span><span>96</span></div><div class="it"><span>Typography</span><span>11</span></div>
+        </div>
+        <div class="rail"><div class="rh"><span class="t-heading">Harbour Coffee</span><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <table class="ctx"><thead><tr><th>Palette</th><th>Colours</th></tr></thead><tbody>
+            <tr><td><span class="sw4"><i style="background:#2456F5"></i><i style="background:#F3C3A0"></i><i style="background:#161616"></i></span>Brand</td><td>12</td></tr>
+            <tr><td><span class="sw4"><i style="background:#4C9A91"></i><i style="background:#E9DCC4"></i><i style="background:#C8553A"></i></span>Packaging</td><td>8</td></tr>
+            <tr><td><span class="sw4"><i style="background:#8DB3CE"></i><i style="background:#EC7A3C"></i><i style="background:#3E7F79"></i></span>Web</td><td>16</td></tr>
+            <tr><td><span class="sw4"><i style="background:#BCD3E3"></i><i style="background:#A3A19B"></i><i style="background:#EEEDEA"></i></span>Print</td><td>9</td></tr>
+          </tbody></table>
+        </div>
+        <div class="rail hist"><div class="rh"><span class="t-heading">History</span><svg class="ne" viewBox="0 0 16 16"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <div class="grp-t">Today</div>
+          <div class="it"><span class="dot" style="background:#2456F5"></span><span class="w">Blue Ribbon<small>Picked</small></span><span class="tm">14:20</span></div>
+          <div class="it"><span class="dot" style="background:#EC7A3C"></span><span class="w">Orange<small>Added to Brand</small></span><span class="tm">13:05</span></div>
+          <div class="it"><span class="dot" style="background:#4C9A91"></span><span class="w">Teal<small>Renamed</small></span><span class="tm">11:42</span></div>
+          <div class="grp-t">Yesterday</div>
+          <div class="it"><span class="dot" style="background:#C8553A"></span><span class="w">Ember<small>Sampled</small></span><span class="tm">17:58</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="el"><span class="t-label">Footer</span>
+      <div class="strip ftr"><span class="l"><span class="sq"></span><span>Blue Ribbon</span><span class="t-caption">#2456F5</span></span>
+        <span class="c"><span>Pick</span><b>Sample</b><span>Compare</span></span>
+        <span class="r"><span class="mini-slider">&#9675;<span class="track"><i></i></span>&#9788;</span><span class="ver">Release v3.0 &nbsp;39ddca5</span></span></div>
+    </div>
+  </section>
+
+  <!-- 09 The Wizard On The Grid -->
+  <section>
+    <div class="g sec-head">
+      <div class="n t-title">9</div>
+      <h2 class="ttl t-title"><span class="hi">The Wizard</span><br><span class="lo">On The Grid</span></h2>
+      <p class="txt t-body">Borderless, 1040 by 620. No title bar, no button bar: the band along the top, the words above, the steps settling together below. Margins 48, gutters 24, twelve columns.</p>
+    </div>
+    <div class="frame" data-w="1040" data-h="620"><div class="frame-inner wz">
+      <span class="band10"></span>
+      <div class="wtop"><span class="t-label">Step 02 Of 08</span><button class="btn btn-quiet" tabindex="-1">Skip Setup</button></div>
+      <div class="wgrid">
+        <h3 class="wttl t-title" style="font-size:44px"><span class="target"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="10" r="2.2" fill="currentColor"/><path d="M10 0v20M0 10h20" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="hi">Where Your Data</span><br><span class="lo">Lives</span></h3>
+        <div class="wtxt"><p class="t-lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Application Support suits most people.</p>
+          <div class="fld"><span class="t-caption">App Data Folder</span><span class="v"><span>~/Library/Application Support/Colorgain</span><button class="btn btn-quiet" tabindex="-1">Change</button></span></div></div>
+      </div>
+      <div class="wact"><button class="btn btn-quiet" tabindex="-1">Back</button><button class="btn btn-primary" tabindex="-1">Continue <span class="arr">&rarr;</span></button></div>
+      <div class="wsteps" id="wsteps"></div>
+      <div class="cols" style="left:48px;right:48px;grid-template-columns:repeat(12,1fr);column-gap:24px"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div></div>
+    <div class="frame-cap"><span class="t-caption">Step 2 shown. The title takes columns 1 to 5, the words and the field 7 to 12, the steps all twelve.</span><button class="toggle" id="colsToggle" aria-pressed="true">Columns On</button></div>
+  </section>
+
+  <!-- 10 The App On The Grid -->
+  <section>
+    <div class="g sec-head">
+      <div class="n t-title">10</div>
+      <h2 class="ttl t-title"><span class="hi">The App</span><br><span class="lo">On The Grid</span></h2>
+      <p class="txt t-body">1440 by 900. Header, the library rail, the context rail, the page and the history rail, then the footer. Margins 24, gutters 16, twelve columns: two, two, six, two.</p>
+    </div>
+    <div class="frame" data-w="1440" data-h="900"><div class="frame-inner ap">
+      <div class="hdr-nav"><span class="wordmark">colorgain</span>
+        <div class="tabs"><button tabindex="-1" aria-selected="true">Library</button><button tabindex="-1" aria-selected="false">Palettes</button><button tabindex="-1" aria-selected="false">Lab</button><button tabindex="-1" aria-selected="false">Projects</button></div>
+        <span class="search">Search</span><span class="tools"><span class="mini-slider">&#9675;<span class="track"><i></i></span>&#9788;</span><span class="avatar"></span></span></div>
+      <div class="body">
+        <div class="r1 rail"><div class="rh"><span class="t-heading">Library</span></div><div class="grp-t">Collections</div>
+          <div class="it on"><span>Clients</span><span>14</span></div><div class="it"><span>Brands</span><span>6</span></div><div class="it"><span>Studio</span><span>3</span></div>
+          <div class="grp-t">Palettes</div><div class="it"><span>Favourites</span><span>28</span></div><div class="it"><span>Recently Picked</span><span>96</span></div><div class="it"><span>Typography</span><span>11</span></div></div>
+        <div class="r2 rail"><div class="rh"><span class="t-heading">Harbour Coffee</span></div>
+          <table class="ctx"><thead><tr><th>Palette</th><th>Colours</th></tr></thead><tbody>
+            <tr><td>Brand</td><td>12</td></tr><tr><td>Packaging</td><td>8</td></tr><tr><td>Web</td><td>16</td></tr><tr><td>Print</td><td>9</td></tr></tbody></table></div>
+        <div class="pg">
+          <div class="pg-head"><h3 class="ttl t-title"><span class="hi">Harbour Coffee</span><br><span class="lo">Brand Palette</span></h3>
+            <div class="meta"><svg class="ne" viewBox="0 0 16 16" style="font-size:24px"><path d="M3.5 12.5 12.5 3.5M5.5 3.5h7v7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg><span class="t-caption">12 colours &middot; Coated FOGRA39</span></div></div>
+          <div class="tiles" id="tiles"></div>
+        </div>
+        <div class="hi-r rail hist"><div class="rh"><span class="t-heading">History</span></div><div class="grp-t">Today</div>
+          <div class="it"><span class="dot" style="background:#2456F5"></span><span class="w">Blue Ribbon<small>Picked</small></span><span class="tm">14:20</span></div>
+          <div class="it"><span class="dot" style="background:#EC7A3C"></span><span class="w">Orange<small>Added</small></span><span class="tm">13:05</span></div>
+          <div class="it"><span class="dot" style="background:#4C9A91"></span><span class="w">Teal<small>Renamed</small></span><span class="tm">11:42</span></div></div>
+      </div>
+      <div class="ftr"><span class="l"><span class="sq"></span><span>Blue Ribbon</span><span class="t-caption">#2456F5</span></span><span class="c"><span>Pick</span><b>Sample</b><span>Compare</span></span><span class="r"><span class="ver">Release v3.0 &nbsp;39ddca5</span></span></div>
+      <div class="cols" style="left:24px;right:24px;grid-template-columns:repeat(12,1fr);column-gap:16px"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div></div>
+    <div class="frame-cap"><span class="t-caption">The library rail and the context rail take two columns each, the page six, the history rail two. Rails hide and the page takes their columns.</span></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  // Grid overlay
+  const t = document.getElementById("gridToggle");
+  t.addEventListener("click", () => {
+    const on = document.body.classList.toggle("show-grid");
+    t.setAttribute("aria-pressed", String(on));
+    t.textContent = on ? "Hide Grid" : "Show Grid";
+  });
+  // The demo buttons do nothing but show they are buttons
+  ["demoPrimary","demoSecondary","demoQuiet","splitGo"].forEach(id => document.getElementById(id).addEventListener("click", e => e.preventDefault()));
+
+  // The eight step cards
+  const STEPS = [
+    ["Welcome", "Start here", "--c1", "#161616"], ["App Data", "Where it lives", "--c2", "#161616"],
+    ["Bring In", "What you have", "--c3", "#F8F7F5"], ["Catalogue", "Name and place", "--c4", "#161616"],
+    ["Schema", "What things are called", "--c5", "#161616"], ["First One", "Your first project", "--c6", "#161616"],
+    ["Ready", "Once more, then create", "--c7", "#F8F7F5"], ["The Halo", "Learn the dial", "--c8", "#F8F7F5"]
+  ];
+  const wrap = document.getElementById("steps"), band = document.getElementById("band");
+  let cur = 2;
+  function paint(prev) {
+    wrap.innerHTML = STEPS.map((s, i) => {
+      const st = i < cur ? "done" : i === cur ? "cur" : "todo";
+      return `<button class="step ${st}" style="--c:var(${s[2]});--on:${s[3]};animation-delay:${i * 70}ms" data-i="${i}" aria-label="Step ${i + 1}, ${s[0]}">
+        <span class="lbl">${s[0]}<small>${s[1]}</small></span>
+        <span class="chip"><span class="side">STEP</span><span class="t-numeral">${String(i + 1).padStart(2, "0")}</span></span></button>`;
+    }).join("");
+    // The band: the new colour slides in and pushes the old one off, the way the step moved
+    const dir = prev == null ? 1 : (cur > prev ? 1 : -1);
+    const old = band.querySelector("i");
+    const nu = document.createElement("i");
+    nu.style.background = `var(${STEPS[cur][2]})`;
+    nu.style.transform = `translateX(${-100 * dir}%)`;
+    band.appendChild(nu);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      nu.style.transform = "translateX(0)";
+      if (old) { old.style.transform = `translateX(${100 * dir}%)`; setTimeout(() => old.remove(), 600); }
+    }));
+  }
+  wrap.addEventListener("click", e => {
+    const b = e.target.closest(".step"); if (!b) return;
+    const prev = cur; cur = +b.dataset.i;
+    wrap.classList.remove("enter");
+    if (prev !== cur) paint(prev);
+  });
+  document.getElementById("replay").addEventListener("click", () => {
+    wrap.classList.remove("enter"); void wrap.offsetWidth; wrap.classList.add("enter");
+  });
+  paint(null);
+
+  // The space scale
+  document.getElementById("space").innerHTML = [4, 8, 12, 16, 24, 32, 48, 64, 96].map(n =>
+    `<span class="k t-caption">${n} &middot; ${n / 4} beat${n === 4 ? "" : "s"}</span><span class="bar"><i style="width:${n * 3}px;max-width:100%"></i></span>`).join("");
+
+  // ---- Controls
+  ["b1","b2","b3","b5","b6","b7","b8","skipW"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("click", e => e.preventDefault()); });
+  const sl = document.getElementById("sl1"), slo = document.getElementById("sl1o");
+  sl.addEventListener("input", () => { slo.textContent = sl.value + " pt"; });
+  const dd = document.getElementById("dd1"), ddb = document.getElementById("dd1b"), ddm = document.getElementById("dd1m"), ddv = document.getElementById("dd1v");
+  ddb.addEventListener("click", e => { e.stopPropagation(); const open = dd.classList.toggle("open"); ddb.setAttribute("aria-expanded", String(open)); });
+  ddm.addEventListener("click", e => {
+    const li = e.target.closest('li[role="option"]'); if (!li) return;
+    ddm.querySelectorAll('li[role="option"]').forEach(x => x.setAttribute("aria-selected", String(x === li)));
+    ddv.textContent = li.textContent.replace("…", ""); dd.classList.remove("open"); ddb.setAttribute("aria-expanded", "false");
+  });
+  document.addEventListener("click", () => { dd.classList.remove("open"); ddb.setAttribute("aria-expanded", "false"); });
+  document.querySelectorAll(".tabs").forEach(t => t.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || b.tabIndex === -1) return;
+    t.querySelectorAll("button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+  }));
+  const seg = document.getElementById("seg1");
+  seg.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); });
+
+  // ---- The wizard frame's steps and the app frame's tiles
+  document.getElementById("wsteps").innerHTML = STEPS.map((s, i) => {
+    const st = i < 1 ? "done" : i === 1 ? "cur" : "todo";
+    return `<div class="ws ${st}" style="--c:var(${s[2]});--on:${s[3]}"><span class="lbl">${s[0]}</span><span class="chip"><span class="t-numeral">${String(i + 1).padStart(2, "0")}</span></span></div>`;
+  }).join("");
+  const TILES = [["Blue Ribbon","#2456F5"],["Apricot","#EFD5BC"],["Harbour Teal","#4C9A91"],["Sand","#E9DCC4"],["Orange","#EC7A3C"],["Sky","#8DB3CE"],["Deep Teal","#3E7F79"],["Signal Red","#B8362E"],["Ink","#161616"],["Pale Blue","#BCD3E3"],["Stone","#A3A19B"],["Paper","#EEEDEA"]];
+  document.getElementById("tiles").innerHTML = TILES.map(t => `<div class="tile" style="--c:${t[1]}"><span class="c"></span><span class="m">${t[0]}<small>${t[1]}</small></span></div>`).join("");
+
+  // ---- Frames: drawn at their real size, scaled to the width they are given
+  const frames = [...document.querySelectorAll(".frame")];
+  function fit() {
+    frames.forEach(f => {
+      const w = +f.dataset.w, h = +f.dataset.h, inner = f.querySelector(".frame-inner");
+      const s = f.clientWidth / w;
+      inner.style.transform = `scale(${s})`;
+      f.style.height = (h * s) + "px";
+    });
+  }
+  fit();
+  window.addEventListener("resize", fit);
+  const ct = document.getElementById("colsToggle");
+  ct.addEventListener("click", () => {
+    const off = document.body.classList.toggle("hide-cols");
+    ct.setAttribute("aria-pressed", String(!off));
+    ct.textContent = off ? "Columns Off" : "Columns On";
+  });
+})();
+</script>
+
+</body></html>

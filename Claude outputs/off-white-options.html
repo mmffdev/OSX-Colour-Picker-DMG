@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Off-White Options</title>
+<style>
+  body { margin: 0; padding: 24px 16px; background: #808080; font: 13px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #000; }
+  h1 { font-size: 20px; color: #fff; margin: 0 0 4px; }
+  p.lead { color: #fff; margin: 0 0 20px; max-width: 760px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .win { border-radius: 10px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  .bar { height: 28px; border-bottom: 1px solid rgba(0,0,0,.12); display: flex; align-items: center; padding: 0 10px; gap: 6px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #c8c8c8; }
+  .body { display: flex; min-height: 230px; }
+  .rail { width: 90px; border-right: 1px solid rgba(0,0,0,.10); padding: 10px 8px; }
+  .rail div { font-size: 11px; padding: 3px 4px; border-radius: 4px; }
+  .rail .sel { background: rgba(0,0,0,.08); }
+  .page { flex: 1; padding: 12px; }
+  .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+  .btn { display: inline-block; font-size: 11px; padding: 3px 8px; border-radius: 5px; background: rgba(0,0,0,.06); margin-right: 4px; }
+  .sw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .sw div { aspect-ratio: 1; border-radius: 6px; }
+  .label { padding: 10px 12px; font-weight: 600; background: #fff; border-top: 1px solid #ddd; }
+  .label span { font-weight: 400; color: #444; display: block; font-size: 11px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>Light Background Under Match The Mac</h1>
+<p class="lead">The same window on four neutral backgrounds. Pastels and pale yellows are where the difference shows most. Browsers don't colour-manage the way the app does, so treat this as a guide only.</p>
+<div class="grid" id="grid"></div>
+<script>
+  const options = [
+    ["#FFFFFF", "Today", "Pure white. Pale colours lose their edges."],
+    ["#F7F7F7", "Barely off", "Takes the glare off, still reads as white."],
+    ["#F2F2F2", "Recommended in the handover", "Clearly off-white, still neutral. Pale tints hold their edge."],
+    ["#ECECEC", "The Mac's own window grey", "About what macOS uses for light windows. Starting to read as grey."]
+  ];
+  const swatches = ["#FFF8E7", "#FDE2E4", "#E2ECE9", "#DFE7FD", "#F4D35E", "#EE964B", "#0D3B66", "#242424"];
+  const grid = document.getElementById("grid");
+  for (const [hex, name, note] of options) {
+    grid.insertAdjacentHTML("beforeend", `
+      <div class="win" style="background:${hex}">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        <div class="body">
+          <div class="rail"><div style="font-weight:600">Catalogue</div><div class="sel">Autumn Range</div><div>Brand Core</div><div>Web Tints</div></div>
+          <div class="page">
+            <div class="title">Autumn Range</div>
+            <span class="btn">Grid</span><span class="btn">Vertical</span><span class="btn">Analysis</span>
+            <div class="sw">${swatches.map(s => `<div style="background:${s}"></div>`).join("")}</div>
+          </div>
+        </div>
+        <div class="label">${hex} · ${name}<span>${note}</span></div>
+      </div>`);
+  }
+</script>
+</body>
+</html>

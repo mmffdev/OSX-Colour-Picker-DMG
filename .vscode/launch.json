@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MMFFDev - Colour Picker}",
+            "name": "Debug MMFFDevColour3",
+            "target": "MMFFDevColour3",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug MMFFDevColour3"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MMFFDev - Colour Picker}",
+            "name": "Release MMFFDevColour3",
+            "target": "MMFFDevColour3",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release MMFFDevColour3"
+        }
+    ]
+}

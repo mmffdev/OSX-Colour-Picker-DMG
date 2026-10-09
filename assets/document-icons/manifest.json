@@ -1,0 +1,189 @@
+{
+  "families": [
+    {
+      "id": "01-instrument",
+      "name": "Instrument",
+      "desc": "Quiet paper \u00b7 precise line symbols",
+      "page": "#F0F1EE",
+      "fold": "#D5D9D6",
+      "ink": "#343C42",
+      "accent": "#788D81",
+      "mode": "line"
+    },
+    {
+      "id": "02-graphite",
+      "name": "Graphite",
+      "desc": "Dark document \u00b7 luminous line symbols",
+      "page": "#343A3D",
+      "fold": "#565F63",
+      "ink": "#E1E6E5",
+      "accent": "#A1B8B3",
+      "mode": "dark"
+    },
+    {
+      "id": "03-technical",
+      "name": "Technical",
+      "desc": "Drafting frame \u00b7 square-ended geometry",
+      "page": "#EDF2F4",
+      "fold": "#CED9DF",
+      "ink": "#375569",
+      "accent": "#7393A6",
+      "mode": "technical"
+    },
+    {
+      "id": "04-recess",
+      "name": "Recess",
+      "desc": "Inset instrument panel \u00b7 soft grey field",
+      "page": "#F3F2EE",
+      "fold": "#DADBD6",
+      "ink": "#3F474B",
+      "accent": "#8C9888",
+      "mode": "inset"
+    },
+    {
+      "id": "05-silhouette",
+      "name": "Silhouette",
+      "desc": "Solid marks \u00b7 strongest compact presence",
+      "page": "#ECEFED",
+      "fold": "#CDD3D0",
+      "ink": "#35433F",
+      "accent": "#809B91",
+      "mode": "solid"
+    },
+    {
+      "id": "06-header",
+      "name": "Header",
+      "desc": "Dark upper register \u00b7 open paper below",
+      "page": "#F0F0EC",
+      "fold": "#CDD2CE",
+      "ink": "#3E4643",
+      "accent": "#879D93",
+      "mode": "header"
+    },
+    {
+      "id": "07-seal",
+      "name": "Seal",
+      "desc": "Circular field \u00b7 centred identifying mark",
+      "page": "#F0F0EF",
+      "fold": "#D7D8D6",
+      "ink": "#46505B",
+      "accent": "#8997A9",
+      "mode": "circle"
+    },
+    {
+      "id": "08-etched",
+      "name": "Etched",
+      "desc": "Flat ivory \u00b7 open outlines and restrained detail",
+      "page": "#F8F5ED",
+      "fold": "#E6E0D3",
+      "ink": "#5B5549",
+      "accent": "#A0957A",
+      "mode": "etched"
+    },
+    {
+      "id": "09-margin",
+      "name": "Margin",
+      "desc": "Vertical register \u00b7 generous central symbol",
+      "page": "#EEF0F0",
+      "fold": "#D0D7D9",
+      "ink": "#3E4C54",
+      "accent": "#7B929E",
+      "mode": "margin"
+    },
+    {
+      "id": "10-plaque",
+      "name": "Plaque",
+      "desc": "Dark symbol plate \u00b7 light paper surround",
+      "page": "#F0F1ED",
+      "fold": "#D3D8D1",
+      "ink": "#39413D",
+      "accent": "#92A087",
+      "mode": "plaque"
+    }
+  ],
+  "types": [
+    [
+      "colproject",
+      "Project",
+      "core"
+    ],
+    [
+      "colpalette",
+      "Palette",
+      "core"
+    ],
+    [
+      "colswatch",
+      "Swatch",
+      "core"
+    ],
+    [
+      "colhistory",
+      "History",
+      "core"
+    ],
+    [
+      "colcatalogue",
+      "Catalogue",
+      "core"
+    ],
+    [
+      "coldata",
+      "Data",
+      "core"
+    ],
+    [
+      "colweb",
+      "Screen & Web",
+      "purpose"
+    ],
+    [
+      "colprint",
+      "Print",
+      "purpose"
+    ],
+    [
+      "colphoto",
+      "Photography",
+      "purpose"
+    ],
+    [
+      "colvideo",
+      "Video",
+      "purpose"
+    ],
+    [
+      "colcine",
+      "Cinema & VFX",
+      "purpose"
+    ],
+    [
+      "col3d",
+      "3D & Games",
+      "purpose"
+    ],
+    [
+      "colsyncproject",
+      "Sync project",
+      "sync"
+    ],
+    [
+      "colsynccatalogue",
+      "Sync catalogue",
+      "sync"
+    ]
+  ],
+  "logical_sizes": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "densities": [
+    1,
+    2
+  ]
+}
