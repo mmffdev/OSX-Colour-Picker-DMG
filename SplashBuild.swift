@@ -5,10 +5,10 @@ import Foundation
 // The answers to the splash's questions, and the catalogue structure they make. Who the work is for
 // gives the collections: every type picked (Clients, Brands, a word of your own) is a collection with
 // the names given as its first level, and Our Own Work a collection with no such level. Under each
-// come the kinds of thing made (Products, Projects) as a level, then the streams of work (Web, Print)
-// as a level, each only when any were chosen; the first member sits in the deepest folder of the
-// first chain, and the Master Template holds the groups chosen, in their order. Pure, so the
-// self-test can build every combination of answers and check the tree it gives.
+// come the kinds of thing made (Products, Projects) as a level, then each kind's own streams of work
+// (Web, Print) as a level, each only when any were chosen; the first member sits in the deepest
+// folder of the first chain, and the Master Template holds the groups chosen, in their order. Pure,
+// so the self-test can build every combination of answers and check the tree it gives.
 
 final class SplashDraft {
     static let ownWork = "Our own work"
@@ -27,7 +27,7 @@ final class SplashDraft {
         var isOwnWork: Bool { type == SplashDraft.ownWork }
     }
     /// A word being typed, shown on the tree before it is taken.
-    enum Pending: Equatable { case party(String), kind, stream, group, member }
+    enum Pending: Equatable { case party(String), kind, stream(String), group, member }
 
     /// The catalogue's name as typed on the first section; nil keeps the name it has. Set renames it, nothing before.
     var catalogueName: String?
@@ -35,8 +35,8 @@ final class SplashDraft {
     var parties: [Party] = []
     /// What is made, plural, in order; a level under each party as soon as any is chosen.
     var kinds: [String] = []
-    /// The streams chosen, in order; a level under each kind unless `oneKind` sets them aside.
-    var streams: [String] = []
+    /// Each kind's streams, in order; a level under the kind unless `oneKind` sets them aside.
+    var streamsOf: [String: [String]] = [:]
     /// One kind of work: the streams are kept but make no level, so unticking brings them back.
     var oneKind = false
     /// The groups inside each member, by type, in the Master Template's order.
@@ -52,8 +52,11 @@ final class SplashDraft {
     /// The collections, in the order their types were first picked.
     var types: [String] { parties.reduce(into: [String]()) { if !$0.contains($1.type) { $0.append($1.type) } } }
     func names(of type: String) -> [String] { parties.filter { $0.type == type && !$0.isOwnWork }.map { $0.name } }
-    var streamsAnswered: Bool { oneKind || !streams.isEmpty }
-    var activeStreams: [String] { oneKind ? [] : streams }
+    func streams(of kind: String) -> [String] { streamsOf[kind] ?? [] }
+    func activeStreams(of kind: String) -> [String] { oneKind ? [] : streams(of: kind) }
+    /// Whether any kind has a stream that counts: the Stream level exists in every collection then.
+    var anyStreams: Bool { !oneKind && kinds.contains { !streams(of: $0).isEmpty } }
+    var streamsAnswered: Bool { oneKind || kinds.contains { !streams(of: $0).isEmpty } }
     /// "Client" from "Clients", "Product" from "Products": the singular a level or a member is called by.
     static func singular(_ word: String) -> String {
         let w = word.trimmingCharacters(in: .whitespaces)
@@ -66,9 +69,9 @@ final class SplashDraft {
     var memberWord: String { Self.singular(kinds.first ?? "Project") }
     /// The collection for a type: its name on the tree, the type itself, or "My Products" for the user's own.
     func collectionTitle(_ type: String) -> String { collectionNames[type] ?? (type == Self.ownWork ? "My " + SchemaTrial.plural(memberWord) : type) }
-    /// The levels between, top down: the party's word, Kind when any is made, Stream when streams are on.
+    /// The levels between, top down: the party's word, Kind when any is made, Stream when any kind's streams are on.
     func levelNames(for type: String) -> [String] {
-        (type == Self.ownWork ? [] : [Self.singular(type)]) + (kinds.isEmpty ? [] : ["Kind"]) + (activeStreams.isEmpty ? [] : ["Stream"])
+        (type == Self.ownWork ? [] : [Self.singular(type)]) + (kinds.isEmpty ? [] : ["Kind"]) + (anyStreams ? ["Stream"] : [])
     }
     /// The app's own group of that type, if it is one; a custom group has none and is a folder of files under its name.
     static func role(of group: String) -> SchemaRole? { SchemaRole.allCases.first { $0.title == group } }
@@ -77,8 +80,8 @@ final class SplashDraft {
         SchemaNode(name: memberWord, children: groups.map { SchemaNode(name: groupNames[$0] ?? $0, role: Self.role(of: $0), kind: $0) })
     }
 
-    /// Builds the structure into a schema and a library: a collection for every type, its folders level by level inside every
-    /// folder of the level above, and the members in the deepest folder of the first collection's first chain.
+    /// Builds the structure into a schema and a library: a collection for every type, its first-level folders, a folder for every
+    /// kind inside each, and that kind's streams inside it; the members go in the deepest folder of the first collection's first chain.
     /// Returns the collections' ids and the members' ids.
     @discardableResult
     func build(into schema: inout SchemaTrial.SchemaFile, library lib: inout Library, at date: Date = Date()) -> (collections: [UUID], members: [UUID]) {
@@ -89,17 +92,27 @@ final class SplashDraft {
             collection.folderName = levels.first
             collection.levelNames = levels.count > 1 ? levels : nil
             var folders: [SchemaFolder] = []
-            var parents: [UUID?] = [nil]
-            for level in [names(of: type), kinds, activeStreams] where !level.isEmpty {
-                var next: [UUID?] = []
-                for p in parents { for name in level { let f = SchemaFolder(name: name, parent: p); folders.append(f); next.append(f.id) } }
-                parents = next
+            var deepest: UUID?
+            let tops: [UUID?] = type == Self.ownWork ? [nil] : names(of: type).map { name in
+                let f = SchemaFolder(name: name); folders.append(f); return f.id
+            }
+            for (t, top) in tops.enumerated() {
+                if t == 0 { deepest = top }
+                for (k, kind) in kinds.enumerated() {
+                    let kf = SchemaFolder(name: kind, parent: top)
+                    folders.append(kf)
+                    if t == 0 && k == 0 { deepest = kf.id }
+                    for (s, stream) in activeStreams(of: kind).enumerated() {
+                        let sf = SchemaFolder(name: stream, parent: kf.id)
+                        folders.append(sf)
+                        if t == 0 && k == 0 && s == 0 { deepest = sf.id }
+                    }
+                }
             }
             collection.folders = folders
             schema.collections.append(collection)
             ids.append(collection.id)
             guard n == 0 else { continue }
-            let deepest = parents.first ?? nil
             for name in members where !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 let id = lib.createProject(named: name, at: date)
                 schema.places[id.uuidString] = SchemaPlace(collection: collection.id, folder: deepest)

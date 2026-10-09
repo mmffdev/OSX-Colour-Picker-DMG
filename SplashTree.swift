@@ -20,8 +20,8 @@ final class SplashTreeView: NSView {
     /// Called after any change made on the tree, so the splash can settle its buttons.
     var onChange: (() -> Void)?
 
-    enum Level: Equatable { case party(String), kind, stream, member, group }
-    private enum Kind { case catalogue, collection(String), party(Int), kind(Int), stream(Int), member(Int), placeholder, pending, group(String), add(Level) }
+    enum Level: Equatable { case party(String), kind, stream(String), member, group }
+    private enum Kind { case catalogue, collection(String), party(Int), kind(Int), stream(String, Int), member(Int), placeholder, pending, group(String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
         /// A node that holds others has a key the caret opens and closes it by.
@@ -30,6 +30,10 @@ final class SplashTreeView: NSView {
     private var hits: [(NSRect, () -> Void)] = []
     private var collapsed: Set<String> = []
     private var options: SplashMenu?
+    /// The furthest section reached: what a later section asks for is a placeholder until then (Rick, 2026-10-09).
+    var reached = 0
+    /// The section that asks what sits inside each member; before it the groups are one "Asset Collection".
+    var groupsStep = 5
     private static let step: CGFloat = 22, caret: CGFloat = 14
 
     init(draft: SplashDraft, catalogueName: @escaping () -> String) {
@@ -55,6 +59,7 @@ final class SplashTreeView: NSView {
         func pending(_ w: SplashDraft.Pending) -> String? { d.pending.flatMap { $0.level == w && !$0.text.isEmpty ? $0.text : nil } }
         func add(_ level: Level, _ name: String, at depth: Int) { out.append(Line(kind: .add(level), name: name, depth: depth, caption: "", removable: false)) }
         func groups(at depth: Int) {
+            guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Asset Collection", depth: depth, caption: "Groups", removable: false)); return }
             for g in d.groups { out.append(Line(kind: .group(g), name: d.groupNames[g] ?? g, depth: depth, caption: "Group", removable: d.groups.count > 1)) }
             if let p = pending(.group) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false)) }
             add(.group, "Another group", at: depth)
@@ -74,23 +79,23 @@ final class SplashTreeView: NSView {
                 if open(k) { groups(at: depth + 1) }
             }
         }
-        func streams(under key: String, at depth: Int, first: Bool) {
-            let active = d.activeStreams
-            guard !active.isEmpty || (first && pending(.stream) != nil) else { members(under: key, at: depth, first: first); return }
+        func streams(under key: String, at depth: Int, first: Bool, kind: String) {
+            let active = d.activeStreams(of: kind)
+            guard !active.isEmpty || (first && pending(.stream(kind)) != nil) else { members(under: key, at: depth, first: first); return }
             for (j, s) in active.enumerated() {
                 let k = key + "/s\(j)"
-                out.append(Line(kind: .stream(j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
+                out.append(Line(kind: .stream(kind, j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
                 if open(k) { members(under: k, at: depth + 1, first: first && j == 0) }
             }
-            if first, let p = pending(.stream) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Stream", removable: false)) }
-            if !active.isEmpty { add(.stream, "Another stream", at: depth) }
+            if first, let p = pending(.stream(kind)) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Stream", removable: false)) }
+            if !active.isEmpty { add(.stream(kind), "Another stream", at: depth) }
         }
         func kinds(under key: String, at depth: Int, first: Bool) {
-            guard !d.kinds.isEmpty || (first && pending(.kind) != nil) else { streams(under: key, at: depth, first: first); return }
+            guard !d.kinds.isEmpty || (first && pending(.kind) != nil) else { members(under: key, at: depth, first: first); return }
             for (i, name) in d.kinds.enumerated() {
                 let k = key + "/k\(i)"
                 out.append(Line(kind: .kind(i), name: name, depth: depth, caption: "Kind", removable: true, key: k))
-                if open(k) { streams(under: k, at: depth + 1, first: first && i == 0) }
+                if open(k) { streams(under: k, at: depth + 1, first: first && i == 0, kind: name) }
             }
             if first, let p = pending(.kind) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Kind", removable: false)) }
             if !d.kinds.isEmpty { add(.kind, "Another kind", at: depth) }
@@ -211,7 +216,7 @@ final class SplashTreeView: NSView {
             case .collection(let type): d.collectionNames[type] = t
             case .party(let i): if d.parties.indices.contains(i) { d.parties[i].name = t }
             case .kind(let i): if d.kinds.indices.contains(i) { d.kinds[i] = t }
-            case .stream(let j): if d.streams.indices.contains(j) { d.streams[j] = t }
+            case .stream(let kind, let j): if var list = d.streamsOf[kind], list.indices.contains(j) { list[j] = t; d.streamsOf[kind] = list }
             case .member(let i): if d.members.indices.contains(i) { d.members[i] = t }
             case .group(let g): d.groupNames[g] = t
             default: break
@@ -233,16 +238,16 @@ final class SplashTreeView: NSView {
             let offered: [String], taken: [String]
             switch level {
             case .kind: offered = SplashDraft.makeOptions; taken = d.kinds
-            case .stream: offered = SplashDraft.streamOptions; taken = d.streams
+            case .stream(let kind): offered = SplashDraft.streamOptions; taken = d.streams(of: kind)
             default: offered = SplashDraft.groupOptions; taken = d.groups
             }
             let m = SplashMenu(items: offered.filter { !taken.contains($0) }, own: "A word of your own") { [weak self] choice in
                 guard let self = self else { return }
                 self.options?.removeFromSuperview(); self.options = nil
-                let word = choice ?? uniqueName(level == .kind ? "Kind 2" : level == .stream ? "Stream 2" : "Group 2", among: taken)
+                let word = choice ?? uniqueName(level == .kind ? "Kind 2" : level == .group ? "Group 2" : "Stream 2", among: taken)
                 switch level {
                 case .kind: d.kinds.append(word); self.changed(); if choice == nil { self.edit(.kind(d.kinds.count - 1)) }
-                case .stream: d.streams.append(word); d.oneKind = false; self.changed(); if choice == nil { self.edit(.stream(d.streams.count - 1)) }
+                case .stream(let kind): d.streamsOf[kind, default: []].append(word); d.oneKind = false; self.changed(); if choice == nil { self.edit(.stream(kind, d.streams(of: kind).count - 1)) }
                 default: d.groups.append(word); self.changed(); if choice == nil { self.edit(.group(word)) }
                 }
             }
@@ -265,7 +270,8 @@ final class SplashTreeView: NSView {
         }
         func same(_ a: Kind, _ b: Kind) -> Bool {
             switch (a, b) {
-            case (.party(let i), .party(let j)), (.kind(let i), .kind(let j)), (.stream(let i), .stream(let j)), (.member(let i), .member(let j)): return i == j
+            case (.party(let i), .party(let j)), (.kind(let i), .kind(let j)), (.member(let i), .member(let j)): return i == j
+            case (.stream(let a, let i), .stream(let b, let j)): return a == b && i == j
             case (.group(let g), .group(let h)): return g == h
             default: return false
             }
@@ -276,7 +282,7 @@ final class SplashTreeView: NSView {
         switch kind {
         case .party(let i): if d.parties.indices.contains(i) { d.parties.remove(at: i) }
         case .kind(let i): if d.kinds.indices.contains(i) { d.kinds.remove(at: i) }
-        case .stream(let j): if d.streams.indices.contains(j) { d.streams.remove(at: j) }
+        case .stream(let kind, let j): if var list = d.streamsOf[kind], list.indices.contains(j) { list.remove(at: j); d.streamsOf[kind] = list }
         case .member(let i): if d.members.count > 1, d.members.indices.contains(i) { d.members.remove(at: i) }
         case .group(let g): if d.groups.count > 1 { d.groups.removeAll { $0 == g } }
         default: break
