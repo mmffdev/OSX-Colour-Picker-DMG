@@ -129,7 +129,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "--new-user": true
-        "--splash-loop": false
+        "--splash-loop": true
         "--splash": false
         "--classic": false
         "--self-test": false

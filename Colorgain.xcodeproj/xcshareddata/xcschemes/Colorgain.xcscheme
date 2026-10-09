@@ -80,7 +80,7 @@
          </CommandLineArgument>
          <CommandLineArgument
             argument = "--splash-loop"
-            isEnabled = "NO">
+            isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>
    </LaunchAction>
