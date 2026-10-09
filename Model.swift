@@ -1021,10 +1021,9 @@ final class LibraryStore {
     let earlierURL: URL
     /// The schema read with the library, written back with it.
     private(set) var schema: SchemaTrial.SchemaFile = .fresh
-    /// What bringing an earlier layout across did, the first time this catalogue was opened in this version; nil otherwise.
-    private var migrated: Migration.Report?
-    /// The report, once: the controller tells the user and records it.
-    func takeMigration() -> Migration.Report? { defer { migrated = nil }; return migrated }
+    /// What bringing an earlier layout across did, the first time this catalogue was opened in this version, once: the
+    /// controller tells the user and records it. Nil when there was nothing to bring across, or it has been told already.
+    func takeMigration() -> Migration.Report? { Migration.reports.removeValue(forKey: root.standardizedFileURL.path) }
     /// What the last read found that the files had not listed: folders and files taken in or renamed in Finder.
     private(set) var notes: [String] = []
 
@@ -1062,9 +1061,7 @@ final class LibraryStore {
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
         let fm = FileManager.default, stamp = Int(Date().timeIntervalSince1970)
-        if Migration.needed(in: root) {
-            migrated = try Migration.run(root: root, name: name)
-        }
+        if Migration.needed(in: root) { try Migration.run(root: root, name: name) }
         if let index = CatalogueFiles.index(in: root) {
             do {
                 let loaded = try CatalogueTree.read(root: root)

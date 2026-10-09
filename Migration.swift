@@ -33,6 +33,9 @@ enum Migration {
     }
 
     private static let fm = FileManager.default
+    /// What each catalogue's bringing across did, by its folder, until the controller that opens it takes the report: whichever
+    /// store happened to read the catalogue first did the work, and the user is still told once.
+    static var reports: [String: Report] = [:]
     /// What belongs to the app's home, not to the catalogue at its root.
     private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", TreeFiles.backups]
 
@@ -97,7 +100,9 @@ enum Migration {
         let index = root.appendingPathComponent(filesystemName(name) + "." + ColourFiles.catalogue)
         try CatalogueTree.write(lib, schema: schema, index: index, name: name, now: now)
         Diagnostics.log("migration", "\(name): \(lib.projects.count) members, \(lib.swatches.count) palettes, backup at \(backup.path)" + (notes.isEmpty ? "" : "; " + notes.joined(separator: "; ")))
-        return Report(backup: backup, members: lib.projects.count, palettes: lib.swatches.count, orphans: orphans, notes: notes)
+        let report = Report(backup: backup, members: lib.projects.count, palettes: lib.swatches.count, orphans: orphans, notes: notes)
+        reports[root.standardizedFileURL.path] = report
+        return report
     }
 
     /// The schema an earlier version kept beside the index, or a fresh one.

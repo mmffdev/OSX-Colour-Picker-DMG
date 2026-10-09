@@ -62,7 +62,7 @@ final class StudioWindowController: NSWindowController {
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
         else {
-            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes)]
+            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share)]
             c.frame.go(views.first { args.contains($0.0) }?.1 ?? .catalogue)
         }
         c.showWindow(nil)
@@ -147,7 +147,7 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, tags, lab, contrast }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, tags, lab, contrast, share }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -163,6 +163,8 @@ final class StudioFrame: NSView {
     let strip = TitleStrip()
     /// Contrast, drawn on the page's columns; kept here so the window can open it on a typography palette.
     let contrastPage: ContrastPage
+    /// Export and Import as a wizard in the page (StudioShare.swift), begun from a palette's halo, a page's Export or the catalogue settings.
+    let sharePage: SharePage
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
     private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
     private var goal = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
@@ -173,6 +175,7 @@ final class StudioFrame: NSView {
     init(library: LibraryController) {
         self.library = library
         contrastPage = ContrastPage(library: library)
+        sharePage = SharePage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
@@ -243,6 +246,11 @@ final class StudioFrame: NSView {
         page.add(TagsSettings(library: library), as: .tags)
         page.add(LabPage(library: library), as: .lab)
         page.add(contrastPage, as: .contrast)
+        page.add(sharePage, as: .share)
+        sharePage.onLeave = { [weak self] in self?.go(.catalogue) }
+        page.onExport = { [weak self] in self?.exportFromPage() }
+        page.settings.onImport = { [weak self] in self?.startImport() }
+        page.settings.onExport = { [weak self] in guard let self = self else { return }; self.startExport(.catalogue, subject: self.library.store.root, name: self.library.catalogue) }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -372,10 +380,34 @@ final class StudioFrame: NSView {
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .tags: return nil; case .group: return 0; case .lab: return 2; case .contrast: return 3; case .projects: return 4; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .tags, .share: return nil; case .group: return 0; case .lab: return 2; case .contrast: return 3; case .projects: return 4; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
+
+    // MARK: Sharing
+
+    /// The wizard on a level of the catalogue: the whole catalogue from its settings, a collection or member from its page, a palette from its halo.
+    func startExport(_ level: ShareLevel, subject: URL?, name: String) {
+        guard let url = subject else { library.flash("\(name) has no folder on disk yet"); return }
+        sharePage.beginExport(level: level, subject: url, name: name)
+        go(.share)
+    }
+    func startImport() {
+        sharePage.beginImport()
+        go(.share)
+    }
+    private func exportFromPage() {
+        let root = library.store.root
+        switch place {
+        case .project(let id): startExport(.workGroup, subject: library.memberFolderURL(id), name: library.library.project(id)?.name ?? "Member")
+        case .folder(let cid, let fid):
+            let name = SchemaTrial.collections.first { $0.id == cid }?.folders.first { $0.id == fid }?.name ?? "Group"
+            startExport(.workGroup, subject: CatalogueTree.folder(ofWorkGroup: fid, in: root), name: name)
+        case .collection(let id): startExport(.collection, subject: CatalogueTree.folder(ofCollection: id, in: root), name: SchemaTrial.collections.first { $0.id == id }?.name ?? "Collection")
+        default: startExport(.catalogue, subject: root, name: library.catalogue)
+        }
+    }
 
     // MARK: The palette's halo
 
@@ -411,7 +443,7 @@ final class StudioFrame: NSView {
                 }
             },
             HaloAction(id: "copy-all", label: "Copy All", symbol: "doc.on.doc") { library.copy(lib.hexes(inSwatch: id, by: .oldest), from: s.name) },
-            HaloAction(id: "export-file", label: "Export Palette File\u{2026}", symbol: "square.and.arrow.up") { library.exportPaletteFile(id) },
+            HaloAction(id: "export", label: "Export Palette\u{2026}", symbol: "square.and.arrow.up", onSelect: { [weak self] in self?.startExport(.palette, subject: library.paletteFileURL(id), name: s.name) }),
             HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id) },
         ]
         if s.projectID != nil { actions.insert(HaloAction(id: "open", label: "Open Member", symbol: "arrow.up.right", onSelect: { [weak self] in if let p = s.projectID { self?.go(.project(p)) } }), at: 0) }
@@ -584,7 +616,7 @@ final class StudioFrame: NSView {
         case .project(let id), .group(let id, _):
             guard let project = lib.project(id) else { return }
             return fillStack(of: project, in: lib)
-        case .settings, .schema, .shortcuts, .halo, .tags:
+        case .settings, .schema, .shortcuts, .halo, .tags, .share:
             heading = "Settings"; labels = ("Section", "")
             rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
                     .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Tags", nil, 0, .tags, place == .tags)]
@@ -706,6 +738,9 @@ final class StudioFrame: NSView {
         case .tags:
             title = "Tags"; meta = (plural(lib.allTags.count, "tag"), "Global and scoped")
             page.show(.tags)
+        case .share:
+            title = "Share"; meta = ("Export and import", "One checked file")
+            page.show(.share)
         case .lab:
             title = "Colour Lab"; meta = ("The wheel", "Build on a colour")
             page.show(.lab)
@@ -778,8 +813,9 @@ final class StudioFrame: NSView {
             page.show(.catalogues)
         }
         switch place {
-        case .collection(let id): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)) }
-        case .folder(let id, _): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)) }
+        case .collection(let id): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)); page.showExport("Export Collection\u{2026}") }
+        case .folder(let cid, _): if let c = SchemaTrial.collections.first(where: { $0.id == cid }) { page.showNew(newWord(c)); page.showExport("Export \(c.folderName ?? "Group")\u{2026}") }
+        case .project(let id): page.showExport("Export \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))\u{2026}")
         default: break
         }
         page.set(title: title, meta: meta, items: items)
@@ -1913,6 +1949,9 @@ final class StudioPage: NSView, Overlay {
     /// The way to make a member, under the header when the page lists members.
     private let newButton = SwissButton("New Project", .primary)
     var onNew: (() -> Void)?
+    /// Export beside New, where a page shows a level that can go out as one file.
+    private let exportButton = SwissButton("Export\u{2026}", .secondary)
+    var onExport: (() -> Void)?
     /// How many tiles sit across: the slider in the page's header, right-aligned before the arrow and centred on it, shown with the tiles.
     private let slider = MiniSlider()
     var onAcross: ((Int) -> Void)?
@@ -1945,7 +1984,7 @@ final class StudioPage: NSView, Overlay {
         dropped = panel
         Overlays.opened(self)
     }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, tags, lab, contrast }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, tags, lab, contrast, share }
     private var section = Section.tiles
     /// The sections beyond the tiles, the catalogues and the schema, each in a scroll of its own, laid out like the catalogues.
     private var extras: [Section: (view: PageSection, scroll: NSScrollView)] = [:]
@@ -2002,6 +2041,9 @@ final class StudioPage: NSView, Overlay {
         newButton.isHidden = true
         newButton.target = self; newButton.action = #selector(makeNew)
         addSubview(newButton)
+        exportButton.isHidden = true
+        exportButton.target = self; exportButton.action = #selector(exportPressed)
+        addSubview(exportButton)
         slider.onChange = { [weak self] v in self?.onAcross?(4 + Int((v * 4).rounded())) }
         addSubview(slider)
         grid.onResize = { [weak self] in self?.needsLayout = true }
@@ -2019,8 +2061,16 @@ final class StudioPage: NSView, Overlay {
         if s == .catalogues { settings.reload() }
         if s == .schema { schema.reload() }
         newButton.isHidden = true
+        exportButton.isHidden = true
         needsLayout = true
     }
+    /// The Export button beside New; nil takes it away.
+    func showExport(_ title: String?) {
+        exportButton.isHidden = title == nil
+        if let t = title { exportButton.title = t; exportButton.invalidateIntrinsicContentSize() }
+        needsLayout = true
+    }
+    @objc private func exportPressed() { onExport?() }
     /// The New button under the header, with its word; nil takes it away.
     func showNew(_ title: String?) {
         newButton.isHidden = title == nil
@@ -2047,9 +2097,11 @@ final class StudioPage: NSView, Overlay {
         let arrowCentre = AreaHeader.headingBaseline - 5
         let column = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
         slider.frame = NSRect(x: bounds.width - insetRight - 16 - 24 - column, y: arrowCentre - 8, width: column, height: 16)
-        if !newButton.isHidden {
-            // The button stands on the second unit's foot, clear of the rule above it; the tiles a unit below.
-            newButton.frame = NSRect(x: inset, y: top + 2 * u - 32, width: newButton.intrinsicContentSize.width, height: 32)
+        if !newButton.isHidden || !exportButton.isHidden {
+            // The buttons stand on the second unit's foot, clear of the rule above it; the tiles a unit below.
+            var x = inset
+            if !newButton.isHidden { newButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: newButton.intrinsicContentSize.width, height: 32); x += newButton.frame.width + 12 }
+            if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
             top += 2 * u
         }
         let tilesTop = top + (section == .tiles ? u : 0)
@@ -2073,6 +2125,10 @@ final class StudioPage: NSView, Overlay {
                 e.scroll.frame = schemaScroll.frame
                 t.leading = inset
                 t.frame = NSRect(x: 0, y: 0, width: schemaScroll.frame.width, height: max(e.scroll.frame.height, eh))
+            } else if let sp = e.view as? SharePage {
+                e.scroll.frame = schemaScroll.frame
+                sp.leading = inset
+                sp.frame = NSRect(x: 0, y: 0, width: schemaScroll.frame.width, height: max(e.scroll.frame.height, eh))
             }
             e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
         }
@@ -2229,6 +2285,10 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     private let openButton = SwissButton("Open Catalogue\u{2026}", .primary)
     private let newButton = SwissButton("New Catalogue", .secondary)
     private let finderButton = SwissButton("Show In Finder", .secondary)
+    private let importButton = SwissButton("Import\u{2026}", .secondary)
+    private let exportButton = SwissButton("Export Catalogue\u{2026}", .secondary)
+    var onImport: (() -> Void)?
+    var onExport: (() -> Void)?
     private let aboutScroll = NSScrollView()
     private let about = NSTextView()
     /// On the beat: every row a unit, the notes three, the hue strip two; text on the unit's line.
@@ -2266,6 +2326,8 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         openButton.target = self; openButton.action = #selector(openCatalogue)
         newButton.target = self; newButton.action = #selector(newCatalogue)
         finderButton.target = self; finderButton.action = #selector(showInFinder)
+        importButton.target = self; importButton.action = #selector(importPressed)
+        exportButton.target = self; exportButton.action = #selector(exportPressed)
         aboutScroll.documentView = about
         aboutScroll.hasVerticalScroller = true
         aboutScroll.autohidesScrollers = true
@@ -2284,7 +2346,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         about.autoresizingMask = [.width]
         about.isVerticallyResizable = true
         about.textContainer?.widthTracksTextView = true
-        for v in [openButton, newButton, finderButton, aboutScroll] { addSubview(v) }
+        for v in [openButton, newButton, finderButton, importButton, exportButton, aboutScroll] { addSubview(v) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -2442,7 +2504,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     override func layout() {
         super.layout()
         var x: CGFloat = 0
-        for b in [openButton, newButton, finderButton] {
+        for b in [openButton, newButton, finderButton, importButton, exportButton] {
             let w = b.intrinsicContentSize.width
             b.frame = NSRect(x: x, y: Self.u + Self.lineY - 22, width: w, height: 32)
             x += w + 12
@@ -2935,6 +2997,8 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         }
     }
 
+    @objc private func importPressed() { onImport?() }
+    @objc private func exportPressed() { onExport?() }
     @objc private func newCatalogue() {
         guard let lib = library else { return }
         do { lib.open(catalogue: try Catalogues.standard.create(Self.freshName())) } catch { lib.show(error) }

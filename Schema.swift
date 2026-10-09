@@ -163,6 +163,9 @@ enum SchemaTrial {
         NotificationCenter.default.post(name: .schemaDidChange, object: nil, userInfo: ["before": before, "after": f])
     }
 
+    /// The whole schema at once, as a share brings it: written through the store like any change.
+    static func replace(_ f: SchemaFile) { write(f) }
+
     /// Every collection, in rail1's order.
     static var collections: [SchemaCollection] {
         get { file.collections }

@@ -1073,6 +1073,131 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(stuck == nil && fm.fileExists(atPath: lockedDir.appendingPathComponent("library.json").path) && !fm.fileExists(atPath: lockedDir.appendingPathComponent("Stuck.colcatalogue").path),
           "when the backup cannot be written nothing is brought across and the catalogue is left exactly as it was")
 
+    print("sharing: zip, manifest, staging, twins, bringing in")
+    let zipDir = root.appendingPathComponent("zip")
+    try! fm.createDirectory(at: zipDir, withIntermediateDirectories: true)
+    let bigBlob = Data(repeating: 0x41, count: 90_000) + Data("end".utf8)
+    let zipEntries = [Zip.Entry(path: "Clients/Clients.colcollection", data: Data("{\"a\":1}".utf8)), Zip.Entry(path: "Clients/Acmé/Été.colpalette", data: bigBlob), Zip.Entry(path: "empty.txt", data: Data())]
+    let zipFile = zipDir.appendingPathComponent("round.zip")
+    try! Zip.write(zipEntries, to: zipFile, at: tcat)
+    let zipBack = try? Zip.read(zipFile)
+    let zipBytes = try! Data(contentsOf: zipFile)
+    check(zipBack == zipEntries && zipBytes.count < 2_000, "the app's own zip writes files with names in any script, packs what packs, and reads them back whole")
+    var broken = zipBytes
+    broken[62] ^= 0xFF   // inside the first entry's data, after its 30-byte header and 29-byte name
+    try! broken.write(to: zipDir.appendingPathComponent("broken.zip"))
+    try! Data(repeating: 7, count: 300).write(to: zipDir.appendingPathComponent("junk.zip"))
+    check((try? Zip.read(zipDir.appendingPathComponent("broken.zip"))) == nil && (try? Zip.read(zipDir.appendingPathComponent("junk.zip"))) == nil,
+          "a zip with a byte changed, or a file that is no zip, is refused rather than read wrong")
+    // A collection goes out: its folder, every member and palette in it, and a manifest naming each file's digest.
+    let catalogueNamed = ShareManifest.Named(id: CatalogueTree.index(in: treeDir)!.id, name: "Studio")
+    let shareFile = zipDir.appendingPathComponent("Projects.colshare.zip")
+    let manifest = try! Sharing.export(level: .collection, subject: projectsDir, root: treeDir, catalogue: catalogueNamed, to: shareFile, now: tcat)
+    let shareTree = Sharing.tree(level: .collection, subject: projectsDir, root: treeDir)
+    check(manifest.level == .collection && manifest.subject.name == "Projects" && Set(manifest.files.map { $0.path }).isSuperset(of: ["Projects/Projects.colcollection", "Projects/Job Alpha/Job Alpha.colworkgroup", "Projects/Job Alpha/Colourways/Autumn Range.colpalette", "Projects/Job Alpha/Typography/Headings.colpalette"])
+          && manifest.files.allSatisfy { $0.sha256.count == 64 } && shareTree.palettes == 2 && shareTree.children.map { $0.name } == ["Job Alpha"]
+          && shareTree.flattened.map { $0.node.kind }.contains(.bucket) && shareTree.node("Projects/Job Alpha/Colourways/Autumn Range.colpalette")?.name == "Autumn Range",
+          "a collection exports as one zip holding its folder whole, with a manifest listing every file and its digest, and the tree of what it holds reads from the files")
+    let inspected = try! Sharing.inspect(shareFile)
+    check(inspected.ok && inspected.manifest == manifest && inspected.tree.name == "Projects" && inspected.tree.palettes == 2, "the share checks clean: manifest, digests, shape, and the tree is read from the zip before anything is written")
+    // One byte changed inside a file: the check names it.
+    var tampered = try! Zip.read(shareFile)
+    if let at = tampered.firstIndex(where: { $0.path.hasSuffix("Autumn Range.colpalette") }) { var d2 = tampered[at].data; d2[d2.count / 2] ^= 1; tampered[at] = Zip.Entry(path: tampered[at].path, data: d2) }
+    try! Zip.write(tampered, to: zipDir.appendingPathComponent("tampered.zip"))
+    let badCheck = try? Sharing.inspect(zipDir.appendingPathComponent("tampered.zip"))
+    check(badCheck?.ok == false && badCheck?.problems.first?.contains("Autumn Range.colpalette") == true, "a share with one byte changed stops at the check, naming the file")
+    try! Zip.write(tampered.filter { $0.path != ShareManifest.fileName }, to: zipDir.appendingPathComponent("nomanifest.zip"))
+    check((try? Sharing.inspect(zipDir.appendingPathComponent("nomanifest.zip"))) == nil && (try? Sharing.inspect(zipFile)) == nil, "a zip without a manifest is not a share")
+    // Ticks: a palette left out is absent from the zip; what is ticked carries the folders it sits in.
+    let partial = zipDir.appendingPathComponent("partial.zip")
+    let ticks: Set<String> = ["Projects", "Projects/Job Alpha", "Projects/Job Alpha/Colourways", "Projects/Job Alpha/Colourways/Autumn Range.colpalette"]
+    let partialManifest = try! Sharing.export(level: .collection, subject: projectsDir, root: treeDir, catalogue: catalogueNamed, ticked: ticks, to: partial, now: tcat)
+    let carried = Sharing.files(ticked: ["Projects/Job Alpha/Colourways/Autumn Range.colpalette"], in: shareTree)
+    check(!partialManifest.files.contains { $0.path.hasSuffix("Headings.colpalette") } && partialManifest.files.contains { $0.path.hasSuffix("Autumn Range.colpalette") } && partialManifest.files.contains { $0.path == "Projects/Projects.colcollection" }
+          && carried.contains("Projects/Projects.colcollection") && carried.contains("Projects/Job Alpha/Job Alpha.colworkgroup") && (try? Sharing.inspect(partial))?.ok == true,
+          "unticking a palette leaves it out of the zip, a ticked palette carries the files of the folders above it, and the result still checks clean")
+    // Bringing in: staged, read as a library, placed, written into another catalogue as one change.
+    let intoDir = root.appendingPathComponent("tree/Into")
+    let intoStore = LibraryStore(directory: intoDir, legacyURL: nil, name: "Into")
+    var intoLib = try! intoStore.load()
+    var intoSchema = intoStore.schema
+    let staging = try! Sharing.stage(inspected)
+    let staged = try! Sharing.read(staging: staging, level: .collection)
+    check(staged.library.projects.map { $0.name } == ["Job Alpha"] && staged.library.swatches.count == 2 && staged.schema.collections.map { $0.name } == ["Projects"] && staged.paths[jobA] == "Projects/Job Alpha",
+          "a staged collection reads as a library of its own, each member and palette knowing the path it came from")
+    check(Sharing.placements(for: .collection, in: intoLib, schema: intoSchema).map { $0.0 } == [.catalogue] && Sharing.placements(for: .palette, in: intoLib, schema: intoSchema).first?.0 == .pool
+          && Sharing.placements(for: .workGroup, in: intoLib, schema: intoSchema).count == 1,
+          "a share may land only where its level fits: a collection in the catalogue, a palette in the Library or a member, a work group in a collection")
+    // Every catalogue's first collection shares one fixed id, so a share of it is a twin of the one here: Replace folds it in.
+    let firstTwin = Sharing.duplicates(in: staged, ticked: nil, into: intoLib, schema: intoSchema, placement: .catalogue)
+    let firstIn = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [SchemaTrial.firstCollection: .replace]), into: &intoLib, schema: &intoSchema, at: tcat)
+    try! intoStore.save(intoLib, schema: intoSchema)
+    let intoBack = try! intoStore.load()
+    if !fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette").path) {
+        print("        stacks staged: \(staged.schema.stacks?.keys.map { $0 } ?? []) into: \(intoSchema.stacks?.keys.map { $0 } ?? [])  places: \(intoSchema.places)")
+        if let e = fm.enumerator(atPath: intoDir.path) { for case let f as String in e { print("          \(f)") } }
+    }
+    print("        firstTwin \(firstTwin.map { "\($0.kind) \($0.why)" })  firstIn \(firstIn)  project \(String(describing: intoBack.project(jobA)?.name)) palettes \(intoBack.palettes(in: jobA).count) collections \(intoStore.schema.collections.map { $0.name }) stacks \(intoStore.schema.stacks?[jobA.uuidString]?.children.map { $0.name } ?? [])")
+    check(firstTwin.map { $0.kind } == [.collection] && firstIn.members == 1 && firstIn.palettes == 2 && firstIn.added == 3 && firstIn.replaced == 1 && intoBack.project(jobA)?.name == "Job Alpha" && intoBack.palettes(in: jobA).count == 2
+          && intoStore.schema.collections.map { $0.name } == ["Projects"] && intoStore.schema.stacks?[jobA.uuidString]?.children[1].name == "Colourways"
+          && fm.fileExists(atPath: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette").path),
+          "into a fresh catalogue a collection lands whole: its member with its own tree, its palettes in their folders, the first collection folded into the one every catalogue starts with")
+    // The same share again: every piece is a twin, by id; each answer does what it says.
+    let twins = Sharing.duplicates(in: staged, ticked: nil, into: intoBack, schema: intoStore.schema, placement: .catalogue)
+    check(twins.map { $0.kind } == [.collection, .member, .palette, .palette] && twins.allSatisfy { $0.why == .sameID } && twins.contains { $0.name == "Autumn Range" && $0.existing == "Autumn Range" },
+          "bringing the same share in again finds the collection, the member and the palettes by id")
+    var skipLib = intoBack, skipSchema = intoStore.schema
+    let skipped = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .skip), into: &skipLib, schema: &skipSchema, at: tcat)
+    check(skipped.skipped == 1 && skipLib == intoBack && skipSchema == intoStore.schema, "Skip on the collection leaves the catalogue exactly as it was")
+    var bothLib = intoBack, bothSchema = intoStore.schema
+    let both = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .keepBoth), into: &bothLib, schema: &bothSchema, at: tcat)
+    print("        both \(both) collections \(bothSchema.collections.map { $0.name }) projects \(bothLib.projects.map { $0.name }) swatches \(bothLib.swatches.count) ids \(Set(bothLib.swatches.map { $0.id }).count)")
+    check(both.added == 4 && bothSchema.collections.map { $0.name } == ["Projects", "Projects 2"] && bothLib.projects.count == 2 && bothLib.swatches.count == 4 && Set(bothLib.swatches.map { $0.id }).count == 4
+          && bothLib.projects.filter { $0.name == "Job Alpha" }.count == 2,
+          "Keep Both brings the share in beside what is there, under new ids, the collection told apart by its name")
+    var replaceLib = intoBack, replaceSchema = intoStore.schema
+    var changed = staged
+    if let at = changed.library.swatches.firstIndex(where: { $0.id == inA }) { changed.library.swatches[at].name = "Autumn Range Revised" }
+    let replaced = Sharing.commit(changed, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .replace), into: &replaceLib, schema: &replaceSchema, at: tcat)
+    check(replaced.replaced == 4 && replaceLib.projects.count == 1 && replaceLib.swatches.count == 2 && replaceLib.swatch(inA)?.name == "Autumn Range Revised" && replaceSchema.collections.count == 1,
+          "Replace puts the share's version in the place of what was there, id for id")
+    var renameLib = intoBack, renameSchema = intoStore.schema
+    let renamed = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .skip), into: &renameLib, schema: &renameSchema, at: tcat)
+    check(renamed.skipped == 1 && renamed.renamed == 0 && renameLib.projects.count == 1, "an answer for each thing is kept to: with the collection skipped nothing beneath it comes in")
+    let renamedIn = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .replace), into: &renameLib, schema: &renameSchema, at: tcat)
+    print("        renamedIn \(renamedIn) projects \(renameLib.projects.map { $0.name }) swatches \(renameLib.swatches.map { $0.name })")
+    check(renamedIn.renamed == 3 && renameLib.projects.map { $0.name }.sorted() == ["Job Alpha", "Job Alpha 2"] && renameLib.swatches.contains { $0.name == "Autumn Range 2" },
+          "Rename brings a twin in under the next free name, beside the original")
+    // A palette on its own: the same colours under another name are a twin; it lands in a member or the Library.
+    let paletteShare = zipDir.appendingPathComponent("Autumn.zip")
+    _ = try! Sharing.export(level: .palette, subject: intoDir.appendingPathComponent("Projects/Job Alpha/Colourways/Autumn Range.colpalette"), root: intoDir, catalogue: catalogueNamed, to: paletteShare, now: tcat)
+    let paletteInspected = try! Sharing.inspect(paletteShare)
+    let paletteStaging = try! Sharing.stage(paletteInspected)
+    var paletteStaged = try! Sharing.read(staging: paletteStaging, level: .palette)
+    paletteStaged.palette = paletteStaged.palette.map { pair in var p = pair.0; p.name = "Autumn Again"; return (Sharing.renamedCopyForTest(p), pair.1) }
+    let colourTwin = Sharing.duplicates(in: paletteStaged, ticked: nil, into: intoBack, schema: intoStore.schema, placement: .pool)
+    var poolLib = intoBack, poolSchema = intoStore.schema
+    let intoPool = Sharing.commit(paletteStaged, choices: Sharing.Choices(ticked: nil, placement: .pool, otherwise: .keepBoth), into: &poolLib, schema: &poolSchema, at: tcat)
+    check(paletteInspected.ok && paletteInspected.manifest.level == .palette && paletteInspected.tree.kind == .palette && colourTwin.map { $0.why } == [.sameColours] && colourTwin.first?.existing == "Autumn Range"
+          && intoPool.added == 1 && poolLib.palettes(in: nil).map { $0.name } == ["Autumn Again"],
+          "a palette shares as one file; the same colours under another name are seen as a twin; Keep Both puts it in the Library")
+    // A work group on its own lands in a collection of the user's choosing, or under a client in it.
+    let memberShare = zipDir.appendingPathComponent("JobAlpha.zip")
+    _ = try! Sharing.export(level: .workGroup, subject: intoDir.appendingPathComponent("Projects/Job Alpha"), root: intoDir, catalogue: catalogueNamed, to: memberShare, now: tcat)
+    let memberInspected = try! Sharing.inspect(memberShare)
+    let memberStaged = try! Sharing.read(staging: try! Sharing.stage(memberInspected), level: .workGroup)
+    var wgLib = try! treeStore.load(), wgSchema = treeStore.schema
+    let customers = wgSchema.collections.first { $0.name == "Customers" }!
+    let underAcme = Sharing.commit(memberStaged, choices: Sharing.Choices(ticked: nil, placement: .collection(customers.id, customers.folders[0].id), otherwise: .keepBoth), into: &wgLib, schema: &wgSchema, at: tcat)
+    try! treeStore.save(wgLib, schema: wgSchema)
+    let landed = wgLib.projects.first { $0.name == "Job Alpha" && $0.id != jobA }
+    check(memberInspected.ok && memberInspected.manifest.level == .workGroup && memberStaged.library.projects.count == 1 && underAcme.members == 1 && underAcme.palettes == 2
+          && landed != nil && SchemaTrial.folder(of: landed!.id, among: wgSchema.collections, places: wgSchema.places) == customers.folders[0].id
+          && fm.fileExists(atPath: treeDir.appendingPathComponent("Customers/Acme Ltd/Job Alpha/Colourways/Autumn Range.colpalette").path),
+          "a work group shares as its folder and lands where it is pointed, under a client, with its own tree and its palettes")
+    for dir in [staging, paletteStaging] { Sharing.discard(dir) }
+    check(!fm.fileExists(atPath: staging.path), "a staging folder is gone once the share is in or set aside")
+
     print("where catalogues and their members are kept")
     let homeDir = root.appendingPathComponent("home"), awayDir = root.appendingPathComponent("awayDir")
     let cats = Catalogues(root: homeDir, legacyURL: nil)

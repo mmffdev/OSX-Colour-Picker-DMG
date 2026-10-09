@@ -192,26 +192,26 @@ enum CatalogueTree {
 
     // Every path is built from the folder it was asked for, never from what the file system says the folder's real path is,
     // so a folder reached through a link compares equal to itself wherever it was named.
-    private static func names(in dir: URL) -> [String] {
+    static func names(in dir: URL) -> [String] {
         ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
-    private static func isFolder(_ url: URL) -> Bool {
+    static func isFolder(_ url: URL) -> Bool {
         var isDir: ObjCBool = false
         return fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
-    private static func subfolders(of dir: URL) -> [URL] {
+    static func subfolders(of dir: URL) -> [URL] {
         names(in: dir).map { dir.appendingPathComponent($0) }.filter(isFolder)
     }
-    private static func files(of dir: URL, extension ext: String) -> [URL] {
+    static func files(of dir: URL, extension ext: String) -> [URL] {
         names(in: dir).filter { ($0 as NSString).pathExtension.lowercased() == ext }.map { dir.appendingPathComponent($0) }.filter { !isFolder($0) }
     }
-    private static func read<T: Decodable>(_ type: T.Type, at url: URL) -> T? {
+    static func read<T: Decodable>(_ type: T.Type, at url: URL) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? decoder().decode(type, from: data)
     }
     /// The one document of a folder: "Acme/Acme.colworkgroup", or whichever file of that kind is there.
-    private static func document(in folder: URL, extension ext: String) -> URL? {
+    static func document(in folder: URL, extension ext: String) -> URL? {
         let named = folder.appendingPathComponent(folder.lastPathComponent + "." + ext)
         if fm.fileExists(atPath: named.path) { return named }
         return files(of: folder, extension: ext).first
@@ -460,6 +460,8 @@ enum CatalogueTree {
 
     /// The folder of a member or a level between, by its id, wherever the tree has it.
     static func folder(ofWorkGroup id: UUID, in root: URL) -> URL? { scan(root: root).workGroups[id] }
+    /// A collection's folder, by its id.
+    static func folder(ofCollection id: UUID, in root: URL) -> URL? { scan(root: root).collections[id] }
     /// A palette's file, by its id, wherever the tree has it.
     static func file(ofPalette id: UUID, in root: URL) -> URL? { scan(root: root).palettes[id] }
 
