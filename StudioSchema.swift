@@ -98,6 +98,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     private struct TypeRow { let name: String; let locked: Bool; let chosen: Bool; let symbol: String }
     private var mapRows: [MapRow] = []
     private var typeRows: [TypeRow] = []
+    /// The last row of the templates: saves the row's own shape as a template of the catalogue.
+    private static let saveTemplateRow = "Save As Template\u{2026}"
     private var rowRects: [NSRect] = []
     private var gripRects: [NSRect] = []
     private var doHits: [(NSRect, () -> Void)] = []
@@ -301,6 +303,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
 
     private struct Form {
         var title = "", help = "", name = "", said: String?, offered: [String] = [], chosen: String?, locked: Set<String> = [], canName = false, symbol = "square.dashed"
+        /// The right column lists the catalogue's templates instead of types: on the Master Template and on a member.
+        var templates = false
+        /// The template the row was made from, ticked in the list.
+        var fromTemplate: UUID?
         /// Whether the name is one of the types on offer; when it is not, the Custom Name row holds it with the type it follows.
         var custom: Bool { !offered.isEmpty && !offered.contains(name) }
     }
@@ -333,7 +339,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             f.title = level == 1 ? "Master Template" : SchemaTrial.title(forLevel: level + offset(c)); f.name = n.name; f.said = n.about; f.canName = true
             if level == 1 {
                 f.symbol = "folder"
-                f.help = "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups beneath it. Add Child makes a group in every \(memberWord); Add Sibling makes a \(memberWord)."
+                f.templates = true; f.fromTemplate = c.templateID
+                f.help = "What a \(memberWord) of \(heading) is called, and the pattern every one follows: the groups beneath it. Choose a template to make it this pattern, or save this pattern as a template; Add Child makes a group in every \(memberWord)."
             } else {
                 f.offered = Self.groupTypes; f.chosen = SchemaTrial.type(of: n); f.symbol = symbol(forType: SchemaTrial.type(of: n))
                 // The types its siblings already hold are locked: one of each to a level. A second can always be made under a name of its own.
@@ -342,7 +349,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             }
         case .member(_, let pid):
             f.title = member(c); f.name = lib.project(pid)?.name ?? ""; f.canName = true; f.symbol = "folder"; f.said = lib.project(pid)?.details?[ProjectField.notes.rawValue] ?? ""
-            f.help = "One \(memberWord) in \(heading): a project with files of its own, following the Master Template. Its palettes are made in rail1."
+            f.templates = true
+            f.help = "One \(memberWord) in \(heading): a folder of its own in the catalogue, following the Master Template until it is shaped. Choose a template to give it that shape as its own, or save its shape as a template."
         case .instance(_, let pid, let nid, let level):
             let root = tree(of: pid), n = node(nid, of: pid) ?? root
             f.title = SchemaTrial.title(forLevel: level + offset(c)); f.name = n.name; f.said = n.about; f.canName = true
@@ -387,7 +395,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         super.layout()
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line
         mapRows = buildMap()
-        typeRows = g.form.offered.map { TypeRow(name: $0, locked: g.form.locked.contains($0) && $0 != g.form.chosen, chosen: $0 == g.form.chosen, symbol: symbol(forType: $0)) }
+        typeRows = g.form.templates
+            ? SchemaTrial.templates.map { TypeRow(name: $0.name, locked: false, chosen: $0.id == g.form.fromTemplate, symbol: "square.stack.3d.up") } + [TypeRow(name: Self.saveTemplateRow, locked: false, chosen: false, symbol: "plus")]
+            : g.form.offered.map { TypeRow(name: $0, locked: g.form.locked.contains($0) && $0 != g.form.chosen, chosen: $0 == g.form.chosen, symbol: symbol(forType: $0)) }
         // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
         mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter / 2, height: max(0, bounds.height - g.mapTop))
         let mapHeight = CGFloat(mapRows.count) * u + u
@@ -419,15 +429,15 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     override func draw(_ dirtyRect: NSRect) {
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line, l = leading
         // The two first-order headers on the first line, their words in a box of three units under each, then the second pair of headers on one line with their rules.
-        Design.attributed("Structure", .body).draw(x: l, baseline: line)
+        Design.attributed("Structure", .header).draw(x: l, baseline: line)
         Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
-        Design.attributed("Schema", .body).draw(x: l, baseline: 4 * u + line)
+        Design.attributed("Schema", .header).draw(x: l, baseline: 4 * u + line)
         hairline(x: l, y: g.mapTop - 1, width: g.lw, Design.rule)
         guard selected != nil else { return }
         let rx = g.rx
-        Design.attributed(g.form.title, .body).draw(x: rx, baseline: line)
+        Design.attributed(g.form.title, .header).draw(x: rx, baseline: line)
         Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
-        Design.attributed("Type", .body).draw(x: rx, baseline: 4 * u + line)
+        Design.attributed(g.form.templates ? "Templates" : "Type", .header).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
         if g.form.canName {
             Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
@@ -527,7 +537,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             Design.ink.setStroke()
             let e = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
             name.draw(x: lead + 24, baseline: b, width: w - lead - 24 - 150)
-            let menuRect = trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol, word: Self.isRole(t.name) ? nil : "Template")
+            let inTemplates = form().templates
+            let menuRect = trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol,
+                                    word: inTemplates ? (t.name == Self.saveTemplateRow ? nil : "Delete") : Self.isRole(t.name) ? nil : "Template")
             hairline(x: lead, y: box.maxY - 1, width: w - lead - air, Design.mist)
             if !t.locked {
                 if !menuRect.isEmpty { templateHits.append((menuRect, t.name)) }
@@ -571,8 +583,49 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         }
     }
     private func typesDown(at p: NSPoint) {
+        if form().templates {
+            if let h = templateHits.first(where: { $0.0.contains(p) }), let t = SchemaTrial.templates.first(where: { $0.name == h.1 }) { deleteTemplate(t); return }
+            if let h = typeHits.first(where: { $0.0.contains(p) }) { h.1 == Self.saveTemplateRow ? saveAsTemplate() : useTemplate(named: h.1) }
+            return
+        }
         if let h = templateHits.first(where: { $0.0.contains(p) }) { openTemplates(for: h.1, under: h.0, in: types); return }
         if let h = typeHits.first(where: { $0.0.contains(p) }) { choose(type: h.1) }
+    }
+
+    // MARK: Templates: the catalogue's own shapes, used, saved and deleted here
+
+    /// The shape the selected row stands for: the collection's Master Template, or the member's own tree.
+    private var shapeInHand: SchemaNode? {
+        guard let what = selected, let c = collection(what.collection) else { return nil }
+        switch what {
+        case .node(_, _, 1): return c.stack
+        case .member(_, let pid): return tree(of: pid)
+        default: return nil
+        }
+    }
+    private func useTemplate(named name: String) {
+        guard let what = selected, let t = SchemaTrial.templates.first(where: { $0.name == name }) else { return }
+        switch what {
+        case .node(let cid, _, 1): SchemaTrial.apply(template: t.id, toCollection: cid)
+        case .member(_, let pid): SchemaTrial.apply(template: t.id, toMember: pid)
+        default: return
+        }
+        library?.flash("\(name) is now the shape")
+        show()
+    }
+    private func saveAsTemplate() {
+        guard let shape = shapeInHand else { return }
+        SwissConfirm.name(over: window, title: "Save As Template", note: "The shape as it stands, the groups beneath the member, kept as a template of this catalogue for any collection or member to take.",
+                          placeholder: "Template name", value: "", confirm: "Save", check: { name in SchemaTrial.templates.contains { $0.name.lowercased() == name.lowercased() } ? "There is a template called that already." : nil }) { [weak self] name in
+            SchemaTrial.saveTemplate(shape, named: name)
+            self?.show()
+        }
+    }
+    private func deleteTemplate(_ t: SchemaTemplate) {
+        SwissConfirm.ask(over: window, title: "Delete Template", note: "You are about to delete the template \(t.name). Every collection and member keeps the shape it took from it; only the template goes.", commit: "Delete") { [weak self] in
+            SchemaTrial.removeTemplate(t.id)
+            self?.show()
+        }
     }
     override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
     /// A type's menu: the type itself, Customise, which takes the type and opens the name, and the templates saved for it, none yet.
