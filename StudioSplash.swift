@@ -6,10 +6,10 @@ import AppKit
 // whole window. Nothing of the app shows but the wordmark, drawn by Logo exactly where the header
 // draws it, column 1 on the header's baseline, so when the splash ends the mark has not moved.
 //
-// The lighthouse (Lighthouse.swift) stands on the far left, columns 1 to 4, the whole height of the
-// band, and rises a level as each section locks. The tree (SplashTree.swift), the structure as the
-// answers build it, growing with every choice, is in a scroll of its own on columns 5 to 7. The
-// sections travel on one tall surface on the right, columns 8 to 12 (Rick, 2026-10-09): Continue moves the surface up one section, pushing the one in view up
+// Half and half (Rick, 2026-10-09): the tree (SplashTree.swift), the structure as the answers build it,
+// growing with every choice, is in a scroll of its own on columns 1 to 6; the sections travel on one
+// tall surface on the right, columns 7 to 12. The lighthouse (Lighthouse.swift) is kept but not shown
+// (showLighthouse) until its picture is right. Continue moves the surface up one section, pushing the one in view up
 // and out of the band's top edge as the next slides up under it and locks. Each section is exactly
 // the band's height and draws on the window's columns and on the beat counted from the band's top,
 // so a locked section leaves every baseline on the grid. Only the surface moves; nothing inside a
@@ -35,7 +35,7 @@ final class StudioSplash: NSView {
     private let library: LibraryController
     private let draft: SplashDraft
     private let lighthouse = LighthouseView()
-    private static let showLighthouse = true
+    private static let showLighthouse = false
     private let tree: SplashTreeView
     private let scroll = NSScrollView()
     private let band = SplashBand()
@@ -130,14 +130,14 @@ final class StudioSplash: NSView {
         band.frame = NSRect(x: 0, y: top, width: w, height: h)
         if !moving { surface.frame = NSRect(x: 0, y: -CGFloat(at) * h, width: w, height: h * CGFloat(sections.count)) }
         for (i, s) in sections.enumerated() { s.frame = NSRect(x: 0, y: CGFloat(i) * h, width: w, height: h) }
-        // The lighthouse takes columns 1 to 4 from the band's top to the window's foot, growing up the height of the
-        // app; its picture ends at the area gutter after column 4. The tree's scroll takes columns 5 to 7, from the
-        // band's top to the buttons' foot, its own margin landing on column 5.
+        // Half and half: the tree's scroll takes columns 1 to 6 from the band's top to the buttons' foot, the sections
+        // columns 7 to 12. The lighthouse, when shown, stands under the tree.
         if Self.showLighthouse {
-            lighthouse.frame = NSRect(x: 0, y: top, width: A.column(4, in: w) + A.columnWidth(in: w) + A.extra / 2, height: bounds.height - top)
+            let lhH = min(13 * A.unit, max(8 * A.unit, bounds.height - top - 15 * A.unit))
+            lighthouse.frame = NSRect(x: 0, y: bounds.height - lhH, width: A.column(6, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: lhH)
             lighthouse.headroom = A.unit
         }
-        scroll.frame = NSRect(x: A.column(5, in: w) - A.margin, y: top, width: A.span(5, 7, in: w) + A.margin + A.gutter / 2, height: foot - top)
+        scroll.frame = NSRect(x: 0, y: top, width: A.column(6, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: foot - top)
         tree.fit()
     }
 
@@ -291,9 +291,9 @@ class SplashSection: NSView {
     func line(_ k: Int) -> CGFloat { CGFloat(k) * A.unit }
     func col(_ c: Int) -> CGFloat { A.column(c, in: bounds.width) }
     func span(_ a: Int, _ b: Int) -> CGFloat { A.span(a, b, in: bounds.width) }
-    /// The section's words begin at column 8 and run to column 12's end: the lighthouse has columns 1 to 4, the tree 5 to 7 (Rick, 2026-10-09).
-    var left: CGFloat { col(8) }
-    var width: CGFloat { span(8, 12) }
+    /// Half and half: the tree has columns 1 to 6, the section's words begin at column 7 and run to column 12's end (Rick, 2026-10-09).
+    var left: CGFloat { col(7) }
+    var width: CGFloat { span(7, 12) }
 
     /// The section's label on row 1 and its two-tone question on rows 3 and 5, from column 7.
     func drawQuestion(step: String, first: String, second: String) {
