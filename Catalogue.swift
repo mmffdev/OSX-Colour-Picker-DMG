@@ -1,27 +1,11 @@
 import Foundation
 
-// ---------- The catalogue on disk ----------
+// ---------- The catalogue as earlier versions kept it ----------
 //
-// A catalogue is the index a user opens: which projects there are, and the few things that
-// belong to the catalogue as a whole. It is not a second copy of anything. The work itself is in
-// the projects, each a folder of its own files, and each project is the only home of what is in it.
-//
-//     Client Name.colcatalogue                 the index: the projects, the order of things, what was deleted
-//     Unfiled/Config/Unfiled.coldata           what belongs to no project: global tags, the house's
-//                                              profiles, and colours no palette uses
-//     Unfiled/Palettes/Loose.colpalette        palettes that sit in no project
-//     Unfiled/Channels/Loose.colprint          and their purposes
-//
-//     <Projects>/Brand/Space/Brand.colspace       the member
-//     <Projects>/Brand/Config/Brand.coldata       its own tags, and the tags and profiles it carries with it
-//     <Projects>/Brand/History/Brand.colhistory
-//     <Projects>/Brand/Palettes/…                 its palettes, each with the colours it uses
-//     <Projects>/Brand/Channels/…                 each palette's settings for a purpose
-//
-// In memory the app still works on one Library. Saving splits it into these files; loading joins
-// them. A project whose files cannot be reached (a drive unplugged, a folder moved) stays in the
-// index and is shown as unavailable; it is never taken to have been deleted, and never written
-// over, so it comes back whole when its files do.
+// Until 2026-10-09 a catalogue was an index listing its members, each a folder of its own files,
+// with Unfiled for what belonged to no member. The reader here is kept for one purpose: bringing
+// such a catalogue across into the tree (see Migration.swift and CatalogueTree.swift). Nothing is
+// written in this shape any more.
 
 /// One project as the index lists it: enough to name it and find it, no more.
 struct ProjectRef: Codable, Equatable {
@@ -85,54 +69,14 @@ enum CatalogueFiles {
 
     static func unfiledFolder(beside index: URL) -> URL { index.deletingLastPathComponent().appendingPathComponent(unfiled) }
 
-    /// Saves a library as a catalogue: each project into its own files, what belongs to no
-    /// project into Unfiled, and the index last, so the index never names what is not yet there.
-    /// `remaking` is for turning an earlier one-file catalogue into these files: every project is
-    /// written, including any whose folder had gone, because that one file was the only copy.
-    /// `skipping` names the projects that could not be reached when the catalogue was loaded. All
-    /// that is known of them is their name, so they are left exactly as they are on disk.
-    static func write(_ lib: Library, index: URL, master: URL?, remaking: Bool = false, skipping: Set<UUID> = [], written: inout [UUID: Data]) throws {
-        let fm = FileManager.default, e = ColourFiles.encoder()
-        _ = try ProjectFiles.write(lib, library: index, master: master, touchHistory: false, remaking: remaking, skipping: skipping, written: &written)
-
-        let real = Set(lib.projects.map { $0.id })
-        let loose = lib.swatches.filter { $0.projectID.map { !real.contains($0) } ?? true }
-        let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
-        let data = DataDocument(project: nil, colours: lib.colours.filter { !used.contains($0.hex) },
-                                tags: lib.tagInfo.filter { $0.projectID.map { !real.contains($0) } ?? true }, profiles: lib.colourProfiles)
-        let folder = unfiledFolder(beside: index)
-        for name in [ProjectFiles.configFolder, ProjectFiles.palettesFolder, ProjectFiles.channelsFolder] {
-            try fm.createDirectory(at: folder.appendingPathComponent(name), withIntermediateDirectories: true)
-        }
-        var documents: [(path: String, data: Data)] = [("\(ProjectFiles.configFolder)/\(unfiled).\(ColourFiles.data)", try e.encode(data))]
-        documents += try ProjectFile.paletteDocuments(loose, colours: lib.colours, project: nil)
-        try ProjectFiles.put(documents, in: folder)
-        // Where an earlier version kept the same, loose in the folder.
-        try? fm.removeItem(at: folder.appendingPathComponent("\(unfiled).\(ColourFiles.data)"))
-
-        // The notes are the file's own, not the library's, so they are carried over from the file as it stands.
-        let kept = (try? ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index)))?.about
-        var doc = CatalogueDocument(library: lib.version,
-                                    // Every member's folder is written, so the catalogue says where its members are
-                                    // without this Mac's settings: relative when inside the catalogue, in full otherwise.
-                                    projects: lib.projects.map { ProjectRef(id: $0.id, name: $0.name, createdAt: $0.createdAt,
-                                                                            folder: $0.folder ?? ProjectFiles.keep(ProjectFiles.root(for: $0, library: index, master: master), beside: index)) },
-                                    palettes: lib.swatches.map { $0.id }, colours: lib.colours.map { $0.hex },
-                                    tags: lib.tagInfo.map { TagKey(name: $0.name, project: $0.projectID) },
-                                    activePalette: lib.activeSwatchID, deleted: lib.deleted)
-        doc.about = kept
-        // Always written, changed or not: its date is how another copy of the app sees there is something new.
-        do { try e.encode(doc).write(to: index, options: .atomic) } catch { throw StoreError.saveFailed(index, error) }
-    }
-
-    /// The catalogue's notes, from its file.
+    /// The catalogue's notes, from its index.
     static func about(index: URL) -> String {
-        (try? ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index)))?.about ?? ""
+        (try? Data(contentsOf: index)).flatMap { CatalogueTree.decode($0) }?.about ?? ""
     }
 
-    /// Writes the catalogue's notes into its file, touching nothing else in it.
+    /// Writes the catalogue's notes into its index, touching nothing else in it.
     static func setAbout(_ text: String, index: URL) throws {
-        var doc = try ColourFiles.decoder().decode(CatalogueDocument.self, from: Data(contentsOf: index))
+        guard let data = try? Data(contentsOf: index), var doc = CatalogueTree.decode(data) else { return }
         doc.about = text.isEmpty ? nil : text
         try ColourFiles.encoder().encode(doc).write(to: index, options: .atomic)
     }

@@ -523,12 +523,6 @@ extension Library {
         projects[i].detailsChangedAt = date
     }
 
-    /// Removes the project only; its palettes drop into the loose list.
-    mutating func setProjectFolder(_ id: UUID, _ path: String?) {
-        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
-        projects[i].folder = path
-    }
-
     mutating func setProjectLocked(_ id: UUID, _ on: Bool) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         projects[i].locked = on ? true : nil
@@ -544,11 +538,6 @@ extension Library {
         // Deleting a locked project is a change to it too.
         for p in projects where p.isLocked && after.project(p.id) == nil { return p.name }
         return nil
-    }
-
-    mutating func markProjectFile(_ id: UUID, known: Bool) {
-        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
-        projects[i].fileKnown = known
     }
 
     mutating func deleteProject(_ id: UUID, at date: Date = Date()) {
@@ -1017,30 +1006,35 @@ enum StoreError: LocalizedError {
 }
 
 final class LibraryStore {
+    /// The catalogue's index, "Rick 001.colcatalogue"; the tree is the folder round it.
     let url: URL
+    var root: URL { url.deletingLastPathComponent() }
+    /// The catalogue's name, which its index is named for.
+    let name: String
     /// The v1 library. Read for import, never written.
     let legacyURL: URL?
     /// The v2 library. Read for import, never written.
     let previousURL: URL?
     /// Set when an unreadable library file was moved aside during load.
     private(set) var quarantinedFile: URL?
-
-    /// The one file an earlier version kept everything in. Read once, then kept as a backup.
+    /// The one file an earlier version kept everything in: brought across the first time it is opened.
     let earlierURL: URL
-    /// The folder projects are kept under; nil puts them in "Projects" beside the catalogue.
-    let projectsFolder: URL?
-    /// Projects the catalogue lists whose files could not be reached at the last load. They are
-    /// shown as unavailable, and never written over.
-    private(set) var unavailable = Set<UUID>()
-    private var written: [UUID: Data] = [:]
+    /// The schema read with the library, written back with it.
+    private(set) var schema: SchemaTrial.SchemaFile = .fresh
+    /// What bringing an earlier layout across did, the first time this catalogue was opened in this version; nil otherwise.
+    private var migrated: Migration.Report?
+    /// The report, once: the controller tells the user and records it.
+    func takeMigration() -> Migration.Report? { defer { migrated = nil }; return migrated }
+    /// What the last read found that the files had not listed: folders and files taken in or renamed in Finder.
+    private(set) var notes: [String] = []
 
     /// `name` is the catalogue's, which its file is named for.
-    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil, projectsFolder: URL? = nil) {
+    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        self.url = CatalogueFiles.index(in: directory)
-            ?? directory.appendingPathComponent(filesystemName(name ?? directory.lastPathComponent) + "." + ColourFiles.catalogue)
+        let found = CatalogueFiles.index(in: directory)
+        self.url = found ?? directory.appendingPathComponent(filesystemName(name ?? directory.lastPathComponent) + "." + ColourFiles.catalogue)
+        self.name = name ?? found?.deletingPathExtension().lastPathComponent ?? directory.lastPathComponent
         self.earlierURL = directory.appendingPathComponent("library.json")
-        self.projectsFolder = projectsFolder
         self.legacyURL = legacyURL
         self.previousURL = previousURL
     }
@@ -1064,30 +1058,28 @@ final class LibraryStore {
         return try? decoder.decode(Library.self, from: data)
     }
 
+    /// Reads the tree. A catalogue laid out by an earlier version is brought across first, with a backup beside it.
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
         let fm = FileManager.default, stamp = Int(Date().timeIntervalSince1970)
-        if fm.fileExists(atPath: url.path) {
-            if let loaded = try? CatalogueFiles.read(index: url, master: projectsFolder) {
-                unavailable = loaded.unavailable
+        if Migration.needed(in: root) {
+            migrated = try Migration.run(root: root, name: name)
+        }
+        if let index = CatalogueFiles.index(in: root) {
+            do {
+                let loaded = try CatalogueTree.read(root: root)
+                schema = loaded.schema
+                notes = loaded.notes
+                SchemaTrial.adopt(loaded.schema, for: root)
+                // The disk said something the files had not: the files catch up.
+                if loaded.dirty { try? CatalogueTree.write(loaded.library, schema: loaded.schema, index: url, name: name) }
                 return loaded.library
+            } catch {
+                Diagnostics.log("store", "could not read \(index.path): \(error.localizedDescription)")
             }
-            // Never overwrite a file we could not read — move it aside for recovery.
-            let aside = url.deletingLastPathComponent().appendingPathComponent("unreadable-\(stamp)." + ColourFiles.catalogue + ".txt")
-            try? fm.moveItem(at: url, to: aside)
-            quarantinedFile = aside
-        } else if fm.fileExists(atPath: earlierURL.path) {
-            // A catalogue an earlier version kept in one file: saved as a catalogue of project
-            // files, and the one file kept among the backups.
-            if let data = try? Data(contentsOf: earlierURL), let lib = try? decoder.decode(Library.self, from: data) {
-                try save(lib, remaking: true)
-                let backups = url.deletingLastPathComponent().appendingPathComponent("Backups")
-                try? fm.createDirectory(at: backups, withIntermediateDirectories: true)
-                try? fm.moveItem(at: earlierURL, to: backups.appendingPathComponent("library before catalogue files \(stamp).json"))
-                return lib
-            }
-            let aside = url.deletingLastPathComponent().appendingPathComponent("library.unreadable-\(stamp).json")
-            try? fm.moveItem(at: earlierURL, to: aside)
+            // Never overwrite a file we could not read: move it aside for recovery.
+            let aside = root.appendingPathComponent("unreadable-\(stamp)." + ColourFiles.catalogue + ".txt")
+            try? fm.moveItem(at: index, to: aside)
             quarantinedFile = aside
         }
         var lib = loadPrevious() ?? Library()
@@ -1096,16 +1088,19 @@ final class LibraryStore {
         return lib
     }
 
-    func save(_ lib: Library) throws { try save(lib, remaking: false) }
+    /// Writes the library as the tree, with the schema as it stands.
+    func save(_ lib: Library) throws { try save(lib, schema: SchemaTrial.schema(for: root) ?? schema) }
 
-    private func save(_ lib: Library, remaking: Bool) throws {
+    func save(_ lib: Library, schema f: SchemaTrial.SchemaFile) throws {
         do {
-            try CatalogueFiles.write(lib, index: url, master: projectsFolder, remaking: remaking, skipping: unavailable, written: &written)
+            try CatalogueTree.write(lib, schema: f, index: url, name: name)
         } catch let error as StoreError {
             throw error
         } catch {
             throw StoreError.saveFailed(url, error)
         }
+        schema = f
+        SchemaTrial.adopt(f, for: root)
     }
 
     /// Re-reads from disk before changing anything, so picks made by the

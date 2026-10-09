@@ -1075,7 +1075,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let cell = o.makeView(withIdentifier: ProjectHeaderCell.identifier, owner: self) as? ProjectHeaderCell ?? {
                 let c = ProjectHeaderCell(frame: .zero); c.identifier = ProjectHeaderCell.identifier; return c }()
             let locked = lib.project(id)?.isLocked ?? false
-            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: library.lostProjects[id] != nil, locked: locked)
+            cell.configure(name: lib.project(id)?.name ?? "", tooltip: "New palette in this project", lost: false, locked: locked)
             cell.onAdd = { [weak self] in self?.library.addPalette(to: id) }
             cell.onLock = { [weak self] in self?.library.setProjectLocked(id, !locked) }
             cell.onGear = { [weak self] button in
@@ -1314,10 +1314,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case .editTags:
             // Not a place to be: open the editor and put the highlight back where it was.
             library.showTagEditor()
-            select(selection)
-            return
-        case .project(let id) where library.lostProjects[id] != nil:
-            library.showLostProject(id)
             select(selection)
             return
         default: return
@@ -1595,7 +1591,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         add("\(kind) Details\u{2026}", #selector(projectDetailsClicked(_:)), id)
         add("Rename \(kind)\u{2026}", #selector(renameProjectClicked(_:)), id)
         add("Show \(kind) File", #selector(projectFileClicked(_:)), id)
-        add("Keep \(kind) In\u{2026}", #selector(moveProjectClicked(_:)), id)
         add("Export Design Pack\u{2026}", #selector(projectPackClicked(_:)), id)
         // Where it sits: any collection, or any folder of one that groups its members.
         let move = NSMenu()
@@ -1649,7 +1644,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func projectDetailsClicked(_ s: NSMenuItem) { if let id = id(s) { library.editProject(id) } }
     @objc private func renameProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.renameProject(id) } }
     @objc private func projectFileClicked(_ s: NSMenuItem) { if let id = id(s) { library.showProjectFile(id) } }
-    @objc private func moveProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.moveProject(id) } }
     @objc private func projectPackClicked(_ s: NSMenuItem) { if let id = id(s) { library.exportDesignPack(project: id) } }
     @objc private func deleteProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.delete(project: id) } }
     @objc private func dumpProjectClicked(_ s: NSMenuItem) { if let id = id(s) { library.dump(project: id, over: view.window) } }

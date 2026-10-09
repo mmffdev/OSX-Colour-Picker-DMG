@@ -336,8 +336,7 @@ if CommandLine.arguments.contains("--self-test") {
     let named = args.firstIndex(of: "--catalogue").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
     let controller = LibraryController(catalogue: named ?? Catalogues.currentName)
     controller.reload()
-    controller.writeProjectFiles()
-    for p in controller.library.orderedProjects { print(controller.projectFileURL(p.id)?.path ?? p.name) }
+    for p in controller.library.orderedProjects { print(controller.memberFolderURL(p.id)?.path ?? p.name) }
     exit(0)
 } else if CommandLine.arguments.contains("--pick") {
     runPickMode()

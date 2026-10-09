@@ -118,7 +118,7 @@ final class OverviewViewController: NSViewController {
         lock.toolTip = project.isLocked ? "Locked: nothing in the project can change. Click to unlock" : "Lock the project so nothing in it can change"
         copyAll.isEnabled = !colours.isEmpty
         pack.isEnabled = !palettes.isEmpty
-        file.isEnabled = library.lostProjects[id] == nil
+        file.isEnabled = true
 
         // The form is left alone while what it shows is unchanged, so typing is not lost to an unrelated change.
         let now = Built(id: id, name: project.name, details: project.details ?? [:], locked: project.isLocked)

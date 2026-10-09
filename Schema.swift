@@ -53,6 +53,17 @@ struct SchemaCollection: Codable, Equatable {
     var folders: [SchemaFolder] = []
     /// The default stack. Its top is the member itself, named for what a member is called: Project, Contract.
     var stack: SchemaNode
+    /// The template file the Master Template was copied from, if any; the copy is the collection's own from then on.
+    var templateID: UUID? = nil
+}
+
+/// A shape a work group can be made from, kept as a file of its own in the catalogue's Templates folder.
+struct SchemaTemplate: Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var about = ""
+    var stack: SchemaNode
+    var changedAt: Date
 }
 
 /// Where a project sits: its collection, and the folder in it, if any.
@@ -93,65 +104,63 @@ enum SchemaTrial {
     /// The first collection is the one every project was in before there were collections, and is where a project with no place of its own still is.
     static let firstCollection = UUID(uuidString: "C0110000-0000-4000-8000-000000000001") ?? UUID()
 
-    // MARK: Where the schema is kept: in the catalogue
+    // MARK: Where the schema is kept: in the catalogue's folders
 
-    /// A catalogue's schema is the catalogue's own. It lives in the catalogue's folder as `schema.colschema`, plain JSON
-    /// beside the catalogue's index: its collections, and where every member sits. It travels with the catalogue, and
-    /// every other catalogue has a schema of its own. Until 2026-10-08 it sat with the app's settings, one for all.
-    struct SchemaFile: Codable {
+    /// A catalogue's schema is the catalogue's own. Since 2026-10-09 it is the tree of folders itself: each collection's
+    /// file holds its Master Template, each member's file holds its own tree, and where a member sits is where its
+    /// folder is. In memory it is one `SchemaFile`, read from the tree with the library and written back with it.
+    struct SchemaFile: Codable, Equatable {
         var collections: [SchemaCollection]
         var places: [String: SchemaPlace]
         /// The members that have shaped a tree of their own, by the member's id; the rest follow their collection's Master Template.
         var stacks: [String: SchemaNode]?
+        /// The templates kept in the catalogue, in the order the index lists them.
+        var templates: [SchemaTemplate]?
         /// What a catalogue starts with: the one collection the app has always had.
         static var fresh: SchemaFile { SchemaFile(collections: [SchemaCollection(id: firstCollection, name: "Projects", stack: start)], places: [:]) }
     }
-    static let fileName = "schema.colschema"
     private static var directory: URL?
     private static var held: SchemaFile?
+    /// The store the schema is written through, when a catalogue is open.
+    private static var store: LibraryStore?
+    /// The library as it stands, from the controller, for the catalogue at this folder and no other, so a schema change is
+    /// written with it; nil, or another folder, reads the tree afresh.
+    static var library: ((URL) -> Library?)?
 
-    /// The controller points here at the open catalogue's folder whenever it opens one; the schema is read from there and written back on every change.
-    static func use(directory url: URL) {
+    /// The controller points here at the open catalogue whenever it opens one; the schema is read from its tree and written back with the library on every change.
+    static func use(store: LibraryStore) {
+        let url = store.url.deletingLastPathComponent()
+        self.store = store
         guard url.standardizedFileURL != directory?.standardizedFileURL else { return }
         directory = url; held = nil
         NotificationCenter.default.post(name: .schemaDidChange, object: nil)
     }
-    /// Another catalogue's schema, read from its folder; the open catalogue's is the live one.
+    static func use(directory url: URL) { use(store: LibraryStore(directory: url, legacyURL: nil)) }
+    /// The schema the store read with the library, so it is not read twice.
+    static func adopt(_ f: SchemaFile, for dir: URL) {
+        guard dir.standardizedFileURL == directory?.standardizedFileURL else { return }
+        held = f
+    }
+    /// The schema held for this folder, if it is the open catalogue's.
+    static func schema(for dir: URL) -> SchemaFile? { dir.standardizedFileURL == directory?.standardizedFileURL ? file : nil }
+    /// Another catalogue's schema, read from its tree; the open catalogue's is the live one.
     static func read(in dir: URL) -> SchemaFile {
         if dir.standardizedFileURL == directory?.standardizedFileURL { return file }
-        return decode(dir) ?? .fresh
-    }
-    private static func decode(_ dir: URL) -> SchemaFile? {
-        guard let data = try? Data(contentsOf: dir.appendingPathComponent(fileName)), let read = try? JSONDecoder().decode(SchemaFile.self, from: data), !read.collections.isEmpty else { return nil }
-        return read
-    }
-    private static func encode(_ f: SchemaFile, to dir: URL) {
-        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? enc.encode(f) { try? data.write(to: dir.appendingPathComponent(fileName), options: .atomic) }
+        return (try? CatalogueTree.read(root: dir, palettes: false).schema) ?? .fresh
     }
     private static var file: SchemaFile {
         if let f = held { return f }
-        var f: SchemaFile
-        if let dir = directory, let read = decode(dir) { f = read }
-        else if let dir = directory, let moved = fromPreferences() { f = moved; encode(f, to: dir) }
-        else { f = .fresh }
+        let f = directory.flatMap { try? CatalogueTree.read(root: $0, palettes: false).schema } ?? .fresh
         held = f
         return f
     }
     private static func write(_ f: SchemaFile) {
+        let before = file
         held = f
-        if let dir = directory { encode(f, to: dir) }
-        NotificationCenter.default.post(name: .schemaDidChange, object: nil)
-    }
-    /// The schema kept with the app's settings until 2026-10-08 goes into the first catalogue opened without one of its own, once; the settings are then cleared.
-    private static func fromPreferences() -> SchemaFile? {
-        let cols = preferences.data(forKey: "schema.collections").flatMap { try? JSONDecoder().decode([SchemaCollection].self, from: $0) } ?? []
-        let tree = preferences.data(forKey: "schema.tree").flatMap { try? JSONDecoder().decode(SchemaNode.self, from: $0) }
-        guard !cols.isEmpty || tree != nil else { return nil }
-        let places = preferences.data(forKey: "schema.places").flatMap { try? JSONDecoder().decode([String: SchemaPlace].self, from: $0) } ?? [:]
-        for key in ["schema.collections", "schema.tree", "schema.places", "schema.projects"] { preferences.removeObject(forKey: key) }
-        let collections = cols.isEmpty ? [SchemaCollection(id: firstCollection, name: plural(tree!.name.isEmpty ? "Project" : tree!.name), stack: tree!)] : cols
-        return SchemaFile(collections: collections, places: places)
+        if let store = store {
+            do { try store.save(library?(store.root) ?? store.load(), schema: f) } catch { Diagnostics.log("schema", "could not write the tree: \(error.localizedDescription)") }
+        }
+        NotificationCenter.default.post(name: .schemaDidChange, object: nil, userInfo: ["before": before, "after": f])
     }
 
     /// Every collection, in rail1's order.
@@ -170,12 +179,49 @@ enum SchemaTrial {
         get { file.places }
         set { var f = file; f.places = newValue; write(f) }
     }
-    /// Places a member in another catalogue's schema, written straight to that catalogue's folder.
+    /// Places a member in another catalogue's schema, written straight to that catalogue's tree.
     static func place(_ project: UUID, in collection: UUID, folder: UUID?, catalogue dir: URL) {
         if dir.standardizedFileURL == directory?.standardizedFileURL { place(project, in: collection, folder: folder); return }
-        var f = decode(dir) ?? .fresh
+        let other = LibraryStore(directory: dir, legacyURL: nil)
+        guard let lib = try? other.load() else { return }
+        var f = other.schema
         f.places[project.uuidString] = SchemaPlace(collection: collection, folder: folder)
-        encode(f, to: dir)
+        try? other.save(lib, schema: f)
+    }
+
+    // MARK: Templates
+
+    /// The templates kept in the catalogue, in order.
+    static var templates: [SchemaTemplate] {
+        get { file.templates ?? [] }
+        set { var f = file; f.templates = newValue.isEmpty ? nil : newValue; write(f) }
+    }
+    /// Keeps a tree as a template of the catalogue, under a name no other template has. Returns the template.
+    @discardableResult
+    static func saveTemplate(_ stack: SchemaNode, named raw: String, about: String = "", at date: Date = Date()) -> SchemaTemplate {
+        let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = uniqueName(base.isEmpty ? "Template" : base, among: templates.map { $0.name })
+        let t = SchemaTemplate(name: name, about: about, stack: stack, changedAt: date)
+        templates = templates + [t]
+        return t
+    }
+    static func removeTemplate(_ id: UUID) { templates = templates.filter { $0.id != id } }
+    /// Makes a template the collection's Master Template: a copy, the collection's own from then on.
+    static func apply(template id: UUID, toCollection cid: UUID) {
+        guard let t = templates.first(where: { $0.id == id }) else { return }
+        changeCollection(cid) { c in
+            var stack = t.stack
+            stack.name = c.stack.name   // what a member is called stays the collection's
+            c.stack = stack
+            c.templateID = id
+        }
+    }
+    /// Gives a member a tree of its own, copied from a template.
+    static func apply(template id: UUID, toMember pid: UUID) {
+        guard let t = templates.first(where: { $0.id == id }) else { return }
+        var stack = t.stack
+        stack.name = collection(of: pid).stack.name
+        setSchema(stack, for: pid)
     }
 
     /// The collection a project is in: the one it was placed in, while that is still there; otherwise the first.

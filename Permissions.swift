@@ -157,7 +157,6 @@ enum DocumentsAccess {
         guard !allowed else { return false }
         let c = Catalogues.standard
         var places = [c.root] + c.registry.map { URL(fileURLWithPath: $0.path) }
-        if let p = ProjectFiles.folder { places.append(p) }
         if let s = SyncSettings.folder { places.append(s) }
         return places.contains { inside($0) }
         #endif

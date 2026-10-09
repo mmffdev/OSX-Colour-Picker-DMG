@@ -82,8 +82,6 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
     private var collectionName = SchemaTrial.collections[0].name
     private var memberName = SchemaTrial.memberName(of: SchemaTrial.collections[0])
     private var firstMember = ""
-    /// Where the first member's folder goes; nil is the default under the catalogue.
-    private var firstMemberParent: URL?
     /// The catalogue opened when the assistant closes: set at Create.
     private var created: String?
     private var trainer: HaloTrainer?
@@ -231,7 +229,6 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         var collectionName: String
         var memberName: String
         var firstMember: String
-        var firstMemberParent: URL?
     }
     static let draftKey = "setupDraft"
 
@@ -239,7 +236,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         guard created == nil else { return }
         SetupDraft.save(Draft(step: s ?? step, home: home, imported: imported, useImported: useImported, existing: existing,
                               catalogueName: catalogueName, catalogueParent: catalogueParent, collectionName: collectionName,
-                              memberName: memberName, firstMember: firstMember, firstMemberParent: firstMemberParent), key: Self.draftKey)
+                              memberName: memberName, firstMember: firstMember), key: Self.draftKey)
     }
 
     /// Takes up a draft left by a relaunch; returns the step to open on. "--step 3" on the command
@@ -261,7 +258,6 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         collectionName = d.collectionName
         memberName = d.memberName
         firstMember = d.firstMember
-        firstMemberParent = d.firstMemberParent
         return max(Step.welcome, min(d.step, Step.ready))
     }
 
@@ -490,7 +486,6 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     // MARK: 5. The first member
 
-    private var memberPath: NSTextField?
     private var memberField: NSTextField?
 
     /// Where the catalogue being set up will be.
@@ -502,32 +497,17 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         return catalogueParent.appendingPathComponent(filesystemName(catalogueName))
     }
 
-    private func memberFolder() -> URL {
-        let name = filesystemName(firstMember.isEmpty ? "\(memberName) Name" : firstMember)
-        return (firstMemberParent ?? catalogueFolder.appendingPathComponent(filesystemName(collectionName))).appendingPathComponent(name)
-    }
-
     private func firstMemberStep() {
         setup.title("Your First", memberName)
         skip.isHidden = false
         skip.title = "Skip For Now"
-        body.addArrangedSubview(lead("A \(memberName.lowercased()) is a folder of its own, so it can be handed over or moved as one."))
-        body.addArrangedSubview(story("It goes under the catalogue unless you put it somewhere else, such as a client's own drive. Skip this and make the first one in the app."))
+        body.addArrangedSubview(lead("A \(memberName.lowercased()) is a folder of its own inside the catalogue, under \(collectionName), so it can be handed over or moved as one."))
+        body.addArrangedSubview(story("Its folders follow the shape you chose: Information, Palettes, Typography and Tags. Skip this and make the first one in the app."))
         let name = field("\(memberName) Name", firstMember, action: #selector(memberNameTyped))
         memberField = name
-        let (row, path) = pathRow("Kept In", memberFolder(), change: #selector(changeMemberParent), afterField: true)
-        memberPath = path
-        body.addArrangedSubview(row)
     }
 
-    @objc private func memberNameTyped(_ f: NSTextField) { firstMember = f.stringValue; memberPath?.stringValue = place(memberFolder()) }
-    @objc private func changeMemberParent() {
-        firstMember = memberField?.stringValue ?? firstMember
-        chooseFolder("Choose the folder the \(memberName.lowercased())'s own folder goes in", start: firstMemberParent ?? catalogueFolder) { [weak self] u in
-            self?.firstMemberParent = u
-            self?.memberPath?.stringValue = self?.place(self?.memberFolder() ?? u) ?? ""
-        }
-    }
+    @objc private func memberNameTyped(_ f: NSTextField) { firstMember = f.stringValue }
 
     // MARK: 0. Welcome
 
@@ -568,7 +548,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
         if let name = chosenCatalogue { rows.append(("Catalogue", "\u{201C}\(name)\u{201D}, where it is")) }
         else { rows.append(("Catalogue", "\u{201C}\(catalogueName)\u{201D} in \(place(catalogueFolder))")) }
         rows.append(("Heading And Member", "\(collectionName) \u{00B7} \(memberName)"))
-        if !firstMember.trimmingCharacters(in: .whitespaces).isEmpty { rows.append(("First \(memberName)", "\u{201C}\(firstMember)\u{201D} in \(place(memberFolder()))")) }
+        if !firstMember.trimmingCharacters(in: .whitespaces).isEmpty { rows.append(("First \(memberName)", "\u{201C}\(firstMember)\u{201D} under \(collectionName)")) }
         let allowed = Permission.all.filter { $0.state() == .on }.map { $0.title }
         rows.append(("Allowed", allowed.isEmpty ? "Nothing yet. Settings has every switch." : allowed.joined(separator: ", ")))
         let list = NSStackView()
@@ -600,12 +580,7 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
             }
             let member = firstMember.trimmingCharacters(in: .whitespacesAndNewlines)
             if !member.isEmpty {
-                let store = Catalogues.standard.store(for: name)
-                let folder = memberFolder()
-                try store.mutate { lib in
-                    let id = lib.createProject(named: member)
-                    lib.setProjectFolder(id, ProjectFiles.keep(folder, beside: store.url))
-                }
+                try Catalogues.standard.store(for: name).mutate { lib in _ = lib.createProject(named: member) }
             }
             Prefs.assistantDone = true
             Prefs.setupDone = true      // the permissions were offered on the welcome page
@@ -659,21 +634,15 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
 // MARK: - Reading a catalogue in, as it happens
 
-/// Two lines that follow a catalogue being read: the group being fetched, and the file inside it,
-/// at the speed it really happens. Anything that cannot be found is listed under them, each with
-/// Find and Skip, and the whole ends in one line that stays.
+/// Two lines that follow a catalogue being read: what is being done, and the member or file in hand, at the
+/// speed it really happens; then one line that stays. A catalogue laid out by an earlier version is brought
+/// across first, with a backup beside it, and that is said here too.
 final class OnboardingView: NSView {
     private let group = NSTextField(labelWithString: "")
     private let item = NSTextField(labelWithString: "")
     private let bar = NSProgressIndicator()
     private let summary = NSTextField(wrappingLabelWithString: "")
-    private let misses = NSStackView()
     private let memberWord: String
-    private var missesHeight: NSLayoutConstraint?
-    private lazy var skipAll = NSButton(title: "Skip All", target: self, action: #selector(skipAllTapped))
-
-    /// A member whose files were not where the catalogue says.
-    private struct Miss { let ref: ProjectRef; let expected: URL }
 
     init(memberWord: String) {
         self.memberWord = memberWord
@@ -688,23 +657,7 @@ final class OnboardingView: NSView {
         bar.controlSize = .small
         summary.font = NSFont.systemFont(ofSize: TextSize.body)
         summary.preferredMaxLayoutWidth = 584
-        misses.orientation = .vertical
-        misses.alignment = .leading
-        misses.spacing = 6
-        misses.translatesAutoresizingMaskIntoConstraints = false
-        let scroll = NSScrollView()
-        scroll.documentView = misses
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
-        missesHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
-        missesHeight?.isActive = true
-        misses.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
-        skipAll.bezelStyle = .rounded
-        skipAll.controlSize = .small
-        skipAll.isHidden = true
-        let column = NSStackView(views: [group, item, bar, scroll, skipAll, summary])
-        scroll.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        let column = NSStackView(views: [group, item, bar, summary])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 6
@@ -720,11 +673,6 @@ final class OnboardingView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    private var index: URL?
-    private weak var host: NSWindow?
-    private var done: (() -> Void)?
-    private var found = (members: 0, palettes: 0, typography: 0, tags: 0, missing: 0)
-
     func finished(summaryFor text: String) {
         isHidden = false
         group.stringValue = ""
@@ -733,46 +681,39 @@ final class OnboardingView: NSView {
         summary.stringValue = text
     }
 
-    /// Reads the catalogue member by member, off the main thread, telling the lines what it is on.
+    /// Reads the catalogue off the main thread, telling the lines what it is on.
     func load(catalogue name: String, over host: NSWindow, done: @escaping () -> Void) {
-        let dir = Catalogues.standard.directory(for: name)
-        guard let index = CatalogueFiles.index(in: dir) else { finished(summaryFor: "\u{201C}\(name)\u{201D} is from an earlier version and will be read when it opens."); done(); return }
-        self.index = index
-        self.host = host
-        self.done = done
         isHidden = false
         bar.isHidden = false
         bar.doubleValue = 0
         summary.stringValue = ""
-        misses.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        found = (0, 0, 0, 0, 0)
-        let master = ProjectFiles.folder, word = memberWord
+        let word = memberWord
+        let store = Catalogues.standard.store(for: name)
+        let bringing = Migration.needed(in: store.root)
+        say(group: bringing ? "Backing up \(name), then bringing it across into its own tree of folders" : "Reading \(name)", item: "", progress: 0.05)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let doc = (try? Data(contentsOf: index)).flatMap { try? ColourFiles.decoder().decode(CatalogueDocument.self, from: $0) }
-            let refs = doc?.projects ?? []
-            var missing: [Miss] = []
-            var tally = (members: 0, palettes: 0, typography: 0, tags: 0)
-            for (at, ref) in refs.enumerated() {
-                let stub = Project(id: ref.id, name: ref.name, createdAt: ref.createdAt, folder: ref.folder, fileKnown: true)
-                let root = ProjectFiles.root(for: stub, library: index, master: master)
-                self?.say(group: "Fetching \(word) \(at + 1) of \(refs.count): \(ref.name)", item: "", progress: Double(at) / Double(max(refs.count, 1)))
-                guard let file = ProjectFiles.existingFile(in: root, name: ref.name), let whole = try? ProjectFiles.read(file) else {
-                    missing.append(Miss(ref: ref, expected: ProjectFiles.configURL(in: root, name: ref.name)))
-                    self?.say(group: nil, item: "Not found: \(ProjectFiles.configURL(in: root, name: ref.name).lastPathComponent)", progress: nil)
-                    continue
+            let read: Result<Library, Error> = Result { try store.load() }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch read {
+                case .failure(let error):
+                    self.finished(summaryFor: error.localizedDescription)
+                    Diagnostics.log("setup", error: error)
+                case .success(let lib):
+                    let members = lib.orderedProjects
+                    for (at, p) in members.enumerated() { self.say(group: "Fetching \(word) \(at + 1) of \(members.count): \(p.name)", item: "", progress: Double(at + 1) / Double(max(members.count, 1))) }
+                    let plural = SchemaTrial.plural(word)
+                    let palettes = lib.swatches.filter { !$0.isTypography }.count, typography = lib.swatches.filter { $0.isTypography }.count
+                    let tags = lib.tagInfo.filter { $0.removed != true }.count
+                    var parts = ["Found \(members.count) \(members.count == 1 ? word : plural)", "\(palettes) palettes", "\(typography) typography sets", "\(tags) tags"]
+                    if let report = store.takeMigration() { parts.append("brought across, the old folders kept in \(report.backup.lastPathComponent)") }
+                    self.group.stringValue = "Done"
+                    self.item.stringValue = ""
+                    self.bar.doubleValue = 1
+                    self.summary.stringValue = parts.joined(separator: " \u{00B7} ")
                 }
-                tally.members += 1
-                tally.tags += whole.tags.count
-                for (n, palette) in whole.palettes.enumerated() {
-                    if palette.isTypography { tally.typography += 1 } else { tally.palettes += 1 }
-                    let pct = Int((Double(n + 1) / Double(whole.palettes.count)) * 100)
-                    self?.say(group: nil, item: "Fetching \(palette.isTypography ? "Typography" : "Palette") \(palette.name)   \(pct)%", progress: nil)
-                }
+                done()
             }
-            let unfiled = CatalogueFiles.unfiledFolder(beside: index).appendingPathComponent(ProjectFiles.palettesFolder)
-            let loose = ((try? FileManager.default.contentsOfDirectory(atPath: unfiled.path)) ?? []).filter { !$0.hasPrefix(".") }
-            self?.say(group: "Fetching Unfiled", item: "\(loose.count) files", progress: 1)
-            DispatchQueue.main.async { self?.complete(tally: tally, missing: missing) }
         }
     }
 
@@ -782,98 +723,6 @@ final class OnboardingView: NSView {
             if let g = group { self.group.stringValue = g }
             if let i = item { self.item.stringValue = i }
             if let p = progress { self.bar.doubleValue = p }
-        }
-    }
-
-    private func complete(tally: (members: Int, palettes: Int, typography: Int, tags: Int), missing: [Miss]) {
-        found = (tally.members, tally.palettes, tally.typography, tally.tags, missing.count)
-        for miss in missing { misses.addArrangedSubview(row(for: miss)) }
-        settle()
-    }
-
-    /// The list of misses takes the room it needs, up to a scrolling height, and none when it is empty.
-    private func fitMisses() {
-        let rows = misses.arrangedSubviews.count
-        missesHeight?.constant = rows == 0 ? 0 : min(CGFloat(rows) * 42, 180)
-        skipAll.isHidden = rows < 2
-        // The first miss at the top, not the last: the stack is not flipped, so the top is the far end.
-        misses.layoutSubtreeIfNeeded()
-        if let scroll = misses.enclosingScrollView { scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, misses.frame.height - scroll.contentView.bounds.height))) }
-    }
-
-    @objc private func skipAllTapped() {
-        for miss in Array(pending.values) where rows[miss.ref.id] != nil { resolved(miss, foundIt: false) }
-    }
-
-    /// The line that stays, and the way out once nothing is left to find.
-    private func settle() {
-        fitMisses()
-        let plural = SchemaTrial.plural(memberWord)
-        var parts = ["Found \(found.members) \(found.members == 1 ? memberWord : plural)", "\(found.palettes) palettes", "\(found.typography) typography sets", "\(found.tags) tags"]
-        if found.missing > 0 { parts.append("\(found.missing) to find") }
-        group.stringValue = "Done"
-        item.stringValue = ""
-        bar.doubleValue = 1
-        summary.stringValue = parts.joined(separator: " \u{00B7} ")
-        if found.missing == 0 { done?(); done = nil }
-    }
-
-    private func row(for miss: Miss) -> NSView {
-        let name = NSTextField(labelWithString: miss.ref.name)
-        name.font = NSFont.systemFont(ofSize: TextSize.body)
-        let where_ = NSTextField(labelWithString: (miss.expected.path as NSString).abbreviatingWithTildeInPath)
-        where_.font = NSFont.monospacedSystemFont(ofSize: TextSize.caption, weight: .regular)
-        where_.textColor = .secondaryLabelColor
-        where_.lineBreakMode = .byTruncatingMiddle
-        let find = NSButton(title: "Find\u{2026}", target: self, action: #selector(findTapped))
-        let skip = NSButton(title: "Skip", target: self, action: #selector(skipTapped))
-        for b in [find, skip] { b.bezelStyle = .rounded; b.controlSize = .small }
-        let text = NSStackView(views: [name, where_])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 2
-        let row = NSStackView(views: [text, NSView(), find, skip])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 584 - 20).isActive = true   // room for the scroller
-        where_.widthAnchor.constraint(lessThanOrEqualToConstant: 400).isActive = true
-        pending[ObjectIdentifier(find)] = miss
-        pending[ObjectIdentifier(skip)] = miss
-        rows[miss.ref.id] = row
-        return row
-    }
-    private var pending: [ObjectIdentifier: Miss] = [:]
-    private var rows: [UUID: NSView] = [:]
-
-    private func resolved(_ miss: Miss, foundIt: Bool) {
-        rows[miss.ref.id]?.removeFromSuperview()
-        rows[miss.ref.id] = nil
-        found.missing -= 1
-        if foundIt { found.members += 1 }
-        settle()
-    }
-
-    @objc private func skipTapped(_ b: NSButton) { if let miss = pending[ObjectIdentifier(b)] { resolved(miss, foundIt: false) } }
-
-    /// Points the catalogue at the member where it is now: the index is rewritten with the folder, nothing else touched.
-    @objc private func findTapped(_ b: NSButton) {
-        guard let miss = pending[ObjectIdentifier(b)], let host = host, let index = index else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [ColourFiles.project, ColourFiles.earlierProject, ColourFiles.legacyProject].map { UTType(filenameExtension: $0) ?? .data }
-        panel.prompt = "Use This"
-        panel.message = "Find \u{201C}\(miss.ref.name)\u{201D}: its .\(ColourFiles.project) file, or the folder holding it"
-        panel.beginSheetModal(for: host) { [weak self] r in
-            guard let self = self, r == .OK, let url = panel.url else { return }
-            let stub = Project(id: miss.ref.id, name: miss.ref.name, createdAt: miss.ref.createdAt, folder: miss.ref.folder, fileKnown: true)
-            guard let root = try? ProjectFiles.adopt(url, for: stub),
-                  var doc = (try? Data(contentsOf: index)).flatMap({ try? ColourFiles.decoder().decode(CatalogueDocument.self, from: $0) }),
-                  let at = doc.projects.firstIndex(where: { $0.id == miss.ref.id }) else { return }
-            FolderAccess.remember(root)
-            doc.projects[at].folder = ProjectFiles.keep(root, beside: index)
-            if let data = try? ColourFiles.encoder().encode(doc) { try? data.write(to: index, options: .atomic) }
-            self.resolved(miss, foundIt: true)
         }
     }
 }

@@ -410,7 +410,6 @@ final class SyncPanel: SettingsPanel {
     private lazy var turnOff = button("Turn Off Sync", #selector(turnOffSync))
     private lazy var showFolder = button("Show in Finder", #selector(showSyncFolder))
     private lazy var syncNow = button("Sync Now", #selector(syncNowTapped))
-    private let projectsFolder = NSTextField(labelWithString: "")
     private let keepChoices = [10, 25, 50, 100, 0]
 
     override func rows() -> [[NSView]] {
@@ -429,10 +428,6 @@ final class SyncPanel: SettingsPanel {
             [label("Keep:"), keep],
             [blank, row([button("Show Backups", #selector(showBackups))])],
             [blank, note("Both copies are saved before every merge, in the sync folder and on this Mac.")],
-            [heading("Project files"), blank],
-            [label("Projects folder:"), projectsFolder],
-            [blank, row([button("Choose\u{2026}", #selector(chooseProjects))])],
-            [blank, note("Every project is also kept as a file of its own here, always current, so it can be handed over whole. Right-click a project to keep it somewhere else instead.")],
         ]
     }
 
@@ -440,9 +435,6 @@ final class SyncPanel: SettingsPanel {
         guard isViewLoaded else { return }
         let chosen = SyncSettings.folder
         folder.stringValue = chosen.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Sync is off"
-        projectsFolder.lineBreakMode = .byTruncatingMiddle
-        projectsFolder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        projectsFolder.stringValue = ((ProjectFiles.folder ?? library.store.url.deletingLastPathComponent().appendingPathComponent("Projects")).path as NSString).abbreviatingWithTildeInPath
         folder.toolTip = chosen?.path
         folder.textColor = chosen == nil ? .secondaryLabelColor : .labelColor
         [turnOff, showFolder, syncNow, when].forEach { ($0 as NSControl).isEnabled = chosen != nil }
@@ -455,8 +447,6 @@ final class SyncPanel: SettingsPanel {
         SyncSettings.askBeforeMerging = when.indexOfSelectedItem == 0
         SyncSettings.backupsToKeep = keepChoices[max(0, keep.indexOfSelectedItem)]
     }
-
-    @objc private func chooseProjects() { library.chooseProjectsFolder() }
 
     @objc private func chooseFolder() {
         guard let w = view.window else { return }
@@ -1008,7 +998,6 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
 final class HistoryPanel: SettingsPanel {
     private lazy var enabled = check("Keep a history for this library", #selector(enabledChanged))
     private let whereKept = NSTextField(labelWithString: "")
-    private lazy var projectHistory = check("Write each project's steps into its project file", #selector(changed))
     private let stepChoices = [0, 25, 50, 100, 200, 500]
     private lazy var steps = popup(stepChoices.map { $0 == 0 ? "Unlimited" : "\($0)" }, #selector(changed))
 
@@ -1022,10 +1011,7 @@ final class HistoryPanel: SettingsPanel {
             [heading("Global history"), blank],
             [label("Kept in:"), whereKept],
             [blank, row([button("Show in Finder", #selector(showFile)), button("Clear History", #selector(clear))])],
-            [blank, note("A file of its own beside the library file, so the library stays lean and the history can be cleared without touching your work. Steps hold only names, colours, order and tags, never images.")],
-            [heading("Project history"), blank],
-            [blank, projectHistory],
-            [blank, note("A step that changes one project is also listed in that project's file, so whoever receives the project sees how it came about.")],
+            [blank, note("A file of its own beside the catalogue\u{2019}s index, holding what each step changed, never a copy of everything, so it stays small and can be cleared without touching your work.")],
             [heading("Steps to save"), blank],
             [label("Keep:"), steps],
             [blank, note("Once the limit is reached the oldest step is dropped. Unlimited keeps everything.")],
@@ -1036,9 +1022,8 @@ final class HistoryPanel: SettingsPanel {
         let on = library.historyEnabled
         enabled.state = on ? .on : .off
         whereKept.stringValue = (library.historyFileURL().path as NSString).abbreviatingWithTildeInPath
-        projectHistory.state = Prefs.projectHistory ? .on : .off
         steps.selectItem(at: stepChoices.firstIndex(of: Prefs.historySteps) ?? 2)
-        for c in [whereKept, projectHistory, steps] as [NSControl] { c.isEnabled = on }
+        for c in [whereKept, steps] as [NSControl] { c.isEnabled = on }
     }
 
     @objc private func enabledChanged() {
@@ -1047,7 +1032,6 @@ final class HistoryPanel: SettingsPanel {
     }
 
     @objc private func changed() {
-        Prefs.projectHistory = projectHistory.state == .on
         Prefs.historySteps = stepChoices[max(0, steps.indexOfSelectedItem)]
     }
 

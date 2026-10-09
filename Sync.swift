@@ -346,11 +346,8 @@ struct Catalogues {
     /// Earlier versions' libraries seed Main on a fresh install only — never after a rename.
     func store(for name: String) -> LibraryStore {
         let fresh = name == Catalogues.mainName && !hasMain && others().isEmpty
-        // Only the real catalogues use the Projects folder chosen in Settings; any other set of
-        // catalogues keeps its projects beside itself.
-        let chosen = root == Catalogues.standard.root ? ProjectFiles.folder : nil
         return LibraryStore(directory: directory(for: name), legacyURL: fresh ? legacyURL : nil,
-                            previousURL: fresh ? previousURL : nil, name: name, projectsFolder: chosen)
+                            previousURL: fresh ? previousURL : nil, name: name)
     }
 
     private var hasMain: Bool { Catalogues.holdsCatalogue(root) }
@@ -361,9 +358,23 @@ struct Catalogues {
     func dropEmptyMain() {
         guard hasMain, let lib = try? store(for: Catalogues.mainName).load(), lib.colours.isEmpty, lib.swatches.isEmpty, lib.projects.isEmpty else { return }
         let fm = FileManager.default
-        for item in [CatalogueFiles.index(in: root)?.lastPathComponent, "library.json", "library.history.json", SchemaTrial.fileName, CatalogueFiles.unfiled].compactMap({ $0 }) {
-            try? fm.removeItem(at: root.appendingPathComponent(item))
+        let index = CatalogueFiles.index(in: root)
+        var items = [index?.lastPathComponent, index.map { HistoryStore.url(beside: $0).lastPathComponent }, "library.json", TreeFiles.library, TreeFiles.templates].compactMap { $0 }
+        // The collections' folders, each holding nothing but its own file.
+        for sub in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where fm.fileExists(atPath: root.appendingPathComponent(sub).appendingPathComponent(sub + "." + TreeFiles.collection).path) { items.append(sub) }
+        for item in items { try? fm.removeItem(at: root.appendingPathComponent(item)) }
+    }
+
+    /// What at the app's home belongs to the catalogue kept there, Main: its index and history, its Library and Templates, its
+    /// collections' folders, and whatever an earlier layout left. Never the other catalogues or the registry.
+    static func catalogueItems(at root: URL) -> [String] {
+        let fm = FileManager.default
+        var items = [CatalogueFiles.index(in: root)?.lastPathComponent, CatalogueFiles.index(in: root).map { HistoryStore.url(beside: $0).lastPathComponent },
+                     "library.json", "library.history.json", "schema.colschema", TreeFiles.library, TreeFiles.templates, TreeFiles.backups, CatalogueFiles.unfiled, "Projects"].compactMap { $0 }
+        for sub in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where !items.contains(sub) && sub != "Catalogues" {
+            if fm.fileExists(atPath: root.appendingPathComponent(sub).appendingPathComponent(sub + "." + TreeFiles.collection).path) { items.append(sub) }
         }
+        return items
     }
 
     /// Whether a folder holds a catalogue: its file, or the one file of an earlier version.
@@ -405,8 +416,7 @@ struct Catalogues {
             var n = 2
             while fm.fileExists(atPath: dest.path) { dest = folder.appendingPathComponent(filesystemName(name) + " \(n)"); n += 1 }
             try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            let index = CatalogueFiles.index(in: root)?.lastPathComponent
-            for item in [index, "library.json", "library.history.json", SchemaTrial.fileName, "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
+            for item in Catalogues.catalogueItems(at: root) {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }
@@ -430,8 +440,7 @@ struct Catalogues {
         let dest = directory(for: new)
         if old == Catalogues.mainName {
             try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            let index = CatalogueFiles.index(in: root)?.lastPathComponent
-            for item in [index, "library.json", "library.history.json", SchemaTrial.fileName, "Backups", CatalogueFiles.unfiled, "Projects"].compactMap({ $0 }) {
+            for item in Catalogues.catalogueItems(at: root) {
                 let from = root.appendingPathComponent(item)
                 if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
             }

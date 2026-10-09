@@ -34,7 +34,7 @@ enum Selection: Equatable {
 
 final class LibraryController: NSObject {
     /// The open catalogue's files; its schema is read from the same folder.
-    private(set) var store: LibraryStore { didSet { SchemaTrial.use(directory: store.url.deletingLastPathComponent()) } }
+    private(set) var store: LibraryStore { didSet { SchemaTrial.use(store: store); watchTree() } }
     private(set) var library = Library()
     private(set) var catalogue: String
     weak var window: NSWindow?
@@ -75,7 +75,9 @@ final class LibraryController: NSObject {
         catalogue = name
         store = Catalogues.standard.store(for: name)
         super.init()
-        SchemaTrial.use(directory: store.url.deletingLastPathComponent())
+        SchemaTrial.use(store: store)
+        SchemaTrial.library = { [unowned self] dir in dir.standardizedFileURL == self.store.root.standardizedFileURL ? self.library : nil }
+        NotificationCenter.default.addObserver(forName: .schemaDidChange, object: nil, queue: .main) { [weak self] n in self?.schemaChanged(n) }
     }
 
     // MARK: Reading
@@ -104,6 +106,17 @@ final class LibraryController: NSObject {
         do { library = try store.load() } catch { show(error) }
         loadedStamp = store.modificationDate
         loadHistory()
+        for note in store.notes { Diagnostics.log("tree", note) }
+        if let report = store.takeMigration() {
+            var words = "\(plural(report.members, "member")) and \(plural(report.palettes, "palette")) were brought across into the catalogue's own tree of folders. The old folders are kept whole in \(report.backup.lastPathComponent)."
+            if !report.orphans.isEmpty { words += " Palettes from \(report.orphans.joined(separator: ", ")) went to the Library." }
+            if historyEnabled { history.record("Brought Across From The Earlier Layout", library: library, before: library, limit: Prefs.historySteps); historyChanged() }
+            let a = NSAlert()
+            a.messageText = "\(catalogue) now follows its schema on disk"
+            a.informativeText = words + (report.notes.isEmpty ? "" : "\n\n" + report.notes.joined(separator: "\n"))
+            present(a)
+        }
+        watchTree()
         // Once per catalogue: every colour known only by its hex gets its source and linear master, written back as one step.
         if library.colours.contains(where: { $0.source == nil }) { apply("Complete Colour Records") { $0.completeColourRecords() } }
         changed()
@@ -157,6 +170,7 @@ final class LibraryController: NSObject {
         if library != before { recordStep(title, before: before) }
         changed()
         sync()
+        watch?.settle()
     }
 
     // MARK: History
@@ -174,7 +188,6 @@ final class LibraryController: NSObject {
 
     private func historyChanged() {
         NotificationCenter.default.post(name: .historyDidChange, object: self)
-        writeProjectFilesSoon()
         historyTimer?.invalidate()
         historyTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.saveHistory() }
     }
@@ -190,13 +203,15 @@ final class LibraryController: NSObject {
         NotificationCenter.default.post(name: .historyDidChange, object: self)
     }
 
-    /// Takes the library back (or forward) to a step. Not a step itself.
+    /// Takes the library back (or forward) to a step, the schema with it, and writes the tree as it was then. Not a step itself.
     func goToStep(_ index: Int) {
-        guard let lib = history.go(to: index) else { return }
-        do { try store.save(lib); library = lib; loadedStamp = store.modificationDate } catch { show(error); return }
+        guard let then = history.go(to: index, from: library, schema: SchemaTrial.schema(for: store.root) ?? store.schema) else { return }
+        do { try store.save(then.library, schema: then.schema); library = then.library; loadedStamp = store.modificationDate } catch { show(error); return }
+        NotificationCenter.default.post(name: .schemaDidChange, object: nil)
         historyChanged()
         changed()
         sync()
+        watch?.settle()
     }
 
     func deleteStep(_ index: Int) {
@@ -220,45 +235,15 @@ final class LibraryController: NSObject {
 
     private func changed() {
         NotificationCenter.default.post(name: .libraryDidChange, object: self)
-        writeProjectFilesSoon()
     }
 
-    // MARK: Project files
+    // MARK: The tree on disk
 
-    private var projectFilesWritten: [UUID: Data] = [:]
-    private var projectFilesTimer: Timer?
+    /// The folder a member lives in, found by its id wherever the tree has it.
+    func memberFolderURL(_ id: UUID) -> URL? { CatalogueTree.folder(ofWorkGroup: id, in: store.root) }
+    /// A palette's file, found by its id wherever the tree has it.
+    func paletteFileURL(_ id: UUID) -> URL? { CatalogueTree.file(ofPalette: id, in: store.root) }
 
-    /// Each project's own file follows the library, a moment after it changes.
-    private func writeProjectFilesSoon() {
-        projectFilesTimer?.invalidate()
-        projectFilesTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.writeProjectFiles() }
-    }
-
-    /// Projects whose file has existed and cannot be found, with why.
-    private(set) var lostProjects: [UUID: ProjectFiles.Loss] = [:]
-
-    func writeProjectFiles() {
-        do {
-            let done = try ProjectFiles.write(library, library: store.url, master: store.projectsFolder,
-                                              history: Prefs.projectHistory && historyEnabled ? history : nil,
-                                              skipping: store.unavailable, written: &projectFilesWritten)
-            if !done.firstTime.isEmpty {
-                // Remembered without becoming a step: it is bookkeeping, not a change the user made.
-                library = try store.mutate { lib in for id in done.firstTime { lib.markProjectFile(id, known: true) } }
-                loadedStamp = store.modificationDate
-            }
-        } catch { flash("Could not write a project file: \(error.localizedDescription)") }
-        let lost = ProjectFiles.lost(in: library, library: store.url, master: ProjectFiles.folder)
-        let changed = lost != lostProjects
-        lostProjects = lost
-        if changed { NotificationCenter.default.post(name: .projectFilesDidChange, object: self) }
-    }
-
-    /// The project's file, where it should be.
-    func projectFileURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.url(for: $0, library: store.url, master: ProjectFiles.folder) } }
-    func projectFolderURL(_ id: UUID) -> URL? { library.project(id).map { ProjectFiles.root(for: $0, library: store.url, master: ProjectFiles.folder) } }
-
-    /// Gives the project a folder of its own, or nil to put it back under the master folder, moving its folder.
     func setProjectLocked(_ id: UUID, _ on: Bool) {
         apply(on ? "Lock Project" : "Unlock Project") { $0.setProjectLocked(id, on) }
     }
@@ -267,99 +252,39 @@ final class LibraryController: NSObject {
         library.swatch(id)?.projectID.flatMap { library.project($0)?.isLocked } ?? false
     }
 
-    func setProjectFolder(_ id: UUID, _ folder: URL?) {
-        guard let p = library.project(id) else { return }
-        let old = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder)
-        apply("Keep Project In") { $0.setProjectFolder(id, folder.map { ProjectFiles.keep($0, beside: store.url) }) }
-        projectFilesWritten[id] = nil
-        if let new = projectFolderURL(id), new != old, FileManager.default.fileExists(atPath: old.path) {
-            try? FileManager.default.removeItem(at: new)
-            try? FileManager.default.moveItem(at: old, to: new)
-        }
-        writeProjectFiles()
-    }
-
-    /// Lets the user point at the project's file after it was moved; the folder structure is built round it if need be.
-    func relocateProject(_ id: UUID) {
-        guard let p = library.project(id) else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [ColourFiles.project, ColourFiles.earlierProject, ColourFiles.legacyProject].map { UTType(filenameExtension: $0) ?? .data }
-        panel.prompt = "Use This"
-        panel.message = "Find \u{201C}\(p.name)\u{201D}: its \(ProjectFiles.fileExtension) file, or the folder holding it"
-        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
-            guard let self = self, r == .OK, let url = panel.url else { return }
-            do {
-                let root = try ProjectFiles.adopt(url, for: p)
-                FolderAccess.remember(root)
-                let under = ProjectFiles.master(library: self.store.url, master: ProjectFiles.folder)
-                let inMaster = root.deletingLastPathComponent().resolvingSymlinksInPath() == under.resolvingSymlinksInPath()
-                let own: String? = inMaster && root.lastPathComponent == filesystemName(p.name) ? nil : ProjectFiles.keep(root, beside: self.store.url)
-                self.apply("Find Project File") { $0.setProjectFolder(id, own) }
-                // The project was known only by name while its files were out of reach: read it from where it is now.
-                self.reload()
-                self.projectFilesWritten[id] = nil
-                self.writeProjectFiles()
-                self.flash("\u{201C}\(p.name)\u{201D} found")
-                self.onCover?(nil, false)
-            } catch {
-                self.show(error)
-            }
-        }
-        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
-    }
-
-    /// The page shown for a project whose file is gone.
-    func showLostProject(_ id: UUID) {
-        guard let p = library.project(id), let loss = lostProjects[id] else { return }
-        onCover?(LostProjectController(library: self, project: p, loss: loss), true)
-    }
-
-    @objc func chooseProjectsFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Keep Projects Here"
-        panel.message = "Choose the folder where project files are kept"
-        if let current = ProjectFiles.folder { panel.directoryURL = current }
-        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
-            guard let self = self, r == .OK, let url = panel.url else { return }
-            if let old = ProjectFiles.folder, old != url { FolderAccess.forget(old) }
-            FolderAccess.remember(url)
-            ProjectFiles.folder = url
-            self.projectFilesWritten = [:]
-            self.writeProjectFiles()
-            self.stateChanged()
-        }
-        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
-    }
-
-    /// Lets the user pick a folder of the project's own.
-    func moveProject(_ id: UUID) {
-        guard let p = library.project(id) else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Keep Project Here"
-        panel.message = "Choose where the \u{201C}\(p.name)\u{201D} folder should live"
-        panel.directoryURL = ProjectFiles.root(for: p, library: store.url, master: ProjectFiles.folder).deletingLastPathComponent()
-        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
-            guard r == .OK, let url = panel.url else { return }
-            FolderAccess.remember(url)
-            self?.setProjectFolder(id, url.appendingPathComponent(filesystemName(p.name)))
-            self?.flash("\u{201C}\(p.name)\u{201D} is kept in \(url.lastPathComponent)")
-        }
-        if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
-    }
-
+    /// Shows the member's folder in Finder.
     func showProjectFile(_ id: UUID) {
-        writeProjectFiles()
-        if let url = projectFileURL(id), FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-        else if let root = projectFolderURL(id) { NSWorkspace.shared.activateFileViewerSelecting([root]) }
+        if let url = memberFolderURL(id) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
+
+    // MARK: Watching the tree
+
+    private var watch: CatalogueWatch?
+
+    /// Keeps the watch on the open catalogue's folder, and takes the tree as it stands as the app's own doing.
+    private func watchTree() {
+        if let w = watch, w.root.standardizedFileURL == store.root.standardizedFileURL { w.settle(); return }
+        watch?.stop()
+        let made = CatalogueWatch(root: store.root) { [weak self] in self?.treeChangedOutside() }
+        made.start()
+        watch = made
+    }
+
+    /// Finder, or another app, changed the tree: it is read again, unless a name is being typed or a pick is under way.
+    private func treeChangedOutside() {
+        if window?.firstResponder is NSText || picking { watch?.settle(); return }
+        reload()
+        flash("The catalogue changed in Finder and was read again")
+    }
+
+    /// The schema was written through the store: a step in the history, when it changed.
+    private func schemaChanged(_ n: Notification) {
+        defer { watch?.settle() }
+        guard let before = n.userInfo?["before"] as? SchemaTrial.SchemaFile, let after = n.userInfo?["after"] as? SchemaTrial.SchemaFile, before != after else { return }
+        loadedStamp = store.modificationDate
+        if historyEnabled { history.record("Change Schema", library: library, before: library, schema: (before, after), limit: Prefs.historySteps); historyChanged() }
+    }
+
     private func stateChanged() { NotificationCenter.default.post(name: .appStateDidChange, object: self) }
 
     func flash(_ text: String) {
@@ -496,10 +421,9 @@ final class LibraryController: NSObject {
     /// filled in. `palette`, when given, goes into the project as a copy once it is made.
     /// `kind` is what the schema calls it, where that is not Project; `made` is told the new project's id, to place it.
     func startProject(moving palette: UUID?, called kind: String = "Project", in collection: SchemaCollection? = nil, made placed: ((UUID) -> Void)? = nil) {
-        let place = ModalPlace { [weak self] name in self?.usualFolder(for: name, in: collection) ?? URL(fileURLWithPath: NSHomeDirectory()) }
         onPrompt?(ModalPrompt(title: "New \(kind)", message: "Name the \(kind.lowercased()). Its details are filled in on its Overview page, which opens next.",
                               placeholder: "Client, product or piece of work", confirm: "Create \(kind)", symbol: "folder.badge.plus",
-                              check: { ProjectField.problem(name: $0, values: [:]) }, place: place) { [weak self] name in
+                              check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
             self.apply("New Project") { lib in
@@ -507,8 +431,6 @@ final class LibraryController: NSObject {
                 // The Studio section starts as the organisation set in Settings; the form can change any of it.
                 let organisation = ProjectField.tidy(Prefs.organisation)
                 if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
-                // Where it is kept, as the sheet showed: inside the catalogue by a relative path, elsewhere in full.
-                lib.setProjectFolder(made, ProjectFiles.keep(place.folder(for: lib.project(made)?.name ?? name), beside: self.store.url))
                 id = made
             }
             guard let made = id, let project = self.library.project(made) else { return }
@@ -518,18 +440,6 @@ final class LibraryController: NSObject {
             // The copy goes in by the usual door, which asks about notes when the palette has some.
             if let palette = palette { self.move(palette: palette, to: made, index: 0) }
         })
-    }
-
-    /// The folder a new member of `collection` goes in by default: a folder named for the collection
-    /// beside the catalogue's file, or, while the catalogue still lives in the app's own home, under
-    /// the projects folder chosen in Settings, or Documents.
-    func usualFolder(for name: String, in collection: SchemaCollection?) -> URL {
-        let heading = filesystemName((collection ?? SchemaTrial.collections[0]).name)
-        let catalogueFolder = store.url.deletingLastPathComponent()
-        let inHome = catalogueFolder.standardizedFileURL.path.hasPrefix(Catalogues.standard.root.standardizedFileURL.path)
-        let parent = inHome ? (ProjectFiles.folder ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents").appendingPathComponent(catalogue))
-                            : catalogueFolder
-        return parent.appendingPathComponent(heading).appendingPathComponent(filesystemName(name))
     }
 
     /// Asks for a project's name, makes it, and keeps `hexes` in it as a palette. The page stays
@@ -1682,8 +1592,11 @@ extension LibraryController {
 
     /// The .colpalette bytes for some palettes, each on its own (no project), named for the palette.
     private func paletteFiles(_ palettes: [Swatch]) throws -> [(name: String, data: Data)] {
-        try ProjectFile.paletteDocuments(palettes, colours: library.colours, project: nil)
-            .filter { $0.path.hasSuffix("." + ColourFiles.palette) }
-            .map { (name: ($0.path as NSString).lastPathComponent, data: $0.data) }
+        var taken: [String] = []
+        return try palettes.map { palette in
+            let name = uniqueName(filesystemName(palette.name), among: taken)
+            taken.append(name)
+            return (name: name + "." + ColourFiles.palette, data: try ColourFiles.encoder().encode(CatalogueTree.paletteDocument(palette, in: library, member: nil, file: name)))
+        }
     }
 }
