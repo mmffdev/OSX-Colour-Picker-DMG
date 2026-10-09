@@ -68,6 +68,14 @@ final class StudioWindowController: NSWindowController {
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
+        if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
+            let to = URL(fileURLWithPath: args[i + 1])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if let png = c.frame.page.snapshot()?.representation(using: .png, properties: [:]) { try? png.write(to: to) }
+                NSApp.terminate(nil)
+            }
+        }
         // The backslash key turns Master Inner on and off, whenever no words are being typed.
         if gridKey == nil {
             gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c, weak library] e in
@@ -2086,6 +2094,20 @@ final class StudioPage: NSView, Overlay {
         newButton.isHidden = true
         exportButton.isHidden = true
         needsLayout = true
+    }
+    /// The page that is showing, whole, at the screen's scale: what --snap writes.
+    func snapshot() -> NSBitmapImageRep? {
+        let v: NSView
+        switch section {
+        case .tiles: v = grid
+        case .catalogues: v = settings
+        case .schema: v = schema
+        default: guard let e = extras[section], let view = e.view as? NSView else { return nil }; v = view
+        }
+        v.layoutSubtreeIfNeeded()
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        return rep
     }
     /// The Export button beside New; nil takes it away.
     func showExport(_ title: String?) {

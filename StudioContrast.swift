@@ -559,13 +559,18 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
                 let ratio = contrastRatio(inkHex, paperHex), lcv = abs(apcaContrast(text: inkHex, background: paperHex))
                 let text = apca ? String(Int(lcv.rounded(.down))) : String(format: "%.1f", (ratio * 10 + 1e-9).rounded(.down) / 10)
                 let weak = apca ? lcv < APCAUse.headline.minimum : ratio < 3
-                let t = Design.attributed(text, .caption, colour: readable.withAlphaComponent(weak ? 0.5 : 1))
-                let b = cell.minY + (s.height == u ? line : u + line)
-                // The square before the number is the text colour being judged, where the cell has room for both.
-                if cell.width >= 40 {
-                    fill(NSRect(x: cell.minX + 6, y: b - 7, width: 6, height: 6), colour(inkHex))
-                    t.draw(x: cell.minX + 16, baseline: b, width: cell.width - 18)
-                } else { t.draw(x: cell.minX + 4, baseline: b, width: cell.width - 6) }
+                // The score and the square of the text colour being judged, a quarter of the cell's size and centred in it, as one group.
+                let size = max(11, (min(cell.width, cell.height) * 0.25).rounded())
+                let t = Design.attributed(text, .caption, size: size, colour: readable.withAlphaComponent(weak ? 0.5 : 1))
+                let tw = t.size().width.rounded(), gap = (size * 0.5).rounded()
+                let withSquare = cell.width >= size + gap + tw + 2 * gap
+                let groupW = withSquare ? size + gap + tw : tw
+                let x0 = (cell.midX - groupW / 2).rounded(), capHeight = (size * 0.72).rounded()
+                let b = (cell.midY + capHeight / 2).rounded()
+                if withSquare {
+                    fill(NSRect(x: x0, y: b - capHeight, width: size, height: capHeight), colour(inkHex))
+                    t.draw(x: x0 + size + gap, baseline: b, width: cell.width - (x0 + size + gap - cell.minX))
+                } else { t.draw(x: x0, baseline: b, width: cell.width - (x0 - cell.minX)) }
                 if same(inkHex, state.pair.ink) && same(paperHex, state.pair.paper) {
                     readable.setStroke()
                     let mark = NSBezierPath(rect: cell.insetBy(dx: 1.5, dy: 1.5)); mark.lineWidth = 2; mark.stroke()
