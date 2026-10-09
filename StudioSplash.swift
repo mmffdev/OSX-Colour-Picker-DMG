@@ -42,6 +42,8 @@ final class StudioSplash: NSView {
     /// The wordmark's top is this far from the window's top; the buttons' foot is as far from its foot.
     static var edge: CGFloat { (StudioHeader.baseline - Logo.font.capHeight).rounded() }
     static let travel: TimeInterval = 0.46
+    /// The design loop: the splash opens on every launch and Set starts it again, writing nothing. --splash-loop, or the splashLoop default.
+    static var looping: Bool { CommandLine.arguments.contains("--splash-loop") || preferences.bool(forKey: "splashLoop") }
 
     init(library: LibraryController) {
         self.library = library
@@ -136,6 +138,15 @@ final class StudioSplash: NSView {
     private func setUp() {
         guard sections[at].canContinue else { NSSound.beep(); return }
         sections[at].commit()
+        if Self.looping {
+            // The loop: what Set would build is said, nothing is written, and the splash starts again from the first section.
+            var schema = SchemaTrial.SchemaFile(collections: [], places: [:]), lib = Library()
+            let made = draft.build(into: &schema, library: &lib)
+            library.flash("Would set up \(draft.collectionTitle), \(schema.collections[0].levels.isEmpty ? "no level between" : schema.collections[0].levels.joined(separator: " then ")), \(plural(made.members.count, draft.memberWord.lowercased()))")
+            go(to: 0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.travel + 0.1) { [weak self] in self?.lighthouse.set(level: 0, to: 1) }
+            return
+        }
         var schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
         var lib = library.library
         let made = draft.build(into: &schema, library: &lib)
