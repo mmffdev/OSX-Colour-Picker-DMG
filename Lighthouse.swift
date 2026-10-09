@@ -150,8 +150,10 @@ final class LighthouseView: NSView {
         // The sea bed and the far walls, seen faintly through the water: the floor in sand, the two far faces of the block from inside.
         poly([P(-AX, -AY, -sea), P(AX, -AY, -sea), P(AX, AY, -sea), P(-AX, AY, -sea)], NSColor(srgbRed: 214 / 255, green: 200 / 255, blue: 160 / 255, alpha: 0.55 * g))
         for k in [3, 0] {
+            // Each far wall rises to the same waterline as the surface, so the two never show as separate lines through the water.
             let ed = edges[k], b0 = ed.0, b1 = ed.1
-            poly([P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea), P(b1.0, b1.1, 0), P(b0.0, b0.1, 0)], NSColor(srgbRed: 58 / 255, green: 122 / 255, blue: 140 / 255, alpha: 0.32 * g))
+            let topLine = lines[k].map { P($0.0, $0.1, $0.2) }
+            poly([P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea)] + topLine.reversed(), NSColor(srgbRed: 58 / 255, green: 122 / 255, blue: 140 / 255, alpha: 0.32 * g))
             line(P(b0.0, b0.1, -sea), P(b1.0, b1.1, -sea), NSColor(srgbRed: 150 / 255, green: 136 / 255, blue: 104 / 255, alpha: 0.5 * g), width: 1)
         }
         drawFooting(e)
@@ -326,26 +328,31 @@ final class LighthouseView: NSView {
         drawSea(progress[0], t)
         drawIsland(progress[0])
         for i in 0..<4 { drawSection(i, progress[i + 1]) }
+        // The beam turns about the tower's axis, once round in eight seconds: the half pointing away passes behind the lamp room,
+        // the half pointing toward the viewer passes in front of it.
+        let ang = CGFloat(now - beamStart) / 8 * 2 * .pi
+        let beams = lit && !reduceMotion ? [ang, ang + .pi] : []
+        for a in beams where cos(a) + sin(a) <= 0 { beam(a) }
         drawGallery(progress[5], lamp: progress[6])
-        if lit, let lc = lampCentre, !reduceMotion {
-            // The beam sweeping once round in eight seconds: it turns in the ground plane, so from this low camera it lies almost flat,
-            // and each end stops short of the picture's edge so its fade is complete.
-            let ang = CGFloat(now - beamStart) / 8 * 2 * .pi
-            for a in [ang, ang + .pi] {
-                let dx = cos(a), dy = sin(a) * 0.2
-                var len = 6 * s
-                if dx > 0 { len = min(len, (bounds.width - margin - lc.x) / dx) } else if dx < 0 { len = min(len, (margin - lc.x) / dx) }
-                if dy > 0 { len = min(len, (bounds.height - margin - lc.y) / dy) } else if dy < 0 { len = min(len, (margin - lc.y) / dy) }
-                len = max(0, len)
-                let end = CGPoint(x: lc.x + dx * len, y: lc.y + dy * len)
-                let tri = path([lc, CGPoint(x: end.x - dy * len * 0.18, y: end.y + dx * len * 0.09), CGPoint(x: end.x + dy * len * 0.18, y: end.y - dx * len * 0.09)])
-                NSGraphicsContext.saveGraphicsState()
-                tri.addClip()
-                NSGradient(starting: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0.55), ending: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0))!.draw(from: lc, to: end, options: [])
-                NSGraphicsContext.restoreGraphicsState()
-            }
-            drawLamp(progress[6], deck: zAt[4] + 0.26 + 0.14)   // the lamp over its own beam
-        }
+        for a in beams where cos(a) + sin(a) > 0 { beam(a) }
+    }
+
+    /// One half of the beam, from the lamp along the ground direction `a` as the camera sees it, ending short of the picture's edge so its fade is complete.
+    private func beam(_ a: CGFloat) {
+        guard let lc = lampCentre else { return }
+        // The direction (cos a, sin a) on the ground, projected: a near-flat ellipse, dipping as the beam comes toward the viewer.
+        var dx = (cos(a) - sin(a)) * C, dy = (cos(a) + sin(a)) * S
+        let m = sqrt(dx * dx + dy * dy); dx /= m; dy /= m
+        var len = 6 * s
+        if dx > 0 { len = min(len, (bounds.width - margin - lc.x) / dx) } else if dx < 0 { len = min(len, (margin - lc.x) / dx) }
+        if dy > 0 { len = min(len, (bounds.height - margin - lc.y) / dy) } else if dy < 0 { len = min(len, (margin - lc.y) / dy) }
+        len = max(0, len)
+        let end = CGPoint(x: lc.x + dx * len, y: lc.y + dy * len)
+        let tri = path([lc, CGPoint(x: end.x - dy * len * 0.18, y: end.y + dx * len * 0.09), CGPoint(x: end.x + dy * len * 0.18, y: end.y - dx * len * 0.09)])
+        NSGraphicsContext.saveGraphicsState()
+        tri.addClip()
+        NSGradient(starting: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0.55), ending: NSColor(srgbRed: 246 / 255, green: 226 / 255, blue: 158 / 255, alpha: 0))!.draw(from: lc, to: end, options: [])
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     // MARK: Motion
