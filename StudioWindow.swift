@@ -2205,7 +2205,8 @@ final class StudioPage: NSView, Overlay {
     }
 }
 
-/// The tiles: `across` to a row, 16 apart, each a Card with its colour block 116 high over a name and
+/// The tiles: `across` to a row, or as many as there are when fewer, 16 apart and justified to the block
+/// so the first and last meet the Rule's ends; each a Card with its colour block 116 high over a name and
 /// a caption. A colour tile carries one colour and its hex; a palette card a strip of its colours
 /// and its count, and opens the palette.
 final class TileGrid: NSView {
@@ -2230,13 +2231,17 @@ final class TileGrid: NSView {
     static let gap: CGFloat = 16
     override var isFlipped: Bool { true }
 
-    private var tile: CGFloat { ((width - CGFloat(across - 1) * Self.gap) / CGFloat(across)).rounded(.down) }
+    /// How many tiles a row holds: the slider's count, or fewer when there are fewer tiles, so one row always fills the block.
+    private var columns: Int { max(1, min(across, max(items.count, 1))) }
+    /// A column's left edge: the row justified to the block, every edge on a whole point, the last tile's right edge on the block's.
+    private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (width + Self.gap) / CGFloat(columns)).rounded() }
     var height: CGFloat {
-        let rows = (items.count + across - 1) / across
+        let rows = (items.count + columns - 1) / columns
         return CGFloat(rows) * (Self.block + Self.words + Self.rowGap)
     }
     private func rect(_ i: Int) -> NSRect {
-        NSRect(x: CGFloat(i % across) * (tile + Self.gap), y: CGFloat(i / across) * (Self.block + Self.words + Self.rowGap), width: tile, height: Self.block + Self.words)
+        let c = i % columns, x = left(c)
+        return NSRect(x: x, y: CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
     }
 
     override func draw(_ dirtyRect: NSRect) {
