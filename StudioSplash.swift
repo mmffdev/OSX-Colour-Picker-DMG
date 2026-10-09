@@ -58,7 +58,7 @@ final class StudioSplash: NSView {
         addSubview(lighthouse)
         let d = draft
         sections = [
-            SplashName(index: 0, library: library),
+            SplashName(index: 0, library: library, draft: d),
             SplashChoice(index: 1, step: "Who It Is For", first: "Who is the", second: "work for?",
                          words: "The main bucket in your collection: a level for each client, customer or brand. Work of your own has no such level.",
                          options: SplashDraft.whoOptions, many: false, ownWord: true,
@@ -142,11 +142,14 @@ final class StudioSplash: NSView {
             // The loop: what Set would build is said, nothing is written, and the splash starts again from the first section.
             var schema = SchemaTrial.SchemaFile(collections: [], places: [:]), lib = Library()
             let made = draft.build(into: &schema, library: &lib)
-            library.flash("Would set up \(draft.collectionTitle), \(schema.collections[0].levels.isEmpty ? "no level between" : schema.collections[0].levels.joined(separator: " then ")), \(plural(made.members.count, draft.memberWord.lowercased()))")
+            let renamed = draft.catalogueName.map { "rename the catalogue \($0) and " } ?? ""
+            library.flash("Would \(renamed)set up \(draft.collectionTitle), \(schema.collections[0].levels.isEmpty ? "no level between" : schema.collections[0].levels.joined(separator: " then ")), \(plural(made.members.count, draft.memberWord.lowercased()))")
             go(to: 0)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.travel + 0.1) { [weak self] in self?.lighthouse.set(level: 0, to: 1) }
             return
         }
+        // The rename first, so the structure is written into the folder under its new name.
+        if let name = draft.catalogueName, name != library.catalogue { library.rename(catalogue: library.catalogue, to: name) }
         var schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
         var lib = library.library
         let made = draft.build(into: &schema, library: &lib)
@@ -320,15 +323,18 @@ class SplashSection: NSView {
     override func draw(_ dirtyRect: NSRect) { hits = [] }
 }
 
-/// Section 0: what the catalogue is called. Its name is its folder's name and its file's, so a rename moves both.
+/// Section 0: what the catalogue is called. Its name is its folder's name and its file's; the name typed waits in the draft, and
+/// Set renames both with everything else it builds, so nothing on disk moves while the splash is open.
 final class SplashName: SplashSection, NSTextFieldDelegate {
     private let library: LibraryController
+    private let draft: SplashDraft
     private let field = SplashSection.field("A name for everything you make")
 
-    init(index: Int, library: LibraryController) {
+    init(index: Int, library: LibraryController, draft: SplashDraft) {
         self.library = library
+        self.draft = draft
         super.init(index: index)
-        field.stringValue = library.catalogue
+        field.stringValue = draft.catalogueName ?? library.catalogue
         field.delegate = self
         addSubview(field)
     }
@@ -353,11 +359,10 @@ final class SplashName: SplashSection, NSTextFieldDelegate {
         if selector == #selector(NSResponder.insertNewline(_:)) { splash?.go(to: index + 1); return true }
         return false
     }
-    /// The name taken: the catalogue renamed if it changed, folder and file alike.
+    /// The name taken into the draft; the catalogue itself is renamed by Set.
     override func commit() {
         guard canContinue else { return }
-        if typed != library.catalogue { library.rename(catalogue: library.catalogue, to: typed) }
-        field.stringValue = library.catalogue
+        draft.catalogueName = typed == library.catalogue ? nil : typed
     }
 }
 

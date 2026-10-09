@@ -457,11 +457,15 @@ struct Catalogues {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try fm.moveItem(at: directory(for: old), to: dest)
         }
-        // The catalogue's file carries the catalogue's name.
+        // The catalogue's file carries the catalogue's name, and the history beside it follows, or it would be left behind unread.
         if let index = CatalogueFiles.index(in: directory(for: new)) {
             let dest = directory(for: new)
             let named = dest.appendingPathComponent(new + "." + ColourFiles.catalogue)
-            if index.lastPathComponent != named.lastPathComponent { try? fm.moveItem(at: index, to: named) }
+            if index.lastPathComponent != named.lastPathComponent {
+                let history = HistoryStore.url(beside: index), historyNamed = HistoryStore.url(beside: named)
+                try? fm.moveItem(at: index, to: named)
+                if fm.fileExists(atPath: history.path), !fm.fileExists(atPath: historyNamed.path) { try? fm.moveItem(at: history, to: historyNamed) }
+            }
         }
         if Catalogues.currentName == old || preferences.string(forKey: Catalogues.currentKey) == old {
             Catalogues.currentName = new

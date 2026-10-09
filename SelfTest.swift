@@ -1334,9 +1334,12 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let adoptedName = try! Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).adopt(awayDir.appendingPathComponent("Outside/Outside.colcat"))
     check(adoptedName == "Outside" && Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).directory(for: "Outside") == awayDir.appendingPathComponent("Outside"),
           "a .colcat file chosen from anywhere is opened where it is, under its own name, with nothing copied")
+    try! "{}".write(to: awayDir.appendingPathComponent("Outside/Outside.colhis"), atomically: true, encoding: .utf8)
     let renamedOut = try! cats.rename("Outside", to: "Outer")
     check(renamedOut == "Outer" && cats.directory(for: "Outer") == awayDir.appendingPathComponent("Outer") && fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outer.colcat").path),
           "a catalogue kept awayDir is renamed where it is, folder and file alike")
+    check(fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outer.colhis").path) && !fm.fileExists(atPath: awayDir.appendingPathComponent("Outer/Outside.colhis").path),
+          "the history beside the catalogue's file takes the new name with it")
     try! Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").mutate { lib in _ = lib.createProject(named: "Cookra") }
     check(fm.fileExists(atPath: homeDir.appendingPathComponent("Catalogues/Inside/Projects/Cookra/Information/Cookra.colinf").path)
           && (try? Catalogues(root: homeDir, legacyURL: nil).store(for: "Inside").load().projects.first?.name) == "Cookra",

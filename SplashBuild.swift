@@ -30,6 +30,8 @@ final class SplashDraft {
     var members: [String] = []
     /// The collection's name, once settled on the tree; nil takes it from the answers.
     var collectionName: String?
+    /// The catalogue's name as typed on the first section; nil keeps the name it has. Set renames it, nothing before.
+    var catalogueName: String?
     /// The groups' names, where the tree renamed one.
     var groupNames: [SchemaRole: String] = [:]
 
