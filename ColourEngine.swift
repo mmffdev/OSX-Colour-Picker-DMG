@@ -255,14 +255,68 @@ enum RGBSpace: String, CaseIterable, Codable {
     }
 }
 
+// MARK: Illuminants
+
+/// A CIE standard illuminant seen by one of the two standard observers: the white a house quotes its
+/// numbers under. The master stays XYZ under D50, the ICC standard; an illuminant carries it to another
+/// white by Bradford for the numbers only, so a textile mill reading D65 and 10 degrees sees its own figures.
+struct Illuminant: Equatable, CaseIterable {
+    /// The CIE's name: A, C, D50, D55, D65, D75.
+    let name: String
+    /// The standard observer's field, 2 or 10 degrees.
+    let observer: Int
+    /// The illuminant's white, Y = 1 (ASTM E308).
+    let white: XYZ
+
+    static let allCases: [Illuminant] = [
+        Illuminant(name: "A", observer: 2, white: XYZ(x: 1.09850, y: 1, z: 0.35585)),
+        Illuminant(name: "A", observer: 10, white: XYZ(x: 1.11144, y: 1, z: 0.35200)),
+        Illuminant(name: "C", observer: 2, white: XYZ(x: 0.98074, y: 1, z: 1.18232)),
+        Illuminant(name: "C", observer: 10, white: XYZ(x: 0.97285, y: 1, z: 1.16145)),
+        Illuminant(name: "D50", observer: 2, white: XYZ.d50),
+        Illuminant(name: "D50", observer: 10, white: XYZ(x: 0.96720, y: 1, z: 0.81427)),
+        Illuminant(name: "D55", observer: 2, white: XYZ(x: 0.95682, y: 1, z: 0.92149)),
+        Illuminant(name: "D55", observer: 10, white: XYZ(x: 0.95799, y: 1, z: 0.90926)),
+        Illuminant(name: "D65", observer: 2, white: XYZ(x: 0.95047, y: 1, z: 1.08883)),
+        Illuminant(name: "D65", observer: 10, white: XYZ(x: 0.94811, y: 1, z: 1.07304)),
+        Illuminant(name: "D75", observer: 2, white: XYZ(x: 0.94972, y: 1, z: 1.22638)),
+        Illuminant(name: "D75", observer: 10, white: XYZ(x: 0.94416, y: 1, z: 1.20641)),
+    ]
+    /// The master's own white: D50 for the 2 degree observer, which every ICC profile is built round.
+    static let d50 = allCases[4]
+
+    /// "D65 · 10°", as a menu writes it.
+    var label: String { "\(name) \u{00B7} \(observer)\u{00B0}" }
+    /// A key for keeping a choice: "d65-10".
+    var key: String { "\(name.lowercased())-\(observer)" }
+    static func named(_ key: String?) -> Illuminant? { allCases.first { $0.key == key } }
+}
+
+extension XYZ {
+    /// Where the colour sits on the chromaticity diagram, for the adaptation.
+    var chromaticity: (x: Double, y: Double) {
+        let s = x + y + z
+        return s == 0 ? XYZ.d50.chromaticity : (x: x / s, y: y / s)
+    }
+    /// The master carried from D50 to an illuminant's white by Bradford, so its numbers can be quoted under that white.
+    func adapted(to illuminant: Illuminant) -> XYZ {
+        if illuminant == .d50 { return self }
+        let v = multiply(bradford(from: XYZ.d50.chromaticity, to: illuminant.white.chromaticity), [x, y, z])
+        return XYZ(x: v[0], y: v[1], z: v[2])
+    }
+    /// L*a*b* against an illuminant's white, for a colour already adapted to it.
+    func lab(under illuminant: Illuminant) -> LabD50 {
+        let w = illuminant.white
+        func f(_ t: Double) -> Double { t > 216.0 / 24389 ? cbrt(t) : (24389.0 / 27 * t + 16) / 116 }
+        let fx = f(x / w.x), fy = f(y / w.y), fz = f(z / w.z)
+        return LabD50(l: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz))
+    }
+}
+
 // MARK: Comparing colours
 
 extension XYZ {
-    var lab: LabD50 {
-        func f(_ t: Double) -> Double { t > 216.0 / 24389 ? cbrt(t) : (24389.0 / 27 * t + 16) / 116 }
-        let fx = f(x / XYZ.d50.x), fy = f(y / XYZ.d50.y), fz = f(z / XYZ.d50.z)
-        return LabD50(l: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz))
-    }
+    var lab: LabD50 { lab(under: .d50) }
 }
 
 extension LabD50 {
@@ -311,6 +365,69 @@ func deltaE2000(_ p: LabD50, _ q: LabD50) -> Double {
     let sh = 1 + 0.015 * cpBar * t
     let rt = -sin(2 * dTheta * rad) * rc
     return sqrt(pow(dL / sl, 2) + pow(dC / sc, 2) + pow(dH / sh, 2) + rt * (dC / sc) * (dH / sh))
+}
+
+/// The ways a house compares two colours. CIEDE2000 is the CIE's current formula and the default; the older
+/// ones are kept because a press house or a textile mill may still write its tolerances in them. CIE94 and
+/// CMC weight the first colour as the reference, so they are not symmetric: the master is always given first.
+enum DifferenceMethod: String, CaseIterable {
+    case ciede2000, cie94, cmc21, cmc11, cie76
+
+    var label: String {
+        switch self {
+        case .ciede2000: return "CIEDE2000"
+        case .cie94: return "CIE94"
+        case .cmc21: return "CMC 2:1"
+        case .cmc11: return "CMC 1:1"
+        case .cie76: return "CIE76"
+        }
+    }
+    /// The difference's own name, for a label over the number.
+    var short: String {
+        switch self {
+        case .ciede2000: return "\u{0394}E2000"
+        case .cie94: return "\u{0394}E94"
+        case .cmc21: return "\u{0394}E CMC 2:1"
+        case .cmc11: return "\u{0394}E CMC 1:1"
+        case .cie76: return "\u{0394}E76"
+        }
+    }
+    /// What the user needs to know about the method, in a few lines: how to read it, and that the master is the reference where that matters.
+    var note: String {
+        switch self {
+        case .ciede2000: return "CIEDE2000, the CIE's current formula: 1 is about the smallest step the eye can see, 2 plainly another colour."
+        case .cie94: return "CIE94 weights the master as the reference, so the two swapped give another number."
+        case .cmc21: return "CMC 2:1, textiles' acceptability ratio, takes the master as reference: swapped, the two give another number."
+        case .cmc11: return "CMC 1:1, textiles' perceptibility ratio, takes the master as reference: swapped, the two give another number."
+        case .cie76: return "CIE76, the plain distance in L*a*b*, as older houses compare: it overstates the difference in saturated colours."
+        }
+    }
+
+    /// The difference from the reference to the sample.
+    func difference(_ reference: LabD50, _ sample: LabD50) -> Double {
+        let dL = sample.l - reference.l, da = sample.a - reference.a, db = sample.b - reference.b
+        let c1 = hypot(reference.a, reference.b), c2 = hypot(sample.a, sample.b), dC = c2 - c1
+        let dH = sqrt(max(0, da * da + db * db - dC * dC))
+        switch self {
+        case .ciede2000: return deltaE2000(reference, sample)
+        case .cie76: return sqrt(dL * dL + da * da + db * db)
+        case .cie94:
+            // The graphic arts weights: K1 0.045, K2 0.015, kL 1.
+            let sc = 1 + 0.045 * c1, sh = 1 + 0.015 * c1
+            return sqrt(dL * dL + pow(dC / sc, 2) + pow(dH / sh, 2))
+        case .cmc21, .cmc11:
+            let l = self == .cmc21 ? 2.0 : 1.0
+            let sl = reference.l < 16 ? 0.511 : 0.040975 * reference.l / (1 + 0.01765 * reference.l)
+            let sc = 0.0638 * c1 / (1 + 0.0131 * c1) + 0.638
+            var h1 = atan2(reference.b, reference.a) * 180 / .pi
+            if h1 < 0 { h1 += 360 }
+            let rad = Double.pi / 180
+            let t = h1 >= 164 && h1 <= 345 ? 0.56 + abs(0.2 * cos((h1 + 168) * rad)) : 0.36 + abs(0.4 * cos((h1 + 35) * rad))
+            let c14 = pow(c1, 4), f = sqrt(c14 / (c14 + 1900))
+            let sh = sc * (f * t + 1 - f)
+            return sqrt(pow(dL / (l * sl), 2) + pow(dC / sc, 2) + pow(dH / sh, 2))
+        }
+    }
 }
 
 // MARK: Rendering intents

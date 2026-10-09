@@ -1963,8 +1963,29 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(near(deltaE2000(LabD50(l: 50, a: 2.6772, b: -79.7751), LabD50(l: 50, a: 0, b: -82.7485)), 2.0425, 0.0001)
           && near(deltaE2000(LabD50(l: 50, a: 3.1571, b: -77.2803), LabD50(l: 50, a: 0, b: -82.7485)), 2.8615, 0.0001)
           && near(deltaE2000(LabD50(l: 50, a: 2.8361, b: -74.0200), LabD50(l: 50, a: 0, b: -82.7485)), 3.4412, 0.0001)
-          && deltaE2000(someLab, someLab) == 0,
-          "the colour difference matches the published CIEDE2000 figures, and a colour differs from itself by nothing")
+          && deltaE2000(someLab, someLab) == 0
+          // The house's other methods: CIE76 is the plain distance; CIE94 and CMC from a grey reference are worked by hand
+          // (S_C and S_H are 1 for CIE94 at C 0; for CMC at L 50, S_L is 1.0883 and S_C 0.638); the asymmetric ones differ swapped.
+          && near(DifferenceMethod.cie76.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 53, a: 4, b: 0)), 5, 0.0001)
+          && near(DifferenceMethod.cie94.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 50, a: 10, b: 0)), 10, 0.0001)
+          && near(DifferenceMethod.cie94.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 60, a: 0, b: 0)), 10, 0.0001)
+          && near(DifferenceMethod.cmc11.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 60, a: 0, b: 0)), 10 / 1.08831, 0.001)
+          && near(DifferenceMethod.cmc21.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 60, a: 0, b: 0)), 5 / 1.08831, 0.001)
+          && near(DifferenceMethod.cmc11.difference(LabD50(l: 50, a: 0, b: 0), LabD50(l: 50, a: 0, b: 6.38)), 10, 0.001)
+          && DifferenceMethod.cie94.difference(LabD50(l: 50, a: 40, b: 10), LabD50(l: 50, a: 10, b: 10)) != DifferenceMethod.cie94.difference(LabD50(l: 50, a: 10, b: 10), LabD50(l: 50, a: 40, b: 10))
+          && DifferenceMethod.cmc21.difference(LabD50(l: 50, a: 40, b: 10), LabD50(l: 50, a: 10, b: 40)) != DifferenceMethod.cmc21.difference(LabD50(l: 50, a: 10, b: 40), LabD50(l: 50, a: 40, b: 10))
+          && DifferenceMethod.allCases.allSatisfy { $0.difference(someLab, someLab) == 0 }
+          && DifferenceMethod.ciede2000.difference(LabD50(l: 50, a: 2.6772, b: -79.7751), LabD50(l: 50, a: 0, b: -82.7485)) == deltaE2000(LabD50(l: 50, a: 2.6772, b: -79.7751), LabD50(l: 50, a: 0, b: -82.7485)),
+          "the colour difference matches the published CIEDE2000 figures, CIE76, CIE94 and CMC match figures worked by hand with the master as the reference, and a colour differs from itself by nothing under every method")
+    check(Illuminant.allCases.count == 12 && Illuminant.named("d65-10")?.label == "D65 \u{00B7} 10\u{00B0}" && XYZ.d50.adapted(to: .d50) == XYZ.d50
+          && Illuminant.allCases.allSatisfy { ill in
+              let w = XYZ.d50.adapted(to: ill), lab = w.lab(under: ill)
+              return near(w.x, ill.white.x, 1e-4) && near(w.y, 1, 1e-6) && near(w.z, ill.white.z, 1e-4) && near(lab.l, 100, 1e-6) && abs(lab.a) < 1e-6 && abs(lab.b) < 1e-6
+          }
+          && someLab.xyz.lab(under: .d50) == someLab.xyz.lab
+          && { let d65 = Illuminant.named("d65-2")!, under = someLab.xyz.adapted(to: d65).lab(under: d65)
+               return near(under.l, 51.2366, 0.001) && near(under.a, 67.4450, 0.001) && near(under.b, 46.0526, 0.001) }(),
+          "the twelve illuminants each carry the D50 white to their own by Bradford and read it as L 100 with no colour, D50 is left as it is, and a red reads under D65 as worked out independently")
     let steel = ColourDefinition.of(hex: "#4F8093")!
     let steelOnScreen = Rendering.of(steel, in: ProfileChannel(space: "srgb"))
     check(steel.source.space == "srgb" && steel.kind == .surface && steel.sourceText == "sRGB  #4F8093"

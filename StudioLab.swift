@@ -5,10 +5,11 @@ import AppKit
 // The old window's cLab redrawn in the house: a page section drawn by frame on the page's own columns and the 28 beat.
 // A Split. The left is the colour being worked on, the base or, with no rule, the ringed one: its block drawn from its
 // master through Display P3, then its values, every one worked out from the master (XYZ under D50), the print build
-// naming its press and intent. The right is the harmony: the rule's words in a fixed box, the wheel, the nine rules as
-// the guide's Choice, the brightness slider and the actions. Under both, the colours the wheel holds as square tiles on
-// the columns, each copying its value, with Base, Lock and Delete under the pointer; then the palette's name and the
-// house buttons that keep them. The maths, the rules and the history are ColourScience.swift's; nothing is reinvented.
+// naming its press and intent, then the proof: a panel titled by the colour difference, the master and what the press
+// prints side by side and the working on the right. The right is the harmony: the rule's words in a fixed box, the wheel,
+// the nine rules as the guide's Choice, the brightness slider and the actions, then, on the proof's row, the colours the
+// wheel holds as square tiles on the side's columns, each copying its value, with Base, Lock and Delete under the pointer.
+// Under both sides, the palette's name and the house buttons that keep them. The maths, the rules and the history are ColourScience.swift's; nothing is reinvented.
 
 final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     var onResize: (() -> Void)?
@@ -24,7 +25,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private var selected = 0
     /// The library colour the wheel was opened on, kept whole: while the base is still that colour, its values are its own master's, not its eight-bit hex.
     private var origin: String?
-    private static let key = "labState", formatKey = "labFormat"
+    private static let key = "labState", formatKey = "labFormat", methodKey = "labDifference", illuminantKey = "labIlluminant"
 
     /// The model the tiles' values are written in and copied as.
     private var format: ColourFormat {
@@ -41,8 +42,20 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private let toProject = SwissButton("Add To Project", .secondary)
     private let nameField = NSTextField(string: "")
 
+    /// The way the proof compares the master with the print: the house's method, CIEDE2000 until it says otherwise.
+    private var method: DifferenceMethod {
+        get { (preferences.string(forKey: Self.methodKey)).flatMap(DifferenceMethod.init(rawValue:)) ?? .ciede2000 }
+        set { preferences.set(newValue.rawValue, forKey: Self.methodKey) }
+    }
+
+    /// The white the colour's values are quoted under: D50, the master's own, until the house says otherwise.
+    private var illuminant: Illuminant {
+        get { Illuminant.named(preferences.string(forKey: Self.illuminantKey)) ?? .d50 }
+        set { preferences.set(newValue.key, forKey: Self.illuminantKey) }
+    }
+
     /// What a press is on, worked out as the page draws.
-    private enum Hit: Equatable { case node(Int), rule(LabRule), slider, block(Int), name(Int), base(Int), lock(Int), bin(Int), format }
+    private enum Hit: Equatable { case node(Int), rule(LabRule), slider, block(Int), name(Int), base(Int), lock(Int), bin(Int), format, method, illuminant }
     private var hits: [(NSRect, Hit)] = []
     private var hover: Hit?
     private var hoverTile: Int?
@@ -61,6 +74,10 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private static let helpUnits: CGFloat = 3
     /// The wheel is eight units square; the working colour's band two, over its nine values; a tile's block two, as the band is, its words two.
     private static let wheelUnits: CGFloat = 8, bandUnits: CGFloat = 2, blockUnits: CGFloat = 2, wordUnits: CGFloat = 2
+    /// The proof's heading row, then its block: the two colours seven units tall beside the working, two units a value and three for the numeral.
+    private static let proofRow: CGFloat = 17, proofUnits: CGFloat = 7
+    /// The note under the proof: what the method is and what the two colours are, in a box of three units, the words written to fit.
+    private static let proofNoteUnits: CGFloat = 3
     /// The brightness a colour may go down to, as the old slider did: below it a colour is black whatever its hue.
     private static let darkest = 0.08
 
@@ -124,12 +141,20 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private struct Value { let label: String; let value: String; let note: String }
     private var values: [Value] = []
     private var workingName = ""
+    /// The proof: the master against what the press prints, both painted through Display P3, and the difference between them.
+    private struct Proof {
+        var master = NSColor.black, masterLab = LabD50(l: 0, a: 0, b: 0)
+        var print: NSColor?, printLab: LabD50?, difference: Double?
+        var inRange = false
+    }
+    private var proof = Proof()
 
     private func work() {
         shades = state.nodes.indices.map { definition(of: $0).def.master.display }
         let w = definition(of: working), d = w.def, m = d.master
         workingName = w.name
-        let lab = m.lab
+        // The values under the house's illuminant: the master carried to its white, so the XYZ, the L*a*b* and the proof all read under it.
+        let ill = illuminant, under = m.adapted(to: ill), lab = under.lab(under: ill)
         let ok = oklchOf({ let v = RGBSpace.srgb.values(of: m); return (v[0], v[1], v[2]) }())
         let p3 = Rendering.of(d, in: ProfileChannel(space: RGBSpace.displayP3.rawValue))
         let video = Rendering.of(d, in: ProfileChannel(space: RGBSpace.rec2020.rawValue))
@@ -137,14 +162,19 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         /// A value's figures without the depth and range its space writes after them, which the label says instead.
         func bare(_ s: String?) -> String { (s ?? "\u{2014}").components(separatedBy: "  (").first ?? "\u{2014}" }
         let ink = print.detail.components(separatedBy: "Total Ink ").last.map { "Ink " + $0 } ?? ""
+        // The difference by the house's method, the master as the reference; the Print row's note and the proof's title are one number.
+        let printLab = print.shown.map { $0.adapted(to: ill).lab(under: ill) }
+        let difference = printLab.map { method.difference(lab, $0) }
+        proof = Proof(master: m.display, masterLab: lab, print: print.shown?.display, printLab: printLab, difference: difference,
+                      inRange: difference.map { $0 <= Rendering.visible } ?? false)
         values = [
             Value(label: "Source", value: d.sourceText, note: d.kind == .light ? "Light" : "Surface"),
-            Value(label: "Master XYZ", value: String(format: "%.4f, %.4f, %.4f", m.x, m.y, m.z), note: "D50"),
-            Value(label: "L*a*b*", value: String(format: "%.2f, %.2f, %.2f", lab.l, lab.a, lab.b), note: "D50"),
+            Value(label: ill == .d50 ? "Master XYZ" : "XYZ", value: String(format: "%.4f, %.4f, %.4f", under.x, under.y, under.z), note: ill.label),
+            Value(label: "L*a*b*", value: String(format: "%.2f, %.2f, %.2f", lab.l, lab.a, lab.b), note: ill.label),
             Value(label: "OKLCH", value: String(format: "%.3f, %.3f, %.1f\u{00B0}", ok.l, ok.c, ok.h), note: ""),
             Value(label: "Display P3", value: bare(p3.value), note: p3.inRange ? "In Range" : "Out Of Range"),
             Value(label: "Rec. 2020", value: bare(video.value), note: "10-Bit"),
-            Value(label: "Print", value: print.value ?? "\u{2014}", note: print.difference.map { String(format: "\u{0394}E %.1f", $0) } ?? ""),
+            Value(label: "Print", value: print.value ?? "\u{2014}", note: difference.map { String(format: "\u{0394}E %.1f", $0) } ?? ""),
             Value(label: "Press", value: press.press ?? PressProfiles.generic, note: print.value == nil ? "" : ink),
             Value(label: "Intent", value: (press.intent ?? .relative).name, note: press.blackPoint == true ? "BPC" : ""),
         ]
@@ -211,15 +241,18 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     // MARK: Geometry: the page's own columns and the beat
 
     private struct Geometry {
-        var w: CGFloat = 0, column: CGFloat = 0, gutter: CGFloat = 0, n = 6
+        var w: CGFloat = 0, column: CGFloat = 0, gutter: CGFloat = 0, n = 6, half = 3
         /// The left side, columns 1 to half; the right from the next column to the edge.
         var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0
         func x(_ k: Int) -> CGFloat { CGFloat(k) * (column + gutter) }
         var wheel = NSRect.zero, choice = NSRect.zero
+        /// The proof's block, under its heading row; the tiles' header a unit of air below it.
+        var proof = NSRect.zero, coloursTop: CGFloat = 0
         var tilesTop: CGFloat = 0, tileRows = 1, saveTop: CGFloat = 0
+        /// The tiles on the right side's columns, as many to a row as the side has.
         func tile(_ i: Int) -> NSRect {
             let u = Design.App.unit
-            return NSRect(x: x(i % n), y: tilesTop + CGFloat(i / n) * (LabPage.blockUnits + LabPage.wordUnits + 1) * u, width: column, height: (LabPage.blockUnits + LabPage.wordUnits) * u)
+            return NSRect(x: x(half + i % half), y: tilesTop + CGFloat(i / half) * (LabPage.blockUnits + LabPage.wordUnits + 1) * u, width: column, height: (LabPage.blockUnits + LabPage.wordUnits) * u)
         }
     }
     private func geometry(width w: CGFloat) -> Geometry {
@@ -231,15 +264,21 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         // The page is a whole number of the window's columns, six with both rails and the history, more as they go.
         g.n = max(2, Int(((w + g.gutter) / (g.column + g.gutter)).rounded()))
         let half = g.n / 2
+        g.half = half
         g.lw = CGFloat(half) * g.column + CGFloat(half - 1) * g.gutter
         g.rx = g.x(half)
         g.rw = w - g.rx
         g.wheel = NSRect(x: g.rx, y: 5 * u, width: Self.wheelUnits * u, height: Self.wheelUnits * u)
         g.choice = NSRect(x: g.rx, y: 13 * u + 2, width: g.rw, height: u - 4)
-        g.tilesTop = 18 * u
-        g.tileRows = max(1, (state.nodes.count + g.n - 1) / g.n)
-        // A unit of air between the last tiles' values and the save row, whose buttons stand taller than the beat.
-        g.saveTop = g.tilesTop + CGFloat(g.tileRows) * (Self.blockUnits + Self.wordUnits + 1) * u
+        g.proof = NSRect(x: 0, y: (Self.proofRow + 1) * u, width: g.lw, height: Self.proofUnits * u)
+        // The colours share the proof's row, on the right side under the harmony.
+        g.coloursTop = Self.proofRow * u
+        g.tilesTop = g.coloursTop + u
+        g.tileRows = max(1, (state.nodes.count + half - 1) / half)
+        // The save row under whichever side runs longer: the proof, a unit of air, its note and a unit more; or the tiles, whose
+        // every row ends in a unit of air, since the buttons stand taller than the beat.
+        let proofBottom = g.proof.maxY + (Self.proofNoteUnits + 2) * u
+        g.saveTop = max(proofBottom, g.tilesTop + CGFloat(g.tileRows) * (Self.blockUnits + Self.wordUnits + 1) * u)
         return g
     }
     /// Down to the foot of the save row's buttons, which end a point short of the unit: at the window's first size the page holds it all without a scroll.
@@ -274,10 +313,15 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         // The two first-order headers on the first line, their words in a fixed box of three units under each.
         Design.attributed("Colour", .body).draw(x: 0, baseline: line)
         Design.attributed("Harmony", .body).draw(x: g.rx, baseline: line)
+        // The left's words take two of the three units; the third is the illuminant row, the white every value under it is quoted against.
         let leftHelp = state.rule == .custom
-            ? "No rule ties the colours, so this is the ringed one. Every value below is worked out from its master, XYZ under D50, and the print build names its press and intent."
-            : "The base the harmony is built on. Every value below is worked out from its master, XYZ under D50, and the print build names its press and intent."
-        Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: 0, y: u, width: g.lw, height: Self.helpUnits * u))
+            ? "No rule ties the colours, so this is the ringed one. Every value below is worked out from its master, XYZ under D50."
+            : "The base the harmony is built on. Every value below is worked out from its master, XYZ under D50."
+        Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: 0, y: u, width: g.lw, height: (Self.helpUnits - 1) * u))
+        Design.attributed("Values Under", .caption, colour: Design.quiet).draw(x: 0, baseline: (Self.helpUnits) * u + line)
+        let illuminantMenu = drawMenu(illuminant.label, right: g.lw, top: Self.helpUnits * u)
+        hits.append((illuminantMenu, .illuminant))
+        tip(illuminantMenu, "The Illuminant And Observer The Values Are Quoted Under; The Master Stays D50")
         let why = NSMutableAttributedString(attributedString: Design.attributed(state.rule.title + ".  ", .caption, colour: Design.ink, lineHeight: true))
         why.append(Design.attributed(state.rule.why + (state.rule == .custom ? " Drag any colour on the wheel." : " Drag any colour on the wheel and the rest follow; a locked one stays."), .caption, colour: Design.quiet, lineHeight: true))
         why.draw(in: NSRect(x: g.rx, y: u, width: g.rw, height: Self.helpUnits * u))
@@ -292,6 +336,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         hairline(x: g.rx, y: 5 * u - 1, width: g.rw, Design.rule)
 
         drawColour(g)
+        drawProof(g, tip: tip)
         drawWheel(g)
         drawRules(g)
         drawSlider(g)
@@ -301,6 +346,18 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         Design.attributed("Palette Name", .label, colour: Design.quiet).draw(x: 0, baseline: g.saveTop + line)
         let editing = nameField.currentEditor() != nil
         hairline(x: g.x(1), y: g.saveTop + u - 1, width: g.lw - g.x(1), editing ? Design.ink : Design.rule)
+    }
+
+    /// The house's menu control as the page draws it: the chosen words as a caption with a chevron, flush right on a row. Returns the rect a press on it lands in.
+    @discardableResult
+    private func drawMenu(_ chosen: String, right: CGFloat, top: CGFloat) -> NSRect {
+        let b = top + Self.line, t = Design.attributed(chosen, .caption, colour: Design.quiet)
+        t.draw(right: right - 14, baseline: b)
+        Design.quiet.setStroke()
+        let chevron = NSBezierPath(); chevron.lineWidth = 1
+        chevron.move(to: NSPoint(x: right - 9, y: b - 6)); chevron.line(to: NSPoint(x: right - 5, y: b - 2)); chevron.line(to: NSPoint(x: right - 1, y: b - 6))
+        chevron.stroke()
+        return NSRect(x: right - 14 - t.size().width - 8, y: top, width: t.size().width + 22, height: Self.u)
     }
 
     /// The colour's block, a band across the side, drawn from its master; then its values on the beat, each on a Mist hairline.
@@ -316,6 +373,66 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
             Design.attributed(v.value, .body).draw(x: vx, baseline: b, width: g.lw - vx - (v.note.isEmpty ? 0 : note.size().width + 12))
             hairline(x: 0, y: top + u - 1, width: g.lw, Design.mist)
         }
+    }
+
+    // MARK: The proof: the colour difference as the title, the two colours side by side, the working beside them
+
+    /// The first of the writings that fits the width, so a value is rewritten to fit its column, never cut or let run.
+    private func fitted(_ writings: [String], _ style: Design.Text, colour: NSColor = Design.ink, width: CGFloat) -> NSAttributedString {
+        let all = writings.map { Design.attributed($0, style, colour: colour) }
+        return all.first { $0.size().width <= width } ?? all.last ?? NSAttributedString()
+    }
+    /// L*a*b* to two places, one, or none, as the column allows.
+    private func labText(_ lab: LabD50?, width: CGFloat) -> NSAttributedString {
+        guard let lab = lab else { return Design.attributed("\u{2014}", .body) }
+        return fitted([2, 1, 0].map { String(format: "%.\($0)f, %.\($0)f, %.\($0)f", lab.l, lab.a, lab.b) }, .body, width: width)
+    }
+
+    private func drawProof(_ g: Geometry, tip: (NSRect, String) -> Void) {
+        let u = Self.u, line = Self.line, p = proof, box = g.proof
+        // The heading row: the difference is the title, its verdict beside it as the Display P3 row writes it, the method's menu at the right.
+        let b = Self.proofRow * u + line
+        let title = Design.attributed(p.difference.map { String(format: "\u{0394}E %.1f", $0) } ?? "\u{0394}E \u{2014}", .body)
+        let verdict = p.print == nil ? "Not Worked Out" : p.inRange ? "In Range" : "Out Of Range"
+        title.draw(x: 0, baseline: b)
+        let menu = drawMenu(method.label, right: g.lw, top: Self.proofRow * u)
+        hits.append((menu, .method))
+        tip(menu, "The Method The House Compares Colours By")
+        Design.attributed(verdict, .caption, colour: p.inRange || p.print == nil ? Design.quiet : Design.ink)
+            .draw(x: title.size().width + 12, baseline: b, width: menu.minX - title.size().width - 24)
+        hairline(x: 0, y: box.minY - 1, width: g.lw, Design.rule)
+
+        // The two colours, edge to edge so the eye compares them with no paper between: the master, then what the press prints.
+        let half = g.n / 2
+        let huesWidth = half > 1 ? g.x(half - 1) - g.gutter : ((g.lw - g.gutter) / 2).rounded()
+        let left = NSRect(x: 0, y: box.minY, width: (huesWidth / 2).rounded(), height: box.height)
+        let right = NSRect(x: left.maxX, y: box.minY, width: huesWidth - left.width, height: box.height)
+        fill(left, p.master)
+        fill(right, p.print ?? Design.mist)
+        // Each named inside, at its top left, in whichever of ink and paper reads on it.
+        func name(_ s: String, in r: NSRect, on lab: LabD50?) {
+            Design.attributed(s, .caption, colour: (lab?.l ?? 100) > 60 ? Design.ink : Design.paper).draw(x: r.minX + 8, baseline: r.minY + line, width: r.width - 16)
+        }
+        name("Master", in: left, on: p.masterLab)
+        name(p.print == nil ? "Not Worked Out" : "Print", in: right, on: p.printLab)
+        let press = values.first { $0.label == "Press" }?.value ?? "", intent = values.first { $0.label == "Intent" }?.value ?? ""
+        tip(left, "The Master Colour, As The Screen Shows It")
+        tip(right, p.print == nil ? "The Press Profile Is Not On This Mac" : "What \(press) Prints, \(intent), As The Screen Shows It")
+
+        // The working, in the last column: each L*a*b* under its label, then the difference as the numeral on the block's bottom line.
+        let cx = huesWidth + g.gutter, cw = g.lw - cx
+        Design.attributed("Master L*a*b*", .caption, colour: Design.quiet).draw(x: cx, baseline: box.minY + line, width: cw)
+        labText(p.masterLab, width: cw).draw(x: cx, baseline: box.minY + u + line)
+        Design.attributed("Print L*a*b*", .caption, colour: Design.quiet).draw(x: cx, baseline: box.minY + 2 * u + line, width: cw)
+        labText(p.printLab, width: cw).draw(x: cx, baseline: box.minY + 3 * u + line)
+        Design.attributed(method.short, .caption, colour: Design.quiet).draw(x: cx, baseline: box.minY + 4 * u + line, width: cw)
+        let numeral = p.difference.map { d in fitted([String(format: "%.1f", d), String(format: "%.0f", d)], .numeral, width: cw) }
+            ?? Design.attributed("\u{2014}", .numeral)
+        (numeral.size().width <= cw ? numeral : Design.attributed(numeral.string, .headline)).draw(right: g.lw, baseline: box.maxY)
+
+        // The note, a unit of air under the colours: the method and how to read it, then what the two colours are: previews through Display P3, never the sheet.
+        Design.attributed(method.note + " Both are previews through Display P3, not the printed sheet.", .caption, colour: Design.quiet, lineHeight: true)
+            .draw(in: NSRect(x: 0, y: box.maxY + u, width: g.lw, height: Self.proofNoteUnits * u))
     }
 
     // MARK: The wheel: the artists' disc, the spokes, and the colours as squares
@@ -436,16 +553,10 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     private func drawTiles(_ g: Geometry, tip: (NSRect, String) -> Void) {
         let u = Self.u, line = Self.line
-        // The second-order header across the page, the model the values are written in at its right.
-        Design.attributed("Colours", .body).draw(x: 0, baseline: 17 * u + line)
-        let b = 17 * u + line, t = Design.attributed(format.label, .caption, colour: Design.quiet)
-        t.draw(right: g.w - 14, baseline: b)
-        Design.quiet.setStroke()
-        let chevron = NSBezierPath(); chevron.lineWidth = 1
-        chevron.move(to: NSPoint(x: g.w - 9, y: b - 6)); chevron.line(to: NSPoint(x: g.w - 5, y: b - 2)); chevron.line(to: NSPoint(x: g.w - 1, y: b - 6))
-        chevron.stroke()
-        hits.append((NSRect(x: g.w - 14 - t.size().width - 8, y: 17 * u, width: t.size().width + 22, height: u), .format))
-        hairline(x: 0, y: 18 * u - 1, width: g.w, Design.rule)
+        // The second-order header across the right side, on the proof's row, the model the values are written in at its right.
+        Design.attributed("Colours", .body).draw(x: g.rx, baseline: g.coloursTop + line)
+        hits.append((drawMenu(format.label, right: g.w, top: g.coloursTop), .format))
+        hairline(x: g.rx, y: g.tilesTop - 1, width: g.rw, Design.rule)
 
         for (i, n) in state.nodes.enumerated() {
             let r = g.tile(i), key = definition(of: i).key
@@ -537,6 +648,8 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         case .lock(let i): change { $0.toggleLock(i) }
         case .bin(let i): change { $0.remove(i) }
         case .format: openFormats(under: hits.first { $0.1 == .format }?.0 ?? .zero)
+        case .method: openMethods(under: hits.first { $0.1 == .method }?.0 ?? .zero)
+        case .illuminant: openIlluminants(under: hits.first { $0.1 == .illuminant }?.0 ?? .zero)
         }
     }
     override func mouseDragged(with event: NSEvent) {
@@ -643,6 +756,21 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         openMenu(items: models.map { $0.label }, chosen: format.label, width: 160, from: rect, upward: false) { [weak self] i in
             self?.format = models[i]
             self?.needsDisplay = true
+        }
+    }
+
+    private func openIlluminants(under rect: NSRect) {
+        let all = Illuminant.allCases
+        openMenu(items: all.map { $0.label }, chosen: illuminant.label, width: 160, from: rect, upward: false) { [weak self] i in
+            self?.illuminant = all[i]
+            self?.refresh()
+        }
+    }
+    private func openMethods(under rect: NSRect) {
+        let methods = DifferenceMethod.allCases
+        openMenu(items: methods.map { $0.label }, chosen: method.label, width: 160, from: rect, upward: false) { [weak self] i in
+            self?.method = methods[i]
+            self?.refresh()
         }
     }
 
