@@ -52,7 +52,7 @@ final class StudioWindowController: NSWindowController {
 
     private static var gridKey: Any?
 
-    static func show(library: LibraryController) {
+    static func show(library: LibraryController, setupJourney: Bool = false) {
         let c = shared ?? StudioWindowController(library: library)
         shared = c
         // --palettes opens on the palettes view, --palette "<name>" on that palette, for looking at a screen straight away.
@@ -72,8 +72,8 @@ final class StudioWindowController: NSWindowController {
         // While the splash is being designed, the loop keeps the app in it: every launch opens on it, and Set starts it again instead of
         // building anything. --splash-loop for one run, or `defaults write ~/Library/Preferences/com.mmffdev.mmffdevcolour3 splashLoop -bool YES` until it is deleted
         // (by path: the Store edition's container answers to the bare domain once it has run).
-        // A first open (the setup not yet done) is the splash's own case: it is the setup now, the wizard having gone from the launch.
-        if args.contains("--splash") || StudioSplash.looping || ((!Prefs.assistantDone || SchemaTrial.collections.isEmpty) && !args.contains("--no-splash") && !args.contains("--snap")) { c.frame.showSplash() }
+        // The wizard has just completed on a first open; its completion must not skip the journey.
+        if setupJourney || args.contains("--splash") || StudioSplash.looping || (!Prefs.assistantDone && !args.contains("--no-splash") && !args.contains("--snap")) { c.frame.showSplash() }
         // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
         if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
             let to = URL(fileURLWithPath: args[i + 1])

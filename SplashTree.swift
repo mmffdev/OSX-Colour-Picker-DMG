@@ -27,7 +27,7 @@ final class SplashTreeView: NSView {
     /// Called after any change made on the tree, so the splash can settle its buttons.
     var onChange: (() -> Void)?
 
-    /// A level another of can be added at; a group belongs to the leaf (stream, or category with no streams) its member sits under.
+    /// A level another of can be added at; a group belongs to a stream inside its member, or directly to a member without streams.
     enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group(String) }
     /// A node a section can be working on, to mark it with a band.
     enum Target: Hashable { case catalogue, collection(String), party(UUID), category(UUID, String), leaf(String) }
@@ -85,29 +85,31 @@ final class SplashTreeView: NSView {
         func add(_ level: Level, _ name: String, at depth: Int) { out.append(Line(kind: .add(level), name: name, depth: depth, caption: "", removable: false)) }
         /// The groups under a member, the leaf's own: each leaf may differ (Rick, 2026-10-09).
         func groups(at depth: Int, leaf: String) {
-            guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Asset Collection", depth: depth, caption: "Groups", removable: false, soft: true)); return }
+            guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Assets", depth: depth, caption: "Assets", removable: false, soft: true)); return }
             let mine = d.groups(of: leaf)
-            for g in mine { out.append(Line(kind: .group(leaf, g), name: d.groupNames[g] ?? g, depth: depth, caption: "Group", removable: mine.count > 1)) }
-            if let p = pending(.group(leaf)) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false, soft: true)) }
-            add(.group(leaf), "Another group", at: depth)
-        }
-        func member(_ p: SplashDraft.Party, _ category: String, stream: String?, under key: String, at depth: Int) {
-            let word = SplashDraft.memberWord(category), named = d.member(of: p.id, category)
-            let k = key + "/m"
-            let leaf = SplashDraft.leafKey(p.id, category, stream)
-            out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil, targets: [.leaf(leaf)]))
-            if open(k) { groups(at: depth + 1, leaf: leaf) }
+            for g in mine { out.append(Line(kind: .group(leaf, g), name: d.groupNames[g] ?? g, depth: depth, caption: "Asset", removable: mine.count > 1)) }
+            if let p = pending(.group(leaf)) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Asset", removable: false, soft: true)) }
+            add(.group(leaf), "Another asset", at: depth)
         }
         func streams(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
             let active = d.activeStreams(of: p.id, category)
-            guard !active.isEmpty || pending(.stream(p.id, category)) != nil else { member(p, category, stream: nil, under: key, at: depth); return }
+            guard !active.isEmpty || pending(.stream(p.id, category)) != nil else {
+                groups(at: depth, leaf: SplashDraft.leafKey(p.id, category, nil)); return
+            }
             for (j, s) in active.enumerated() {
-                let k = key + "/s\(j)"
-                out.append(Line(kind: .stream(p.id, category, j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
-                if open(k) { member(p, category, stream: s, under: k, at: depth + 1) }
+                let k = key + "/s\(j)", leaf = SplashDraft.leafKey(p.id, category, s)
+                out.append(Line(kind: .stream(p.id, category, j), name: s, depth: depth, caption: "Stream", removable: true, key: k, targets: [.leaf(leaf)]))
+                if open(k) { groups(at: depth + 1, leaf: leaf) }
             }
             if let w = pending(.stream(p.id, category)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Stream", removable: false, soft: true)) }
             if !active.isEmpty { add(.stream(p.id, category), "Another stream", at: depth) }
+        }
+        func member(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
+            let word = SplashDraft.memberWord(category), named = d.member(of: p.id, category)
+            let k = key + "/m"
+            let targets: [Target] = d.activeStreams(of: p.id, category).isEmpty ? [.leaf(SplashDraft.leafKey(p.id, category, nil))] : []
+            out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil, targets: targets))
+            if open(k) { streams(p, category, under: k, at: depth + 1) }
         }
         func categories(_ p: SplashDraft.Party, under key: String, at depth: Int) {
             let mine = d.categories(of: p.id)
@@ -120,7 +122,7 @@ final class SplashTreeView: NSView {
             for (i, c) in mine.enumerated() {
                 let k = key + "/c\(i)"
                 out.append(Line(kind: .category(p.id, i), name: c, depth: depth, caption: "Category", removable: true, key: k, targets: [.category(p.id, c)]))
-                if open(k) { streams(p, c, under: k, at: depth + 1) }
+                if open(k) { member(p, c, under: k, at: depth + 1) }
             }
             if let w = pending(.category(p.id)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Category", removable: false, soft: true)) }
             add(.category(p.id), "Another category", at: depth)
@@ -339,7 +341,7 @@ final class SplashTreeView: NSView {
                     let word = choice ?? uniqueName("Stream 2", among: taken)
                     d.streamsOf[SplashDraft.key(id, c), default: []].append(word); d.setOneKind(false, id, c); self.changed(); if choice == nil { self.edit(.stream(id, c, d.streams(of: id, c).count - 1)) }
                 case .group(let leaf):
-                    let word = choice ?? uniqueName("Group 2", among: taken)
+                    let word = choice ?? uniqueName("Asset 2", among: taken)
                     d.groupsOf[leaf] = d.groups(of: leaf) + [word]; self.changed(); if choice == nil { self.edit(.group(leaf, word)) }
                 default: break
                 }

@@ -626,9 +626,9 @@ final class SetupAssistant: NSWindowController, NSTextFieldDelegate {
 
     private func finishAndOpen() {
         trainer?.stop()
-        Self.keep = nil
-        window?.close()
+        window?.orderOut(nil)
         completion(created ?? Catalogues.currentName)
+        Self.keep = nil
     }
 }
 

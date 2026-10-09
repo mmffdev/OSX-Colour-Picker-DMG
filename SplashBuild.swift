@@ -5,13 +5,19 @@ import Foundation
 // The answers to the splash's questions, and the catalogue structure they make. Who the work is for
 // gives the collections: every type picked (Clients, Brands, a word of your own) is a collection with
 // the names given as its first level, and Our Own Work a collection with no such level. Each one
-// named has its own categories of work (Products, Projects) as a level, each category its own
-// streams (Web, Print) as a level, and each category its first member, named; the Master Template
+// named has its own categories of work (Products, Projects) as a level, each category its first member, named,
+// and each member its streams (Web, Print); the Master Template
 // holds the groups chosen, in their order. Every later question is asked once for each answer to the
 // one before, so a second client or a second category only adds a block to the page. Pure, so the
 // self-test can build every combination of answers and check the tree it gives.
 
-final class SplashDraft {
+final class SplashDraft: Codable {
+    init() {}
+    // Pending text belongs to its field; committed answers and their stable IDs survive a relaunch.
+    private enum CodingKeys: String, CodingKey {
+        case catalogueName, parties, categoriesOf, streamsOf, oneKindOf, groupsOf, groupsEverywhere
+        case members, collectionNames, groupNames, types
+    }
     static let ownWork = "Our own work"
     static let whoOptions = ["Clients", "Customers", "Contracts", "Brands"]
     static let streamOptions = ["Web", "Print", "Design", "Video", "Packaging"]
@@ -22,7 +28,7 @@ final class SplashDraft {
     static let groupOptions = groupStart + SchemaTrial.nestedNames.filter { !groupStart.contains($0) }
 
     /// One of the first level: a client, a brand, named; or the user's own work, which has no name.
-    struct Party: Equatable {
+    struct Party: Equatable, Codable {
         var id = UUID()
         var type: String
         var name: String
@@ -39,7 +45,7 @@ final class SplashDraft {
     var parties: [Party] = []
     /// Each party's categories of work, plural, in order; a level under the party as soon as any is chosen.
     var categoriesOf: [UUID: [String]] = [:]
-    /// Each category's streams, by party and category, in order; a level under the category unless `oneKind` sets them aside.
+    /// Each category's streams, by party and category, in order; a level inside its member unless `oneKind` sets them aside.
     var streamsOf: [String: [String]] = [:]
     /// The categories that are one kind of work, by party and category: their streams are kept but make no level, so unticking
     /// brings them back. Each category answers for itself (Rick, 2026-10-09): a Campaign may be one kind while Projects has streams.
@@ -51,7 +57,7 @@ final class SplashDraft {
     }
     func isOneKind(_ party: UUID, _ category: String) -> Bool { oneKindOf.contains(Self.key(party, category)) }
     func setOneKind(_ on: Bool, _ party: UUID, _ category: String) { if on { oneKindOf.insert(Self.key(party, category)) } else { oneKindOf.remove(Self.key(party, category)) } }
-    /// The groups inside each member, by the leaf they sit under (a stream, or the category when it has no stream level), in order.
+    /// The groups inside each member, by stream (or directly inside a member without streams), in order.
     /// A leaf not yet answered has the four the app fills itself. The model is progressive: every layer the user adds is one more
     /// parent the layer below is asked for, and each may differ (Rick, 2026-10-09).
     var groupsOf: [String: [String]] = [:]
@@ -75,12 +81,18 @@ final class SplashDraft {
     /// The key of a leaf: the category's, with the stream after it when there is one.
     static func leafKey(_ party: UUID, _ category: String, _ stream: String?) -> String { key(party, category) + (stream.map { "/" + $0 } ?? "") }
 
-    /// One place a member sits in: a party's category, and the stream under it when the category has a stream level.
+    /// One place for groups inside a member: its stream, or the member itself without streams.
     struct Leaf: Equatable {
         let party: Party, category: String, stream: String?
         var key: String { SplashDraft.leafKey(party.id, category, stream) }
         /// How the leaf is called on a block's caption: "Acme · Projects · Web".
         var title: String { ([party.title, category] + (stream.map { [$0] } ?? [])).joined(separator: " \u{00B7} ") }
+    }
+    /// Identify the actual project or product while choosing its assets.
+    func assetHeading(for leaf: Leaf) -> String {
+        let word = Self.memberWord(leaf.category)
+        let name = member(of: leaf.party.id, leaf.category) ?? "(Not Named Yet)"
+        return (["\(word) \(name)"] + (leaf.stream.map { ["Stream \($0)"] } ?? []) + ["Assets"]).joined(separator: " > ")
     }
     /// Every leaf, in order: the blocks the last question is asked in, one per stream, or one per category with no stream level.
     var leaves: [Leaf] {
@@ -120,12 +132,11 @@ final class SplashDraft {
     func memberWord(for type: String) -> String { Self.memberWord(parties(of: type).flatMap { categories(of: $0.id) }.first ?? "Projects") }
     /// The collection for a type: its name on the tree, the type itself, or "My Products" for the user's own.
     func collectionTitle(_ type: String) -> String { collectionNames[type] ?? (type == Self.ownWork ? "My " + SchemaTrial.plural(memberWord(for: type)) : type) }
-    /// The levels between, top down: the party's word, Category when any of the type's parties has one, Stream when any of their streams are on.
+    /// The levels above a member: the party and category. Streams belong in the member stack.
     func levelNames(for type: String) -> [String] {
         let mine = parties(of: type)
         let categorised = mine.contains { !categories(of: $0.id).isEmpty }
-        let streamed = mine.contains { p in categories(of: p.id).contains { !activeStreams(of: p.id, $0).isEmpty } }
-        return (type == Self.ownWork ? [] : [Self.singular(type)]) + (categorised ? ["Category"] : []) + (streamed ? ["Stream"] : [])
+        return (type == Self.ownWork ? [] : [Self.singular(type)]) + (categorised ? ["Category"] : [])
     }
     /// The app's own group of that type, if it is one; a custom group has none and is a folder of files under its name.
     static func role(of group: String) -> SchemaRole? { SchemaRole.allCases.first { $0.title == group } }
@@ -133,15 +144,24 @@ final class SplashDraft {
     func stack(named name: String, groups list: [String]) -> SchemaNode {
         SchemaNode(name: name, children: list.map { SchemaNode(name: groupNames[$0] ?? $0, role: Self.role(of: $0), kind: $0) })
     }
-    /// The Master Template for a type: the member, holding the groups of the type's first leaf; a leaf whose groups differ gives
-    /// its first member a tree of its own.
+    /// Streams belong inside the member, with each stream's own groups.
+    func memberStack(_ party: Party, _ category: String) -> SchemaNode {
+        let active = activeStreams(of: party.id, category)
+        let name = Self.memberWord(category)
+        if active.isEmpty { return stack(named: name, groups: groups(of: Self.leafKey(party.id, category, nil))) }
+        return SchemaNode(name: name, children: active.map { stream in
+            stack(named: stream, groups: groups(of: Self.leafKey(party.id, category, stream)))
+        })
+    }
     func template(for type: String) -> SchemaNode {
-        let first = leaves.first { $0.party.type == type }.map { groups(of: $0.key) } ?? groups
-        return stack(named: memberWord(for: type), groups: first)
+        guard let first = chains.first(where: { $0.party.type == type }) else {
+            return stack(named: memberWord(for: type), groups: groups)
+        }
+        return memberStack(first.party, first.category)
     }
 
     /// Builds the structure into a schema and a library: a collection for every type, a folder for every one named in it, that
-    /// one's categories inside it, each category's streams inside that, and each category's first member in its deepest folder.
+    /// one's categories inside it, and each category's first member containing its streams and groups.
     /// Returns the collections' ids and the members' ids.
     @discardableResult
     func build(into schema: inout SchemaTrial.SchemaFile, library lib: inout Library, at date: Date = Date()) -> (collections: [UUID], members: [UUID]) {
@@ -153,20 +173,16 @@ final class SplashDraft {
             collection.folderName = levels.first
             collection.levelNames = levels.count > 1 ? levels : nil
             var folders: [SchemaFolder] = []
-            var places: [(name: String, folder: UUID?, groups: [String])] = []
+            var places: [(name: String, folder: UUID?, stack: SchemaNode)] = []
             for p in parties(of: type) {
                 var top: UUID?
                 if !p.isOwnWork { let f = SchemaFolder(name: p.name); folders.append(f); top = f.id }
                 for category in categories(of: p.id) {
                     let cf = SchemaFolder(name: category, parent: top)
                     folders.append(cf)
-                    var deepest = cf.id, leaf = Self.leafKey(p.id, category, nil)
-                    for (s, stream) in activeStreams(of: p.id, category).enumerated() {
-                        let sf = SchemaFolder(name: stream, parent: cf.id)
-                        folders.append(sf)
-                        if s == 0 { deepest = sf.id; leaf = Self.leafKey(p.id, category, stream) }
+                    if let name = member(of: p.id, category) {
+                        places.append((name, cf.id, memberStack(p, category)))
                     }
-                    if let name = member(of: p.id, category) { places.append((name, deepest, groups(of: leaf))) }
                 }
             }
             collection.folders = folders
@@ -175,11 +191,9 @@ final class SplashDraft {
             for place in places {
                 let id = lib.createProject(named: place.name, at: date)
                 schema.places[id.uuidString] = SchemaPlace(collection: collection.id, folder: place.folder)
-                // A first member whose leaf chose groups of its own, apart from the collection's template, keeps its own tree.
-                if place.groups != template.children.map({ $0.kind ?? $0.name }) {
-                    schema.stacks = schema.stacks ?? [:]
-                    schema.stacks?[id.uuidString] = stack(named: template.name, groups: place.groups)
-                }
+                // Preserve each category's streams and each stream's group choices independently.
+                schema.stacks = schema.stacks ?? [:]
+                schema.stacks?[id.uuidString] = place.stack
                 made.append(id)
             }
         }

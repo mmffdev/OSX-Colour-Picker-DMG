@@ -22,11 +22,12 @@ final class PermissionGate: NSWindowController {
     private static var keep: PermissionGate?
     private let permissions: [Permission]
     private let then: () -> Void
+    private let screenRecording: Bool
     private var done = false
     private let go = SwissButton("Continue", .primary)
 
-    static func show(_ permissions: [Permission], then: @escaping () -> Void) {
-        let g = PermissionGate(permissions, then: then)
+    static func show(_ permissions: [Permission], screenRecording: Bool = false, then: @escaping () -> Void) {
+        let g = PermissionGate(permissions, screenRecording: screenRecording, then: then)
         keep = g
         g.window?.center()
         g.showWindow(nil)
@@ -34,8 +35,9 @@ final class PermissionGate: NSWindowController {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private init(_ permissions: [Permission], then: @escaping () -> Void) {
+    private init(_ permissions: [Permission], screenRecording: Bool, then: @escaping () -> Void) {
         self.permissions = permissions
+        self.screenRecording = screenRecording
         self.then = then
         let size = NSSize(width: W.size.width, height: Self.height)
         let win = SetupWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -67,7 +69,9 @@ final class PermissionGate: NSWindowController {
         title.attributedStringValue = s
 
         let width = W.span(7, 12)
-        let lead = SetupFrame.lead("Your catalogues are kept in Documents. Allow \(Brand.name) to open that folder now, before anything loads, and macOS will not ask again.", width: width)
+        let lead = SetupFrame.lead(screenRecording
+            ? "Screen Recording lets you sample colours from other apps. You can continue without it. You will choose your catalogue folder during setup."
+            : "Allow access to the folder holding your catalogue before it loads.", width: width)
         let list = PermissionsView(permissions, textWidth: width - PermissionRow.buttonWidth - W.gutter, spacing: Design.beat(3)) { [weak win] error in
             guard let w = win else { return }
             NSAlert(error: error).beginSheetModal(for: w)
@@ -107,21 +111,32 @@ final class PermissionGate: NSWindowController {
         ])
         win.contentView = frame
         NotificationCenter.default.addObserver(self, selector: #selector(answered), name: .permissionsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(answered), name: NSApplication.didBecomeActiveNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     /// Allowed: let the ink hairline be seen, then carry on.
     @objc private func answered() {
+        if screenRecording {
+            go.title = ScreenAccess.restartNeeded && ScreenAccess.granted ? "Restart And Continue" : "Continue"
+            return
+        }
         guard permissions.allSatisfy({ $0.state() == .on }) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in self?.carryOn() }
     }
 
+    /// Hides the panel and carries on; the panel is never closed. The app quits when its last window closes, and until
+    /// what `then` opens is on screen this panel is the last one: hidden and let go of, it ends without that.
     @objc private func carryOn() {
         guard !done else { return }
+        if screenRecording {
+            preferences.set(true, forKey: "permissionsOffered")
+            if ScreenAccess.restartNeeded && ScreenAccess.granted { Relaunch.now(); return }
+        }
         done = true
         NotificationCenter.default.removeObserver(self)
-        window?.close()
-        Self.keep = nil
+        window?.orderOut(nil)
         then()
+        Self.keep = nil
     }
 }

@@ -1303,12 +1303,58 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
         return all.first { $0.name == name && (parent == nil ? $0.parent == nil : $0.parent == all.first { $0.name == parent }?.id) }
     }
     let (withStreams, wsLib) = answered([("Clients", ["Acme"])], kinds: ["Projects"], streams: ["Web", "Print"], members: ["Spring Launch"])
-    let acmeF = folder(withStreams, "Acme"), projectsF = folder(withStreams, "Projects", under: "Acme"), webF = folder(withStreams, "Web", under: "Projects")
-    check(withStreams.collections.map { $0.name } == ["Clients"] && withStreams.collections[0].levels == ["Client", "Category", "Stream"]
-          && withStreams.collections[0].folders.map { $0.name } == ["Acme", "Projects", "Web", "Print"] && projectsF?.parent == acmeF?.id && webF?.parent == projectsF?.id
-          && wsLib.projects.map { $0.name } == ["Spring Launch"] && withStreams.places[wsLib.projects[0].id.uuidString] == SchemaPlace(collection: withStreams.collections[0].id, folder: webF?.id)
-          && withStreams.collections[0].stack.name == "Project" && withStreams.collections[0].stack.children.map { $0.role } == SchemaRole.allCases.map { Optional($0) },
-          "Clients making projects in two streams build Clients, then the client, the category, the streams inside it, and the first project in the first stream, holding the four groups")
+    check(withStreams.places[wsLib.projects[0].id.uuidString]?.folder == folder(withStreams, "Projects", under: "Acme")?.id
+          && withStreams.collections[0].stack.children.map { $0.name } == ["Web", "Print"],
+          "a project contains all its streams instead of sitting inside the first stream")
+    // New setup creates only the named shell before the nesting questions are answered.
+    let setupRoot = root.appendingPathComponent("Setup Home")
+    let setupCatalogues = Catalogues(root: setupRoot, legacyURL: nil)
+    let setupParent = root.appendingPathComponent("Chosen Folder")
+    let shellName = try! CatalogueSetup.createBlank("Journey", under: setupParent, catalogues: setupCatalogues)
+    let shellStore = setupCatalogues.store(for: shellName)
+    let shellLibrary = try! shellStore.load()
+    check(shellLibrary.projects.isEmpty && shellLibrary.swatches.isEmpty && shellStore.schema.collections.isEmpty,
+          "choosing the name and location creates a blank catalogue without nesting or members")
+    check(shellStore.root == setupParent.appendingPathComponent("Journey"), "the blank catalogue lives in the chosen parent folder")
+    do {
+        _ = try CatalogueSetup.createBlank("Journey", under: setupParent, catalogues: setupCatalogues)
+        check(false, "a second create must not silently replace or rename an existing catalogue")
+    } catch { check(true, "an existing catalogue is preserved when its name is entered again") }
+    let pending = SplashDraft()
+    let party = SplashDraft.Party(type: "Clients", name: "Acme")
+    pending.types = ["Clients"]; pending.parties = [party]
+    pending.categoriesOf[party.id] = ["Projects"]
+    let pendingKey = SplashDraft.key(party.id, "Projects")
+    pending.members[pendingKey] = "Launch"
+    pending.streamsOf[pendingKey] = ["Web", "Print"]
+    pending.groupsOf[SplashDraft.leafKey(party.id, "Projects", "Print")] = ["Information", "Assets"]
+    let restoredDraft = try! JSONDecoder().decode(SplashDraft.self, from: JSONEncoder().encode(pending))
+    check(restoredDraft.parties == pending.parties && restoredDraft.groupsOf == pending.groupsOf && restoredDraft.streamsOf == pending.streamsOf,
+          "resuming setup preserves party identities and per-stream group choices")
+    try! CatalogueSetup.build(restoredDraft, into: shellStore)
+    let compiled = try! shellStore.load()
+    check(compiled.projects.count == 1 && shellStore.schema.collections.first?.folders.map { $0.name } == ["Acme", "Projects"],
+          "the final build compiles the original nested draft into the previously blank catalogue")
+    do {
+        try CatalogueSetup.build(restoredDraft, into: shellStore)
+        check(false, "repeating a finished build must not duplicate members")
+    } catch { check((try! shellStore.load()).projects.count == 1, "a completed catalogue cannot be built a second time by first-open setup") }
+    let untouched = try! Data(contentsOf: shellStore.url)
+    do {
+        try CatalogueSetup.build(SplashDraft(), into: shellStore)
+        check(false, "an incomplete draft cannot be built")
+    } catch { check((try! Data(contentsOf: shellStore.url)) == untouched, "an incomplete draft leaves the saved catalogue unchanged") }
+    let acmeF = folder(withStreams, "Acme"), projectsF = folder(withStreams, "Projects", under: "Acme")
+    let projectStack = withStreams.stacks![wsLib.projects[0].id.uuidString]!
+    check(withStreams.collections[0].levels == ["Client", "Category"]
+          && projectsF?.parent == acmeF?.id
+          && withStreams.places[wsLib.projects[0].id.uuidString]?.folder == projectsF?.id
+          && projectStack.children.map { $0.name } == ["Web", "Print"]
+          && projectStack.children.allSatisfy { $0.children.map { $0.role } == SchemaRole.allCases.map { Optional($0) } },
+          "a client category contains the project, whose Web and Print streams each contain their groups")
+    let compiledStack = shellStore.schema.stacks![compiled.projects[0].id.uuidString]!
+    check(compiledStack.children[1].children.map { $0.name } == ["Information", "Assets"],
+          "per-stream group choices survive building and reading the catalogue")
     let (oneKind, okLib) = answered([("Customers", ["Acme"])], kinds: ["Jobs"], streams: ["Web"], oneKind: true, members: ["Fit Out"])
     check(oneKind.collections[0].levels == ["Customer", "Category"] && oneKind.collections[0].folders.map { $0.name } == ["Acme", "Jobs"]
           && oneKind.places[okLib.projects[0].id.uuidString]?.folder == folder(oneKind, "Jobs", under: "Acme")?.id && SchemaTrial.memberName(of: oneKind.collections[0]) == "Job",
@@ -1318,47 +1364,49 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && own.places[ownLib.projects[0].id.uuidString]?.folder == own.collections[0].folders[0].id,
           "Our own work builds My Products with the category as its one level and the first product in it")
     let (ownStreams, osLib) = answered([(SplashDraft.ownWork, [])], kinds: ["Ranges"], streams: ["Web", "Print"], members: ["Autumn 27"])
-    check(ownStreams.collections[0].levels == ["Category", "Stream"] && ownStreams.collections[0].folders.map { $0.name } == ["Ranges", "Web", "Print"]
-          && folder(ownStreams, "Web", under: "Ranges") != nil && ownStreams.places[osLib.projects[0].id.uuidString]?.folder == folder(ownStreams, "Web", under: "Ranges")?.id,
-          "Our own work with streams builds the category then the streams, the first range in the first stream")
+    check(ownStreams.collections[0].levels == ["Category"] && ownStreams.collections[0].folders.map { $0.name } == ["Ranges"]
+          && ownStreams.places[osLib.projects[0].id.uuidString]?.folder == folder(ownStreams, "Ranges")?.id
+          && ownStreams.stacks?[osLib.projects[0].id.uuidString]?.children.map { $0.name } == ["Web", "Print"],
+          "own-work ranges contain their streams inside the named range")
     check(SplashDraft.singular("Clients") == "Client" && SplashDraft.singular("Ranges") == "Range" && SplashDraft.singular("Companies") == "Company" && SplashDraft.singular("Campaigns") == "Campaign",
           "the word for one of them comes from the word for many")
     let (twoKinds, tkLib) = answered([("Clients", ["Acme"])], kinds: ["Products", "Projects"], streams: ["Web"], groups: ["Palettes", "Assets", "Props"], members: ["Driftwood"])
-    let tkProducts = folder(twoKinds, "Products", under: "Acme"), tkProjects = folder(twoKinds, "Projects", under: "Acme")
-    let tkWebs = twoKinds.collections[0].folders.filter { $0.name == "Web" }
-    check(twoKinds.collections[0].levels == ["Client", "Category", "Stream"] && twoKinds.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Projects", "Web"]
-          && tkWebs.map { $0.parent } == [tkProducts?.id, tkProjects?.id] && twoKinds.places[tkLib.projects[0].id.uuidString]?.folder == tkWebs[0].id
-          && twoKinds.collections[0].stack.name == "Product" && twoKinds.collections[0].stack.children.map { $0.role } == [.palettes, nil, nil]
-          && twoKinds.collections[0].stack.children.map { $0.kind } == ["Palettes", "Assets", "Props"],
-          "two categories sit side by side under the client, each with the stream inside it, the first product in the first category's stream, and a custom group is a typed folder with no role")
+    let tkProducts = folder(twoKinds, "Products", under: "Acme")
+    check(twoKinds.collections[0].folders.map { $0.name } == ["Acme", "Products", "Projects"]
+          && twoKinds.places[tkLib.projects[0].id.uuidString]?.folder == tkProducts?.id
+          && twoKinds.stacks?[tkLib.projects[0].id.uuidString]?.children.first?.children.map { $0.kind } == ["Palettes", "Assets", "Props"],
+          "categories stay beside each other, with custom groups inside the product's stream")
     let pkDraft = SplashDraft(), pkAcme = SplashDraft.Party(type: "Clients", name: "Acme")
     pkDraft.types = ["Clients"]; pkDraft.parties = [pkAcme]; pkDraft.categoriesOf[pkAcme.id] = ["Products", "Projects"]
     pkDraft.streamsOf[SplashDraft.key(pkAcme.id, "Products")] = ["Web", "Print"]; pkDraft.members[SplashDraft.key(pkAcme.id, "Products")] = "Shoes"; pkDraft.members[SplashDraft.key(pkAcme.id, "Projects")] = "Relaunch"
     var perKind = SchemaTrial.SchemaFile(collections: [], places: [:]), pkLib = Library()
     pkDraft.build(into: &perKind, library: &pkLib, at: tcat)
-    check(perKind.collections[0].levels == ["Client", "Category", "Stream"] && perKind.collections[0].folders.map { $0.name } == ["Acme", "Products", "Web", "Print", "Projects"]
-          && pkLib.projects.map { $0.name } == ["Shoes", "Relaunch"] && perKind.places[pkLib.projects[0].id.uuidString]?.folder == folder(perKind, "Web", under: "Products")?.id
-          && perKind.places[pkLib.projects[1].id.uuidString]?.folder == folder(perKind, "Projects", under: "Acme")?.id,
-          "each category has streams of its own: Products with Web and Print inside it, Projects with none, the first product in Products' Web and the first project straight in Projects")
+    check(perKind.collections[0].folders.map { $0.name } == ["Acme", "Products", "Projects"]
+          && perKind.places[pkLib.projects[0].id.uuidString]?.folder == folder(perKind, "Products", under: "Acme")?.id
+          && perKind.stacks?[pkLib.projects[0].id.uuidString]?.children.map { $0.name } == ["Web", "Print"]
+          && perKind.stacks?[pkLib.projects[1].id.uuidString]?.children.map { $0.name } == SplashDraft.groupStart,
+          "a product can have streams while a neighbouring project has groups directly inside it")
     let (mixed, mxLib) = answered([("Clients", ["Acme", "Bolt"]), ("Brands", ["Nike"]), (SplashDraft.ownWork, [])], kinds: ["Projects"], streams: [], oneKind: true, members: ["Launch"])
     check(mixed.collections.map { $0.name } == ["Clients", "Brands", "My Projects"] && mixed.collections[0].folders.map { $0.name } == ["Acme", "Projects", "Bolt", "Projects"]
           && mixed.collections[1].levels == ["Brand", "Category"] && mixed.collections[2].levels == ["Category"]
           && mixed.places[mxLib.projects[0].id.uuidString]?.collection == mixed.collections[0].id,
           "clients, brands and our own work together are three collections, each with its own levels, and the first member is in the first")
-    // The tree on disk nests the levels: Clients/Acme/Projects/Web/Spring Launch, and reads back with the same parents.
     let splashDir = root.appendingPathComponent("tree/Splash")
     let splashStore = LibraryStore(directory: splashDir, legacyURL: nil, name: "Splash")
     try! splashStore.save(wsLib, schema: withStreams)
     let splashBack = try! splashStore.load()
-    check(fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Projects/Web/Spring Launch/Palettes").path) && fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Projects/Print").path)
-          && splashBack.project(wsLib.projects[0].id) != nil && splashStore.schema.collections[0].folders.first { $0.name == "Web" }?.parent == projectsF?.id
-          && splashStore.schema.collections[0].levels == ["Client", "Category", "Stream"] && SchemaTrial.folder(of: wsLib.projects[0].id, among: splashStore.schema.collections, places: splashStore.schema.places) == webF?.id,
-          "the levels nest on disk, Clients/Acme/Projects/Web/Spring Launch, and read back with their parents and the member in the deepest")
-    try! fm.moveItem(at: splashDir.appendingPathComponent("Clients/Acme/Projects/Web"), to: splashDir.appendingPathComponent("Clients/Acme/Projects/Online"))
+    let memberPath = "Clients/Acme/Projects/Spring Launch"
+    check(fm.fileExists(atPath: splashDir.appendingPathComponent(memberPath + "/Web/Palettes").path)
+          && fm.fileExists(atPath: splashDir.appendingPathComponent(memberPath + "/Print/Palettes").path)
+          && !fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Projects/Web").path)
+          && splashBack.project(wsLib.projects[0].id) != nil
+          && splashStore.schema.stacks?[wsLib.projects[0].id.uuidString]?.children.map { $0.name } == ["Web", "Print"],
+          "disk and reload preserve Project/Web and Project/Print without a parent stream")
+    try! fm.moveItem(at: splashDir.appendingPathComponent("Clients/Acme/Projects"), to: splashDir.appendingPathComponent("Clients/Acme/Jobs"))
     _ = try! splashStore.load()
-    check(splashStore.schema.collections[0].folders.first { $0.id == webF?.id }?.name == "Online" && splashStore.schema.collections[0].folders.first { $0.id == webF?.id }?.parent == projectsF?.id
+    check(splashStore.schema.collections[0].folders.first { $0.id == projectsF?.id }?.name == "Jobs"
           && (try? splashStore.load())?.project(wsLib.projects[0].id) != nil,
-          "a nested level renamed in Finder keeps its place under its parent, and the member inside it")
+          "renaming the category in Finder preserves its project and nested streams")
 
     print("where catalogues and their members are kept")
     let homeDir = root.appendingPathComponent("home"), awayDir = root.appendingPathComponent("awayDir")
@@ -2710,6 +2758,18 @@ func runImportTests(check: (Bool, String) -> Void) {
 // ---------- The setup: its steps, its draft and its proof strip ----------
 
 func runSetupTests(check: (Bool, String) -> Void) {
+    check(!AppDelegate().applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared),
+          "closing a startup window must not terminate the app before its successor opens")
+    let savedSplash = preferences.object(forKey: "splash")
+    preferences.removeObject(forKey: "splash")
+    check(Prefs.splash, "a fresh install shows the animated launch artwork")
+    if let savedSplash = savedSplash { preferences.set(savedSplash, forKey: "splash") }
+    check(Relaunch.arguments(for: ["--new-user"]) == ["--new-user", "--resume-new-user"],
+          "a new-user permission restart resumes rather than wiping the wizard draft")
+    check(Relaunch.arguments(for: ["--new-user", "--resume-new-user"]) == ["--new-user", "--resume-new-user"]
+          && Relaunch.arguments(for: ["--classic"]) == ["--classic"],
+          "restarts preserve ordinary arguments and add the resume flag only once")
+
     let steps = SetupAssistant.steps
     check(steps.first == "Welcome" && steps.last == "The Halo" && steps.firstIndex(of: "Ready") == steps.count - 2,
           "the setup opens on the welcome page, makes things at Ready and ends on the halo: \(steps)")

@@ -1226,7 +1226,7 @@ final class LibraryController: NSObject {
     }
 
     func open(catalogue requested: String) {
-        guard requested != catalogue else { return }
+        guard requested != catalogue || store.root.standardizedFileURL != Catalogues.standard.directory(for: requested).standardizedFileURL else { return }
         stopPicking()
         var name = requested
         if !Catalogues.standard.names().contains(name) { // so far it only exists in the sync folder

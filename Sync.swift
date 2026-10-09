@@ -275,7 +275,7 @@ struct Catalogues {
         let override = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"].map { URL(fileURLWithPath: $0) }
         // A trial home is a brand-new Mac: it never seeds Main from the earlier versions' libraries here.
         return Catalogues(
-            root: override ?? home ?? seedRoot,
+            root: home ?? override ?? seedRoot,
             legacyURL: override == nil ? support.appendingPathComponent("MMFFDev Colour").appendingPathComponent("library.json") : nil,
             previousURL: override == nil ? support.appendingPathComponent("MMFFDev Colour 2").appendingPathComponent("library.json") : nil)
     }
@@ -321,6 +321,14 @@ struct Catalogues {
         var all = registry.filter { $0.name != name }
         all.append(Entry(name: name, path: dir.path))
         registry = all
+    }
+
+    /// Setup must know that the catalogue's location was saved before proceeding.
+    func registerChecked(_ name: String, at dir: URL) throws {
+        var all = registry.filter { $0.name != name }
+        all.append(Entry(name: name, path: dir.path))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try ColourFiles.encoder().encode(all).write(to: registryURL, options: .atomic)
     }
 
     func unregister(_ name: String) { registry = registry.filter { $0.name != name } }
@@ -505,7 +513,7 @@ struct Catalogues {
         // Already on the list, by the registry or by sitting under Catalogues: that name, not a second one for the same folder.
         if let already = names().first(where: { directory(for: $0).standardizedFileURL == dir.standardizedFileURL }) { return already }
         let name = uniqueName(filesystemName(index.deletingPathExtension().lastPathComponent), among: names())
-        register(name, at: dir)
+        try registerChecked(name, at: dir)
         return name
     }
 

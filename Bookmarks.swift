@@ -22,12 +22,16 @@ enum FolderAccess {
 
     /// Keeps hold of a folder (or file) the user has just chosen in a panel, so it stays reachable after a relaunch.
     static func remember(_ url: URL) {
+        do { try authorize(url) }
+        catch { NSLog("FolderAccess: could not keep folder access: %@", error.localizedDescription) }
+    }
+
+    /// Setup must report a bookmark failure before promising access will survive a restart.
+    static func authorize(_ url: URL) throws {
         #if APPSTORE
         let path = url.standardizedFileURL.path
         guard held[path] == nil else { return }
-        let data: Data
-        do { data = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) }
-        catch { NSLog("FolderAccess: could not make a bookmark for %@: %@", path, error.localizedDescription); return }
+        let data = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
         var all = stored
         all[path] = data
         stored = all

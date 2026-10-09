@@ -2,7 +2,7 @@
 # Open the installed app as a brand-new user, or as yourself. Never touches your own data.
 #
 #   tools/open.sh new                 a first open, clean: a throwaway home and settings of its own,
-#                                     wiped each time, so the setup runs from the welcome page
+#                                     wizard, animated splash, setup journey, then the app
 #   tools/open.sh new permissions     the same, and macOS also forgets every permission it gave the
 #                                     app (Screen Recording, Documents), so it asks again; this one
 #                                     reaches your own copy too, which asks again next time you open it
@@ -11,8 +11,8 @@
 #   tools/open.sh studio              the same
 #   tools/open.sh classic             as you, in the old window, for the pages not yet redrawn
 #
-# A new user here keeps everything in the throwaway home, so it never asks for Documents; the
-# Documents question is seen as yourself, after "new permissions".
+# A new user keeps everything in the throwaway home; Screen Recording is offered by the wizard.
+# Permission-triggered restarts resume the draft; a fresh "new" launch starts over.
 set -euo pipefail
 APP="/Applications/MMFFDev Colour 3.app"
 BUNDLE_ID="com.mmffdev.mmffdevcolour3"

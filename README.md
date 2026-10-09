@@ -44,7 +44,11 @@ The Store edition is built by Xcode from `appstore/project.yml` (needs `brew ins
 
 The app installs to `/Applications`, not `~/Applications`, because the Adobe helper only works from there. A copy left in `~/Applications` by an older build is removed.
 
-All three scripts build from `Package.swift`, which is also what Xcode opens: open that file in Xcode (File > Open) and Cmd+R builds only the files that changed and runs the app, in a few seconds, with the debugger. What Xcode runs is the bare binary, not the installed bundle, so the Adobe helper, the file icons and the update check are only seen in the app `./build.sh` installs. Iterate in Xcode; prove in `./build.sh`.
+For Xcode, open `Colorgain.xcodeproj` and run the **Colorgain** scheme. It builds a signed app bundle with its identifier, permissions and resources. Opening `Package.swift` runs a bare executable and is unsuitable for testing permission prompts. The scripts still compile the same sources through `Package.swift` and assemble the installed bundle.
+
+The shared schemes enable `--new-user`: a disposable home and clean preferences on each fresh run. The journey is **Screen Recording permissions → restart if needed → animation → app-data location → catalogue name/location → existing nesting steps → final review/build → app**. Catalogue selection creates the blank named catalogue early; only Build Catalogue writes its nested contents. Use Existing Catalogue validates and opens a chosen catalogue without adding structure. Setup drafts and folder bookmarks survive a normal relaunch. `--new-user --resume-new-user` resumes a test without wiping it; `--splash-loop` is only a design preview and must stay off for end-to-end testing. `--splash` opens the structure editor, not the animation. The halo tutorial is available from the app menu.
+
+For the sandboxed edition use **Colorgain Store.xcodeproj**, scheme **Colorgain**, or `./make_appstore.sh`. The **Colorgain As Me** scheme opens the saved configuration. The Store build installs as `/Applications/MMFFDev - Colorgain.app`; the direct-download build remains separate.
 
 The build stamps the commit's short hash into the app, and the window's footer shows it at the bottom right (for example "Release v3.0  8aee45d"). A "+" after the hash means the build had uncommitted Swift changes. Commit first, then build.
 

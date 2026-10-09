@@ -35,6 +35,11 @@ final class StudioSplash: NSView {
     var onDone: (() -> Void)?
     private let library: LibraryController
     private let draft: SplashDraft
+    private let session: CatalogueSetupSession?
+    private let offset: Int
+    private let startup: Bool
+    private let reviewIndex: Int
+    private var building = false
     private let lighthouse = LighthouseView()
     private static let showLighthouse = false
     private let tree: SplashTreeView
@@ -53,11 +58,19 @@ final class StudioSplash: NSView {
     /// The design loop: the splash opens on every launch and Set starts it again, writing nothing. --splash-loop, or the splashLoop default.
     static var looping: Bool { CommandLine.arguments.contains("--splash-loop") || preferences.bool(forKey: "splashLoop") }
 
-    init(library: LibraryController) {
+    init(library: LibraryController, startup: Bool = false) {
         self.library = library
-        let d = SplashDraft()
+        self.startup = startup
+        let saved = startup ? CatalogueSetupSession.load() : nil
+        session = saved
+        offset = startup ? 1 : 0
+        reviewIndex = startup ? 7 : 6
+        let d = saved?.draft ?? SplashDraft()
         draft = d
-        let name: () -> String = { [weak library] in d.catalogueName ?? library?.catalogue ?? "" }
+        let name: () -> String = { [weak library, weak saved] in
+            if let saved = saved { return saved.name.isEmpty ? "Your Catalogue" : saved.name }
+            return d.catalogueName ?? library?.catalogue ?? ""
+        }
         tree = SplashTreeView(draft: d, catalogueName: name)
         super.init(frame: .zero)
         wantsLayer = true
@@ -75,34 +88,43 @@ final class StudioSplash: NSView {
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         addSubview(scroll)
-        tree.onChange = { [weak self] in guard let s = self else { return }; s.settleButtons(); s.tree.marks = s.sections[s.at].marks }
+        tree.onChange = { [weak self] in self?.changed() }
         sections = [
             SplashName(index: 0, library: library, draft: d),
-            SplashBlocks(index: 1, step: "Who It Is For", first: "Who is the", second: "work for?",
+            SplashBlocks(index: 1 + offset, step: "Who It Is For", first: "Who is the", second: "work for?",
                          words: "Each type you pick is a collection, with a level inside for every one you name: clients, brands, agencies. Our own work is a collection with no such level. Add another collection for the next.",
-                         pane: SplashWho(index: 1, draft: d)),
-            SplashBlocks(index: 2, step: "Categories", first: "How do you", second: "categorise work?",
+                         pane: SplashWho(index: 1 + offset, draft: d)),
+            SplashBlocks(index: 2 + offset, step: "Categories", first: "How do you", second: "categorise work?",
                          words: "Products, projects, ranges, jobs, campaigns: the categories each one's work falls into, a level under them holding the things you make. Pick for each one you named.",
                          options: SplashDraft.categoryOptions, word: "category",
                          blocks: { d.parties.map { p in SplashBlocks.Block(key: p.id.uuidString, caption: "Categories For \(p.title)", pending: .category(p.id), target: .party(p.id),
                                                                       read: { d.categories(of: p.id) }, write: { d.categoriesOf[p.id] = $0 }) } },
                          ready: { d.everyoneCategorised }),
-            SplashNames(index: 3, draft: d),
-            SplashBlocks(index: 4, step: "Streams", first: "More than one", second: "stream of work?",
-                         words: "Web, print, video: each stream is a level of its own under the category it belongs to, and each category has streams of its own. Choose them in order, or say it is one kind of work and there is no level.",
+            SplashNames(index: 3 + offset, draft: d),
+            SplashBlocks(index: 4 + offset, step: "Streams", first: "More than one", second: "stream of work?",
+                         words: "Web, print, video: each stream sits inside the project or product it belongs to. Each category can have different streams. Choose them in order, or say it is one kind of work and there is no level.",
                          options: SplashDraft.streamOptions, word: "stream",
                          blocks: { d.chains.map { c in SplashBlocks.Block(key: SplashDraft.key(c.party.id, c.category), caption: "Streams For \(c.party.title) \u{00B7} \(c.category)", pending: .stream(c.party.id, c.category), target: .category(c.party.id, c.category),
                                                                     read: { d.streams(of: c.party.id, c.category) }, write: { d.streamsOf[SplashDraft.key(c.party.id, c.category)] = $0 },
                                                                     check: ("One kind of work here, no stream level", { d.isOneKind(c.party.id, c.category) }, { d.setOneKind($0, c.party.id, c.category) })) } },
                          ready: { d.streamsAnswered }),
-            SplashBlocks(index: 5, step: "What Sits Inside", first: "What sits", second: "inside each one?",
-                         words: "The groups inside the first one of each stream: the four the app fills itself, and any of the Schema page's own types. Each stream may differ. Drag them into the order rail1 shows.",
-                         options: SplashDraft.groupOptions, word: "group",
-                         blocks: { d.leaves.map { l in SplashBlocks.Block(key: l.key, caption: "Groups Inside \(l.title)", pending: .group(l.key), target: .leaf(l.key),
+            SplashBlocks(index: 5 + offset, step: "Assets", first: "Which assets", second: "sit inside?",
+                         words: "The assets inside each stream of your first project or product: the four the app fills itself, and any of the Schema page's own types. Each stream may differ. Drag them into the order rail1 shows.",
+                         options: SplashDraft.groupOptions, word: "asset",
+                         blocks: { d.leaves.map { l in SplashBlocks.Block(key: l.key, caption: d.assetHeading(for: l), pending: .group(l.key), target: .leaf(l.key),
                                                                     read: { d.groups(of: l.key) }, write: { d.groupsOf[l.key] = $0 }) } },
                          ready: { d.everyLeafGrouped })
         ]
-        tree.groupsStep = 5
+        if let session = session {
+            let catalogue = SplashCatalogueLocation(index: 1, session: session)
+            catalogue.onExisting = { [weak self] url in self?.openExisting(url) }
+            sections[0] = catalogue
+            sections.insert(SplashAppData(index: 0, session: session), at: 0)
+        }
+        sections.append(SplashReview(index: reviewIndex, draft: d) { [weak library, weak session] in
+            (session?.createdName ?? library?.catalogue ?? "", session?.createdFolder ?? library?.store.root ?? Catalogues.standard.root, session?.home ?? Catalogues.standard.root)
+        })
+        tree.groupsStep = 5 + offset
         for s in sections { s.splash = self; surface.addSubview(s) }
         back.target = self; back.action = #selector(backPressed)
         next.target = self; next.action = #selector(nextPressed)
@@ -145,12 +167,23 @@ final class StudioSplash: NSView {
 
     /// The first thing to type into, once the splash is on screen; and the sea rises.
     func begin() {
-        window?.makeFirstResponder(sections.first?.firstField ?? self)
+        if let saved = session {
+            at = min(max(0, saved.step), reviewIndex)
+            if saved.createdName == nil { at = min(at, 1) }
+            else if let name = saved.createdName, let folder = saved.createdFolder, CatalogueFiles.index(in: folder) != nil {
+                Catalogues.standard.register(name, at: folder)
+                library.open(catalogue: name)
+            } else { at = 1 }
+            tree.reached = at
+            sections[at].arrive()
+            needsLayout = true
+        }
+        window?.makeFirstResponder(sections[at].firstField ?? self)
         settleButtons()
         tree.marks = sections[at].marks
         // --splash-filled [n], for the design loop: every answer given, two collections, three streams of many groups, opened at section n (the last).
         if let i = CommandLine.arguments.firstIndex(of: "--splash-filled") {
-            let step = CommandLine.arguments.indices.contains(i + 1) ? Int(CommandLine.arguments[i + 1]) ?? 5 : 5
+            let step = CommandLine.arguments.indices.contains(i + 1) ? Int(CommandLine.arguments[i + 1]) ?? reviewIndex : reviewIndex
             let alpha = SplashDraft.Party(type: "Clients", name: "Alpha"), beta = SplashDraft.Party(type: "Customers", name: "Beta")
             draft.types = ["Clients", "Customers"]; draft.parties = [alpha, beta]
             draft.categoriesOf[alpha.id] = ["Projects"]; draft.categoriesOf[beta.id] = ["Products"]
@@ -174,13 +207,14 @@ final class StudioSplash: NSView {
 
     func settleButtons() {
         back.isEnabled = at > 0
-        next.title = at == sections.count - 1 ? "Set" : "Continue"
-        next.isEnabled = sections[at].canContinue
+        next.title = at == reviewIndex ? "Build Catalogue" : (startup && at == 1 && session?.createdName == nil ? "Create Catalogue" : "Continue")
+        next.isEnabled = !building && sections[at].canContinue
         next.invalidateIntrinsicContentSize()
         needsLayout = true
     }
     /// An answer changed: the buttons settle and the tree on the left follows.
     func changed() {
+        session?.save()
         settleButtons()
         tree.marks = sections[at].marks
         tree.fit()
@@ -205,20 +239,62 @@ final class StudioSplash: NSView {
             go(to: 0)
             return
         }
-        // The rename first, so the structure is written into the folder under its new name.
-        if let name = draft.catalogueName, name != library.catalogue { library.rename(catalogue: library.catalogue, to: name) }
-        var schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
-        // The placeholder collection a catalogue starts with goes when nothing has been put in it: the collections are the answers'.
-        schema.collections.removeAll { c in c.id == SchemaTrial.firstCollection && c.folders.isEmpty && !schema.places.values.contains { $0.collection == c.id } }
-        var lib = library.library
-        let made = draft.build(into: &schema, library: &lib)
-        // One save: the first members and the structure that places them, written together.
-        let built = lib
-        library.apply("Set Up Structure", schema: schema) { $0 = built }
-        library.flash("Set up \(plural(made.collections.count, "collection")) with \(plural(made.members.count, "first member"))")
-        Prefs.assistantDone = true   // the work is set up: the splash was the first open's setup
-        Prefs.setupDone = true
+        guard !building else { return }
+        building = true; settleButtons()
+        defer { building = false; settleButtons() }
+        do {
+            if let session = session {
+                guard let name = session.createdName, let folder = session.createdFolder else { throw CatalogueSetup.Failure.missingCatalogue }
+                let store = LibraryStore(directory: folder, legacyURL: nil, name: name)
+                try CatalogueSetup.build(draft, into: store)
+            } else {
+                if let name = draft.catalogueName, name != library.catalogue {
+                    let renamed = try Catalogues.standard.rename(library.catalogue, to: name)
+                    library.open(catalogue: renamed)
+                }
+                try CatalogueSetup.build(draft, into: library.store, requireBlank: false)
+            }
+            library.reload()
+            finish()
+        } catch { report(error) }
+    }
+
+    private func report(_ error: Error) {
+        guard let window = window else { return }
+        NSAlert(error: error).beginSheetModal(for: window)
+    }
+
+    private func finish() {
+        if startup {
+            Prefs.assistantDone = true
+            Prefs.setupDone = true
+            CatalogueSetupSession.clear()
+        }
         onDone?()
+    }
+
+    private func openExisting(_ folder: URL) {
+        guard !building else { return }
+        if Migration.needed(in: folder) {
+            guard let window = window else { return }
+            let alert = NSAlert()
+            alert.messageText = "Update This Catalogue?"
+            alert.informativeText = "This catalogue uses an older layout. Colorgain will keep a backup and migrate it before opening."
+            alert.addButton(withTitle: "Back Up And Open"); alert.addButton(withTitle: "Cancel")
+            alert.beginSheetModal(for: window) { [weak self] answer in
+                guard let self = self, answer == .alertFirstButtonReturn else { return }
+                do { try Migration.run(root: folder, name: folder.lastPathComponent); self.openExisting(folder) }
+                catch { self.report(error) }
+            }
+            return
+        }
+        do {
+            guard let index = CatalogueFiles.index(in: folder) else { throw CatalogueSetup.Failure.missingCatalogue }
+            _ = try CatalogueTree.read(root: folder) // Validate without creating or replacing anything.
+            let name = try Catalogues.standard.adopt(index)
+            library.open(catalogue: name)
+            finish()
+        } catch { report(error) }
     }
 
     /// Moves the surface so section `i` locks in the band: up for a later section, down for an earlier one; the lighthouse follows.
@@ -227,10 +303,32 @@ final class StudioSplash: NSView {
         if i > at {
             guard sections[at].canContinue else { NSSound.beep(); return }
             sections[at].commit()
+            if let session = session {
+                do {
+                    if at == 0 && session.home != Catalogues.standard.root {
+                        try Catalogues.moveHome(to: session.home)
+                        session.parent = Catalogues.standard.folder
+                    }
+                    if at == 1 {
+                        if session.createdName == nil {
+                            let name = try CatalogueSetup.createBlank(session.name, under: session.parent)
+                            session.createdName = name
+                            session.createdFolder = Catalogues.standard.directory(for: name)
+                            session.name = name; draft.catalogueName = name
+                            session.save()
+                        }
+                        guard let name = session.createdName, let folder = session.createdFolder, CatalogueFiles.index(in: folder) != nil else {
+                            throw CatalogueSetup.Failure.missingCatalogue
+                        }
+                        library.open(catalogue: name)
+                    }
+                } catch { report(error); return }
+            }
         }
         tree.closeMenu()
         let was = at
         at = i
+        session?.step = i
         tree.reached = max(tree.reached, i)
         sections[i].arrive()
         changed()
@@ -319,7 +417,7 @@ class SplashSection: NSView {
 
     /// The section's label on row 1 and its two-tone question on rows 3 and 5, from column 7.
     func drawQuestion(step: String, first: String, second: String) {
-        Design.attributed(String(format: "%02d", index) + "  \u{00B7}  " + step, .label, colour: Design.quiet).draw(x: left, baseline: row(1))
+        Design.attributed(String(format: "%02d", index + 1) + "  \u{00B7}  " + step, .label, colour: Design.quiet).draw(x: left, baseline: row(1))
         Design.attributed(first, .title).draw(x: left, baseline: row(3), width: width)
         Design.attributed(second, .title, colour: Design.soft).draw(x: left, baseline: row(5), width: width)
     }

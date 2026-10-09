@@ -305,6 +305,14 @@ enum SetupDraft {
 }
 
 enum Relaunch {
+    /// A permission restart resumes the test's draft instead of resetting its throwaway home.
+    static func arguments(for arguments: [String]) -> [String] {
+        if arguments.contains("--new-user"), !arguments.contains("--resume-new-user") {
+            return arguments + ["--resume-new-user"]
+        }
+        return arguments
+    }
+
     /// Whether a debugger (Xcode) is attached: a relaunch would end its session, which reads as the app dying.
     static var debugged: Bool {
         var info = kinfo_proc()
@@ -317,6 +325,9 @@ enum Relaunch {
     /// Opens a fresh copy of the app and quits this one.
     static func now() {
         if debugged {
+            if CommandLine.arguments.contains("--new-user") {
+                preferences.set(true, forKey: "resumeNewUserAfterDebuggerRestart")
+            }
             let a = NSAlert()
             a.messageText = "Run it again from Xcode"
             a.informativeText = "macOS applies what you just allowed to a fresh copy of the app. Outside Xcode the app reopens itself; under the debugger that would end the session, so stop and press Run again."
@@ -328,7 +339,7 @@ enum Relaunch {
             let c = NSWorkspace.OpenConfiguration()
             c.createsNewApplicationInstance = true
             // The flags this copy was opened with go with it, so a restart comes back the same way.
-            c.arguments = Array(CommandLine.arguments.dropFirst())
+            c.arguments = arguments(for: Array(CommandLine.arguments.dropFirst()))
             NSWorkspace.shared.openApplication(at: bundle, configuration: c) { _, error in
                 DispatchQueue.main.async {
                     // A relaunch that did not start leaves this copy running and says so, rather than quitting into nothing.
@@ -344,9 +355,13 @@ enum Relaunch {
         } else if let exe = Bundle.main.executableURL {   // the bare binary Xcode runs
             let p = Process()
             p.executableURL = exe
-            p.arguments = Array(CommandLine.arguments.dropFirst())
-            try? p.run()
-            NSApp.terminate(nil)
+            p.arguments = arguments(for: Array(CommandLine.arguments.dropFirst()))
+            do {
+                try p.run()
+                NSApp.terminate(nil)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 }

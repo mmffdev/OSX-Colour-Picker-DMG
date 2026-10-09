@@ -161,6 +161,17 @@ enum DocumentsAccess {
         return places.contains { inside($0) }
         #endif
     }
+    /// A first open on this Mac: no catalogue yet, and macOS not yet asked either way. The catalogue is about to be made in
+    /// Documents, so the question comes first, with its reason, before anything is read. Never in a trial home, which keeps
+    /// everything to itself; --gate shows the gate there all the same, for seeing the whole first open.
+    static var neededForFirstOpen: Bool {
+        #if APPSTORE
+        return false
+        #else
+        guard !allowed, !refused, ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"] == nil else { return false }
+        return Catalogues.standard.isEmpty
+        #endif
+    }
     static var allowed: Bool {
         get { preferences.bool(forKey: "documentsAllowed") }
         set { preferences.set(newValue, forKey: "documentsAllowed") }

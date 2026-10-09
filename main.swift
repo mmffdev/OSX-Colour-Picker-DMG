@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var main: MainWindowController?
     var settings: SettingsWindowController?
     private var splash: SplashWindowController?
+    private var setupWindow: NSWindowController?
+    private var opening = true
+    private var firstOpen = false
 
     /// The standard About panel, with the credit the colour name list's licence asks for.
     @objc func showAbout() {
@@ -69,13 +72,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
+        let startupMenu = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu(title: Brand.name)
+        appMenu.addItem(withTitle: "Quit \(Brand.name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu; startupMenu.addItem(appItem); NSApp.mainMenu = startupMenu
         FolderAccess.restoreAll()   // the Store build: folders the user chose before stay reachable
         #if APPSTORE
         Store.start()
         #endif
         _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
-        if Prefs.assistantDone && DocumentsAccess.neededAtLaunch {
-            // The catalogue is in Documents and macOS has not been asked with a reason: say why first.
+        // Keep the first-open decision: the wizard marks itself complete before the Studio journey starts.
+        firstOpen = !Prefs.assistantDone
+        if firstOpen && !preferences.bool(forKey: "permissionsOffered") {
+            PermissionGate.show([.screenRecording], screenRecording: true) { [weak self] in self?.openUp() }
+        } else if DocumentsAccess.neededAtLaunch || CommandLine.arguments.contains("--gate") {
             PermissionGate.show([Permission.documents]) { [weak self] in self?.openUp() }
         } else {
             openUp()
@@ -86,26 +97,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether this Mac had no catalogue at all when the app opened, read before the library seeds Main at the root.
     private var noCatalogueAtLaunch = false
 
-    /// The launch artwork, then the Studio window. A first open is no different: the window opens on the
-    /// startup splash that sets up the work (StudioSplash), since the catalogue has no structure yet. The
-    /// old setup assistant no longer runs at launch; it stays on the app menu for a catalogue made by hand.
+    /// After the wizard: animated artwork, then the Studio setup journey, then the app.
     private func openUp() {
         noCatalogueAtLaunch = Catalogues.standard.isEmpty
         let splash = SplashWindowController()
         self.splash = splash
         // With no launch artwork the window must exist before the reveal, which comes straight back.
-        if !Prefs.splash { prepareMainWindow() }
-        splash.present { [weak self] in self?.revealMainWindow() }
+        if !Prefs.splash && !firstOpen { prepareMainWindow() }
+        splash.present { [weak self] in
+            guard let self = self else { return }
+            if self.firstOpen { self.showSetupJourney() } else { self.revealMainWindow() }
+        }
         // Let the launch artwork reach the screen before loading the library and editor.
-        if Prefs.splash { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
+        if Prefs.splash && !firstOpen { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
     }
 
-    /// The assistant again, from the app menu: what it settles is applied to the open window.
-    @objc func runSetupAssistant() {
-        SetupAssistant.show { [weak self] name in
+    /// One setup surface: locations, the existing nested choices, then a final review/build.
+    @objc func runSetupAssistant() { showSetupJourney() }
+    @objc func learnHalo() { SetupAssistant.show(from: SetupAssistant.Step.halo) { _ in } }
+
+    private func showSetupJourney() {
+        if let existing = setupWindow { existing.showWindow(nil); return }
+        let frame = StudioSplash(library: library, startup: true)
+        let window = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
+                                  styleMask: [.resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.title = "Set Up Colorgain"
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = Design.paper
+        window.minSize = Design.App.least
+        window.contentView = frame
+        window.center()
+        let controller = NSWindowController(window: window)
+        setupWindow = controller
+        frame.onDone = { [weak self, weak window] in
             guard let self = self else { return }
-            if name != self.library.catalogue { self.library.open(catalogue: name) } else { self.library.reload() }
+            window?.orderOut(nil)
+            self.firstOpen = false
+            if self.main == nil { self.prepareMainWindow() }
+            self.revealMainWindow()
+            self.setupWindow = nil
         }
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        frame.begin()
+        splash?.close(); splash = nil
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func prepareMainWindow() {
@@ -121,6 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let main = main else { return }
         // The Studio window, Colorgain's own, is the window; the old one opens only with --classic, for the few pages not yet redrawn.
         if CommandLine.arguments.contains("--classic") { main.showWindow(nil) } else { StudioWindowController.show(library: library) }
+        opening = false
         splash?.close()
         splash = nil
         NSApp.activate(ignoringOtherApps: true)
@@ -212,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { !opening }
 
     private func menus(for main: MainWindowController) -> NSMenu {
         let bar = NSMenu()
@@ -233,7 +270,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu(Brand.name) { m in
             add(m, "About \(Brand.name)", #selector(showAbout), "", self)
-            add(m, "Setup Assistant\u{2026}", #selector(runSetupAssistant), "", self)
+            add(m, "Set Up A Catalogue\u{2026}", #selector(runSetupAssistant), "", self)
+            add(m, "Learn The Halo\u{2026}", #selector(learnHalo), "", self)
             #if !APPSTORE
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
             #endif
@@ -312,9 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 if CommandLine.arguments.contains("--new-user") {
     let fm = FileManager.default
     let home = fm.temporaryDirectory.appendingPathComponent("colorgain-new-user")
-    try? fm.removeItem(at: home)
+    let trial = UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial")!
+    let resuming = CommandLine.arguments.contains("--resume-new-user") || trial.bool(forKey: "resumeNewUserAfterDebuggerRestart")
+    trial.removeObject(forKey: "resumeNewUserAfterDebuggerRestart")
+    if !resuming { try? fm.removeItem(at: home) }
     try? fm.createDirectory(at: home, withIntermediateDirectories: true)
-    UserDefaults.standard.removePersistentDomain(forName: "com.mmffdev.mmffdevcolour3.trial")
+    if !resuming { UserDefaults.standard.removePersistentDomain(forName: "com.mmffdev.mmffdevcolour3.trial") }
     setenv("MMFFDEV_COLOUR3_HOME", home.path, 1)
 }
 
