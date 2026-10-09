@@ -223,7 +223,13 @@ final class StudioFrame: NSView {
         // A bucket opened or shut on either rail is remembered for this catalogue; rail2 is built from the state, so it is filled again.
         rail1.onShut = { [weak self] key, shut in guard let self = self else { return }; Prefs.setRailShut(key, shut, in: self.library.catalogue) }
         rail2.onShut = { [weak self] key, shut in guard let self = self else { return }; Prefs.setRailShut(key, shut, in: self.library.catalogue); self.fillContextRail() }
-        rail2.onPick = { [weak self] p in self?.go(p) }
+        // On the Contrast page a row chooses the palette the pair is picked from; everywhere else it opens the place.
+        rail2.onPick = { [weak self] p in
+            guard let self = self else { return }
+            if self.place == .contrast, self.contrastPage.pick(p) { return }
+            self.go(p)
+        }
+        contrastPage.onPaletteChange = { [weak self] in if self?.place == .contrast { self?.fillContextRail() } }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
         page.grid.onCopy = { [weak self] text in copyToClipboard(text); self?.library.flash("Copied \(text)") }
         page.grid.onHalo = { [weak self] hex, rect in self?.openColourHalo(hex, rect: rect) }
@@ -346,8 +352,8 @@ final class StudioFrame: NSView {
         reload()
     }
 
-    /// The Lab and Contrast have no rail2: its columns go to the page.
-    private var railTwo: CGFloat { expanded || place == .lab || place == .contrast ? 0 : 1 }
+    /// The Lab has no rail2: its columns go to the page. Contrast keeps it, as the list of palettes to pick the pair from.
+    private var railTwo: CGFloat { expanded || place == .lab ? 0 : 1 }
 
     private func choose(_ hex: String) {
         chosenHex = hex
@@ -620,8 +626,25 @@ final class StudioFrame: NSView {
             heading = "Settings"; labels = ("Section", "")
             rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
                     .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Tags", nil, 0, .tags, place == .tags)]
-        case .lab, .contrast:
+        case .lab:
             return   // no rail2: the page has its columns
+        case .contrast:
+            // The palettes the pair is picked from: the Lab's wheel when it is on offer, Favourites, each member's, then every palette; colours only.
+            let chosen = contrastPage.state.palette
+            if contrastPage.wheelOffered, let wheel = library.labPalette {
+                rows.append(.item("Colour Lab Wheel", "\(wheel.colours.count)", 0, .lab, chosen == nil))
+            }
+            func group(_ title: String, key: String, _ list: [Swatch]) {
+                let colours = palettes(list)
+                guard !colours.isEmpty else { return }
+                let state = fold("r2.contrast:\(key)", holds: true)
+                rows.append(.group(title, 0, fold: state))
+                guard state?.open ?? false else { return }
+                rows += colours.map { s in .palette(s.id, s.name, s.entries.count, s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) }, chosen == s.id, 1) }
+            }
+            group("Favourites", key: "favourites", library.favourites)
+            for p in lib.orderedProjects { group(p.name, key: "project.\(p.id.uuidString)", lib.palettes(in: p.id)) }
+            group("Palettes", key: "palettes", lib.listedPalettes)
         case .projects:
             heading = "Members"; labels = ("Collection", "Palettes")
             for c in SchemaTrial.collections {
@@ -2577,18 +2600,18 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     /// The open row's panel, on the row's own left edge. `live` is a fully open panel, the one that takes clicks.
     private func drawPanel(_ n: String, at y: CGFloat, live: Bool, own: NSColor?) {
         let w = bounds.width
-        Design.attributed("About", .body).draw(x: 0, baseline: y + Self.aboutLabel)
+        Design.attributed("About", .header).draw(x: 0, baseline: y + Self.aboutLabel)
         if about.string.isEmpty {
             Design.attributed("Add catalogue notes\u{2026}", .body, colour: Design.soft).draw(at: NSPoint(x: 0, y: y + Self.aboutBox))
         }
         hairline(x: 0, y: y + Self.aboutBox + Self.notes, width: w, Design.rule)
-        Design.attributed("All Colours", .body).draw(x: 0, baseline: y + Self.coloursLabel)
+        Design.attributed("All Colours", .header).draw(x: 0, baseline: y + Self.coloursLabel)
         Design.attributed(contents.map { plural($0.colours.count, "colour") } ?? "", .body, colour: Design.quiet).draw(x: 0, baseline: y + Self.coloursValue)
-        Design.attributed("Directory", .body).draw(x: 0, baseline: y + Self.directoryLabel)
+        Design.attributed("Directory", .header).draw(x: 0, baseline: y + Self.directoryLabel)
         let dir = Catalogues.standard.directory(for: n)
         Design.attributed((dir.path as NSString).abbreviatingWithTildeInPath, .body, colour: Design.quiet).draw(x: 0, baseline: y + Self.directory, width: w)
         // Contents: the catalogue as rail1 lists it, a square before each thing that can be ticked, its colours, its name.
-        Design.attributed("Contents", .body).draw(x: 0, baseline: y + Self.contentsLabel)
+        Design.attributed("Contents", .header).draw(x: 0, baseline: y + Self.contentsLabel)
         hairline(x: 0, y: y + Self.contentsRule, width: w, Design.rule)
         var ly = y + Self.linesTop
         for l in lines {

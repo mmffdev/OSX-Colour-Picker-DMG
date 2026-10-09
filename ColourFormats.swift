@@ -13,7 +13,7 @@ struct ColourValues {
 
     init?(_ raw: String) {
         // A key that is not a hex is read as the sRGB colour it shows as.
-        guard let n = normaliseHex(raw) ?? ColourKeys.displayHex(raw), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
+        guard let n = sRGBHex(raw), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
         hex = n
         r = Int((v >> 16) & 0xFF); g = Int((v >> 8) & 0xFF); b = Int(v & 0xFF)
     }

@@ -40,13 +40,14 @@ enum Design {
 
     /// The ten styles: size, weight, line height as a multiple, tracking as a fraction of the size.
     enum Text {
-        case display, title, headline, heading, lead, body, bodyStrong, caption, label, section, numeral, action
+        case display, title, headline, heading, header, lead, body, bodyStrong, caption, label, section, numeral, action
         var size: CGFloat {
             switch self {
             case .display: return 88
             case .title: return 48
             case .headline: return 30
             case .heading: return 17
+            case .header: return 15
             case .lead: return 20
             case .body, .bodyStrong, .action: return 13
             case .caption, .label: return 11
@@ -59,7 +60,7 @@ enum Design {
             case .display, .numeral: return .thin
             case .title, .lead: return .light
             case .headline, .body, .caption: return .regular
-            case .heading, .bodyStrong, .label, .section, .action: return .medium
+            case .heading, .header, .bodyStrong, .label, .section, .action: return .medium
             }
         }
         var lineHeight: CGFloat {
@@ -68,6 +69,7 @@ enum Design {
             case .title: return 1.0
             case .headline: return 1.1
             case .heading: return 1.25
+            case .header: return 1.3
             case .lead: return 1.38
             case .body, .bodyStrong: return 1.55
             case .caption: return 1.45
@@ -81,7 +83,7 @@ enum Design {
             case .display: return -0.045
             case .title: return -0.03
             case .headline: return -0.018
-            case .heading: return -0.005
+            case .heading, .header: return -0.005
             case .lead: return -0.01
             case .numeral: return -0.04
             case .label, .section: return 0.06

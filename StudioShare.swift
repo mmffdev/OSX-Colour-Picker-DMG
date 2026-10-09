@@ -382,14 +382,14 @@ final class SharePage: NSView, PageSection, Overlay {
         let title = mode == .export ? "Export" : "Import"
         let help = mode == .export ? "Any level goes out as one checked file: the whole catalogue, a collection, a work group, or a palette, with everything beneath it that is ticked."
                                    : "A share comes in through the same steps in reverse: checked before anything is written, its twins answered one by one, and placed where its level fits."
-        Design.attributed(title, .body).draw(x: l, baseline: line)
+        Design.attributed(title, .header).draw(x: l, baseline: line)
         Design.attributed(help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
-        Design.attributed(steps[step], .body).draw(x: l, baseline: 4 * u + line)
+        Design.attributed(steps[step], .header).draw(x: l, baseline: 4 * u + line)
         hairline(x: l, y: g.top - 1, width: g.lw, Design.rule)
         let rx = g.rx
-        Design.attributed(mode == .export ? "Five Steps" : "Seven Steps", .body).draw(x: rx, baseline: line)
+        Design.attributed(mode == .export ? "Five Steps" : "Seven Steps", .header).draw(x: rx, baseline: line)
         Design.attributed(levels.indices.contains(levelIndex) && mode == .export ? "\(levels[levelIndex].level.title): \(levels[levelIndex].name)" : (inspection.map { "\($0.manifest.level.title): \($0.manifest.subject.name)" } ?? "Choose a file to begin"), .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
-        Design.attributed("Steps", .body).draw(x: rx, baseline: 4 * u + line)
+        Design.attributed("Steps", .header).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.stepsTop - 1, width: g.rw, Design.rule)
         for (i, name) in steps.enumerated() {
             let r = stepRects[i], b = r.minY + line

@@ -851,7 +851,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     /// A colour picked from the spectrum or the screen goes to whichever colour is waiting, and the other waits next.
     private func take(_ hex: String) {
-        guard let clean = normaliseHex(hex) else { return }
+        guard let clean = sRGBHex(hex) else { return }   // a colour kept under a key is taken as the sRGB it shows as
         let toInk = arming
         arming.toggle()
         change { if toInk { $0.pair.ink = clean } else { $0.pair.paper = clean } }

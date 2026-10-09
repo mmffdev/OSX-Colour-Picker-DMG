@@ -52,9 +52,9 @@ func colourKey(_ raw: String) -> String? {
     normaliseHex(raw) ?? (ColourKeys.definition(of: raw) != nil ? raw : nil)
 }
 
-/// The sRGB hex a colour is shown and exported as, where only sRGB will do.
+/// The sRGB hex a colour is shown and exported as, where only sRGB will do; `sRGBHex` is the same answer, nil for an unknown key.
 func displayHex(_ key: String) -> String {
-    normaliseHex(key) ?? ColourKeys.displayHex(key) ?? key
+    sRGBHex(key) ?? key
 }
 
 extension ColourDefinition {

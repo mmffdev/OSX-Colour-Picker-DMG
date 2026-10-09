@@ -251,9 +251,12 @@ func normaliseHex(_ raw: String) -> String? {
     return "#" + h
 }
 
+/// A palette's colour as a six-digit sRGB hex: a hex as it is, a colour key (a master kept in another space) as the hex it shows as.
+/// Anything that takes a palette's colour as a hex goes through this, never `normaliseHex` alone, which knows only hexes.
+func sRGBHex(_ key: String) -> String? { normaliseHex(key) ?? ColourKeys.displayHex(key) }
+
 func rgbComponents(_ hex: String) -> (r: Double, g: Double, b: Double)? {
-    // A key that is not a hex is read as the sRGB colour it shows as.
-    guard let n = normaliseHex(hex) ?? ColourKeys.displayHex(hex), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
+    guard let n = sRGBHex(hex), let v = UInt32(n.dropFirst(), radix: 16) else { return nil }
     return (Double((v >> 16) & 0xFF) / 255, Double((v >> 8) & 0xFF) / 255, Double(v & 0xFF) / 255)
 }
 

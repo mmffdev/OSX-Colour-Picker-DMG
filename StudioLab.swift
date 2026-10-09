@@ -312,8 +312,8 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         func tip(_ r: NSRect, _ s: String) { let t = s as NSString; tips.append(t); addToolTip(r, owner: t, userData: nil) }
 
         // The two first-order headers on the first line, their words in a fixed box of three units under each.
-        Design.attributed("Colour", .body).draw(x: 0, baseline: line)
-        Design.attributed("Harmony", .body).draw(x: g.rx, baseline: line)
+        Design.attributed("Colour", .header).draw(x: 0, baseline: line)
+        Design.attributed("Harmony", .header).draw(x: g.rx, baseline: line)
         // The left's words take two of the three units; the third is the illuminant row, the white every value under it is quoted against.
         let leftHelp = state.rule == .custom
             ? "No rule ties the colours, so this is the ringed one. Every value below is worked out from its master, XYZ under D50."
@@ -330,9 +330,9 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         // The second-order headers on one line with their rules: the colour's name and what it is; the wheel and how many it holds.
         let which = Design.attributed(state.rule == .custom ? "Ringed" : "Base", .caption, colour: Design.quiet)
         which.draw(right: g.lw, baseline: 4 * u + line)
-        Design.attributed(workingName, .body).draw(x: 0, baseline: 4 * u + line, width: g.lw - which.size().width - 16)
+        Design.attributed(workingName, .header).draw(x: 0, baseline: 4 * u + line, width: g.lw - which.size().width - 16)
         hairline(x: 0, y: 5 * u - 1, width: g.lw, Design.rule)
-        Design.attributed("Wheel", .body).draw(x: g.rx, baseline: 4 * u + line)
+        Design.attributed("Wheel", .header).draw(x: g.rx, baseline: 4 * u + line)
         Design.attributed(plural(state.nodes.count, "colour"), .caption, colour: Design.quiet).draw(right: g.w, baseline: 4 * u + line)
         hairline(x: g.rx, y: 5 * u - 1, width: g.rw, Design.rule)
 
@@ -555,7 +555,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private func drawTiles(_ g: Geometry, tip: (NSRect, String) -> Void) {
         let u = Self.u, line = Self.line
         // The second-order header across the right side, on the proof's row, the model the values are written in at its right.
-        Design.attributed("Colours", .body).draw(x: g.rx, baseline: g.coloursTop + line)
+        Design.attributed("Colours", .header).draw(x: g.rx, baseline: g.coloursTop + line)
         hits.append((drawMenu(format.label, right: g.w, top: g.coloursTop), .format))
         hairline(x: g.rx, y: g.tilesTop - 1, width: g.rw, Design.rule)
 

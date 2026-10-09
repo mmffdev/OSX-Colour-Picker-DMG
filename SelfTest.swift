@@ -2000,6 +2000,13 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let in2020 = Rendering.of(vividRed, in: ProfileChannel(space: "rec2020"))
     check(!inSRGB.inRange && inSRGB.value == "#FF0000   255, 0, 0" && (inSRGB.difference ?? 0) > Rendering.visible && inP3.inRange && (inP3.difference ?? 9) < 0.001 && in2020.inRange,
           "a Display P3 red is outside sRGB, which shows its nearest red and says how far off it is; P3 and Rec. 2020 hold it")
+    // A palette's colour under a key, not a hex, as Palette 139's orange was on 2026-10-09: anything that takes a colour as a hex goes
+    // through sRGBHex, which answers the hex the key shows as, so the contrast pickers take it and the pair's maths holds.
+    let keyedRed = ColourKeys.make()
+    ColourKeys.register(keyedRed, vividRed)
+    check(sRGBHex(keyedRed) == "#FF0000" && sRGBHex("#abcdef") == "#ABCDEF" && sRGBHex("c:nobody") == nil && displayHex("c:nobody") == "c:nobody"
+          && ContrastPair(ink: sRGBHex(keyedRed)!, paper: "#FFFFFF").ratio == contrastRatio(keyedRed, "#FFFFFF"),
+          "a colour kept under a key is taken as the sRGB it shows as, a hex as itself, an unknown key not at all; the pair's maths is the same either way")
     let twiceWhite = XYZ(x: XYZ.d50.x * 2, y: 2, z: XYZ.d50.z * 2)
     let bright = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .light), in: ProfileChannel(space: "acescg"))
     let brightOnPaper = Rendering.of(ColourDefinition(source: ColourSource(space: "xyz", values: [twiceWhite.x, 2, twiceWhite.z]), master: twiceWhite, kind: .surface), in: ProfileChannel(space: "srgb"))

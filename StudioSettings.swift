@@ -76,7 +76,7 @@ final class ShortcutsSettings: NSView, PageSection {
     override func draw(_ dirtyRect: NSRect) {
         let u = Self.u, line = Self.line, w = bounds.width
         hits = []; clearHits = []
-        Design.attributed("Shortcuts", .body).draw(x: 0, baseline: line)
+        Design.attributed("Shortcuts", .header).draw(x: 0, baseline: line)
         Design.attributed("Quick keys are single keys that work anywhere in the window while nothing is being typed. Menu commands keep the shortcuts in the menu bar; those need \u{2318} or \u{2303}. Click a key to change it, then type the new one; Delete takes it off, Escape leaves it.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: 0, y: u, width: min(w, 560), height: 3 * u))
         var y = 4 * u
@@ -194,7 +194,7 @@ final class HaloSettings: NSView, PageSection {
 
     override func draw(_ dirtyRect: NSRect) {
         let u = Self.u, line = Self.line, w = bounds.width
-        Design.attributed("Halo", .body).draw(x: 0, baseline: line)
+        Design.attributed("Halo", .header).draw(x: 0, baseline: line)
         Design.attributed("The halo is the ring menu over a gear or a swatch. Scrolling turns it; this sets how far the wheel or trackpad has to move to turn a ring by one place. Test Halo opens a halo of letters three rings deep: Up grows the next ring, the back arrow steps back one, and X closes it.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: 0, y: u, width: min(w, 560), height: 3 * u))
         Design.attributed("Scrolling", .label, colour: Design.quiet).draw(x: 0, baseline: 4 * u + line)

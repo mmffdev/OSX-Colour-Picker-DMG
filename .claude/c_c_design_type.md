@@ -11,7 +11,7 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 | Medium 500 | heading, label, body strong, buttons |
 | Bold 700 | the wordmark only |
 
-## The eleven styles
+## The twelve styles
 
 | Style | Weight | Size / line | Tracking | Notes |
 |---|---|---|---|---|
@@ -19,6 +19,7 @@ Family: **Helvetica Neue**, on every Mac, nothing to license. Fallback Helvetica
 | Title | 300 | 48 / 1.0 | −3% | two-tone: first line ink, second line soft grey |
 | Headline | 400 | 30 / 1.1 | −1.8% | |
 | Heading | 500 | 17 / 1.25 | −0.5% | |
+| Header | 500 | 15 / 1.3 | −0.5% | every first-order header and subheader on a page (Text And Background, Pair, Library, Every Pair): three quarters of the way from Caption up to the Heading that names the area, so a page's sections stand above its reading text but under its title (Rick, 2026-10-09); the one style to tune if they ever move again |
 | Lead | 300 | 20 / 1.38 | −1% | at most 34em wide |
 | Body | 400 | 13 / 1.55 | 0 | 60 characters wide; Body Strong is 500 |
 | Caption | 400 | 11 / 1.45 | 0 | quiet grey; paths and metadata |

@@ -371,9 +371,9 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         let g = geometry(), u = Self.u, line = Self.line, l = leading, gut = Design.App.gutter
         filterHits = []; colourHits = []; scopeHit = .zero
         // Left: the first-order header and its words, then the list's header on its rule.
-        Design.attributed("Tag Library", .body).draw(x: l, baseline: line)
+        Design.attributed("Tag Library", .header).draw(x: l, baseline: line)
         Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
-        Design.attributed("Every Tag", .body).draw(x: l, baseline: 4 * u + line)
+        Design.attributed("Every Tag", .header).draw(x: l, baseline: 4 * u + line)
         Design.attributed(rows.count == lib.allTags.count ? plural(rows.count, "tag") : "\(rows.count) of \(lib.allTags.count)", .caption, colour: Design.quiet).draw(right: l + g.lw, baseline: 4 * u + line)
         hairline(x: l, y: 5 * u - 1, width: g.lw, Design.rule)
         // The filters, side by side on rows 5 and 6, a gutter between.
@@ -390,9 +390,9 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
         // Right: the chosen tag.
         let rx = g.rx, rw = g.rw
-        Design.attributed("Tag", .body).draw(x: rx, baseline: line)
+        Design.attributed("Tag", .header).draw(x: rx, baseline: line)
         Design.attributed(rightHelp(chosen), .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: rw, height: Self.helpUnits * u))
-        Design.attributed("Details", .body).draw(x: rx, baseline: 4 * u + line)
+        Design.attributed("Details", .header).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: 5 * u - 1, width: rw, Design.rule)
         guard let name = chosen else { return }
         let info = lib.info(forTag: name)

@@ -5,8 +5,9 @@ import AppKit
 // A text colour on a background, drawn on the page's own columns and the 28 beat. Two Splits. The
 // first: the pair, its score and what it passes, the target and the fixes on the left; the pair in
 // the user's own words and fonts, the fonts, and the ways to keep it on the right. The second: the
-// palettes to pick from on the left; the chosen palette's colours and every pair of them scored on
-// the right. Every first-order header has its words in a box of three units; every second-order
+// chosen palette's colours on the left; every pair of them scored on the right, across the block.
+// The palette is chosen in rail2, which lists them as it does everywhere, a press choosing rather
+// than opening. Every first-order header has its words in a box of three units; every second-order
 // header sits on a rule; what is under them starts on one line across the page whatever the words
 // say. The maths is the old page's (ColourScience.swift, ColourFormats.swift), and so is the state,
 // kept under the same key, so the old window and this page hold one pair.
@@ -17,7 +18,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private(set) var state: ContrastState
     private var history = History<ContrastState>()
     /// Whether the Lab's wheel is listed as a palette: only when the page was reached from the Lab.
-    private var offersWheel = false
+    private(set) var offersWheel = false
     /// Which of the two colours the next colour picked goes to: true is the text colour.
     private var arming = true
     private var sampler: NSColorSampler?
@@ -36,7 +37,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         static let fieldLabel = 5, field = 6, choice = 8, grade = 9, score = 10
         static let sub2 = 12, columns = 13, table = 14, addType = 16
         static let sub3 = 18, label3 = 19, value3 = 20, buttons = 22
-        /// The second Split: the palettes and the colours.
+        /// The second Split: the colours and every pair.
         static let lower = 24
         static var lowerSub: Int { lower + 4 }
         static var lowerRows: Int { lower + 5 }
@@ -123,6 +124,9 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         library.contrastPalette = ExportPalette(name: chosenName, colours: pairHexes.map { ExportColour(name: colourName($0), hex: $0) })
     }
     private func colour(_ hex: String) -> NSColor { shade[hex] ?? colorFromHex(hex) ?? Design.hex(hex) }
+    /// A palette's colour as the sRGB hex the pair holds: a plain hex as it is, a colour key as the hex it shows as.
+    private static func sRGB(_ key: String) -> String? { sRGBHex(key) }
+    private func same(_ key: String, _ hex: String) -> Bool { Self.sRGB(key) == hex }
 
     /// Called on arriving at the page. From the Lab, its wheel is offered as a palette and chosen; from anywhere else it is not.
     func arrive(fromLab: Bool) {
@@ -159,9 +163,37 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         needsLayout = true
         needsDisplay = true
         onResize?()
+        tellRail()
     }
 
     private var lc: Double { abs(apcaContrast(text: state.pair.ink, background: state.pair.paper)) }
+
+    // MARK: The palette, chosen in rail2
+
+    /// Whether the Lab's wheel is listed: only after arriving from the Lab, while it has colours.
+    var wheelOffered: Bool { offersWheel && library.labPalette != nil }
+    /// Told when the palette chosen changes, so the rail can mark the row.
+    var onPaletteChange: (() -> Void)?
+    private var listed = ""
+    private func tellRail() {
+        let now = "\(state.palette?.uuidString ?? "wheel")/\(wheelOffered)"
+        guard now != listed else { return }
+        listed = now
+        onPaletteChange?()
+    }
+    /// A row of rail2 pressed: a palette's row chooses it, the Lab's row the wheel. False for a place the page has no use for, which then opens.
+    func pick(_ place: StudioFrame.Place) -> Bool {
+        switch place {
+        case .palette(let id):
+            guard library.library.swatch(id) != nil else { return false }
+            change { $0.palette = id }
+        case .lab:
+            guard wheelOffered else { return false }
+            change { $0.palette = nil }
+        default: return false
+        }
+        return true
+    }
 
     // MARK: The palettes to pick from
 
@@ -175,29 +207,6 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         return offersWheel ? "Colour Lab Wheel" : "No Palette Chosen"
     }
 
-    /// One row of the list: a group's heading, which opens and closes it, or a palette; a nil id is the Lab's wheel.
-    private enum ShelfRow { case heading(String, key: String), palette(UUID?, String, [String]) }
-    private func closedKey(_ key: String) -> String { "contrastShelfClosed.\(key)" }
-    private func isClosed(_ key: String) -> Bool { preferences.bool(forKey: closedKey(key)) }
-
-    /// The palettes in the sidebar's groups: the Lab's wheel when offered, Favourites, each member, then every palette. Palettes of colours only.
-    private var shelf: [ShelfRow] {
-        let lib = library.library
-        var rows: [ShelfRow] = []
-        if offersWheel, let lab = library.labPalette { rows.append(.palette(nil, "Colour Lab Wheel", lab.colours.map { $0.hex })) }
-        func group(_ title: String, key: String, _ list: [Swatch]) {
-            let colours = list.filter { !$0.isTypography }
-            guard !colours.isEmpty else { return }
-            rows.append(.heading(title, key: key))
-            if isClosed(key) { return }
-            rows += colours.map { .palette($0.id, $0.name, library.hexes(in: $0.id)) }
-        }
-        group("Favourites", key: "favourites", library.favourites)
-        for p in lib.orderedProjects { group(p.name, key: "project.\(p.id.uuidString)", lib.palettes(in: p.id)) }
-        group("Palettes", key: "palettes", lib.listedPalettes)
-        return rows
-    }
-
     // MARK: Geometry: the page's columns, the two blocks and their halves
 
     private struct Geometry {
@@ -207,11 +216,10 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         var a: (x: CGFloat, w: CGFloat) = (0, 0), b: (x: CGFloat, w: CGFloat) = (0, 0)
         var c: (x: CGFloat, w: CGFloat) = (0, 0), d: (x: CGFloat, w: CGFloat) = (0, 0)
         var card = NSRect.zero
-        var shelf: [ShelfRow] = []
         var tiles: [(hex: String, rect: NSRect)] = []
         var spectrumRows = 1
         var gridRow: Int?
-        /// A cell of the grid: two units square where the block has room, else a unit high and as wide as the block allows.
+        /// A cell of the grid: the block's width shared between the colours, whole units high, up to three and never taller than wide.
         var cell = NSSize.zero
         var gridHexes: [String] = []
         var height: CGFloat = 0
@@ -229,32 +237,31 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         g.lx = 0; g.lw = span(k); g.rx = g.cols[k]; g.rw = span(rk)
         g.a = (g.cols[0], span(h)); g.b = (g.cols[k - h], span(h))
         g.c = (g.cols[k], span(rh)); g.d = (g.cols[n - rh], span(rh))
-        // The sample: from a step under the rule to the score's line, so its bottom edge and the numeral's baseline are one line across the Split.
-        g.card = NSRect(x: g.rx, y: CGFloat(R.fieldLabel) * u + 8, width: g.rw, height: CGFloat(R.score) * u + Self.line - CGFloat(R.fieldLabel) * u - 8)
+        // The sample: from the rule under its header, as the grid and the Lab's blocks meet theirs, to the score's line, so its
+        // bottom edge and the numeral's baseline are one line across the Split.
+        g.card = NSRect(x: g.rx, y: CGFloat(R.fieldLabel) * u, width: g.rw, height: CGFloat(R.score) * u + Self.line - CGFloat(R.fieldLabel) * u)
 
-        // The second Split: the list of palettes on the left; the chosen palette's colours and its grid on the right.
-        g.shelf = shelf
+        // The second Split: the chosen palette's colours on the left; every pair of them scored on the right, across the block.
         let hexes = targetHexes, extras = ["#FFFFFF", "#000000"].filter { !hexes.contains($0) }
-        let perRow = max(1, Int((g.rw + 4) / 28))
+        let perRow = max(1, Int((g.lw + 4) / 28))
         var slots: [String?] = hexes.map { $0 }
         if !hexes.isEmpty && !extras.isEmpty { slots.append(nil) }
         slots += extras.map { $0 }
         for (i, s) in slots.enumerated() {
             guard let hex = s else { continue }
-            g.tiles.append((hex, NSRect(x: g.rx + CGFloat(i % perRow) * 28, y: CGFloat(R.lowerRows + i / perRow) * u + 4, width: 24, height: 24)))
+            g.tiles.append((hex, NSRect(x: g.lx + CGFloat(i % perRow) * 28, y: CGFloat(R.lowerRows + i / perRow) * u + 4, width: 24, height: 24)))
         }
         g.spectrumRows = max(1, (slots.count + perRow - 1) / perRow)
         let shown = Array(hexes.prefix(Self.gridMost))
         var end = CGFloat(R.lowerRows + g.spectrumRows) * u
         if shown.count > 1 {
             g.gridHexes = shown
-            g.gridRow = R.lowerRows + g.spectrumRows + 1
-            let n = CGFloat(shown.count)
-            g.cell = n * 2 * u <= g.rw ? NSSize(width: 2 * u, height: 2 * u) : NSSize(width: min(2 * u, (g.rw / n).rounded(.down)), height: u)
-            end = CGFloat(g.gridRow! + 1) * u + n * g.cell.height
+            g.gridRow = R.lowerRows
+            let n = CGFloat(shown.count), w = (g.rw / n).rounded(.down)
+            g.cell = NSSize(width: w, height: min(3 * u, max(u, (w / u).rounded(.down) * u)))
+            end = max(end, CGFloat(g.gridRow!) * u + n * g.cell.height)
         }
-        let listEnd = CGFloat(R.lowerRows + g.shelf.count) * u
-        g.height = max(end, listEnd, CGFloat(R.lowerRows + 2) * u) + 2 * u
+        g.height = max(end, CGFloat(R.lowerRows + 2) * u) + 2 * u
         return g
     }
 
@@ -286,7 +293,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         let redoW = redoButton.intrinsicContentSize.width, undoW = undoButton.intrinsicContentSize.width
         place(redoButton, x: g.rx + g.rw - redoW, row: R.header, width: redoW, height: SwissButton.height)
         place(undoButton, x: g.rx + g.rw - redoW - 16 - undoW, row: R.header, width: undoW, height: SwissButton.height)
-        // The sample's words: the heading on the first line in the card, the sentence on the next two, over the button.
+        // The sample's words: the heading on the card's second line, the sentence on the two after, over the button.
         let pad: CGFloat = 16, card = g.card
         place(heading, x: card.minX + pad - 2, row: R.field, width: card.width - 2 * pad + 4, height: 36)
         let top = CGFloat(R.field + 1) * u + Self.line - body.firstBaselineOffsetFromTop
@@ -301,7 +308,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     }
     /// A second-order header: its word on the row's line, the rule under the row.
     private func subheader(_ s: String, x: CGFloat, width: CGFloat, row: Int) {
-        Design.attributed(s, .body).draw(x: x, baseline: CGFloat(row) * Self.u + Self.line, width: width)
+        Design.attributed(s, .header).draw(x: x, baseline: CGFloat(row) * Self.u + Self.line, width: width)
         hairline(x: x, y: CGFloat(row + 1) * Self.u - 1, width: width, Design.rule)
     }
     private func value(_ s: String, colour: NSColor = Design.ink) -> NSAttributedString {
@@ -405,9 +412,9 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         let pair = state.pair, apca = state.usesAPCA, ratio = pair.ratio, lc = self.lc
 
         // The first Split's headers: first order on the first line with their words in three units, second order on a rule.
-        Design.attributed("Text And Background", .body).draw(x: g.lx, baseline: at(R.header))
+        Design.attributed("Text And Background", .header).draw(x: g.lx, baseline: at(R.header))
         words(methodNote, x: g.lx, width: g.lw)
-        Design.attributed("Preview", .body).draw(x: g.rx, baseline: at(R.header))
+        Design.attributed("Preview", .header).draw(x: g.rx, baseline: at(R.header))
         words("The pair in your own words and fonts. Click the heading or the sentence to type over it; Add To Typography keeps the pairing with its words and fonts.", x: g.rx, width: g.rw)
         subheader("Pair", x: g.lx, width: g.lw, row: R.sub)
         subheader("Sample", x: g.rx, width: g.rw, row: R.sub)
@@ -503,69 +510,29 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         drawLower(g)
     }
 
-    /// The second Split: the palettes on the left, the chosen palette's colours and its grid on the right.
+    /// The second Split: the chosen palette's colours on the left, every pair of them scored on the right.
     private func drawLower(_ g: Geometry) {
         let u = Self.u, line = Self.line
         func at(_ row: Int) -> CGFloat { CGFloat(row) * u + line }
-        let top = R.lower
-        Design.attributed("Palettes", .body).draw(x: g.lx, baseline: at(top))
-        Design.attributed("The palette the two colours are picked from. Favourites come first, then each member's palettes, then every palette; a heading opens and closes its group.", .caption, colour: Design.quiet, lineHeight: true)
+        let top = R.lower, lright = g.lx + g.lw, right = g.rx + g.rw
+        Design.attributed("Colours", .header).draw(x: g.lx, baseline: at(top))
+        Design.attributed("The palette chosen in the rail. Click a colour to set the text colour; the next sets the background. White and black are always offered.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: g.lx, y: CGFloat(top + 1) * u, width: g.lw, height: 3 * u))
-        Design.attributed("Colours", .body).draw(x: g.rx, baseline: at(top))
-        Design.attributed("Click a colour to set the text colour; the next sets the background. White and black are always offered. The grid scores every pair: rows are text, columns ground.", .caption, colour: Design.quiet, lineHeight: true)
+        Design.attributed("Every Pair", .header).draw(x: g.rx, baseline: at(top))
+        Design.attributed("The palette's first eight colours against each other: rows are the text colour, columns the background, each cell its score. Click a cell to make it the pair.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: g.rx, y: CGFloat(top + 1) * u, width: g.rw, height: 3 * u))
-        subheader("Library", x: g.lx, width: g.lw, row: R.lowerSub)
-
-        // The list: a group's heading in capitals with its chevron, each palette its name and its colours as a strip.
-        for (i, row) in g.shelf.enumerated() {
-            let y = CGFloat(R.lowerRows + i) * u, b = y + line
-            switch row {
-            case .heading(let title, let key):
-                let closed = isClosed(key)
-                Design.attributed(title, .label, colour: Design.quiet).draw(x: g.lx, baseline: b, width: g.lw - 24)
-                Design.quiet.setStroke()
-                let p = NSBezierPath(); p.lineWidth = 1
-                let r = g.lx + g.lw
-                if closed { p.move(to: NSPoint(x: r - 7, y: b - 8)); p.line(to: NSPoint(x: r - 3, y: b - 4)); p.line(to: NSPoint(x: r - 7, y: b)) }
-                else { p.move(to: NSPoint(x: r - 9, y: b - 6)); p.line(to: NSPoint(x: r - 5, y: b - 2)); p.line(to: NSPoint(x: r - 1, y: b - 6)) }
-                p.stroke()
-                hits.append((NSRect(x: g.lx, y: y, width: g.lw, height: u), { [weak self] in
-                    preferences.set(!closed, forKey: self?.closedKey(key) ?? "")
-                    self?.refresh()
-                }))
-            case .palette(let id, let name, let hexes):
-                let on = (state.palette == id && (id != nil || offersWheel))
-                if on { fill(NSRect(x: g.lx, y: y - 1, width: g.lw, height: u + 1), Design.mist) }
-                Design.attributed(name, on ? .bodyStrong : .body, colour: on ? Design.ink : Design.quiet).draw(x: g.lx + (on ? 8 : 0), baseline: b, width: g.b.x - g.lx - 16)
-                let strip = NSRect(x: g.b.x, y: b - 11, width: g.b.w - (on ? 8 : 0), height: 12)
-                if hexes.isEmpty {
-                    Design.rule.setStroke()
-                    let e = NSBezierPath(rect: strip.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
-                } else {
-                    let band = strip.width / CGFloat(hexes.count)
-                    for (k, h) in hexes.enumerated() {
-                        let l = (strip.minX + CGFloat(k) * band).rounded(), r = k == hexes.count - 1 ? strip.maxX : (strip.minX + CGFloat(k + 1) * band).rounded()
-                        fill(NSRect(x: l, y: strip.minY, width: r - l, height: strip.height), colour(h))
-                    }
-                }
-                hairline(x: g.lx, y: y + u - 1, width: g.lw, Design.mist)
-                hits.append((NSRect(x: g.lx, y: y, width: g.lw, height: u), { [weak self] in self?.change { $0.palette = id } }))
-            }
-        }
-        if g.shelf.isEmpty { Design.attributed("No palettes yet", .body, colour: Design.soft).draw(x: g.lx, baseline: at(R.lowerRows)) }
 
         // The colours: the chosen palette's name on the rule, what the next click sets and the eyedropper flush right.
         let next = Design.attributed(arming ? "Next Sets The Text Colour" : "Next Sets The Background", .caption, colour: Design.quiet)
-        let right = g.rx + g.rw
-        Design.attributed(targetName, .body).draw(x: g.rx, baseline: at(R.lowerSub), width: g.rw - next.size().width - 48)
-        hairline(x: g.rx, y: CGFloat(R.lowerSub + 1) * u - 1, width: g.rw, Design.rule)
-        RowMark.draw("eyedropper", x: right - 14, baseline: at(R.lowerSub), colour: Design.ink)
-        next.draw(right: right - 14 - 12, baseline: at(R.lowerSub))
-        hits.append((NSRect(x: right - 24, y: CGFloat(R.lowerSub) * u, width: 24, height: u), { [weak self] in self?.pickFromScreen() }))
+        Design.attributed(targetName, .header).draw(x: g.lx, baseline: at(R.lowerSub), width: g.lw - next.size().width - 48)
+        hairline(x: g.lx, y: CGFloat(R.lowerSub + 1) * u - 1, width: g.lw, Design.rule)
+        RowMark.draw("eyedropper", x: lright - 14, baseline: at(R.lowerSub), colour: Design.ink)
+        next.draw(right: lright - 14 - 12, baseline: at(R.lowerSub))
+        hits.append((NSRect(x: lright - 24, y: CGFloat(R.lowerSub) * u, width: 24, height: u), { [weak self] in self?.pickFromScreen() }))
         for t in g.tiles {
             square(t.hex, t.rect)
             // T and B mark the two colours in use.
-            if let mark = t.hex == state.pair.ink ? "T" : t.hex == state.pair.paper ? "B" : nil {
+            if let mark = same(t.hex, state.pair.ink) ? "T" : same(t.hex, state.pair.paper) ? "B" : nil {
                 let m = Design.attributed(mark, .label, colour: Design.hex(readableText(on: t.hex)))
                 m.draw(x: t.rect.midX - m.size().width / 2 + 0.5, baseline: t.rect.minY + 16)
             }
@@ -573,16 +540,19 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
             hits.append((t.rect, { [weak self] in self?.take(hex) }))
         }
 
-        // Every pair of the palette's first colours: rows are the text colour, columns the background.
-        guard let gr = g.gridRow else { return }
+        // Every pair of the palette's first colours: rows are the text colour, columns the background, the cells across the block.
         let all = targetHexes.count
-        subheader("Every Pair", x: g.rx, width: g.rw, row: gr)
-        Design.attributed(all > g.gridHexes.count ? "The First \(g.gridHexes.count) Colours" : "Rows Text, Columns Background", .caption, colour: Design.quiet)
-            .draw(right: right, baseline: at(gr))
-        let s = g.cell, y0 = CGFloat(gr + 1) * u, apca = state.usesAPCA
+        subheader(all > g.gridHexes.count ? "The First \(g.gridHexes.count) Colours" : "Rows Text, Columns Background", x: g.rx, width: g.rw, row: R.lowerSub)
+        guard let gr = g.gridRow else {
+            Design.attributed(all == 0 ? "Choose a palette in the rail" : "One colour makes no pair", .body, colour: Design.soft).draw(x: g.rx, baseline: at(R.lowerRows))
+            return
+        }
+        let s = g.cell, y0 = CGFloat(gr) * u, apca = state.usesAPCA, last = g.gridHexes.count - 1
         for (r, inkHex) in g.gridHexes.enumerated() {
             for (c, paperHex) in g.gridHexes.enumerated() {
-                let cell = NSRect(x: g.rx + CGFloat(c) * s.width, y: y0 + CGFloat(r) * s.height, width: s.width, height: s.height)
+                let x = g.rx + CGFloat(c) * s.width
+                // The last column runs to the block's edge, taking the width the rounding left.
+                let cell = NSRect(x: x, y: y0 + CGFloat(r) * s.height, width: c == last ? right - x : s.width, height: s.height)
                 fill(cell, colour(paperHex))
                 guard r != c else { continue }   // a colour on itself is nothing to read
                 let readable = Design.hex(readableText(on: paperHex))
@@ -592,15 +562,16 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
                 let t = Design.attributed(text, .caption, colour: readable.withAlphaComponent(weak ? 0.5 : 1))
                 let b = cell.minY + (s.height == u ? line : u + line)
                 // The square before the number is the text colour being judged, where the cell has room for both.
-                if s.width >= 40 {
+                if cell.width >= 40 {
                     fill(NSRect(x: cell.minX + 6, y: b - 7, width: 6, height: 6), colour(inkHex))
-                    t.draw(x: cell.minX + 16, baseline: b, width: s.width - 18)
-                } else { t.draw(x: cell.minX + 4, baseline: b, width: s.width - 6) }
-                if inkHex == state.pair.ink && paperHex == state.pair.paper {
+                    t.draw(x: cell.minX + 16, baseline: b, width: cell.width - 18)
+                } else { t.draw(x: cell.minX + 4, baseline: b, width: cell.width - 6) }
+                if same(inkHex, state.pair.ink) && same(paperHex, state.pair.paper) {
                     readable.setStroke()
                     let mark = NSBezierPath(rect: cell.insetBy(dx: 1.5, dy: 1.5)); mark.lineWidth = 2; mark.stroke()
                 }
-                let pairing = ContrastPair(ink: inkHex, paper: paperHex)
+                guard let ink = Self.sRGB(inkHex), let paper = Self.sRGB(paperHex) else { continue }
+                let pairing = ContrastPair(ink: ink, paper: paper)
                 hits.append((cell, { [weak self] in self?.change { $0.pair = pairing } }))
             }
         }
@@ -618,7 +589,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     /// A colour picked from the palette or the screen goes to whichever colour is waiting, and the other waits next.
     private func take(_ hex: String) {
-        guard let clean = normaliseHex(hex) else { return }
+        guard let clean = Self.sRGB(hex) else { return }
         let toInk = arming
         arming.toggle()
         change { if toInk { $0.pair.ink = clean } else { $0.pair.paper = clean } }
