@@ -64,6 +64,7 @@
 		78DB73FE2C5706AF3301211E /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA23ADF5B5A72831812C270 /* Permissions.swift */; };
 		7A78AC96D0347FD9D128D423 /* Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D0FB439FBE947C1764AE7C /* Sidebar.swift */; };
 		7AC304C23E633B1C9BC65222 /* ColourEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA64E8FACD17BFE0A7BE0281 /* ColourEngine.swift */; };
+		7F641CF41A83BF131AD2E610 /* Lighthouse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D5744D1A01A2D6B9D6F7AF1 /* Lighthouse.swift */; };
 		801B3301A4C6880F48957326 /* HaloMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B197D35E0D8B3E30F07F119 /* HaloMenu.swift */; };
 		81A32F6C13F8ACF7AD1F8512 /* colswatch.icns in Resources */ = {isa = PBXBuildFile; fileRef = 3E3DDBEC4DB75A5B7562579B /* colswatch.icns */; };
 		89AA8FCF657408356778F2A7 /* colsynccatalogue.icns in Resources */ = {isa = PBXBuildFile; fileRef = CBD9E43C14980080CE9A9439 /* colsynccatalogue.icns */; };
@@ -168,6 +169,7 @@
 		97088A7B77A529EA78D0F1BC /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
 		97C357DB6CB5B4FF75DDA543 /* Tags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tags.swift; sourceTree = "<group>"; };
 		9A1451250ED5E9CB05C38BC0 /* StudioWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioWindow.swift; sourceTree = "<group>"; };
+		9D5744D1A01A2D6B9D6F7AF1 /* Lighthouse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lighthouse.swift; sourceTree = "<group>"; };
 		A63EF8DDCE386E1737985999 /* History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = History.swift; sourceTree = "<group>"; };
 		A87514F33C98513F82B40D77 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
 		A90B9D5EFB67D3F8729486C0 /* colsyncproject.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colsyncproject.icns; sourceTree = "<group>"; };
@@ -278,6 +280,7 @@
 				75E74A3257E9F77D283E9C9F /* Lab.swift */,
 				B0DC819485B4C439C5DB717F /* LabContrast.swift */,
 				1146C0164FBE13B9E11D88B4 /* LegacyTree.swift */,
+				9D5744D1A01A2D6B9D6F7AF1 /* Lighthouse.swift */,
 				3A7D6831A452CA89370158C1 /* Logo.swift */,
 				C46F1F4C6C41052061294C25 /* main.swift */,
 				2F5F86B39BE41109D29DE6FF /* MainWindow.swift */,
@@ -483,6 +486,7 @@
 				ED5E15DFDAB7B92EC6CBD176 /* Lab.swift in Sources */,
 				00E6D3487E9D398BC85A548B /* LabContrast.swift in Sources */,
 				6E794E13F46D2D49FEB72C03 /* LegacyTree.swift in Sources */,
+				7F641CF41A83BF131AD2E610 /* Lighthouse.swift in Sources */,
 				5E1703FFE8CCB47E5566886A /* Logo.swift in Sources */,
 				137B166C1F93FA6A481E201D /* MainWindow.swift in Sources */,
 				F19B22FE195C552B3F15BA8E /* Migration.swift in Sources */,
