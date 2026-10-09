@@ -34,8 +34,9 @@ final class SplashTreeView: NSView {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    private func row(_ k: Int) -> CGFloat { CGFloat(k) * A.unit + A.textBaseline }
-    private func line(_ k: Int) -> CGFloat { CGFloat(k) * A.unit }
+    /// The tree's first row is the band's row 1, the baseline the sections' labels sit on.
+    private func row(_ k: Int) -> CGFloat { CGFloat(k + 1) * A.unit + A.textBaseline }
+    private func line(_ k: Int) -> CGFloat { CGFloat(k + 1) * A.unit }
     private var left: CGFloat { A.margin }
     private var width: CGFloat { bounds.width - A.margin - A.gutter / 2 }
 

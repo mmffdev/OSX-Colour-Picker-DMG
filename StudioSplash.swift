@@ -116,9 +116,9 @@ final class StudioSplash: NSView {
         band.frame = NSRect(x: 0, y: top, width: w, height: h)
         if !moving { surface.frame = NSRect(x: 0, y: -CGFloat(at) * h, width: w, height: h * CGFloat(sections.count)) }
         for (i, s) in sections.enumerated() { s.frame = NSRect(x: 0, y: CGFloat(i) * h, width: w, height: h) }
-        // The lighthouse stands at the bottom left on columns 1 to 4, eleven units tall where the window allows and eight at least;
+        // The lighthouse stands at the bottom left on columns 1 to 4, thirteen units tall where the window allows and eight at least;
         // the tree takes the band's height above it, on columns 1 to 6.
-        let lhH = min(11 * A.unit, max(8 * A.unit, bounds.height - top - 16 * A.unit))
+        let lhH = min(13 * A.unit, max(8 * A.unit, bounds.height - top - 15 * A.unit))
         lighthouse.frame = NSRect(x: 0, y: bounds.height - lhH, width: A.column(4, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: lhH)
         lighthouse.headroom = A.unit
         tree.frame = NSRect(x: 0, y: top, width: A.column(6, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: bounds.height - lhH - A.gutter - top)
