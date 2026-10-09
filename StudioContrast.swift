@@ -323,29 +323,32 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         p.stroke()
     }
     /// A dropdown as the guide draws one: the label above, the value at 17 on the line under it, the chevron right, a hairline beneath.
+    /// The value sits a point and a half under the line, so its capitals share a centre with the 13-point words on the same row (Rick, 2026-10-09).
     @discardableResult
     private func dropdown(_ title: String, value v: String, x: CGFloat, width: CGFloat, row: Int, act: @escaping () -> Void) -> NSRect {
         let u = Self.u, b = CGFloat(row + 1) * u + Self.line
         label(title, x: x, row: row)
         let r = NSRect(x: x, y: CGFloat(row) * u, width: width, height: 2 * u)
         let open = openRect == r
-        value(v).draw(x: x, baseline: b, width: width - 24)
+        value(v).draw(x: x, baseline: b + 1.5, width: width - 24)
         chevron(right: x + width, baseline: b, open: open)
         hairline(x: x, y: CGFloat(row + 2) * u - 1, width: width, open ? Design.ink : Design.rule)
         hits.append((r, act))
         return r
     }
-    /// The Choice: capitals in a one-point ink outline, the chosen cell filled ink, its words on the line.
+    /// The Choice: capitals in a one-point ink outline, the chosen cell filled ink, its words centred in the cell's height.
     private func choice(_ items: [String], chosen: Int, x: CGFloat, baseline b: CGFloat, pick: @escaping (Int) -> Void) {
         var cx = x
         let top = b - 16, h: CGFloat = 22
+        // Capitals are 0.714 of the size in Helvetica Neue: the baseline that puts their middle on the cell's middle.
+        let capHeight = Design.Text.label.size * 0.714, words = (top + h / 2 + capHeight / 2).rounded()
         for (i, s) in items.enumerated() {
             let on = i == chosen
             let t = Design.attributed(s, .label, colour: on ? Design.card : Design.ink)
             let w = (t.size().width + 24).rounded()
             let cell = NSRect(x: cx, y: top, width: w, height: h)
             if on { fill(cell, Design.ink) }
-            t.draw(x: cx + 12, baseline: b)
+            t.draw(x: cx + 12, baseline: words)
             hits.append((cell, { pick(i) }))
             cx += w
         }
