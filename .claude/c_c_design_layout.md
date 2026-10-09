@@ -2,7 +2,7 @@
 
 ## The grid
 
-Twelve columns always. The wizard: margins 48, gutters 24. The app window: margins 24, gutters 16. Every edge lands on a column; the style sheet's Show Grid proves it.
+Twelve columns always. The wizard: margins 48, gutters 24. The app window: margins 24, gutters 16, and an area gutter of 32 between the rails, before the page and at a page's split (two levels, see the app grid child). Every edge lands on a column; the style sheet's Show Grid proves it.
 
 ## The beat
 
