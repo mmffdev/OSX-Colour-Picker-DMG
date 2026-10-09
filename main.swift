@@ -86,28 +86,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether this Mac had no catalogue at all when the app opened, read before the library seeds Main at the root.
     private var noCatalogueAtLaunch = false
 
-    /// The splash, then the main window, or the setup assistant on a first open.
+    /// The launch artwork, then the Studio window. A first open is no different: the window opens on the
+    /// startup splash that sets up the work (StudioSplash), since the catalogue has no structure yet. The
+    /// old setup assistant no longer runs at launch; it stays on the app menu for a catalogue made by hand.
     private func openUp() {
         noCatalogueAtLaunch = Catalogues.standard.isEmpty
         let splash = SplashWindowController()
         self.splash = splash
-        if Prefs.assistantDone {
-            // With no splash the window must exist before the reveal, which comes straight back.
-            if !Prefs.splash { prepareMainWindow() }
-            splash.present { [weak self] in self?.revealMainWindow() }
-            // Let the launch artwork reach the screen before loading the library and editor.
-            if Prefs.splash { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
-        } else {
-            // The first open: the assistant settles where everything lives before any of it is loaded.
-            splash.present { [weak self] in
-                self?.splash?.close()
-                self?.splash = nil
-                SetupAssistant.show { _ in
-                    self?.prepareMainWindow()
-                    self?.revealMainWindow()
-                }
-            }
-        }
+        // With no launch artwork the window must exist before the reveal, which comes straight back.
+        if !Prefs.splash { prepareMainWindow() }
+        splash.present { [weak self] in self?.revealMainWindow() }
+        // Let the launch artwork reach the screen before loading the library and editor.
+        if Prefs.splash { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
     }
 
     /// The assistant again, from the app menu: what it settles is applied to the open window.
@@ -135,13 +125,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splash = nil
         NSApp.activate(ignoringOtherApps: true)
         if Permission.all.isEmpty { Prefs.setupDone = true }   // nothing to ask: the Store build
-        else if !Prefs.setupDone, let w = main.window { SetupWindowController.show(over: w) }
+        else if !Prefs.setupDone, let w = main.window, w.isVisible { SetupWindowController.show(over: w) }   // the old window only, never dragged into view for a sheet
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
         rehearse(main)
         // No catalogue on this Mac, the setup skipped or every one removed, and nothing seeded from an earlier
         // version either: nothing works without one, so it is asked for now.
+        // On a first open the startup splash over the Studio window is what sets the catalogue up, so nothing is asked here.
         let lib = library.library
-        if noCatalogueAtLaunch && lib.colours.isEmpty && lib.swatches.isEmpty && lib.projects.isEmpty {
+        if Prefs.assistantDone && noCatalogueAtLaunch && lib.colours.isEmpty && lib.swatches.isEmpty && lib.projects.isEmpty {
             DispatchQueue.main.async { [weak self] in self?.askForCatalogue() }
         }
     }

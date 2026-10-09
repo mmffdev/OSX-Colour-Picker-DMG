@@ -190,6 +190,8 @@ final class StudioSplash: NSView {
         let built = lib
         library.apply("Set Up Structure") { $0 = built }
         library.flash("Set up \(plural(made.collections.count, "collection")) with \(plural(made.members.count, "first member"))")
+        Prefs.assistantDone = true   // the work is set up: the splash was the first open's setup
+        Prefs.setupDone = true
         onDone?()
     }
 
