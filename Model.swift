@@ -1108,10 +1108,11 @@ final class LibraryStore {
     /// Re-reads from disk before changing anything, so picks made by the
     /// hotkey process while the window is open are never overwritten.
     @discardableResult
-    func mutate(_ body: (inout Library) throws -> Void) throws -> Library {
+    func mutate(schema f: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) throws -> Void) throws -> Library {
         var lib = try load()
         try body(&lib)
-        try save(lib)
+        // A schema given is written with the library in the one save, so a member and its place land together.
+        if let f = f { try save(lib, schema: f) } else { try save(lib) }
         return lib
     }
 }

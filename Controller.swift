@@ -145,10 +145,10 @@ final class LibraryController: NSObject {
 
     /// Every change goes through here, and becomes a step in the history under `title`.
     /// A change to anything in a locked project is refused before it is saved.
-    func apply(_ title: String = "Change", _ body: (inout Library) -> Void) {
+    func apply(_ title: String = "Change", schema: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) -> Void) {
         let before = library
         do {
-            library = try store.mutate { lib in
+            library = try store.mutate(schema: schema) { lib in
                 var trial = lib
                 body(&trial)
                 // A palette just made is turned to the default purpose straight away: a palette always has one.

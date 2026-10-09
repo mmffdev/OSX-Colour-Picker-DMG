@@ -159,7 +159,11 @@ final class StudioSplash: NSView {
             draft.members[key] = "First"
             for stream in ["Design", "Print", "Web"] { draft.groupsOf[SplashDraft.leafKey(alpha.id, "Projects", stream)] = Array(SplashDraft.groupOptions.prefix(stream == "Web" ? 3 : 9)) }
             draft.groupsOf[SplashDraft.leafKey(beta.id, "Products", nil)] = Array(SplashDraft.groupOptions.prefix(4))
-            DispatchQueue.main.async { [weak self] in self?.go(to: step) }
+            DispatchQueue.main.async { [weak self] in
+                self?.go(to: step)
+                // --splash-set beside it presses Set at once: the whole build, from the command line, for checking what it makes.
+                if CommandLine.arguments.contains("--splash-set") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self?.setUp() } }
+            }
         }
         if Self.showLighthouse {
             // --lighthouse-up raises the whole tower at once, for framing the picture while it is designed.
@@ -204,11 +208,13 @@ final class StudioSplash: NSView {
         // The rename first, so the structure is written into the folder under its new name.
         if let name = draft.catalogueName, name != library.catalogue { library.rename(catalogue: library.catalogue, to: name) }
         var schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
+        // The placeholder collection a catalogue starts with goes when nothing has been put in it: the collections are the answers'.
+        schema.collections.removeAll { c in c.id == SchemaTrial.firstCollection && c.folders.isEmpty && !schema.places.values.contains { $0.collection == c.id } }
         var lib = library.library
         let made = draft.build(into: &schema, library: &lib)
-        SchemaTrial.replace(schema)
+        // One save: the first members and the structure that places them, written together.
         let built = lib
-        library.apply("Set Up Structure") { $0 = built }
+        library.apply("Set Up Structure", schema: schema) { $0 = built }
         library.flash("Set up \(plural(made.collections.count, "collection")) with \(plural(made.members.count, "first member"))")
         Prefs.assistantDone = true   // the work is set up: the splash was the first open's setup
         Prefs.setupDone = true
