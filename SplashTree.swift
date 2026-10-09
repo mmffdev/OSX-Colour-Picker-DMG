@@ -21,8 +21,9 @@ final class SplashTreeView: NSView {
     /// Called after any change made on the tree, so the splash can settle its buttons.
     var onChange: (() -> Void)?
 
-    enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group }
-    private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String), add(Level) }
+    /// A level another of can be added at; a group belongs to the leaf (stream, or category with no streams) its member sits under.
+    enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group(String) }
+    private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String, String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
         /// A node that holds others has a key the caret opens and closes it by.
@@ -61,25 +62,27 @@ final class SplashTreeView: NSView {
         func open(_ key: String) -> Bool { !collapsed.contains(key) }
         func pending(_ w: SplashDraft.Pending) -> String? { d.pending.flatMap { $0.level == w && !$0.text.isEmpty ? $0.text : nil } }
         func add(_ level: Level, _ name: String, at depth: Int) { out.append(Line(kind: .add(level), name: name, depth: depth, caption: "", removable: false)) }
-        func groups(at depth: Int) {
+        /// The groups under a member, the leaf's own: each leaf may differ (Rick, 2026-10-09).
+        func groups(at depth: Int, leaf: String) {
             guard reached >= groupsStep else { out.append(Line(kind: .placeholder, name: "Asset Collection", depth: depth, caption: "Groups", removable: false, soft: true)); return }
-            for g in d.groups { out.append(Line(kind: .group(g), name: d.groupNames[g] ?? g, depth: depth, caption: "Group", removable: d.groups.count > 1)) }
-            if let p = pending(.group) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false, soft: true)) }
-            add(.group, "Another group", at: depth)
+            let mine = d.groups(of: leaf)
+            for g in mine { out.append(Line(kind: .group(leaf, g), name: d.groupNames[g] ?? g, depth: depth, caption: "Group", removable: mine.count > 1)) }
+            if let p = pending(.group(leaf)) { out.append(Line(kind: .pending, name: p, depth: depth, caption: "Group", removable: false, soft: true)) }
+            add(.group(leaf), "Another group", at: depth)
         }
-        func member(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
+        func member(_ p: SplashDraft.Party, _ category: String, stream: String?, under key: String, at depth: Int) {
             let word = SplashDraft.memberWord(category), named = d.member(of: p.id, category)
             let k = key + "/m"
             out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil))
-            if open(k) { groups(at: depth + 1) }
+            if open(k) { groups(at: depth + 1, leaf: SplashDraft.leafKey(p.id, category, stream)) }
         }
         func streams(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
             let active = d.activeStreams(of: p.id, category)
-            guard !active.isEmpty || pending(.stream(p.id, category)) != nil else { member(p, category, under: key, at: depth); return }
+            guard !active.isEmpty || pending(.stream(p.id, category)) != nil else { member(p, category, stream: nil, under: key, at: depth); return }
             for (j, s) in active.enumerated() {
                 let k = key + "/s\(j)"
                 out.append(Line(kind: .stream(p.id, category, j), name: s, depth: depth, caption: "Stream", removable: true, key: k))
-                if open(k) { member(p, category, under: k, at: depth + 1) }
+                if open(k) { member(p, category, stream: s, under: k, at: depth + 1) }
             }
             if let w = pending(.stream(p.id, category)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Stream", removable: false, soft: true)) }
             if !active.isEmpty { add(.stream(p.id, category), "Another stream", at: depth) }
@@ -89,7 +92,7 @@ final class SplashTreeView: NSView {
             if mine.isEmpty {
                 let k = key + "/c"
                 out.append(Line(kind: .placeholder, name: pending(.category(p.id)) ?? "First category", depth: depth, caption: "Category", removable: false, key: k, soft: true))
-                if open(k) { groups(at: depth + 1) }
+                if open(k) { groups(at: depth + 1, leaf: SplashDraft.leafKey(p.id, "", nil)) }
                 return
             }
             for (i, c) in mine.enumerated() {
@@ -222,7 +225,7 @@ final class SplashTreeView: NSView {
                 }
             case .stream(let id, let c, let j): if var list = d.streamsOf[SplashDraft.key(id, c)], list.indices.contains(j) { list[j] = t; d.streamsOf[SplashDraft.key(id, c)] = list }
             case .member(let id, let c): d.members[SplashDraft.key(id, c)] = t
-            case .group(let g): d.groupNames[g] = t
+            case .group(_, let g): d.groupNames[g] = t
             default: break
             }
             self.changed()
@@ -241,7 +244,8 @@ final class SplashTreeView: NSView {
             switch level {
             case .category(let id): offered = SplashDraft.categoryOptions; taken = d.categories(of: id)
             case .stream(let id, let c): offered = SplashDraft.streamOptions; taken = d.streams(of: id, c)
-            default: offered = SplashDraft.groupOptions; taken = d.groups
+            case .group(let leaf): offered = SplashDraft.groupOptions; taken = d.groups(of: leaf)
+            default: offered = []; taken = []
             }
             let m = SplashMenu(items: offered.filter { !taken.contains($0) }, own: "A word of your own") { [weak self] choice in
                 guard let self = self else { return }
@@ -252,10 +256,11 @@ final class SplashTreeView: NSView {
                     d.categoriesOf[id, default: []].append(word); self.changed(); if choice == nil { self.edit(.category(id, d.categories(of: id).count - 1)) }
                 case .stream(let id, let c):
                     let word = choice ?? uniqueName("Stream 2", among: taken)
-                    d.streamsOf[SplashDraft.key(id, c), default: []].append(word); d.oneKind = false; self.changed(); if choice == nil { self.edit(.stream(id, c, d.streams(of: id, c).count - 1)) }
-                default:
+                    d.streamsOf[SplashDraft.key(id, c), default: []].append(word); d.setOneKind(false, id, c); self.changed(); if choice == nil { self.edit(.stream(id, c, d.streams(of: id, c).count - 1)) }
+                case .group(let leaf):
                     let word = choice ?? uniqueName("Group 2", among: taken)
-                    d.groups.append(word); self.changed(); if choice == nil { self.edit(.group(word)) }
+                    d.groupsOf[leaf] = d.groups(of: leaf) + [word]; self.changed(); if choice == nil { self.edit(.group(leaf, word)) }
+                default: break
                 }
             }
             m.frame = NSRect(x: r.minX, y: r.maxY, width: min(220, bounds.width - r.minX - A.gutter), height: m.wanted)
@@ -280,7 +285,7 @@ final class SplashTreeView: NSView {
             case (.party(let i), .party(let j)): return i == j
             case (.category(let a, let i), .category(let b, let j)): return a == b && i == j
             case (.stream(let a, let c, let i), .stream(let b, let e, let j)): return a == b && c == e && i == j
-            case (.group(let g), .group(let h)): return g == h
+            case (.group(let a, let g), .group(let b, let h)): return a == b && g == h
             default: return false
             }
         }
@@ -292,7 +297,7 @@ final class SplashTreeView: NSView {
         case .category(let id, let i): if var list = d.categoriesOf[id], list.indices.contains(i) { list.remove(at: i); d.categoriesOf[id] = list }
         case .stream(let id, let c, let j): if var list = d.streamsOf[SplashDraft.key(id, c)], list.indices.contains(j) { list.remove(at: j); d.streamsOf[SplashDraft.key(id, c)] = list }
         case .member(let id, let c): d.members[SplashDraft.key(id, c)] = nil
-        case .group(let g): if d.groups.count > 1 { d.groups.removeAll { $0 == g } }
+        case .group(let leaf, let g): let mine = d.groups(of: leaf); if mine.count > 1 { d.groupsOf[leaf] = mine.filter { $0 != g } }
         default: break
         }
         changed()

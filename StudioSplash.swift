@@ -6,9 +6,10 @@ import AppKit
 // whole window. Nothing of the app shows but the wordmark, drawn by Logo exactly where the header
 // draws it, column 1 on the header's baseline, so when the splash ends the mark has not moved.
 //
-// The left is the tree (SplashTree.swift), the structure as the answers build it, growing with
-// every choice, in a scroll of its own on columns 1 to 4. The sections travel on one tall surface on
-// the right, columns 8 to 12: Continue moves the surface up one section, pushing the one in view up
+// The lighthouse (Lighthouse.swift) stands on the far left, columns 1 to 4, the whole height of the
+// band, and rises a level as each section locks. The tree (SplashTree.swift), the structure as the
+// answers build it, growing with every choice, is in a scroll of its own on columns 5 to 7. The
+// sections travel on one tall surface on the right, columns 8 to 12 (Rick, 2026-10-09): Continue moves the surface up one section, pushing the one in view up
 // and out of the band's top edge as the next slides up under it and locks. Each section is exactly
 // the band's height and draws on the window's columns and on the beat counted from the band's top,
 // so a locked section leaves every baseline on the grid. Only the surface moves; nothing inside a
@@ -25,8 +26,7 @@ import AppKit
 // page. A question with choices is a row of cells to click, with Custom apart from them for words of
 // your own; what is chosen lists beneath in its order, each with a handle to drag it by. Set builds the
 // collections, their levels and the first member as one change. The splash is never a lock: it
-// opens again from the Schema page. The lighthouse (Lighthouse.swift) stands at the bottom left,
-// under the tree, and rises a level as each section locks.
+// opens again from the Schema page.
 
 final class StudioSplash: NSView {
     typealias A = Design.App
@@ -90,13 +90,15 @@ final class StudioSplash: NSView {
                          words: "Web, print, video: each stream is a level of its own under the category it belongs to, and each category has streams of its own. Choose them in order, or say it is one kind of work and there is no level.",
                          options: SplashDraft.streamOptions, word: "stream",
                          blocks: { d.chains.map { c in SplashBlocks.Block(key: SplashDraft.key(c.party.id, c.category), caption: "Streams For \(c.party.title) \u{00B7} \(c.category)", pending: .stream(c.party.id, c.category),
-                                                                    read: { d.streams(of: c.party.id, c.category) }, write: { d.streamsOf[SplashDraft.key(c.party.id, c.category)] = $0 }) } },
-                         ready: { d.streamsAnswered }, check: ("One kind of work, no stream level", { d.oneKind }, { d.oneKind = $0 })),
+                                                                    read: { d.streams(of: c.party.id, c.category) }, write: { d.streamsOf[SplashDraft.key(c.party.id, c.category)] = $0 },
+                                                                    check: ("One kind of work here, no stream level", { d.isOneKind(c.party.id, c.category) }, { d.setOneKind($0, c.party.id, c.category) })) } },
+                         ready: { d.streamsAnswered }),
             SplashBlocks(index: 5, step: "What Sits Inside", first: "What sits", second: "inside each one?",
-                         words: "The groups of every one you make: the four the app fills itself, and any of the Schema page's own types. Drag them into the order rail1 shows.",
+                         words: "The groups inside the first one of each stream: the four the app fills itself, and any of the Schema page's own types. Each stream may differ. Drag them into the order rail1 shows.",
                          options: SplashDraft.groupOptions, word: "group",
-                         blocks: { [SplashBlocks.Block(key: "groups", caption: "The Groups Inside Each One, In Order", pending: .group, read: { d.groups }, write: { d.groups = $0 })] },
-                         ready: { !d.groups.isEmpty })
+                         blocks: { d.leaves.map { l in SplashBlocks.Block(key: l.key, caption: "Groups Inside \(l.title)", pending: .group(l.key),
+                                                                    read: { d.groups(of: l.key) }, write: { d.groupsOf[l.key] = $0 }) } },
+                         ready: { d.everyLeafGrouped })
         ]
         tree.groupsStep = 5
         for s in sections { s.splash = self; surface.addSubview(s) }
@@ -128,14 +130,15 @@ final class StudioSplash: NSView {
         band.frame = NSRect(x: 0, y: top, width: w, height: h)
         if !moving { surface.frame = NSRect(x: 0, y: -CGFloat(at) * h, width: w, height: h * CGFloat(sections.count)) }
         for (i, s) in sections.enumerated() { s.frame = NSRect(x: 0, y: CGFloat(i) * h, width: w, height: h) }
-        // The tree's scroll takes columns 1 to 4 from the band's top to the buttons' foot.
-        scroll.frame = NSRect(x: 0, y: top, width: A.column(4, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: foot - top)
-        tree.fit()
+        // The lighthouse takes columns 1 to 4 from the band's top to the window's foot, growing up the height of the
+        // app; its picture ends at the area gutter after column 4. The tree's scroll takes columns 5 to 7, from the
+        // band's top to the buttons' foot, its own margin landing on column 5.
         if Self.showLighthouse {
-            let lhH = min(13 * A.unit, max(8 * A.unit, bounds.height - top - 15 * A.unit))
-            lighthouse.frame = NSRect(x: 0, y: bounds.height - lhH, width: A.column(7, in: w) + A.columnWidth(in: w) + A.gutter / 2, height: lhH)
+            lighthouse.frame = NSRect(x: 0, y: top, width: A.column(4, in: w) + A.columnWidth(in: w) + A.extra / 2, height: bounds.height - top)
             lighthouse.headroom = A.unit
         }
+        scroll.frame = NSRect(x: A.column(5, in: w) - A.margin, y: top, width: A.span(5, 7, in: w) + A.margin + A.gutter / 2, height: foot - top)
+        tree.fit()
     }
 
     /// The first thing to type into, once the splash is on screen; and the sea rises.
@@ -288,7 +291,7 @@ class SplashSection: NSView {
     func line(_ k: Int) -> CGFloat { CGFloat(k) * A.unit }
     func col(_ c: Int) -> CGFloat { A.column(c, in: bounds.width) }
     func span(_ a: Int, _ b: Int) -> CGFloat { A.span(a, b, in: bounds.width) }
-    /// The section's words begin at column 8 and run to column 12's end: the tree has columns 1 to 4, the lighthouse the room between (Rick, 2026-10-09).
+    /// The section's words begin at column 8 and run to column 12's end: the lighthouse has columns 1 to 4, the tree 5 to 7 (Rick, 2026-10-09).
     var left: CGFloat { col(8) }
     var width: CGFloat { span(8, 12) }
 
@@ -710,18 +713,19 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
 /// and keeps the field for the next. A `check` is the question's other answer, drawn last on a row of its own; it sets every
 /// block's choices aside without losing them.
 final class SplashBlocks: SplashSection, NSTextFieldDelegate {
-    struct Block { let key: String; let caption: String; let pending: SplashDraft.Pending; let read: () -> [String]; let write: ([String]) -> Void }
     typealias Check = (title: String, read: () -> Bool, write: (Bool) -> Void)
+    /// One block: a question asked for one answer to the one before. Its check, when it has one, sets its own list aside.
+    struct Block { let key: String; let caption: String; let pending: SplashDraft.Pending; let read: () -> [String]; let write: ([String]) -> Void; var check: Check? = nil }
     private let step: String, first: String, second: String, words: String, options: [String], word: String
-    private let blocks: () -> [Block], ready: () -> Bool, check: Check?
+    private let blocks: () -> [Block], ready: () -> Bool
     private let custom = SplashSection.field("Type one and press Return")
     /// The key of the block whose Custom field is open.
     private var customFor: String?
     private var handles: [(rect: NSRect, key: String)] = []
 
     init(index: Int, step: String, first: String, second: String, words: String, options: [String], word: String,
-         blocks: @escaping () -> [Block], ready: @escaping () -> Bool, check: Check? = nil) {
-        (self.step, self.first, self.second, self.words, self.options, self.word, self.blocks, self.ready, self.check) = (step, first, second, words, options, word, blocks, ready, check)
+         blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
+        (self.step, self.first, self.second, self.words, self.options, self.word, self.blocks, self.ready) = (step, first, second, words, options, word, blocks, ready)
         super.init(index: index)
         custom.delegate = self
         custom.isHidden = true
@@ -732,8 +736,8 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
     private var typed: String { custom.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var splashDraft: SplashDraft? { splash?.draftForSections }
 
-    private struct Placed { let block: Block; let captionRow: Int; let cells: [Cell]; let customRow: Int?; let listStart: Int; let listCount: Int }
-    private struct Metrics { let placed: [Placed]; let checkRow: Int? }
+    private struct Placed { let block: Block; let captionRow: Int; let cells: [Cell]; let customRow: Int?; let listStart: Int; let listCount: Int; let checkRow: Int? }
+    private struct Metrics { let placed: [Placed] }
     private func metrics() -> Metrics {
         var k = 11, placed: [Placed] = []
         for b in blocks() {
@@ -743,10 +747,15 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
             var customRow: Int?
             if customFor == b.key { customRow = k + 1; k += 4 }
             let count = b.read().count
-            placed.append(Placed(block: b, captionRow: captionRow, cells: cells, customRow: customRow, listStart: k, listCount: count))
-            k += count + 1
+            let listStart = k
+            k += count
+            // The block's check, on the row after its list, before the next block begins.
+            var checkRow: Int?
+            if b.check != nil { checkRow = k; k += 1 }
+            placed.append(Placed(block: b, captionRow: captionRow, cells: cells, customRow: customRow, listStart: listStart, listCount: count, checkRow: checkRow))
+            k += 1
         }
-        return Metrics(placed: placed, checkRow: check != nil ? k + 1 : nil)
+        return Metrics(placed: placed)
     }
     override func layout() {
         super.layout()
@@ -757,10 +766,10 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
         super.draw(dirtyRect)
         drawQuestion(step: step, first: first, second: second)
         drawWords(words)
-        let m = metrics(), aside = check?.read() ?? false
+        let m = metrics()
         handles = []
         for p in m.placed {
-            let b = p.block, chosen = b.read()
+            let b = p.block, chosen = b.read(), aside = b.check?.read() ?? false
             Design.attributed(b.caption, .caption, colour: Design.quiet).draw(x: left, baseline: row(p.captionRow))
             drawStrip(p.cells, on: { $0 == "Custom" ? customFor == b.key : chosen.contains($0) }) { [weak self] s in self?.pick(s, in: b) }
             if let k = p.customRow {
@@ -771,9 +780,9 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
             for (i, name) in chosen.enumerated() {
                 handles.append((drawListRow(name, muted: aside, row: p.listStart + i, x: left, width: width) { [weak self] in self?.remove(i, from: b) }, b.key))
             }
-        }
-        if let c = check, let k = m.checkRow {
-            drawCheck(c.title, on: aside, x: left, baseline: row(k)) { [weak self] in c.write(!c.read()); self?.refresh() }
+            if let c = b.check, let k = p.checkRow {
+                drawCheck(c.title, on: aside, x: left, baseline: row(k)) { [weak self] in c.write(!c.read()); self?.refresh() }
+            }
         }
     }
 
@@ -785,7 +794,7 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
         var chosen = b.read()
         if let i = chosen.firstIndex(of: s) { chosen.remove(at: i) } else { chosen.append(s) }
         b.write(chosen)
-        if !chosen.isEmpty { check?.write(false) }
+        if !chosen.isEmpty { b.check?.write(false) }   // a stream picked is a stream level: the block is no longer one kind
         refresh()
     }
     private func remove(_ i: Int, from b: Block) {
@@ -800,7 +809,7 @@ final class SplashBlocks: SplashSection, NSTextFieldDelegate {
         var chosen = b.read()
         if !chosen.contains(w) { chosen.append(w) }
         b.write(chosen)
-        check?.write(false)
+        b.check?.write(false)
         custom.stringValue = ""
         splashDraft?.pending = nil
         refresh()

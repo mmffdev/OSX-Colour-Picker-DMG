@@ -30,8 +30,8 @@ final class SplashDraft {
         /// How the party is called on a block's caption.
         var title: String { isOwnWork ? SplashDraft.ownWork : name }
     }
-    /// A word being typed, shown on the tree before it is taken: for a type's next name, a party's category, a category's stream or member, a group.
-    enum Pending: Equatable { case party(String), category(UUID), stream(UUID, String), member(UUID, String), group }
+    /// A word being typed, shown on the tree before it is taken: for a type's next name, a party's category, a category's stream or member, a leaf's group.
+    enum Pending: Equatable { case party(String), category(UUID), stream(UUID, String), member(UUID, String), group(String) }
 
     /// The catalogue's name as typed on the first section; nil keeps the name it has. Set renames it, nothing before.
     var catalogueName: String?
@@ -41,10 +41,28 @@ final class SplashDraft {
     var categoriesOf: [UUID: [String]] = [:]
     /// Each category's streams, by party and category, in order; a level under the category unless `oneKind` sets them aside.
     var streamsOf: [String: [String]] = [:]
-    /// One kind of work: the streams are kept but make no level, so unticking brings them back.
-    var oneKind = false
-    /// The groups inside each member, by type, in the Master Template's order.
-    var groups: [String] = groupStart
+    /// The categories that are one kind of work, by party and category: their streams are kept but make no level, so unticking
+    /// brings them back. Each category answers for itself (Rick, 2026-10-09): a Campaign may be one kind while Projects has streams.
+    var oneKindOf: Set<String> = []
+    /// One kind of work for every category at once: what the old single switch did, kept for the self-test and the tree.
+    var oneKind: Bool {
+        get { !chains.isEmpty && chains.allSatisfy { oneKindOf.contains(Self.key($0.party.id, $0.category)) } }
+        set { oneKindOf = newValue ? Set(chains.map { Self.key($0.party.id, $0.category) }) : [] }
+    }
+    func isOneKind(_ party: UUID, _ category: String) -> Bool { oneKindOf.contains(Self.key(party, category)) }
+    func setOneKind(_ on: Bool, _ party: UUID, _ category: String) { if on { oneKindOf.insert(Self.key(party, category)) } else { oneKindOf.remove(Self.key(party, category)) } }
+    /// The groups inside each member, by the leaf they sit under (a stream, or the category when it has no stream level), in order.
+    /// A leaf not yet answered has the four the app fills itself. The model is progressive: every layer the user adds is one more
+    /// parent the layer below is asked for, and each may differ (Rick, 2026-10-09).
+    var groupsOf: [String: [String]] = [:]
+    /// The groups of every leaf at once: what the old single list did, kept for the self-test and the tree's start.
+    var groups: [String] {
+        get { leaves.first.map { groups(of: $0.key) } ?? groupsEverywhere }
+        set { groupsOf = [:]; groupsEverywhere = newValue }
+    }
+    /// What a leaf not yet answered starts with.
+    private var groupsEverywhere: [String] = groupStart
+    func groups(of leaf: String) -> [String] { groupsOf[leaf] ?? groupsEverywhere }
     /// Each category's first member, by party and category.
     var members: [String: String] = [:]
     /// The collections' names, where the tree renamed one, by type.
@@ -54,6 +72,24 @@ final class SplashDraft {
     var pending: (level: Pending, text: String)?
 
     static func key(_ party: UUID, _ category: String) -> String { party.uuidString + "/" + category }
+    /// The key of a leaf: the category's, with the stream after it when there is one.
+    static func leafKey(_ party: UUID, _ category: String, _ stream: String?) -> String { key(party, category) + (stream.map { "/" + $0 } ?? "") }
+
+    /// One place a member sits in: a party's category, and the stream under it when the category has a stream level.
+    struct Leaf: Equatable {
+        let party: Party, category: String, stream: String?
+        var key: String { SplashDraft.leafKey(party.id, category, stream) }
+        /// How the leaf is called on a block's caption: "Acme · Projects · Web".
+        var title: String { ([party.title, category] + (stream.map { [$0] } ?? [])).joined(separator: " \u{00B7} ") }
+    }
+    /// Every leaf, in order: the blocks the last question is asked in, one per stream, or one per category with no stream level.
+    var leaves: [Leaf] {
+        chains.flatMap { c -> [Leaf] in
+            let active = activeStreams(of: c.party.id, c.category)
+            return active.isEmpty ? [Leaf(party: c.party, category: c.category, stream: nil)] : active.map { Leaf(party: c.party, category: c.category, stream: $0) }
+        }
+    }
+    var everyLeafGrouped: Bool { !leaves.isEmpty && leaves.allSatisfy { !groups(of: $0.key).isEmpty } }
 
     /// The collections, in the order their types were picked; a type stays while it waits for its first name.
     var types: [String] = []
@@ -61,14 +97,15 @@ final class SplashDraft {
     func names(of type: String) -> [String] { parties(of: type).filter { !$0.isOwnWork }.map { $0.name } }
     func categories(of party: UUID) -> [String] { categoriesOf[party] ?? [] }
     func streams(of party: UUID, _ category: String) -> [String] { streamsOf[Self.key(party, category)] ?? [] }
-    func activeStreams(of party: UUID, _ category: String) -> [String] { oneKind ? [] : streams(of: party, category) }
+    func activeStreams(of party: UUID, _ category: String) -> [String] { isOneKind(party, category) ? [] : streams(of: party, category) }
     func member(of party: UUID, _ category: String) -> String? { members[Self.key(party, category)].flatMap { $0.isEmpty ? nil : $0 } }
     /// Every party and category, in order: the blocks a later question is asked in.
     var chains: [(party: Party, category: String)] { parties.flatMap { p in categories(of: p.id).map { (p, $0) } } }
     var everyoneCategorised: Bool { !parties.isEmpty && parties.allSatisfy { !categories(of: $0.id).isEmpty } }
     var anyoneNamed: Bool { chains.contains { member(of: $0.party.id, $0.category) != nil } }
-    var anyStreams: Bool { !oneKind && chains.contains { !streams(of: $0.party.id, $0.category).isEmpty } }
-    var streamsAnswered: Bool { oneKind || chains.contains { !streams(of: $0.party.id, $0.category).isEmpty } }
+    var anyStreams: Bool { chains.contains { !activeStreams(of: $0.party.id, $0.category).isEmpty } }
+    /// Every category has said: streams of its own, or one kind of work.
+    var streamsAnswered: Bool { !chains.isEmpty && chains.allSatisfy { isOneKind($0.party.id, $0.category) || !streams(of: $0.party.id, $0.category).isEmpty } }
     /// "Client" from "Clients", "Product" from "Products": the singular a level or a member is called by.
     static func singular(_ word: String) -> String {
         let w = word.trimmingCharacters(in: .whitespaces)
@@ -87,14 +124,20 @@ final class SplashDraft {
     func levelNames(for type: String) -> [String] {
         let mine = parties(of: type)
         let categorised = mine.contains { !categories(of: $0.id).isEmpty }
-        let streamed = !oneKind && mine.contains { p in categories(of: p.id).contains { !streams(of: p.id, $0).isEmpty } }
+        let streamed = mine.contains { p in categories(of: p.id).contains { !activeStreams(of: p.id, $0).isEmpty } }
         return (type == Self.ownWork ? [] : [Self.singular(type)]) + (categorised ? ["Category"] : []) + (streamed ? ["Stream"] : [])
     }
     /// The app's own group of that type, if it is one; a custom group has none and is a folder of files under its name.
     static func role(of group: String) -> SchemaRole? { SchemaRole.allCases.first { $0.title == group } }
-    /// The Master Template for a type: the member, holding the groups chosen, each typed and under its name on the tree.
+    /// A member's tree from a list of groups, each typed and under its name on the tree.
+    func stack(named name: String, groups list: [String]) -> SchemaNode {
+        SchemaNode(name: name, children: list.map { SchemaNode(name: groupNames[$0] ?? $0, role: Self.role(of: $0), kind: $0) })
+    }
+    /// The Master Template for a type: the member, holding the groups of the type's first leaf; a leaf whose groups differ gives
+    /// its first member a tree of its own.
     func template(for type: String) -> SchemaNode {
-        SchemaNode(name: memberWord(for: type), children: groups.map { SchemaNode(name: groupNames[$0] ?? $0, role: Self.role(of: $0), kind: $0) })
+        let first = leaves.first { $0.party.type == type }.map { groups(of: $0.key) } ?? groups
+        return stack(named: memberWord(for: type), groups: first)
     }
 
     /// Builds the structure into a schema and a library: a collection for every type, a folder for every one named in it, that
@@ -104,25 +147,26 @@ final class SplashDraft {
     func build(into schema: inout SchemaTrial.SchemaFile, library lib: inout Library, at date: Date = Date()) -> (collections: [UUID], members: [UUID]) {
         var made: [UUID] = [], ids: [UUID] = []
         for type in types {
-            var collection = SchemaCollection(name: collectionTitle(type), stack: template(for: type))
+            let template = self.template(for: type)
+            var collection = SchemaCollection(name: collectionTitle(type), stack: template)
             let levels = levelNames(for: type)
             collection.folderName = levels.first
             collection.levelNames = levels.count > 1 ? levels : nil
             var folders: [SchemaFolder] = []
-            var places: [(name: String, folder: UUID?)] = []
+            var places: [(name: String, folder: UUID?, groups: [String])] = []
             for p in parties(of: type) {
                 var top: UUID?
                 if !p.isOwnWork { let f = SchemaFolder(name: p.name); folders.append(f); top = f.id }
                 for category in categories(of: p.id) {
                     let cf = SchemaFolder(name: category, parent: top)
                     folders.append(cf)
-                    var deepest = cf.id
+                    var deepest = cf.id, leaf = Self.leafKey(p.id, category, nil)
                     for (s, stream) in activeStreams(of: p.id, category).enumerated() {
                         let sf = SchemaFolder(name: stream, parent: cf.id)
                         folders.append(sf)
-                        if s == 0 { deepest = sf.id }
+                        if s == 0 { deepest = sf.id; leaf = Self.leafKey(p.id, category, stream) }
                     }
-                    if let name = member(of: p.id, category) { places.append((name, deepest)) }
+                    if let name = member(of: p.id, category) { places.append((name, deepest, groups(of: leaf))) }
                 }
             }
             collection.folders = folders
@@ -131,6 +175,11 @@ final class SplashDraft {
             for place in places {
                 let id = lib.createProject(named: place.name, at: date)
                 schema.places[id.uuidString] = SchemaPlace(collection: collection.id, folder: place.folder)
+                // A first member whose leaf chose groups of its own, apart from the collection's template, keeps its own tree.
+                if place.groups != template.children.map({ $0.kind ?? $0.name }) {
+                    schema.stacks = schema.stacks ?? [:]
+                    schema.stacks?[id.uuidString] = stack(named: template.name, groups: place.groups)
+                }
                 made.append(id)
             }
         }
