@@ -70,7 +70,8 @@ final class StudioWindowController: NSWindowController {
         library.window = c.window   // errors and prompts come up on this window
         // The splash that sets up the work (TH-299): over the whole window when the catalogue has no structure yet, or when --splash asks; --no-splash keeps it away.
         // While the splash is being designed, the loop keeps the app in it: every launch opens on it, and Set starts it again instead of
-        // building anything. --splash-loop for one run, or `defaults write com.mmffdev.mmffdevcolour3 splashLoop -bool YES` until it is deleted.
+        // building anything. --splash-loop for one run, or `defaults write ~/Library/Preferences/com.mmffdev.mmffdevcolour3 splashLoop -bool YES` until it is deleted
+        // (by path: the Store edition's container answers to the bare domain once it has run).
         if args.contains("--splash") || StudioSplash.looping || (SchemaTrial.collections.isEmpty && !args.contains("--no-splash") && !args.contains("--snap")) { c.frame.showSplash() }
         // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
         if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
