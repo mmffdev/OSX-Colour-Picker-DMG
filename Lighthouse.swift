@@ -316,10 +316,11 @@ final class LighthouseView: NSView {
         for i in 0..<4 { drawSection(i, progress[i + 1]) }
         drawGallery(progress[5], lamp: progress[6])
         if lit, let lc = lampCentre, !reduceMotion {
-            // The beam sweeping once round in eight seconds, each end stopping short of the picture's edge so its fade is complete.
+            // The beam sweeping once round in eight seconds: it turns in the ground plane, so from this low camera it lies almost flat,
+            // and each end stops short of the picture's edge so its fade is complete.
             let ang = CGFloat(now - beamStart) / 8 * 2 * .pi
             for a in [ang, ang + .pi] {
-                let dx = cos(a), dy = sin(a) * 0.5
+                let dx = cos(a), dy = sin(a) * 0.2
                 var len = 6 * s
                 if dx > 0 { len = min(len, (bounds.width - margin - lc.x) / dx) } else if dx < 0 { len = min(len, (margin - lc.x) / dx) }
                 if dy > 0 { len = min(len, (bounds.height - margin - lc.y) / dy) } else if dy < 0 { len = min(len, (margin - lc.y) / dy) }
