@@ -75,28 +75,30 @@ final class StudioSplash: NSView {
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         addSubview(scroll)
-        tree.onChange = { [weak self] in self?.settleButtons() }
+        tree.onChange = { [weak self] in guard let s = self else { return }; s.settleButtons(); s.tree.marks = s.sections[s.at].marks }
         sections = [
             SplashName(index: 0, library: library, draft: d),
-            SplashWho(index: 1, draft: d),
+            SplashBlocks(index: 1, step: "Who It Is For", first: "Who is the", second: "work for?",
+                         words: "Each type you pick is a collection, with a level inside for every one you name: clients, brands, agencies. Our own work is a collection with no such level. Add another collection for the next.",
+                         pane: SplashWho(index: 1, draft: d)),
             SplashBlocks(index: 2, step: "Categories", first: "How do you", second: "categorise work?",
                          words: "Products, projects, ranges, jobs, campaigns: the categories each one's work falls into, a level under them holding the things you make. Pick for each one you named.",
                          options: SplashDraft.categoryOptions, word: "category",
-                         blocks: { d.parties.map { p in SplashBlocks.Block(key: p.id.uuidString, caption: "Categories For \(p.title)", pending: .category(p.id),
+                         blocks: { d.parties.map { p in SplashBlocks.Block(key: p.id.uuidString, caption: "Categories For \(p.title)", pending: .category(p.id), target: .party(p.id),
                                                                       read: { d.categories(of: p.id) }, write: { d.categoriesOf[p.id] = $0 }) } },
                          ready: { d.everyoneCategorised }),
             SplashNames(index: 3, draft: d),
             SplashBlocks(index: 4, step: "Streams", first: "More than one", second: "stream of work?",
                          words: "Web, print, video: each stream is a level of its own under the category it belongs to, and each category has streams of its own. Choose them in order, or say it is one kind of work and there is no level.",
                          options: SplashDraft.streamOptions, word: "stream",
-                         blocks: { d.chains.map { c in SplashBlocks.Block(key: SplashDraft.key(c.party.id, c.category), caption: "Streams For \(c.party.title) \u{00B7} \(c.category)", pending: .stream(c.party.id, c.category),
+                         blocks: { d.chains.map { c in SplashBlocks.Block(key: SplashDraft.key(c.party.id, c.category), caption: "Streams For \(c.party.title) \u{00B7} \(c.category)", pending: .stream(c.party.id, c.category), target: .category(c.party.id, c.category),
                                                                     read: { d.streams(of: c.party.id, c.category) }, write: { d.streamsOf[SplashDraft.key(c.party.id, c.category)] = $0 },
                                                                     check: ("One kind of work here, no stream level", { d.isOneKind(c.party.id, c.category) }, { d.setOneKind($0, c.party.id, c.category) })) } },
                          ready: { d.streamsAnswered }),
             SplashBlocks(index: 5, step: "What Sits Inside", first: "What sits", second: "inside each one?",
                          words: "The groups inside the first one of each stream: the four the app fills itself, and any of the Schema page's own types. Each stream may differ. Drag them into the order rail1 shows.",
                          options: SplashDraft.groupOptions, word: "group",
-                         blocks: { d.leaves.map { l in SplashBlocks.Block(key: l.key, caption: "Groups Inside \(l.title)", pending: .group(l.key),
+                         blocks: { d.leaves.map { l in SplashBlocks.Block(key: l.key, caption: "Groups Inside \(l.title)", pending: .group(l.key), target: .leaf(l.key),
                                                                     read: { d.groups(of: l.key) }, write: { d.groupsOf[l.key] = $0 }) } },
                          ready: { d.everyLeafGrouped })
         ]
@@ -145,16 +147,19 @@ final class StudioSplash: NSView {
     func begin() {
         window?.makeFirstResponder(sections.first?.firstField ?? self)
         settleButtons()
-        // --splash-filled, for the design loop: every answer given, with three streams of many groups, opened at the last section.
-        if CommandLine.arguments.contains("--splash-filled") {
-            let party = SplashDraft.Party(type: "Clients", name: "Alpha")
-            draft.types = ["Clients"]; draft.parties = [party]
-            draft.categoriesOf[party.id] = ["Projects"]
-            let key = SplashDraft.key(party.id, "Projects")
+        tree.marks = sections[at].marks
+        // --splash-filled [n], for the design loop: every answer given, two collections, three streams of many groups, opened at section n (the last).
+        if let i = CommandLine.arguments.firstIndex(of: "--splash-filled") {
+            let step = CommandLine.arguments.indices.contains(i + 1) ? Int(CommandLine.arguments[i + 1]) ?? 5 : 5
+            let alpha = SplashDraft.Party(type: "Clients", name: "Alpha"), beta = SplashDraft.Party(type: "Customers", name: "Beta")
+            draft.types = ["Clients", "Customers"]; draft.parties = [alpha, beta]
+            draft.categoriesOf[alpha.id] = ["Projects"]; draft.categoriesOf[beta.id] = ["Products"]
+            let key = SplashDraft.key(alpha.id, "Projects")
             draft.streamsOf[key] = ["Design", "Print", "Web"]
             draft.members[key] = "First"
-            for stream in ["Design", "Print", "Web"] { draft.groupsOf[SplashDraft.leafKey(party.id, "Projects", stream)] = Array(SplashDraft.groupOptions.prefix(stream == "Web" ? 3 : 9)) }
-            DispatchQueue.main.async { [weak self] in self?.go(to: 5) }
+            for stream in ["Design", "Print", "Web"] { draft.groupsOf[SplashDraft.leafKey(alpha.id, "Projects", stream)] = Array(SplashDraft.groupOptions.prefix(stream == "Web" ? 3 : 9)) }
+            draft.groupsOf[SplashDraft.leafKey(beta.id, "Products", nil)] = Array(SplashDraft.groupOptions.prefix(4))
+            DispatchQueue.main.async { [weak self] in self?.go(to: step) }
         }
         if Self.showLighthouse {
             // --lighthouse-up raises the whole tower at once, for framing the picture while it is designed.
@@ -173,6 +178,7 @@ final class StudioSplash: NSView {
     /// An answer changed: the buttons settle and the tree on the left follows.
     func changed() {
         settleButtons()
+        tree.marks = sections[at].marks
         tree.fit()
     }
     @objc private func backPressed() { go(to: at - 1) }
@@ -282,6 +288,11 @@ class SplashSection: NSView {
     func arrive() { needsDisplay = true }
     /// What a click does, by where it lands, rebuilt on every draw.
     var hits: [(NSRect, () -> Void)] = []
+    /// The nodes the section is working on, each with its colour: the tree bands them while the section is in view.
+    var marks: [SplashTreeView.Target: Int] { [:] }
+    /// The square of a block's colour before its cells, the cells' own height; the cells begin a gutter after it.
+    static let swatch: CGFloat = 22
+    func drawSwatch(_ colour: Int, x: CGFloat, baseline b: CGFloat) { fill(NSRect(x: x, y: b - 16, width: Self.swatch, height: Self.swatch), SplashTreeView.colour(colour)) }
     /// Where the pointer is, so a cell under it can reverse.
     private var hover: NSPoint?
     private var tracking: NSTrackingArea?
@@ -342,7 +353,7 @@ class SplashSection: NSView {
         return (out, r + 1)
     }
     /// Draws the cells: capitals in one ink outline per run, the chosen filled ink, the one under the pointer reversed too.
-    func drawStrip(_ cells: [Cell], on: (String) -> Bool, pick: @escaping (String) -> Void) {
+    func drawStrip(_ cells: [Cell], on: (String) -> Bool, dim: (String) -> Bool = { _ in false }, pick: @escaping (String) -> Void) {
         let capHeight = Design.Text.label.size * 0.714
         var i = 0
         while i < cells.count {
@@ -351,9 +362,10 @@ class SplashSection: NSView {
             while !cells[j].apart, j + 1 < cells.count, !cells[j + 1].apart, cells[j + 1].rect.minX == cells[j].rect.maxX, cells[j + 1].rect.minY == cells[j].rect.minY { j += 1 }
             let run = cells[i...j]
             for c in run {
-                let lit = on(c.word) || hovered(c.rect)
+                // A cell taken elsewhere is dimmed and takes no click.
+                let taken = dim(c.word), lit = !taken && (on(c.word) || hovered(c.rect))
                 if lit { fill(c.rect, Design.ink) }
-                let ink = lit ? Design.card : Design.ink, words = (c.rect.minY + c.rect.height / 2 + capHeight / 2).rounded()
+                let ink = lit ? Design.card : taken ? Design.rule : Design.ink, words = (c.rect.minY + c.rect.height / 2 + capHeight / 2).rounded()
                 var tx = c.rect.minX + 12
                 if c.plus {
                     fill(NSRect(x: tx, y: c.rect.midY - 0.5, width: 9, height: 1), ink)
@@ -361,7 +373,7 @@ class SplashSection: NSView {
                     tx += 14
                 }
                 Design.attributed(c.word, .label, colour: ink).draw(x: tx, baseline: words)
-                hits.append((c.rect, { pick(c.word) }))
+                if !taken { hits.append((c.rect, { pick(c.word) })) }
             }
             let box = NSRect(x: run.first!.rect.minX, y: run.first!.rect.minY, width: run.last!.rect.maxX - run.first!.rect.minX, height: run.first!.rect.height)
             Design.ink.setStroke()
@@ -495,6 +507,7 @@ final class SplashName: SplashSection, NSTextFieldDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var firstField: NSView? { field }
+    override var marks: [SplashTreeView.Target: Int] { [.catalogue: 0] }
     private var typed: String { field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     override var canContinue: Bool { !typed.isEmpty }
 
@@ -526,11 +539,15 @@ final class SplashName: SplashSection, NSTextFieldDelegate {
 /// of names without picking it again. Our Own Work, apart from the types, is a collection with no name to give. Custom, apart as
 /// well, takes a type of your own, which heads the list the moment it is taken. The names drag within their collection and go with
 /// their cross; a collection's cross takes it and every name in it.
-final class SplashWho: SplashSection, NSTextFieldDelegate {
+final class SplashWho: SplashPane, NSTextFieldDelegate {
     private let draft: SplashDraft
     private let typeField = SplashSection.field("A type of your own: Agencies, Partners")
     private var nameFields: [String: NSTextField] = [:]
-    private var customOpen = false
+    /// The collections in order, a slot each, with the type picked for it or nothing yet; a slot's colour is its place. Set from
+    /// the draft's types on arrival, so the tree's edits are seen; a last slot with nothing picked is the one being chosen.
+    private var slots: [String?] = [nil]
+    /// The slot whose Custom field is open.
+    private var customFor: Int?
     private var handles: [(rect: NSRect, party: Int)] = []
     private static let indent: CGFloat = 22
 
@@ -543,7 +560,19 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var canContinue: Bool { !draft.parties.isEmpty }
-    override var firstField: NSView? { customOpen ? typeField : draft.types.last.flatMap { nameFields[$0] } }
+    override var firstField: NSView? { customFor != nil ? typeField : slots.compactMap { $0 }.last.flatMap { nameFields[$0] } }
+    override var marks: [SplashTreeView.Target: Int] {
+        var m: [SplashTreeView.Target: Int] = [:]
+        for (i, t) in slots.enumerated() { if let t = t { m[.collection(t)] = i } }
+        return m
+    }
+    /// The slots follow the draft's types: one each, in the draft's order, and one more to choose when every slot is taken.
+    override func arrive() {
+        let types = draft.types
+        if slots.compactMap({ $0 }) != types { slots = types.map { $0 }; if slots.isEmpty { slots = [nil] } }
+        super.arrive()
+        needsLayout = true
+    }
     private func typed(_ f: NSTextField) -> String { f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private func nameField(for type: String) -> NSTextField {
         if let f = nameFields[type] { return f }
@@ -554,114 +583,144 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
         return f
     }
 
-    /// The list, collection by collection: a heading, its names, and the field for the next name.
-    private enum Row { case header(String), party(Int), field(String) }
-    private func rows() -> [Row] {
-        var out: [Row] = []
-        for t in draft.types {
-            out.append(.header(t))
-            if t == SplashDraft.ownWork { continue }
-            for (i, p) in draft.parties.enumerated() where p.type == t { out.append(.party(i)) }
-            out.append(.field(t))
-        }
-        return out
-    }
-    private struct Metrics { let cells: [Cell]; let typeRow: Int?; let captionRow: Int?; let rows: [(Row, Int)] }
+    /// One slot laid out: its cells on their rows, then, once a type is picked, the collection's heading, its names and the field for the next.
+    private struct Placed { let slot: Int; let type: String?; let cells: [Cell]; let stripRow: Int; let typeRow: Int?; let headerRow: Int?; let parties: [(Int, Int)]; let captionRow: Int?; let fieldRow: Int? }
+    private struct Metrics { let placed: [Placed]; let addRow: Int?; let rows: Int }
+    override var height: CGFloat { line(metrics().rows) }
     private func metrics() -> Metrics {
-        let (cells, stripRows) = self.cells(SplashDraft.whoOptions, apart: [(SplashDraft.ownWork, false), ("Custom", true)], x: left, width: width, baseline: row(11))
-        var k = 11 + stripRows
-        var typeRow: Int?
-        if customOpen { typeRow = k + 1; k += 4 }
-        let list = rows()
-        var captionRow: Int?
-        var placed: [(Row, Int)] = []
-        if !list.isEmpty {
-            k += 1
-            captionRow = k; k += 1
-            for r in list {
-                placed.append((r, k))
-                if case .field = r { k += 3 } else { k += 1 }
+        var k = 0, placed: [Placed] = []
+        let stripX = left + Self.swatch + A.gutter, stripWidth = width - Self.swatch - A.gutter
+        for (i, t) in slots.enumerated() {
+            let stripRow = k
+            let (cells, rows) = self.cells(SplashDraft.whoOptions, apart: [(SplashDraft.ownWork, false), ("Custom", true)], x: stripX, width: stripWidth, baseline: row(k))
+            k += rows
+            var typeRow: Int?
+            if customFor == i { typeRow = k + 1; k += 4 }
+            var headerRow: Int?, parties: [(Int, Int)] = [], captionRow: Int?, fieldRow: Int?
+            if let t = t {
+                headerRow = k; k += 1
+                if t != SplashDraft.ownWork {
+                    for (j, p) in draft.parties.enumerated() where p.type == t { parties.append((j, k)); k += 1 }
+                    captionRow = k; fieldRow = k + 1; k += 2
+                }
             }
+            placed.append(Placed(slot: i, type: t, cells: cells, stripRow: stripRow, typeRow: typeRow, headerRow: headerRow, parties: parties, captionRow: captionRow, fieldRow: fieldRow))
+            k += 1
         }
-        return Metrics(cells: cells, typeRow: typeRow, captionRow: captionRow, rows: placed)
+        // Another collection may be begun once every slot has its type.
+        var addRow: Int?
+        if slots.allSatisfy({ $0 != nil }) { addRow = k; k += 1 }
+        return Metrics(placed: placed, addRow: addRow, rows: k)
     }
     override func layout() {
         super.layout()
         let m = metrics()
-        typeField.isHidden = m.typeRow == nil
-        if let k = m.typeRow { place(typeField, row: k + 1, marks: true) }
+        typeField.isHidden = true
         for f in nameFields.values { f.isHidden = true }
-        for (r, k) in m.rows {
-            guard case .field(let t) = r else { continue }
+        for p in m.placed {
+            if let k = p.typeRow { typeField.isHidden = false; place(typeField, row: k + 1, marks: true) }
+            guard let t = p.type, let k = p.fieldRow else { continue }
             let f = nameField(for: t)
             f.isHidden = false
             let one = SplashDraft.singular(t)
             f.placeholderAttributedString = NSAttributedString(string: draft.names(of: t).isEmpty ? "Name of the first \(one.lowercased())" : "Add the next \(one.lowercased())",
                                                                attributes: [.font: Design.font(17, .regular), .foregroundColor: Design.soft])
-            place(f, row: k + 1, marks: true, indent: Self.indent)
+            place(f, row: k, marks: true, indent: Self.indent)
         }
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        drawQuestion(step: "Who It Is For", first: "Who is the", second: "work for?")
-        drawWords("Each type you pick is a collection, with a level inside for every one you name: clients, brands, agencies. Our own work is a collection with no such level. Pick again to add more.")
         let m = metrics()
-        drawStrip(m.cells, on: { [weak self] w in self?.isOn(w) ?? false }) { [weak self] s in self?.pick(s) }
-        if let k = m.typeRow {
-            Design.attributed("Custom Type", .caption, colour: Design.quiet).draw(x: left, baseline: row(k))
-            hairline(row: k + 1, live: typeField.currentEditor() != nil)
-            drawMarks(row: k + 1, accept: { [weak self] in self?.takeType() }, cancel: { [weak self] in self?.customOpen = false; self?.typeField.stringValue = ""; self?.refresh() })
-        }
-        if let k = m.captionRow { Design.attributed("Your Collections, In Order, And Who Is In Each", .caption, colour: Design.quiet).draw(x: left, baseline: row(k)) }
         handles = []
-        for (r, k) in m.rows {
-            switch r {
-            case .header(let t):
-                Design.attributed(draft.collectionTitle(t), .bodyStrong).draw(x: left, baseline: row(k), width: width - 160)
-                Design.attributed("Collection", .caption, colour: Design.soft).draw(x: left + width - 110, baseline: row(k))
-                let mark = NSRect(x: left + width - 24, y: line(k), width: 24, height: A.unit)
-                Design.attributed("\u{00D7}", .body, colour: Design.quiet).draw(x: mark.minX + 8, baseline: row(k))
-                hits.append((mark, { [weak self] in self?.removeType(t) }))
-            case .party(let i):
-                let h = drawListRow(draft.parties[i].name, row: k, x: left + Self.indent, width: width - Self.indent) { [weak self] in self?.remove(i) }
-                handles.append((h, i))
-            case .field(let t):
-                let one = SplashDraft.singular(t)
-                Design.attributed(draft.names(of: t).isEmpty ? "First \(one)" : "Next \(one)", .caption, colour: Design.quiet).draw(x: left + Self.indent, baseline: row(k))
-                hairline(row: k + 1, live: nameFields[t]?.currentEditor() != nil, indent: Self.indent)
-                drawMarks(row: k + 1, accept: { [weak self] in self?.take(t) }, cancel: { [weak self] in self?.nameFields[t]?.stringValue = ""; self?.draft.pending = nil; self?.refresh() })
+        for p in m.placed {
+            let i = p.slot
+            drawSwatch(i, x: left, baseline: row(p.stripRow))
+            // The slot's own type is lit; a type another slot has is dimmed; Custom is lit while its field is open here.
+            drawStrip(p.cells, on: { w in w == "Custom" ? self.customFor == i : p.type == w },
+                      dim: { w in w != "Custom" && w != p.type && self.slots.contains(w) }) { [weak self] w in self?.pick(w, for: i) }
+            if let k = p.typeRow {
+                Design.attributed("Custom Type", .caption, colour: Design.quiet).draw(x: left, baseline: row(k))
+                hairline(row: k + 1, live: typeField.currentEditor() != nil)
+                drawMarks(row: k + 1, accept: { [weak self] in self?.takeType(for: i) }, cancel: { [weak self] in self?.customFor = nil; self?.typeField.stringValue = ""; self?.refresh() })
             }
+            guard let t = p.type, let h = p.headerRow else { continue }
+            Design.attributed(draft.collectionTitle(t), .bodyStrong).draw(x: left, baseline: row(h), width: width - 160)
+            Design.attributed("Collection", .caption, colour: Design.soft).draw(x: left + width - 110, baseline: row(h))
+            let mark = NSRect(x: left + width - 24, y: line(h), width: 24, height: A.unit)
+            Design.attributed("\u{00D7}", .body, colour: Design.quiet).draw(x: mark.minX + 8, baseline: row(h))
+            hits.append((mark, { [weak self] in self?.removeSlot(i) }))
+            for (j, k) in p.parties {
+                let r = drawListRow(draft.parties[j].name, row: k, x: left + Self.indent, width: width - Self.indent) { [weak self] in self?.remove(j) }
+                handles.append((r, j))
+            }
+            if let c = p.captionRow, let f = p.fieldRow {
+                let one = SplashDraft.singular(t)
+                Design.attributed(draft.names(of: t).isEmpty ? "First \(one)" : "Next \(one)", .caption, colour: Design.quiet).draw(x: left + Self.indent, baseline: row(c))
+                hairline(row: f, live: nameFields[t]?.currentEditor() != nil, indent: Self.indent)
+                drawMarks(row: f, accept: { [weak self] in self?.take(t) }, cancel: { [weak self] in self?.nameFields[t]?.stringValue = ""; self?.draft.pending = nil; self?.refresh() })
+            }
+        }
+        if let k = m.addRow {
+            let r = NSRect(x: left, y: line(k), width: 260, height: A.unit)
+            Design.attributed("+  Add Another Collection", .body, colour: Design.quiet).draw(x: left, baseline: row(k))
+            hits.append((r, { [weak self] in self?.addSlot() }))
         }
     }
 
-    /// A cell stays lit while its type is on the list; Custom while its field is open.
-    private func isOn(_ w: String) -> Bool { w == "Custom" ? customOpen : draft.types.contains(w) }
-    private func pick(_ s: String) {
-        if s == "Custom" {
-            customOpen.toggle()
-            if !customOpen { typeField.stringValue = "" }
+    /// A cell picked in a slot: the slot takes the type, its collection heads the list at once with the field for its first name,
+    /// and the tree shows the collection with its band. The slot's own type picked again is let go.
+    private func pick(_ w: String, for i: Int) {
+        if w == "Custom" {
+            customFor = customFor == i ? nil : i
+            typeField.stringValue = ""
             refresh()
-            if customOpen { window?.makeFirstResponder(typeField) }
+            if customFor != nil { window?.makeFirstResponder(typeField) }
             return
         }
-        if s == SplashDraft.ownWork {
-            if draft.types.contains(s) { removeType(s) } else { draft.types.append(s); draft.parties.append(SplashDraft.Party(type: s, name: "")); refresh() }
-            return
-        }
-        open(s)
+        guard slots.indices.contains(i) else { return }
+        if slots[i] == w { clear(i); return }
+        if let old = slots[i] { dropType(old) }
+        set(w, in: i)
     }
-    /// A type picked: its collection heads the list at once with the field for its first name, and the tree shows the collection it will be.
-    private func open(_ type: String) {
-        if !draft.types.contains(type) { draft.types.append(type) }
-        customOpen = false
+    private func set(_ type: String, in i: Int) {
+        slots[i] = type
+        customFor = nil
         typeField.stringValue = ""
+        draft.types = slots.compactMap { $0 }
+        if type == SplashDraft.ownWork { draft.parties.append(SplashDraft.Party(type: type, name: "")) }
         refresh()
         layoutSubtreeIfNeeded()
-        window?.makeFirstResponder(nameField(for: type))
+        window?.makeFirstResponder(type == SplashDraft.ownWork ? self : nameField(for: type))
     }
-    private func takeType() {
-        guard let w = SplashSection.titled(typed(typeField)) else { return }
-        open(w)
+    private func takeType(for i: Int) {
+        guard let w = SplashSection.titled(typed(typeField)), !slots.contains(w) else { return }
+        if let old = slots[i] { dropType(old) }
+        set(w, in: i)
+    }
+    /// A slot let go of its type: the type's names go with it.
+    private func dropType(_ t: String) {
+        draft.parties.removeAll { $0.type == t }
+        nameFields[t]?.stringValue = ""
+        draft.pending = nil
+    }
+    private func clear(_ i: Int) {
+        if let t = slots[i] { dropType(t) }
+        slots[i] = nil
+        draft.types = slots.compactMap { $0 }
+        refresh()
+    }
+    private func removeSlot(_ i: Int) {
+        guard slots.indices.contains(i) else { return }
+        if let t = slots[i] { dropType(t) }
+        slots.remove(at: i)
+        if slots.isEmpty { slots = [nil] }
+        if customFor == i { customFor = nil }
+        draft.types = slots.compactMap { $0 }
+        refresh()
+    }
+    private func addSlot() {
+        slots.append(nil)
+        refresh()
     }
     /// The name typed for a type is taken, and its field waits for the next.
     private func take(_ type: String) {
@@ -678,20 +737,13 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
         draft.parties.remove(at: i)
         refresh()
     }
-    private func removeType(_ t: String) {
-        draft.parties.removeAll { $0.type == t }
-        draft.types.removeAll { $0 == t }
-        nameFields[t]?.stringValue = ""
-        draft.pending = nil
-        refresh()
-    }
     /// A name drags among the names of its own collection.
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         guard let h = handles.first(where: { $0.rect.contains(p) }) else { super.mouseDown(with: event); return }
         let type = draft.parties[h.party].type
         let group = draft.parties.indices.filter { draft.parties[$0].type == type }
-        guard let start = metrics().rows.first(where: { if case .party(let i) = $0.0 { return i == group[0] } else { return false } })?.1 else { return }
+        guard let start = metrics().placed.first(where: { $0.type == type })?.parties.first?.1 else { return }
         _ = drag(handles: [h.rect], at: p, from: start, count: group.count) { [weak self] a, b in
             guard let d = self?.draft else { return }
             var names = group.map { d.parties[$0] }
@@ -707,7 +759,7 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
-        if control === typeField { takeType() } else if let t = nameFields.first(where: { $0.value === control })?.key { take(t) }
+        if control === typeField { if let i = customFor { takeType(for: i) } } else if let t = nameFields.first(where: { $0.value === control })?.key { take(t) }
         return true
     }
 }
@@ -720,20 +772,18 @@ final class SplashWho: SplashSection, NSTextFieldDelegate {
 final class SplashBlocks: SplashSection {
     typealias Check = (title: String, read: () -> Bool, write: (Bool) -> Void)
     /// One block: a question asked for one answer to the one before. Its check, when it has one, sets its own list aside.
-    struct Block { let key: String; let caption: String; let pending: SplashDraft.Pending; let read: () -> [String]; let write: ([String]) -> Void; var check: Check? = nil }
+    struct Block { let key: String; let caption: String; let pending: SplashDraft.Pending; let target: SplashTreeView.Target; let read: () -> [String]; let write: ([String]) -> Void; var check: Check? = nil }
     private let step: String, first: String, second: String, words: String
-    private let ready: () -> Bool
-    /// The blocks, in a pane of their own that scrolls when they run past the band's foot (Rick, 2026-10-09): the question and
-    /// the words stay, the pane takes the section's columns from row 11 down, and its wheel never reaches the splash.
-    private let pane: SplashBlocksPane
+    /// The answering part, in a pane of its own that scrolls when it runs past the band's foot (Rick, 2026-10-09): the question
+    /// and the words stay, the pane takes the section's columns from row 11 down and a margin more so its scroller sits in the
+    /// gutter at the right, and its wheel never reaches the splash.
+    let pane: SplashPane
     private let scroll = NSScrollView()
 
-    init(index: Int, step: String, first: String, second: String, words: String, options: [String], word: String,
-         blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
-        (self.step, self.first, self.second, self.words, self.ready) = (step, first, second, words, ready)
-        pane = SplashBlocksPane(index: index, options: options, word: word, blocks: blocks)
+    init(index: Int, step: String, first: String, second: String, words: String, pane: SplashPane) {
+        (self.step, self.first, self.second, self.words, self.pane) = (step, first, second, words, pane)
         super.init(index: index)
-        pane.section = self
+        pane.holder = self
         scroll.documentView = pane
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -743,19 +793,26 @@ final class SplashBlocks: SplashSection {
         scroll.verticalScrollElasticity = .none
         addSubview(scroll)
     }
+    convenience init(index: Int, step: String, first: String, second: String, words: String, options: [String], word: String,
+                     blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
+        self.init(index: index, step: step, first: first, second: second, words: words, pane: SplashBlocksPane(index: index, options: options, word: word, blocks: blocks, ready: ready))
+    }
     required init?(coder: NSCoder) { fatalError() }
     override var splash: StudioSplash? { didSet { pane.splash = splash } }
-    override var canContinue: Bool { ready() }
+    override var canContinue: Bool { pane.canContinue }
+    override var firstField: NSView? { pane.firstField }
+    override var marks: [SplashTreeView.Target: Int] { pane.marks }
+    override func commit() { pane.commit() }
     /// The section locks: the pane is drawn again for the answers before it, opened at its top.
     override func arrive() {
-        super.arrive(); pane.refresh()
+        super.arrive(); pane.arrive(); pane.refresh()
         DispatchQueue.main.async { [weak self] in guard let s = self else { return }; s.scroll.contentView.scroll(to: .zero); s.scroll.reflectScrolledClipView(s.scroll.contentView) }
     }
     override func layout() {
         super.layout()
         let top = line(11)
-        scroll.frame = NSRect(x: left, y: top, width: width, height: max(0, bounds.height - top))
-        pane.frame = NSRect(x: 0, y: 0, width: width, height: max(scroll.contentSize.height, pane.height))
+        scroll.frame = NSRect(x: left, y: top, width: width + A.margin, height: max(0, bounds.height - top))
+        pane.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.contentSize.height, pane.height))
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -764,34 +821,47 @@ final class SplashBlocks: SplashSection {
     }
 }
 
+/// A section's answering part in its scrolling pane: drawn from the pane's top on the beat, so a row of the pane is a row of
+/// the band while it has not been scrolled, on the section's columns from column 7, a margin short of the pane's right edge.
+class SplashPane: SplashSection {
+    weak var holder: SplashBlocks?
+    override var left: CGFloat { 0 }
+    override var width: CGFloat { bounds.width - A.margin }
+    /// The pane's height: its rows, to the line after the last.
+    var height: CGFloat { 0 }
+    /// The wheel stays in the pane: it scrolls and never moves a section.
+    override func scrollWheel(with event: NSEvent) { enclosingScrollView?.contentView.scrollWheel(with: event) }
+    override func refresh() {
+        super.refresh()
+        holder?.needsLayout = true   // the section lays the pane out again to its new height
+    }
+}
+
 /// The blocks of a Choices section, drawn from their pane's top on the beat, so a row of the pane is a row of the band while
 /// it has not been scrolled; its columns are the section's own, from column 7.
-final class SplashBlocksPane: SplashSection, NSTextFieldDelegate {
+final class SplashBlocksPane: SplashPane, NSTextFieldDelegate {
     typealias Block = SplashBlocks.Block
     private let options: [String], word: String
-    private let blocks: () -> [Block]
+    private let blocks: () -> [Block], ready: () -> Bool
     private let custom = SplashSection.field("Type one and press Return")
     /// The key of the block whose Custom field is open.
     private var customFor: String?
     private var handles: [(rect: NSRect, key: String)] = []
-    weak var section: SplashBlocks?
 
-    init(index: Int, options: [String], word: String, blocks: @escaping () -> [Block]) {
-        (self.options, self.word, self.blocks) = (options, word, blocks)
+    init(index: Int, options: [String], word: String, blocks: @escaping () -> [Block], ready: @escaping () -> Bool) {
+        (self.options, self.word, self.blocks, self.ready) = (options, word, blocks, ready)
         super.init(index: index)
         custom.delegate = self
         custom.isHidden = true
         addSubview(custom)
     }
     required init?(coder: NSCoder) { fatalError() }
-    override var left: CGFloat { 0 }
-    override var width: CGFloat { bounds.width }
+    override var canContinue: Bool { ready() }
+    /// Each block's node on the tree, in the block's colour: its place in the list.
+    override var marks: [SplashTreeView.Target: Int] { Dictionary(blocks().enumerated().map { ($1.target, $0) }, uniquingKeysWith: { a, _ in a }) }
     private var typed: String { custom.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var splashDraft: SplashDraft? { splash?.draftForSections }
-    /// The pane's height: every block's rows, to the line after the last.
-    var height: CGFloat { line(metrics().rows) }
-    /// The wheel stays in the pane: it scrolls the blocks and never moves a section.
-    override func scrollWheel(with event: NSEvent) { enclosingScrollView?.contentView.scrollWheel(with: event) }
+    override var height: CGFloat { line(metrics().rows) }
 
     private struct Placed { let block: Block; let captionRow: Int; let cells: [Cell]; let customRow: Int?; let listStart: Int; let listCount: Int; let checkRow: Int? }
     private struct Metrics { let placed: [Placed]; let rows: Int }
@@ -799,7 +869,7 @@ final class SplashBlocksPane: SplashSection, NSTextFieldDelegate {
         var k = 0, placed: [Placed] = []
         for b in blocks() {
             let captionRow = k
-            let (cells, rows) = self.cells(options, apart: [("Custom", true)], x: left, width: width, baseline: row(k + 1))
+            let (cells, rows) = self.cells(options, apart: [("Custom", true)], x: left + Self.swatch + A.gutter, width: width - Self.swatch - A.gutter, baseline: row(k + 1))
             k += 1 + rows
             var customRow: Int?
             if customFor == b.key { customRow = k + 1; k += 4 }
@@ -814,10 +884,6 @@ final class SplashBlocksPane: SplashSection, NSTextFieldDelegate {
         }
         return Metrics(placed: placed, rows: k)
     }
-    override func refresh() {
-        super.refresh()
-        section?.needsLayout = true   // the section lays the pane out again to its new height
-    }
     override func layout() {
         super.layout()
         custom.isHidden = true
@@ -827,9 +893,10 @@ final class SplashBlocksPane: SplashSection, NSTextFieldDelegate {
         super.draw(dirtyRect)
         let m = metrics()
         handles = []
-        for p in m.placed {
+        for (i, p) in m.placed.enumerated() {
             let b = p.block, chosen = b.read(), aside = b.check?.read() ?? false
             Design.attributed(b.caption, .caption, colour: Design.quiet).draw(x: left, baseline: row(p.captionRow))
+            drawSwatch(i, x: left, baseline: row(p.captionRow + 1))
             drawStrip(p.cells, on: { $0 == "Custom" ? customFor == b.key : chosen.contains($0) }) { [weak self] s in self?.pick(s, in: b) }
             if let k = p.customRow {
                 Design.attributed("Custom " + word.prefix(1).uppercased() + word.dropFirst(), .caption, colour: Design.quiet).draw(x: left, baseline: row(k))
@@ -912,6 +979,7 @@ final class SplashNames: SplashSection, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
     override var canContinue: Bool { draft.anyoneNamed }
     override var firstField: NSView? { draft.chains.first.flatMap { fields[SplashDraft.key($0.party.id, $0.category)] } }
+    override var marks: [SplashTreeView.Target: Int] { Dictionary(draft.chains.enumerated().map { (.category($1.party.id, $1.category), $0) }, uniquingKeysWith: { a, _ in a }) }
     private func typed(_ f: NSTextField) -> String { f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private func field(for key: String, word: String) -> NSTextField {
         if let f = fields[key] { return f }
@@ -944,8 +1012,10 @@ final class SplashNames: SplashSection, NSTextFieldDelegate {
         super.draw(dirtyRect)
         drawQuestion(step: "First Names", first: "Name your", second: "first ones")
         drawWords("The first one in each category: a real folder, named as you type it, holding its own palettes, typography, information and tags. Every later one is made from the app.")
-        for p in placed {
-            Design.attributed(p.caption, .caption, colour: Design.quiet).draw(x: left, baseline: row(p.row))
+        for (i, p) in placed.enumerated() {
+            // The chain's colour, a caption-high square before its caption, as the band on the tree.
+            fill(NSRect(x: left, y: row(p.row) - 10, width: 10, height: 10), SplashTreeView.colour(i))
+            Design.attributed(p.caption, .caption, colour: Design.quiet).draw(x: left + 18, baseline: row(p.row))
             hairline(row: p.row + 1, live: fields[p.key]?.currentEditor() != nil)
         }
     }

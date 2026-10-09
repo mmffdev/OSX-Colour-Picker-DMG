@@ -13,6 +13,12 @@ import AppKit
 //
 // The tree's lines join: a row's elbow comes down from its parent's caret and runs into its own,
 // and where a level goes on below (Web, then Print) the vertical runs through the rows between.
+//
+// The working nodes are marked (Rick, 2026-10-09): each section says which nodes its blocks are about,
+// each with a colour from the palette, and a band of that colour slides in from the right behind the
+// node's row, a ribbon with a point at its end; the same colour stands in a square before the block's
+// cells on the right, so the block and its node read as one. On reaching the next section the bands
+// slide out again and the new section's slide in.
 
 final class SplashTreeView: NSView {
     typealias A = Design.App
@@ -23,6 +29,17 @@ final class SplashTreeView: NSView {
 
     /// A level another of can be added at; a group belongs to the leaf (stream, or category with no streams) its member sits under.
     enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group(String) }
+    /// A node a section can be working on, to mark it with a band.
+    enum Target: Hashable { case catalogue, collection(String), party(UUID), category(UUID, String), leaf(String) }
+    /// The colours the bands and the squares take, in turn: Colorgain's own amber first, then its complements.
+    static let palette: [NSColor] = [Design.active, Design.hex("#1E9BF0"), Design.hex("#F26B3A"), Design.hex("#3FBF7F"), Design.hex("#8B6CF2"), Design.hex("#1FB8B0"), Design.hex("#F26BA8"), Design.hex("#B5C738")]
+    static func colour(_ i: Int) -> NSColor { palette[((i % palette.count) + palette.count) % palette.count] }
+    /// The nodes marked, with the palette index of each; set by the splash for the section in view, and the bands follow.
+    var marks: [Target: Int] = [:] { didSet { if marks != oldValue { settleBands() } } }
+    private struct Band { var colour: Int; var start: TimeInterval; var leaving: Bool }
+    private var bands: [Target: Band] = [:]
+    private var bandTimer: Timer?
+    private static let slide: TimeInterval = 0.42
     private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String, String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
@@ -30,6 +47,8 @@ final class SplashTreeView: NSView {
         var key: String? = nil
         /// Drawn soft: a placeholder, a word being typed, a member not yet named.
         var soft = false
+        /// What the row stands for, to a section marking the node it works on.
+        var targets: [Target] = []
     }
     private var hits: [(NSRect, () -> Void)] = []
     private var collapsed: Set<String> = []
@@ -58,7 +77,7 @@ final class SplashTreeView: NSView {
 
     private func lines() -> [Line] {
         let d = draft
-        var out: [Line] = [Line(kind: .catalogue, name: catalogueName(), depth: 0, caption: "Catalogue", removable: false, key: "cat")]
+        var out: [Line] = [Line(kind: .catalogue, name: catalogueName(), depth: 0, caption: "Catalogue", removable: false, key: "cat", targets: [.catalogue])]
         func open(_ key: String) -> Bool { !collapsed.contains(key) }
         func pending(_ w: SplashDraft.Pending) -> String? { d.pending.flatMap { $0.level == w && !$0.text.isEmpty ? $0.text : nil } }
         func add(_ level: Level, _ name: String, at depth: Int) { out.append(Line(kind: .add(level), name: name, depth: depth, caption: "", removable: false)) }
@@ -73,8 +92,9 @@ final class SplashTreeView: NSView {
         func member(_ p: SplashDraft.Party, _ category: String, stream: String?, under key: String, at depth: Int) {
             let word = SplashDraft.memberWord(category), named = d.member(of: p.id, category)
             let k = key + "/m"
-            out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil))
-            if open(k) { groups(at: depth + 1, leaf: SplashDraft.leafKey(p.id, category, stream)) }
+            let leaf = SplashDraft.leafKey(p.id, category, stream)
+            out.append(Line(kind: .member(p.id, category), name: named ?? pending(.member(p.id, category)) ?? "First \(word.lowercased())", depth: depth, caption: word, removable: named != nil, key: k, soft: named == nil, targets: [.leaf(leaf)]))
+            if open(k) { groups(at: depth + 1, leaf: leaf) }
         }
         func streams(_ p: SplashDraft.Party, _ category: String, under key: String, at depth: Int) {
             let active = d.activeStreams(of: p.id, category)
@@ -97,7 +117,7 @@ final class SplashTreeView: NSView {
             }
             for (i, c) in mine.enumerated() {
                 let k = key + "/c\(i)"
-                out.append(Line(kind: .category(p.id, i), name: c, depth: depth, caption: "Category", removable: true, key: k))
+                out.append(Line(kind: .category(p.id, i), name: c, depth: depth, caption: "Category", removable: true, key: k, targets: [.category(p.id, c)]))
                 if open(k) { streams(p, c, under: k, at: depth + 1) }
             }
             if let w = pending(.category(p.id)) { out.append(Line(kind: .pending, name: w, depth: depth, caption: "Category", removable: false, soft: true)) }
@@ -106,15 +126,16 @@ final class SplashTreeView: NSView {
         guard open("cat") else { return out }
         for type in d.types {
             let ck = "c:" + type
-            out.append(Line(kind: .collection(type), name: d.collectionTitle(type), depth: 1, caption: "Collection", removable: false, key: ck))
+            let own = type == SplashDraft.ownWork ? d.parties.first(where: { $0.isOwnWork }) : nil
+            out.append(Line(kind: .collection(type), name: d.collectionTitle(type), depth: 1, caption: "Collection", removable: false, key: ck, targets: [.collection(type)] + (own.map { [.party($0.id)] } ?? [])))
             guard open(ck) else { continue }
             if type == SplashDraft.ownWork {
-                if let own = d.parties.first(where: { $0.isOwnWork }) { categories(own, under: ck, at: 2) }
+                if let own = own { categories(own, under: ck, at: 2) }
                 continue
             }
             for (i, p) in d.parties.enumerated() where p.type == type {
                 let pk = ck + "/p\(i)"
-                out.append(Line(kind: .party(i), name: p.name, depth: 2, caption: SplashDraft.singular(type), removable: true, key: pk))
+                out.append(Line(kind: .party(i), name: p.name, depth: 2, caption: SplashDraft.singular(type), removable: true, key: pk, targets: [.party(p.id)]))
                 if open(pk) { categories(p, under: pk, at: 3) }
             }
             if let w = pending(.party(type)) { out.append(Line(kind: .pending, name: w, depth: 2, caption: SplashDraft.singular(type), removable: false, soft: true)) }
@@ -144,8 +165,13 @@ final class SplashTreeView: NSView {
             for j in (k + 1)..<all.count where all[j].depth <= depth { return all[j].depth == depth }
             return false
         }
+        let now = CACurrentMediaTime()
         for (k, l) in all.enumerated() {
             let b = row(k), top = line(k), x = left + CGFloat(l.depth) * step
+            // The band behind a marked row, sliding in from the right or away again.
+            var banded = false
+            for t in l.targets { if let band = bands[t] { drawBand(band, top: top, at: now); banded = banded || !band.leaving } }
+            let captionColour = banded ? Design.ink.withAlphaComponent(0.6) : Design.soft
             // The verticals passing through from levels above, and this row's own elbow, every one meeting the next.
             for a in 1..<max(1, l.depth) where continues(after: k, at: a) {
                 fill(NSRect(x: left + CGFloat(a - 1) * step + 6, y: top, width: 1, height: A.unit), Design.rule)
@@ -177,7 +203,7 @@ final class SplashTreeView: NSView {
             default:
                 let style: Design.Text = l.depth < 2 ? .bodyStrong : .body
                 Design.attributed(l.name, style, colour: l.soft ? Design.soft : Design.ink).draw(x: nx, baseline: b, width: nameWidth)
-                Design.attributed(l.caption, .label, colour: Design.soft).draw(x: left + width - 96, baseline: b - 1)
+                Design.attributed(l.caption, .label, colour: captionColour).draw(x: left + width - 96, baseline: b - 1)
                 hits.append((rowRect, { [weak self] in self?.rename(l, x: nx, baseline: b, width: nameWidth, style: style) }))
                 if l.removable {
                     let mark = NSRect(x: left + width - 24, y: top, width: 24, height: A.unit)
@@ -189,6 +215,50 @@ final class SplashTreeView: NSView {
         window?.invalidateCursorRects(for: self)
     }
     override func resetCursorRects() { for h in hits { addCursorRect(h.0, cursor: .pointingHand) } }
+
+    // MARK: The bands
+
+    /// Marks changed: a node newly marked gets a band coming in, one no longer marked has its band leave.
+    private func settleBands() {
+        let now = CACurrentMediaTime()
+        for (t, c) in marks {
+            if var b = bands[t] { if b.leaving || b.colour != c { b.leaving = false; b.colour = c; b.start = now; bands[t] = b } }
+            else { bands[t] = Band(colour: c, start: now, leaving: false) }
+        }
+        for (t, var b) in bands where marks[t] == nil && !b.leaving { b.leaving = true; b.start = now; bands[t] = b }
+        if bandTimer == nil {
+            bandTimer = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] _ in self?.tickBands() }
+        }
+        needsDisplay = true
+    }
+    private func tickBands() {
+        let now = CACurrentMediaTime()
+        var busy = false
+        for (t, b) in bands {
+            let done = now - b.start >= Self.slide
+            if done, b.leaving { bands[t] = nil } else if !done { busy = true }
+        }
+        if !busy { bandTimer?.invalidate(); bandTimer = nil }
+        needsDisplay = true
+    }
+    /// The ribbon: the row's height, from the tree's left edge to the mark column with a point beyond it and a notch at its tail,
+    /// translated by how far it has come; a leaving band goes back the way it came.
+    private func drawBand(_ band: Band, top: CGFloat, at now: TimeInterval) {
+        let u = max(0, min(1, (now - band.start) / Self.slide))
+        let eased = 1 - pow(1 - u, 3)
+        let progress = CGFloat(band.leaving ? 1 - eased : eased)
+        let end = left + width - 24, tip: CGFloat = 14, notch: CGFloat = 10, mid = top + A.unit / 2
+        let dx = (end + tip) * (1 - progress)
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: dx, y: top))
+        path.line(to: NSPoint(x: dx + end, y: top))
+        path.line(to: NSPoint(x: dx + end + tip, y: mid))
+        path.line(to: NSPoint(x: dx + end, y: top + A.unit))
+        path.line(to: NSPoint(x: dx, y: top + A.unit))
+        path.line(to: NSPoint(x: dx + notch, y: mid))
+        path.close()
+        Self.colour(band.colour).setFill(); path.fill()
+    }
 
     // MARK: Changing it
 
