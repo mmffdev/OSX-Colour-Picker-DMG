@@ -301,7 +301,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
     private struct Geometry { var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0 }
     private func geometry() -> Geometry {
-        let w = bounds.width - leading, gut = Design.App.gutter
+        let w = bounds.width - leading, gut = Design.App.areaGutter   // the split is an area gutter
         var g = Geometry()
         g.lw = ((w - gut) * 0.6).rounded(); g.rx = leading + g.lw + gut; g.rw = w - g.lw - gut
         return g
@@ -320,7 +320,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         super.layout()
         let g = geometry(), u = Self.u, line = Self.line
         let top = Self.listTop * u
-        listScroll.frame = NSRect(x: 0, y: top, width: leading + g.lw + Design.App.gutter / 2, height: max(0, bounds.height - top))
+        listScroll.frame = NSRect(x: 0, y: top, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - top))
         let listHeight = CGFloat(max(rows.count, 1)) * u + u
         list.frame = NSRect(x: 0, y: 0, width: listScroll.frame.width, height: max(listScroll.frame.height, listHeight))
         listScroll.verticalScrollElasticity = listHeight > listScroll.frame.height ? .allowed : .none
@@ -467,7 +467,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         for (i, name) in rows.enumerated() {
             let box = rowRects[i], b = box.minY + line, on = name == chosen
             let text = Design.attributed(on ? (draft ?? name) : name, on ? .bodyStrong : .body)
-            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.gutter / 2, height: u + 1), Design.mist) }
+            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.areaGutter / 2, height: u + 1), Design.mist) }
             if let v = reveal[name], v > 0 {
                 let full = l + col.name + min(text.size().width, col.scope - col.name - 12) + Self.step, eased = 1 - pow(1 - v, 3)
                 fill(NSRect(x: 0, y: box.minY - 1, width: (full * eased).rounded(), height: u + 1), Design.App.gridColour)

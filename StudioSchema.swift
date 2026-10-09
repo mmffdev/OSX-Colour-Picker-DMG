@@ -371,7 +371,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
-        let u = Self.u, gut = Design.App.gutter, l = leading
+        let u = Self.u, gut = Design.App.areaGutter, l = leading   // the split is an area gutter
         // Both columns: a header on row 0, words on rows 1 to 3, a second header on row 4 with its rule, content from row 5. The map takes 60 of the width, the selected row 40.
         g.lw = ((w - gut) * 0.6).rounded(); g.rx = l + g.lw + gut; g.rw = w - g.lw - gut
         g.mapTop = 5 * u
@@ -399,12 +399,12 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             ? SchemaTrial.templates.map { TypeRow(name: $0.name, locked: false, chosen: $0.id == g.form.fromTemplate, symbol: "square.stack.3d.up") } + [TypeRow(name: Self.saveTemplateRow, locked: false, chosen: false, symbol: "plus")]
             : g.form.offered.map { TypeRow(name: $0, locked: g.form.locked.contains($0) && $0 != g.form.chosen, chosen: $0 == g.form.chosen, symbol: symbol(forType: $0)) }
         // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
-        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter / 2, height: max(0, bounds.height - g.mapTop))
+        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - g.mapTop))
         let mapHeight = CGFloat(mapRows.count) * u + u
         map.frame = NSRect(x: 0, y: 0, width: mapScroll.frame.width, height: max(mapScroll.frame.height, mapHeight))
         mapScroll.verticalScrollElasticity = mapHeight > mapScroll.frame.height ? .allowed : .none
         rowRects = mapRows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
-        let lead = Design.App.gutter / 2
+        let lead = Design.App.areaGutter / 2
         typeScroll.frame = NSRect(x: g.rx - lead, y: g.typesTop, width: g.rw + lead, height: max(0, bounds.height - g.typesTop))
         let typesHeight = CGFloat(typeRows.count) * u + u
         types.frame = NSRect(x: 0, y: 0, width: g.rw + lead, height: max(typeScroll.frame.height, typesHeight))
@@ -475,7 +475,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         for (i, r) in mapRows.enumerated() {
             let box = rowRects[i]
             let on = r.target == selected
-            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.gutter / 2, height: box.height + 1), Design.mist) }
+            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.areaGutter / 2, height: box.height + 1), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             rollover.pane(.row(r.target), box: box, reach: x + 36 + name.size().width + Self.step)
@@ -523,7 +523,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
 
     private func drawTypes() {
-        let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.gutter / 2, air: CGFloat = 16
+        let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.areaGutter / 2, air: CGFloat = 16
         typeHits = []; templateHits = []
         for (i, t) in typeRows.enumerated() {
             let box = NSRect(x: 0, y: CGFloat(i) * u, width: w, height: u), b = box.minY + line

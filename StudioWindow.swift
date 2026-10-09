@@ -307,8 +307,9 @@ final class StudioFrame: NSView {
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
-        let r1Full = A.column(3, in: w) - A.gutter / 2, r1Min = LibraryRail.collapsedWidth
-        let r2Full = A.column(5, in: w) - A.gutter / 2 - r1Full - 1
+        // The dividers stand in the middle of the area gutters, after columns 2 and 4; the history's is a column gutter.
+        let r1Full = A.column(3, in: w) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
+        let r2Full = A.column(5, in: w) - A.areaGutter / 2 - r1Full - 1
         let hFull = w - A.column(11, in: w) + A.gutter / 2
         let r1W = (r1Min + (r1Full - r1Min) * ease(open.rail1)).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
         header.railEdge = r1W
@@ -328,9 +329,10 @@ final class StudioFrame: NSView {
         func edges(_ v: NSView, _ from: Int, _ to: Int) -> (CGFloat, CGFloat) {
             (A.column(from, in: w) - v.frame.minX, v.frame.maxX - (A.column(to, in: w) + A.columnWidth(in: w)))
         }
-        (rail1.inset, rail1.insetRight) = (A.column(1, in: w), A.gutter / 2)
-        (rail2.inset, rail2.insetRight) = (A.gutter / 2 - 1, A.gutter / 2)
-        (page.inset, page.insetRight) = (A.gutter / 2 - 1, open.history > 0 ? A.gutter / 2 - 1 : A.margin)
+        (rail1.inset, rail1.insetRight) = (A.column(1, in: w), A.areaGutter / 2)
+        (rail2.inset, rail2.insetRight) = (A.areaGutter / 2 - 1, A.areaGutter / 2)
+        (page.inset, page.insetRight) = (A.areaGutter / 2 - 1, open.history > 0 ? A.gutter / 2 - 1 : A.margin)
+        overlay.page = NSRect(x: page.frame.minX + page.inset, y: 0, width: page.frame.width - page.inset - page.insetRight, height: 0)
         (history.inset, history.insetRight) = (A.gutter / 2, A.margin)
         strip.frame = NSRect(x: 0, y: 0, width: w, height: TitleStrip.height)
         overlay.frame = bounds
@@ -3077,15 +3079,26 @@ final class TitleStrip: NSView {
 final class GridOverlay: NSView {
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    /// The page's content, left edge and width: its columns are drawn as the page lays them, from its own width.
+    var page = NSRect.zero { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
         typealias A = Design.App
         let w = bounds.width, h = bounds.height, c = A.gridColour
         let cw = A.columnWidth(in: w)
+        func column(_ x: CGFloat, _ width: CGFloat) {
+            fill(NSRect(x: x, y: 0, width: width, height: h), c.withAlphaComponent(0.05))
+            fill(NSRect(x: x, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+            fill(NSRect(x: x + width - 1, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+        }
+        // The window's columns up to the page, then the page's own, then the window's again past it.
         for i in 1...A.columns {
             let x = A.column(i, in: w)
-            fill(NSRect(x: x, y: 0, width: cw, height: h), c.withAlphaComponent(0.05))
-            fill(NSRect(x: x, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
-            fill(NSRect(x: x + cw - 1, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
+            if page.width > 0, x + cw > page.minX, x < page.maxX { continue }
+            column(x, cw)
+        }
+        if page.width > 0 {
+            let own = A.pageColumns(width: page.width, in: w)
+            for x in own.x { column(page.minX + x, own.width) }
         }
         // The header's baseline, the area header's heading and label lines and its rule.
         let strong = c.withAlphaComponent(0.6), faint = c.withAlphaComponent(0.25)

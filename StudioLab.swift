@@ -243,9 +243,11 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     private struct Geometry {
         var w: CGFloat = 0, column: CGFloat = 0, gutter: CGFloat = 0, n = 6, half = 3
+        /// The page's own columns, the area gutter at the split.
+        var cols: [CGFloat] = []
         /// The left side, columns 1 to half; the right from the next column to the edge.
         var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0
-        func x(_ k: Int) -> CGFloat { CGFloat(k) * (column + gutter) }
+        func x(_ k: Int) -> CGFloat { k < cols.count ? cols[k] : CGFloat(k) * (column + gutter) + (k >= half ? Design.App.extra : 0) }
         var wheel = NSRect.zero, choice = NSRect.zero
         /// The proof's block, under its heading row; the tiles' header a unit of air below it.
         var proof = NSRect.zero, coloursTop: CGFloat = 0
@@ -261,10 +263,10 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         let u = Self.u
         g.w = w
         g.gutter = Design.App.gutter
-        g.column = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
-        // The page is a whole number of the window's columns, six with both rails and the history, more as they go.
-        g.n = max(2, Int(((w + g.gutter) / (g.column + g.gutter)).rounded()))
-        let half = g.n / 2
+        // The page is a whole number of the window's columns, six with both rails and the history, more as they go; the area gutter at its split.
+        let grid = Design.App.pageColumns(width: w, in: window?.frame.width ?? Design.App.size.width)
+        g.column = grid.width; g.n = grid.x.count; g.cols = grid.x
+        let half = grid.split
         g.half = half
         g.lw = CGFloat(half) * g.column + CGFloat(half - 1) * g.gutter
         g.rx = g.x(half)

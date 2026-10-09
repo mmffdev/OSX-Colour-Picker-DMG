@@ -229,11 +229,12 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private func geometry(width: CGFloat) -> Geometry {
         var g = Geometry()
         let u = Self.u, gut = Design.App.gutter
-        let cw = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
-        let n = max(2, Int(((width + gut) / (cw + gut)).rounded()))
-        g.cols = (0..<n).map { (CGFloat($0) * (cw + gut)).rounded() }
+        // The page's own columns, the area gutter at the split between the two blocks.
+        let grid = Design.App.pageColumns(width: width, in: window?.frame.width ?? Design.App.size.width)
+        let cw = grid.width, n = grid.x.count
+        g.cols = grid.x
         func span(_ count: Int) -> CGFloat { (CGFloat(count) * cw + CGFloat(count - 1) * gut).rounded() }
-        let k = n / 2, rk = n - k, h = max(1, k / 2), rh = max(1, rk / 2)
+        let k = grid.split, rk = n - k, h = max(1, k / 2), rh = max(1, rk / 2)
         g.lx = 0; g.lw = span(k); g.rx = g.cols[k]; g.rw = span(rk)
         g.a = (g.cols[0], span(h)); g.b = (g.cols[k - h], span(h))
         g.c = (g.cols[k], span(rh)); g.d = (g.cols[n - rh], span(rh))

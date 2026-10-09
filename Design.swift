@@ -184,6 +184,11 @@ enum Design {
         static let least = NSSize(width: 1120, height: 669)     // the same with 17 units
         static let margin: CGFloat = 24
         static let gutter: CGFloat = 16
+        /// The gutter between areas, twice the column gutter: between the rails, between rail2 and the page, and at a page's split.
+        /// A two-level grid: the window's twelve columns with the wide gutter after columns 2, 4 and 8, every area's own columns inside (Rick, 2026-10-09).
+        static let areaGutter: CGFloat = 32
+        static let wideAfter = [2, 4, 8]
+        static var extra: CGFloat { areaGutter - gutter }
         static let columns = 12
         static let header: CGFloat = 64
         static let footer: CGFloat = 48
@@ -202,9 +207,15 @@ enum Design {
         /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
         static var masterGrid = false
         static let gridColour = hex("#FCC80A")
-        static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
-        static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) }
-        static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { CGFloat(to - from + 1) * columnWidth(in: width) + CGFloat(to - from) * gutter }
+        static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter - CGFloat(wideAfter.count) * extra) / CGFloat(columns) }
+        static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) + CGFloat(wideAfter.filter { $0 < c }.count) * extra }
+        static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { column(to, in: width) + columnWidth(in: width) - column(from, in: width) }
+        /// A page's own columns: as many of the window's as its width holds, the area gutter at its split. The x of each, their width, the split.
+        static func pageColumns(width: CGFloat, in window: CGFloat) -> (x: [CGFloat], width: CGFloat, split: Int) {
+            let cw = columnWidth(in: window)
+            let n = max(2, Int(((width + gutter - extra) / (cw + gutter)).rounded())), k = n / 2
+            return ((0..<n).map { (CGFloat($0) * (cw + gutter) + ($0 >= k ? extra : 0)).rounded() }, cw, k)
+        }
     }
     /// Every gap is a multiple of four.
     static func beat(_ n: Int) -> CGFloat { CGFloat(n) * 4 }

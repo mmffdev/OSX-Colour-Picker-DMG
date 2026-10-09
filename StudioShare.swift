@@ -350,7 +350,7 @@ final class SharePage: NSView, PageSection, Overlay {
     private struct Geometry { var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0, top: CGFloat = 0, stepsTop: CGFloat = 0, wordsTop: CGFloat = 0, buttonsTop: CGFloat = 0 }
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
-        let u = Self.u, gut = Design.App.gutter
+        let u = Self.u, gut = Design.App.areaGutter   // the split is an area gutter
         g.lw = ((w - gut) * 0.6).rounded(); g.rx = leading + g.lw + gut; g.rw = w - g.lw - gut
         g.top = 5 * u
         g.stepsTop = 5 * u
@@ -363,7 +363,7 @@ final class SharePage: NSView, PageSection, Overlay {
         super.layout()
         let g = geometry(width: bounds.width - leading), u = Self.u
         rows = build()
-        scroll.frame = NSRect(x: 0, y: g.top, width: leading + g.lw + Design.App.gutter / 2, height: max(0, bounds.height - g.top))
+        scroll.frame = NSRect(x: 0, y: g.top, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - g.top))
         let h = CGFloat(rows.count) * u + u
         canvas.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, h))
         scroll.verticalScrollElasticity = h > scroll.frame.height ? .allowed : .none
@@ -393,7 +393,7 @@ final class SharePage: NSView, PageSection, Overlay {
         hairline(x: rx, y: g.stepsTop - 1, width: g.rw, Design.rule)
         for (i, name) in steps.enumerated() {
             let r = stepRects[i], b = r.minY + line
-            if i == step { fill(NSRect(x: r.minX - Design.App.gutter / 2, y: r.minY - 1, width: r.width + Design.App.gutter / 2, height: r.height + 1), Design.mist) }
+            if i == step { fill(NSRect(x: r.minX - Design.App.areaGutter / 2, y: r.minY - 1, width: r.width + Design.App.areaGutter / 2, height: r.height + 1), Design.mist) }
             Design.attributed("\(i + 1)", .caption, colour: i < step ? Design.quiet : Design.soft).draw(x: r.minX, baseline: b)
             Design.attributed(name, i == step ? .bodyStrong : .body, colour: i == step ? Design.ink : i < step ? Design.quiet : Design.soft).draw(x: r.minX + 24, baseline: b)
             if i < step { Design.attributed("\u{2713}", .caption, colour: Design.quiet).draw(right: r.maxX, baseline: b) }
