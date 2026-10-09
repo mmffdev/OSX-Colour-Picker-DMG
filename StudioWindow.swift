@@ -68,8 +68,8 @@ final class StudioWindowController: NSWindowController {
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
-        // --splash opens the splash that sets up the work, over the whole window, for looking at it straight away.
-        if args.contains("--splash") { c.frame.showSplash() }
+        // The splash that sets up the work (TH-299): over the whole window when the catalogue has no structure yet, or when --splash asks; --no-splash keeps it away.
+        if args.contains("--splash") || (SchemaTrial.collections.isEmpty && !args.contains("--no-splash") && !args.contains("--snap")) { c.frame.showSplash() }
         // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
         if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
             let to = URL(fileURLWithPath: args[i + 1])
@@ -267,6 +267,7 @@ final class StudioFrame: NSView {
         page.onExport = { [weak self] in self?.exportFromPage() }
         page.settings.onImport = { [weak self] in self?.startImport() }
         page.settings.onExport = { [weak self] in guard let self = self else { return }; self.startExport(.catalogue, subject: nil, name: self.library.catalogue) }
+        page.schema.onSetUp = { [weak self] in self?.showSplash() }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -356,6 +357,7 @@ final class StudioFrame: NSView {
             self?.splash?.removeFromSuperview()
             self?.splash = nil
             self?.overlay.splash = false
+            self?.go(.catalogue)
         }
         addSubview(s)
         // The grid stays on top of it, for measuring, and draws the splash's own beat.
@@ -590,13 +592,16 @@ final class StudioFrame: NSView {
         // members. Then the member itself, the app's project, with its palettes counted.
         for c in SchemaTrial.collections {
             rows.append(.group(c.name, key: "collection:\(c.id.uuidString)"))
-            if c.folderName != nil {
-                for f in c.folders {
-                    let inside = members(of: c, folder: .some(f.id))
-                    rows.append(.row(f.name, inside.count, .folder(c.id, f.id), 0))
-                    rows += inside.flatMap { memberRows($0, indent: 1) }
-                }
+            // Level 1 and below: the folders nest, each one step further in, its members under it before the folders inside it.
+            func folderRows(_ f: SchemaFolder, indent: Int) -> [LibraryRail.Row] {
+                let inside = members(of: c, folder: .some(f.id))
+                let beneath = inside.count + c.descendants(of: f.id).reduce(0) { $0 + members(of: c, folder: .some($1.id)).count }
+                var out: [LibraryRail.Row] = [.row(f.name, beneath, .folder(c.id, f.id), indent)]
+                out += inside.flatMap { memberRows($0, indent: indent + 1) }
+                for child in c.children(of: f.id) { out += folderRows(child, indent: indent + 1) }
+                return out
             }
+            if c.folderName != nil { for f in c.children(of: nil) { rows += folderRows(f, indent: 0) } }
             // A member in no folder sits beside the folders, straight in its collection, so the tree's lines tie it to the
             // collection and not to the last folder above it, and shutting that folder leaves it showing.
             rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: 0) }

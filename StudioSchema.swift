@@ -36,6 +36,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     private static func isRole(_ t: String) -> Bool { SchemaRole.allCases.contains { $0.title == t } }
     weak var library: LibraryController?
     var onChange: (() -> Void)?
+    /// The door to the splash that builds the structure, offered when the catalogue has no collection; the window opens it.
+    var onSetUp: (() -> Void)?
+    private let setUpButton = SwissButton("Set Up My Structure", .primary)
     var onResize: (() -> Void)?
     /// The page's edge to its first column: the view starts at the rail's divider so a row's ground can reach it, and the words start here.
     var leading: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
@@ -120,6 +123,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
 
     init() {
         super.init(frame: .zero)
+        setUpButton.target = self; setUpButton.action = #selector(setUpPressed)
+        addSubview(setUpButton)
         nameField.isBordered = false
         nameField.drawsBackground = false
         nameField.focusRingType = .none
@@ -217,6 +222,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
     private func refresh() { needsLayout = true; needsDisplay = true; map.needsDisplay = true; types.needsDisplay = true; onResize?() }
     private func show() { all = SchemaTrial.collections; if selected == nil || !stillThere(selected!) { selected = all.first.map { .collection($0.id) } }; refresh(); settle(); onChange?() }
+    @objc private func setUpPressed() { onSetUp?() }
     private func keep(_ c: UUID, _ tree: SchemaNode) { SchemaTrial.changeCollection(c) { $0.stack = tree }; all = SchemaTrial.collections }
 
     // MARK: What a group holds
@@ -398,6 +404,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         typeRows = g.form.templates
             ? SchemaTrial.templates.map { TypeRow(name: $0.name, locked: false, chosen: $0.id == g.form.fromTemplate, symbol: "square.stack.3d.up") } + [TypeRow(name: Self.saveTemplateRow, locked: false, chosen: false, symbol: "plus")]
             : g.form.offered.map { TypeRow(name: $0, locked: g.form.locked.contains($0) && $0 != g.form.chosen, chosen: $0 == g.form.chosen, symbol: symbol(forType: $0)) }
+        // With no collection at all, the way to make one: the splash's questions, offered where the map would start.
+        setUpButton.isHidden = !all.isEmpty
+        setUpButton.frame = NSRect(x: leading, y: g.mapTop + u - setUpButton.intrinsicContentSize.height + 4, width: setUpButton.intrinsicContentSize.width, height: setUpButton.intrinsicContentSize.height)
         // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
         mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - g.mapTop))
         let mapHeight = CGFloat(mapRows.count) * u + u

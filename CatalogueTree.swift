@@ -70,6 +70,12 @@ struct GroupEntry: Codable, Equatable {
     var name: String
     var folder: String
     var members: [MemberEntry]
+    /// The levels inside this one, since levels nest to any depth.
+    var groups: [GroupEntry]? = nil
+
+    /// Every member beneath, at any depth, each with the group it sits in directly.
+    var allMembers: [(member: MemberEntry, group: UUID)] { members.map { ($0, id) } + (groups ?? []).flatMap { $0.allMembers } }
+    var allGroups: [GroupEntry] { [self] + (groups ?? []).flatMap { $0.allGroups } }
 }
 
 /// A collection in the structure file: its details, its Master Template, its levels between and the members directly in it.
@@ -80,10 +86,16 @@ struct CollectionEntry: Codable, Equatable {
     var folder: String
     /// What the members are grouped under, such as "Client"; nil when they sit straight under the heading.
     var groupName: String?
+    /// What each level between is called, top down; `groupName` is the first.
+    var levelNames: [String]? = nil
     var template: SchemaNode
     var templateID: UUID?
     var groups: [GroupEntry]
     var members: [MemberEntry]
+
+    /// Every member in the collection, at any depth, each with the group it sits in directly, or nil for one straight in the collection.
+    var allMembers: [(member: MemberEntry, group: UUID?)] { members.map { ($0, nil) } + groups.flatMap { $0.allMembers.map { ($0.member, Optional($0.group)) } } }
+    var allGroups: [GroupEntry] { groups.flatMap { $0.allGroups } }
 }
 
 /// "Rick 001.colcat": the catalogue's structure and the index of everything in it. It holds no payload.
@@ -314,7 +326,7 @@ enum CatalogueTree {
             }
             return out
         }
-        func membersOf(_ c: CollectionEntry) -> Set<UUID> { Set(c.members.map { $0.id } + c.groups.flatMap { $0.members.map { $0.id } }) }
+        func membersOf(_ c: CollectionEntry) -> Set<UUID> { Set(c.allMembers.map { $0.member.id }) }
 
         // The collections, at the root.
         var rootFolders = subfolders(of: root).filter { !TreeFiles.reserved.contains($0.lastPathComponent) }
@@ -341,39 +353,45 @@ enum CatalogueTree {
             guard let cu = collURL[c.id] else {
                 // A collection gone takes everything in it, unless a member's folder turns up elsewhere.
                 for m in c.members { lost.append((m, SchemaPlace(collection: c.id))) }
-                for g in c.groups { r.gone.insert(g.id); for m in g.members { lost.append((m, SchemaPlace(collection: c.id, folder: g.id))) } }
+                for g in c.allGroups { r.gone.insert(g.id); for (m, gid) in g.allMembers where gid == g.id { lost.append((m, SchemaPlace(collection: c.id, folder: g.id))) } }
                 continue
             }
             var kids = subfolders(of: cu)
-            var groupURL = byName(c.groups.map { ($0.id, $0.folder) }, &kids)
             let direct = byName(c.members.map { ($0.id, $0.folder) }, &kids)
-            groupURL.merge(byAssets(c.groups.filter { groupURL[$0.id] == nil }.map { g in (g.id, Set(g.members.map { $0.id })) }, &kids)) { a, _ in a }
-            // A level between holding nothing but folders is known by its members' folder names.
-            for g in c.groups where groupURL[g.id] == nil {
-                let names = Set(g.members.map { $0.folder })
-                let hits = kids.indices.filter { !Set(subfolders(of: kids[$0]).map { $0.lastPathComponent }).isDisjoint(with: names) }
-                if hits.count == 1 { groupURL[g.id] = kids.remove(at: hits[0]) }
-            }
             for m in c.members {
                 if let url = direct[m.id] { r.members[m.id] = url; r.places[m.id] = SchemaPlace(collection: c.id) }
                 else { lost.append((m, SchemaPlace(collection: c.id))) }
             }
-            for g in c.groups {
-                guard let gu = groupURL[g.id] else {
-                    r.gone.insert(g.id); r.notes.append("\(g.name) was taken away in Finder")
-                    for m in g.members { lost.append((m, SchemaPlace(collection: c.id, folder: g.id))) }
-                    continue
+            // The levels between, nested: each group's folder is found among its parent's subfolders, by name, by the assets of its members, or by the folders inside it.
+            func resolveGroups(_ groups: [GroupEntry], in folders: inout [URL], place: SchemaPlace) {
+                var found = byName(groups.map { ($0.id, $0.folder) }, &folders)
+                found.merge(byAssets(groups.filter { found[$0.id] == nil }.map { g in (g.id, Set(g.allMembers.map { $0.member.id })) }, &folders)) { a, _ in a }
+                for g in groups where found[g.id] == nil {
+                    let names = Set(g.members.map { $0.folder } + (g.groups ?? []).map { $0.folder })
+                    let hits = folders.indices.filter { !Set(subfolders(of: folders[$0]).map { $0.lastPathComponent }).isDisjoint(with: names) }
+                    if hits.count == 1 { found[g.id] = folders.remove(at: hits[0]) }
                 }
-                if gu.lastPathComponent != g.folder { r.notes.append("\(g.name) was renamed to \(gu.lastPathComponent) in Finder") }
-                r.groups[g.id] = gu
-                var inner = subfolders(of: gu)
-                let found = byName(g.members.map { ($0.id, $0.folder) }, &inner)
-                for m in g.members {
-                    if let url = found[m.id] { r.members[m.id] = url; r.places[m.id] = SchemaPlace(collection: c.id, folder: g.id) }
-                    else { lost.append((m, SchemaPlace(collection: c.id, folder: g.id))) }
+                for g in groups {
+                    guard let gu = found[g.id] else {
+                        for gone in g.allGroups { r.gone.insert(gone.id) }
+                        r.notes.append("\(g.name) was taken away in Finder")
+                        for (m, gid) in g.allMembers { lost.append((m, SchemaPlace(collection: c.id, folder: gid))) }
+                        continue
+                    }
+                    if gu.lastPathComponent != g.folder { r.notes.append("\(g.name) was renamed to \(gu.lastPathComponent) in Finder") }
+                    r.groups[g.id] = gu
+                    var inner = subfolders(of: gu)
+                    let here = SchemaPlace(collection: c.id, folder: g.id)
+                    let mine = byName(g.members.map { ($0.id, $0.folder) }, &inner)
+                    for m in g.members {
+                        if let url = mine[m.id] { r.members[m.id] = url; r.places[m.id] = here }
+                        else { lost.append((m, here)) }
+                    }
+                    resolveGroups(g.groups ?? [], in: &inner, place: here)
+                    leftovers += inner.map { ($0, here) }
                 }
-                leftovers += inner.map { ($0, SchemaPlace(collection: c.id, folder: g.id)) }
             }
+            resolveGroups(c.groups, in: &kids, place: SchemaPlace(collection: c.id))
             leftovers += kids.map { ($0, SchemaPlace(collection: c.id)) }
         }
         // Members moved or renamed in Finder: known by the assets in their folders, wherever the folders went.
@@ -400,7 +418,7 @@ enum CatalogueTree {
         }
         for (m, _) in gone { r.gone.insert(m.id); r.notes.append("\(m.name) was taken away in Finder") }
         for c in cat.collections {
-            for m in c.members + c.groups.flatMap({ $0.members }) {
+            for (m, _) in c.allMembers {
                 if let url = r.members[m.id], url.lastPathComponent != m.folder { r.notes.append("\(m.name) was renamed to \(url.lastPathComponent) in Finder") }
             }
         }
@@ -433,15 +451,20 @@ enum CatalogueTree {
         for c in cat.collections where !res.gone.contains(c.id) {
             var made = SchemaCollection(id: c.id, name: c.name, about: c.about, folderName: c.groupName, folders: [], stack: c.template)
             made.templateID = c.templateID
+            made.levelNames = c.levelNames
             if let url = res.collections[c.id], url.lastPathComponent != c.folder, url.lastPathComponent != filesystemName(c.name) { made.name = url.lastPathComponent }
-            for g in c.groups where !res.gone.contains(g.id) {
-                var folder = SchemaFolder(id: g.id, name: g.name)
-                if let url = res.groups[g.id], url.lastPathComponent != g.folder, url.lastPathComponent != filesystemName(g.name) { folder.name = url.lastPathComponent }
-                made.folders.append(folder)
+            func take(_ groups: [GroupEntry], parent: UUID?) {
+                for g in groups where !res.gone.contains(g.id) {
+                    var folder = SchemaFolder(id: g.id, name: g.name, parent: parent)
+                    if let url = res.groups[g.id], url.lastPathComponent != g.folder, url.lastPathComponent != filesystemName(g.name) { folder.name = url.lastPathComponent }
+                    made.folders.append(folder)
+                    take(g.groups ?? [], parent: g.id)
+                }
             }
+            take(c.groups, parent: nil)
             if !made.folders.isEmpty && made.folderName == nil { made.folderName = "Group" }
             collections.append(made)
-            for m in c.members + c.groups.flatMap({ $0.members }) { entries[m.id] = m }
+            for (m, _) in c.allMembers { entries[m.id] = m }
         }
         for (id, url) in res.newCollections { collections.append(SchemaCollection(id: id, name: url.lastPathComponent, stack: SchemaTrial.start)) }
 
@@ -454,7 +477,7 @@ enum CatalogueTree {
             return read(InformationDocument.self, at: a.url)?.record
         }
         for c in cat.collections {
-            for m in c.members + c.groups.flatMap({ $0.members }) {
+            for (m, _) in c.allMembers {
                 guard let url = res.members[m.id], let place = res.places[m.id] else { continue }
                 let pack = information(for: m.id, under: url)
                 if pack == nil { dirty = true }
@@ -496,7 +519,7 @@ enum CatalogueTree {
             return (false, nil)
         }
         var linked: [UUID: AssetLink] = [:], order: [UUID?: [UUID]] = [:]
-        for c in cat.collections { for m in c.members + c.groups.flatMap({ $0.members }) { for a in m.assets { linked[a.id] = a }; order[m.id] = m.assets.map { $0.id } } }
+        for c in cat.collections { for (m, _) in c.allMembers { for a in m.assets { linked[a.id] = a }; order[m.id] = m.assets.map { $0.id } } }
         for a in cat.libraryAssets { linked[a.id] = a }
         order[nil] = cat.libraryAssets.map { $0.id }
         // A file at the path the structure file links is read before any copy of it elsewhere.
@@ -586,7 +609,7 @@ enum CatalogueTree {
         // Where everything is now. A file at the path the structure file links wins over a copy of it elsewhere.
         var linkedPath: [UUID: String] = [:], knownPalettes = Set<UUID>(), oldMembers: [UUID: MemberEntry] = [:]
         for c in old?.collections ?? [] {
-            for m in c.members + c.groups.flatMap({ $0.members }) {
+            for (m, _) in c.allMembers {
                 oldMembers[m.id] = m
                 for a in m.assets { linkedPath[a.id] = root.appendingPathComponent(a.file).path; knownPalettes.insert(a.id) }
             }
@@ -633,37 +656,39 @@ enum CatalogueTree {
             if let url = collectionAt[c.id] { removing.append(url) }
         }
 
-        // The levels between, folders inside their collection.
+        // The levels between, folders inside their collection, nested: each settled inside its parent's folder, parents first.
         var groupURL: [UUID: URL] = [:]
-        var collectionTaken: [UUID: Set<String>] = [:]
+        var takenIn: [String: Set<String>] = [:]   // the names claimed in each folder, by the collection's or the folder's id
         for c in schema.collections {
             guard let home = collectionURL[c.id] else { continue }
-            var taken: Set<String> = []
-            for f in c.folders {
-                let url = try settle(existing: groupAt[f.id], wanted: filesystemName(f.name), in: home, taken: &taken)
+            for f in c.folders.sorted(by: { c.chain(to: $0.id).count < c.chain(to: $1.id).count }) {
+                let parentKey = f.parent?.uuidString ?? c.id.uuidString
+                let parentURL = f.parent.flatMap { groupURL[$0] } ?? home
+                var taken = takenIn[parentKey] ?? []
+                let url = try settle(existing: groupAt[f.id], wanted: filesystemName(f.name), in: parentURL, taken: &taken)
                 if let was = groupAt[f.id], was != url { rebase(from: was, to: url) }
                 groupURL[f.id] = url
+                takenIn[parentKey] = taken
             }
-            collectionTaken[c.id] = taken
         }
         for c in old?.collections ?? [] {
-            for g in c.groups where !schema.collections.contains(where: { $0.folders.contains { $0.id == g.id } }) { if let url = groupAt[g.id] { removing.append(url) } }
+            for g in c.allGroups where !schema.collections.contains(where: { $0.folders.contains { $0.id == g.id } }) { if let url = groupAt[g.id] { removing.append(url) } }
         }
 
-        // The members, each a folder in its collection or level between, with a folder for every group of its schema.
+        // The members, each a folder in its collection or its level between, with a folder for every group of its schema.
         var entries: [UUID: MemberEntry] = [:]
-        var groupTaken: [UUID: Set<String>] = [:]
         let placesAll = schema.places
         for p in lib.orderedProjects {
             let c = SchemaTrial.collection(of: p.id, among: schema.collections, places: placesAll)
             let g = SchemaTrial.folder(of: p.id, among: schema.collections, places: placesAll)
             guard let cURL = collectionURL[c.id] else { continue }
             let parent: URL = g.flatMap { groupURL[$0] } ?? cURL
-            var taken: Set<String> = g.flatMap { groupURL[$0] != nil ? (groupTaken[$0] ?? []) : nil } ?? (collectionTaken[c.id] ?? [])
+            let parentKey = (g.flatMap { groupURL[$0] != nil ? $0.uuidString : nil }) ?? c.id.uuidString
+            var taken: Set<String> = takenIn[parentKey] ?? []
             let existingFolder = memberAt[p.id] ?? claim(filesystemName(p.name), in: parent, from: &unclaimedMembers)
             let folder = try settle(existing: existingFolder, wanted: filesystemName(p.name), in: parent, taken: &taken)
             if let was = existingFolder, was != folder { rebase(from: was, to: folder) }
-            if let g = g, groupURL[g] != nil { groupTaken[g] = taken } else { collectionTaken[c.id] = taken }
+            takenIn[parentKey] = taken
 
             // Its schema: its own, or the Master Template it follows.
             let tree = schema.stacks?[p.id.uuidString] ?? c.stack
@@ -773,11 +798,18 @@ enum CatalogueTree {
         // The structure file, last, so it never names what is not yet there.
         let collections = schema.collections.map { c -> CollectionEntry in
             let inside = lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: schema.collections, places: placesAll).id == c.id }
-            let groups = c.folders.map { f in GroupEntry(id: f.id, name: f.name, folder: groupURL[f.id]?.lastPathComponent ?? filesystemName(f.name),
-                                                         members: inside.filter { SchemaTrial.folder(of: $0.id, among: schema.collections, places: placesAll) == f.id }.compactMap { entries[$0.id] }) }
+            func entry(_ f: SchemaFolder) -> GroupEntry {
+                let within = c.children(of: f.id).map(entry)
+                return GroupEntry(id: f.id, name: f.name, folder: groupURL[f.id]?.lastPathComponent ?? filesystemName(f.name),
+                                  members: inside.filter { SchemaTrial.folder(of: $0.id, among: schema.collections, places: placesAll) == f.id }.compactMap { entries[$0.id] },
+                                  groups: within.isEmpty ? nil : within)
+            }
+            let groups = c.children(of: nil).map(entry)
             let direct = inside.filter { SchemaTrial.folder(of: $0.id, among: schema.collections, places: placesAll) == nil }.compactMap { entries[$0.id] }
-            return CollectionEntry(id: c.id, name: c.name, about: c.about, folder: collectionURL[c.id]?.lastPathComponent ?? filesystemName(c.name), groupName: c.folderName,
-                                   template: c.stack, templateID: c.templateID, groups: groups, members: direct)
+            var made = CollectionEntry(id: c.id, name: c.name, about: c.about, folder: collectionURL[c.id]?.lastPathComponent ?? filesystemName(c.name), groupName: c.folderName,
+                                       template: c.stack, templateID: c.templateID, groups: groups, members: direct)
+            made.levelNames = c.levelNames
+            return made
         }
         let file = CatalogueFile(id: catID, name: catName, about: old?.about, createdAt: old?.createdAt ?? now, changedAt: now, library: lib.version,
                                  activePalette: lib.activeSwatchID, colours: lib.colours.map { $0.hex }, tags: lib.tagInfo, deleted: lib.deleted,

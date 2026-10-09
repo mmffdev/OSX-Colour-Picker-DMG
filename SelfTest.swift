@@ -1283,6 +1283,46 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     for dir in [staging, paletteStaging] { Sharing.discard(dir) }
     check(!fm.fileExists(atPath: staging.path), "a staging folder is gone once the share is in or set aside")
 
+    print("the splash builds the tree")
+    func answered(_ who: String?, _ streams: [String], _ make: String, clients: [String], members: [String]) -> (SchemaTrial.SchemaFile, Library) {
+        let d = SplashDraft(); d.who = who; d.streams = streams; d.streamsAnswered = true; d.make = make; d.clients = clients; d.members = members
+        var f = SchemaTrial.SchemaFile(collections: [], places: [:]), l = Library()
+        d.build(into: &f, library: &l, at: tcat)
+        return (f, l)
+    }
+    let (withStreams, wsLib) = answered("Clients", ["Web", "Print"], "Projects", clients: ["Acme"], members: ["Spring Launch"])
+    let acmeF = withStreams.collections[0].folders.first { $0.name == "Acme" }, webF = withStreams.collections[0].folders.first { $0.name == "Web" }
+    check(withStreams.collections.map { $0.name } == ["Clients"] && withStreams.collections[0].levels == ["Client", "Stream"] && acmeF?.parent == nil && webF?.parent == acmeF?.id
+          && withStreams.collections[0].folders.map { $0.name } == ["Acme", "Web", "Print"] && wsLib.projects.map { $0.name } == ["Spring Launch"]
+          && withStreams.places[wsLib.projects[0].id.uuidString] == SchemaPlace(collection: withStreams.collections[0].id, folder: webF?.id)
+          && withStreams.collections[0].stack.name == "Project" && withStreams.collections[0].stack.children.map { $0.role } == SchemaRole.allCases.map { Optional($0) },
+          "Clients with two streams build Clients, a client with both streams inside it, and the first project in the first stream, holding the four groups")
+    let (oneKind, okLib) = answered("Customers", [], "Jobs", clients: ["Acme"], members: ["Fit Out"])
+    check(oneKind.collections[0].levels == ["Customer"] && oneKind.collections[0].folders.map { $0.name } == ["Acme"] && oneKind.places[okLib.projects[0].id.uuidString]?.folder == oneKind.collections[0].folders[0].id
+          && SchemaTrial.memberName(of: oneKind.collections[0]) == "Job", "Customers with one kind of work build one level, the customer, with the first job in it")
+    let (own, ownLib) = answered(SplashDraft.ownWork, [], "Products", clients: [], members: ["Driftwood Star"])
+    check(own.collections[0].name == "My Products" && own.collections[0].levels.isEmpty && own.collections[0].folders.isEmpty && own.places[ownLib.projects[0].id.uuidString]?.folder == nil,
+          "Our own work with one kind builds My Products with the first product straight in it")
+    let (ownStreams, osLib) = answered(SplashDraft.ownWork, ["Web", "Print"], "Ranges", clients: [], members: ["Autumn 27"])
+    check(ownStreams.collections[0].levels == ["Stream"] && ownStreams.collections[0].folders.map { $0.parent } == [nil, nil] && ownStreams.places[osLib.projects[0].id.uuidString]?.folder == ownStreams.collections[0].folders[0].id,
+          "Our own work with streams builds the streams as the one level, the first range in the first stream")
+    check(SplashDraft.singular("Clients") == "Client" && SplashDraft.singular("Ranges") == "Range" && SplashDraft.singular("Companies") == "Company" && SplashDraft.singular("Campaigns") == "Campaign",
+          "the word for one of them comes from the word for many")
+    // The tree on disk nests the levels: Clients/Acme/Web/Spring Launch, and reads back with the same parents.
+    let splashDir = root.appendingPathComponent("tree/Splash")
+    let splashStore = LibraryStore(directory: splashDir, legacyURL: nil, name: "Splash")
+    try! splashStore.save(wsLib, schema: withStreams)
+    let splashBack = try! splashStore.load()
+    check(fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Web/Spring Launch/Palettes").path) && fm.fileExists(atPath: splashDir.appendingPathComponent("Clients/Acme/Print").path)
+          && splashBack.project(wsLib.projects[0].id) != nil && splashStore.schema.collections[0].folders.first { $0.name == "Web" }?.parent == acmeF?.id
+          && splashStore.schema.collections[0].levels == ["Client", "Stream"] && SchemaTrial.folder(of: wsLib.projects[0].id, among: splashStore.schema.collections, places: splashStore.schema.places) == webF?.id,
+          "the levels nest on disk, Clients/Acme/Web/Spring Launch, and read back with their parents and the member in the deepest")
+    try! fm.moveItem(at: splashDir.appendingPathComponent("Clients/Acme/Web"), to: splashDir.appendingPathComponent("Clients/Acme/Online"))
+    _ = try! splashStore.load()
+    check(splashStore.schema.collections[0].folders.first { $0.id == webF?.id }?.name == "Online" && splashStore.schema.collections[0].folders.first { $0.id == webF?.id }?.parent == acmeF?.id
+          && (try? splashStore.load())?.project(wsLib.projects[0].id) != nil,
+          "a nested level renamed in Finder keeps its place under its parent, and the member inside it")
+
     print("where catalogues and their members are kept")
     let homeDir = root.appendingPathComponent("home"), awayDir = root.appendingPathComponent("awayDir")
     let cats = Catalogues(root: homeDir, legacyURL: nil)

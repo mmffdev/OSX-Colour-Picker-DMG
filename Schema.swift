@@ -41,6 +41,8 @@ enum SchemaRole: String, Codable, CaseIterable {
 struct SchemaFolder: Codable, Equatable {
     var id = UUID()
     var name: String
+    /// The folder this one sits in, for a level below the first; nil at the first level. Since 2026-10-09 levels nest to any depth.
+    var parent: UUID? = nil
 }
 
 /// A collection: its heading, how its members are grouped if they are, and the stack they follow.
@@ -55,6 +57,26 @@ struct SchemaCollection: Codable, Equatable {
     var stack: SchemaNode
     /// The template file the Master Template was copied from, if any; the copy is the collection's own from then on.
     var templateID: UUID? = nil
+    /// What each level between the heading and a member is called, top down, such as Client then Stream; `folderName` is the first of them.
+    var levelNames: [String]? = nil
+
+    /// The levels between, top down: `levelNames`, or the one `folderName`, or none.
+    var levels: [String] { levelNames ?? (folderName.map { [$0] } ?? []) }
+    /// The folders directly inside `parent`, or at the first level for nil.
+    func children(of parent: UUID?) -> [SchemaFolder] { folders.filter { $0.parent == parent } }
+    /// The folders from the first level down to `folder`, itself last; empty when it is not here.
+    func chain(to folder: UUID) -> [SchemaFolder] {
+        var out: [SchemaFolder] = [], at: UUID? = folder, guardCount = 0
+        while let id = at, let f = folders.first(where: { $0.id == id }), guardCount < 64 { out.insert(f, at: 0); at = f.parent; guardCount += 1 }
+        return out
+    }
+    /// What a folder at this depth is called: the level's name, or the last level's for one deeper than the names go.
+    func levelName(atDepth d: Int) -> String {
+        let l = levels
+        return l.isEmpty ? "Group" : l[min(d, l.count - 1)]
+    }
+    /// Every folder beneath `folder`, at any depth, itself not included.
+    func descendants(of folder: UUID) -> [SchemaFolder] { children(of: folder).flatMap { [$0] + descendants(of: $0.id) } }
 }
 
 /// A shape a work group can be made from, kept as a file of its own in the catalogue's Templates folder.

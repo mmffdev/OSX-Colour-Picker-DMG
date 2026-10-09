@@ -434,7 +434,7 @@ enum Sharing {
             var out: [(Placement, String)] = []
             for c in schema.collections {
                 out.append((.collection(c.id, nil), c.name))
-                for f in c.folders { out.append((.collection(c.id, f.id), "\(c.name): \(f.name)")) }
+                for f in c.folders { out.append((.collection(c.id, f.id), ([c.name] + c.chain(to: f.id).map { $0.name }).joined(separator: ": "))) }
             }
             return out
         case .palette:
