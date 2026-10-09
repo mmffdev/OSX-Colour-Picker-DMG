@@ -559,7 +559,9 @@ final class SplashWho: SplashPane, NSTextFieldDelegate {
         addSubview(typeField)
     }
     required init?(coder: NSCoder) { fatalError() }
-    override var canContinue: Bool { !draft.parties.isEmpty }
+    /// A name typed and not yet taken counts: Continue takes it.
+    override var canContinue: Bool { !draft.parties.isEmpty || nameFields.contains { slots.contains($0.key) && !typed($0.value).isEmpty } }
+    override func commit() { for (t, f) in nameFields where slots.contains(t) && !typed(f).isEmpty { take(t) } }
     override var firstField: NSView? { customFor != nil ? typeField : slots.compactMap { $0 }.last.flatMap { nameFields[$0] } }
     override var marks: [SplashTreeView.Target: Int] {
         var m: [SplashTreeView.Target: Int] = [:]
@@ -643,7 +645,15 @@ final class SplashWho: SplashPane, NSTextFieldDelegate {
                 hairline(row: k + 1, live: typeField.currentEditor() != nil)
                 drawMarks(row: k + 1, accept: { [weak self] in self?.takeType(for: i) }, cancel: { [weak self] in self?.customFor = nil; self?.typeField.stringValue = ""; self?.refresh() })
             }
-            guard let t = p.type, let h = p.headerRow else { continue }
+            // A slot still to be chosen, after the first, can be taken away from its own row.
+            guard let t = p.type, let h = p.headerRow else {
+                if m.placed.count > 1 {
+                    let mark = NSRect(x: left + width - 24, y: line(p.stripRow), width: 24, height: A.unit)
+                    Design.attributed("\u{00D7}", .body, colour: Design.quiet).draw(x: mark.minX + 8, baseline: row(p.stripRow))
+                    hits.append((mark, { [weak self] in self?.removeSlot(i) }))
+                }
+                continue
+            }
             Design.attributed(draft.collectionTitle(t), .bodyStrong).draw(x: left, baseline: row(h), width: width - 160)
             Design.attributed("Collection", .caption, colour: Design.soft).draw(x: left + width - 110, baseline: row(h))
             let mark = NSRect(x: left + width - 24, y: line(h), width: 24, height: A.unit)

@@ -31,15 +31,17 @@ final class SplashTreeView: NSView {
     enum Level: Equatable { case party(String), category(UUID), stream(UUID, String), group(String) }
     /// A node a section can be working on, to mark it with a band.
     enum Target: Hashable { case catalogue, collection(String), party(UUID), category(UUID, String), leaf(String) }
-    /// The colours the bands and the squares take, in turn: Colorgain's own amber first, then its complements.
-    static let palette: [NSColor] = [Design.active, Design.hex("#1E9BF0"), Design.hex("#F26B3A"), Design.hex("#3FBF7F"), Design.hex("#8B6CF2"), Design.hex("#1FB8B0"), Design.hex("#F26BA8"), Design.hex("#B5C738")]
+    /// The colours the bands and the squares take, in turn: eight printer's inks that sit on warm paper and apart from each other,
+    /// vermilion, steel blue, viridian, mustard, plum, teal, olive, periwinkle; none of them a colour the app uses for anything else.
+    static let palette: [NSColor] = [Design.hex("#E04E2F"), Design.hex("#3A6EA5"), Design.hex("#2F9E6E"), Design.hex("#D9A126"), Design.hex("#8C4A9E"), Design.hex("#1F9AA6"), Design.hex("#A5A32E"), Design.hex("#6B7FD7")]
     static func colour(_ i: Int) -> NSColor { palette[((i % palette.count) + palette.count) % palette.count] }
     /// The nodes marked, with the palette index of each; set by the splash for the section in view, and the bands follow.
     var marks: [Target: Int] = [:] { didSet { if marks != oldValue { settleBands() } } }
     private struct Band { var colour: Int; var start: TimeInterval; var leaving: Bool }
     private var bands: [Target: Band] = [:]
     private var bandTimer: Timer?
-    private static let slide: TimeInterval = 0.42
+    /// The band comes in from the left: its point travels to its place, and once it has settled the tail follows and the notch shows.
+    private static let slide: TimeInterval = 0.48, tailWait: TimeInterval = 0.56, tail: TimeInterval = 0.3
     private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String, String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
@@ -235,27 +237,36 @@ final class SplashTreeView: NSView {
         let now = CACurrentMediaTime()
         var busy = false
         for (t, b) in bands {
-            let done = now - b.start >= Self.slide
+            let done = now - b.start >= (b.leaving ? Self.slide : Self.tailWait + Self.tail)
             if done, b.leaving { bands[t] = nil } else if !done { busy = true }
         }
         if !busy { bandTimer?.invalidate(); bandTimer = nil }
         needsDisplay = true
     }
-    /// The ribbon: the row's height, from the tree's left edge to the mark column with a point beyond it and a notch at its tail,
-    /// translated by how far it has come; a leaving band goes back the way it came.
+    /// The ribbon: the row's height, with a point at its head and a notch at its tail, its head reaching to the gap before the
+    /// sections. It grows in from off the left edge: the head travels to its place, the body behind it off the edge still, and
+    /// once the head has settled the tail comes in after it and the notch shows. Leaving, it slides back out the way it came.
     private func drawBand(_ band: Band, top: CGFloat, at now: TimeInterval) {
-        let u = max(0, min(1, (now - band.start) / Self.slide))
-        let eased = 1 - pow(1 - u, 3)
-        let progress = CGFloat(band.leaving ? 1 - eased : eased)
-        let end = left + width - 24, tip: CGFloat = 14, notch: CGFloat = 10, mid = top + A.unit / 2
-        let dx = (end + tip) * (1 - progress)
+        func ease(_ u: Double) -> CGFloat { CGFloat(1 - pow(1 - max(0, min(1, u)), 3)) }
+        let tip: CGFloat = 14, notch: CGFloat = 10, mid = top + A.unit / 2
+        let end = bounds.width - tip - 2, off = -(end + tip)
+        let age = now - band.start
+        var head: CGFloat, tailX: CGFloat
+        if band.leaving {
+            head = end - (end - off) * ease(age / Self.slide)
+            tailX = min(0, head - (end + tip))
+        } else {
+            head = off + (end - off) * ease(age / Self.slide)
+            tailX = -(notch + 24) + (notch + 24) * ease((age - Self.tailWait) / Self.tail)
+            tailX = min(tailX, head - tip - 1)
+        }
         let path = NSBezierPath()
-        path.move(to: NSPoint(x: dx, y: top))
-        path.line(to: NSPoint(x: dx + end, y: top))
-        path.line(to: NSPoint(x: dx + end + tip, y: mid))
-        path.line(to: NSPoint(x: dx + end, y: top + A.unit))
-        path.line(to: NSPoint(x: dx, y: top + A.unit))
-        path.line(to: NSPoint(x: dx + notch, y: mid))
+        path.move(to: NSPoint(x: tailX, y: top))
+        path.line(to: NSPoint(x: head, y: top))
+        path.line(to: NSPoint(x: head + tip, y: mid))
+        path.line(to: NSPoint(x: head, y: top + A.unit))
+        path.line(to: NSPoint(x: tailX, y: top + A.unit))
+        path.line(to: NSPoint(x: tailX + notch, y: mid))
         path.close()
         Self.colour(band.colour).setFill(); path.fill()
     }
