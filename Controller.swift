@@ -90,8 +90,8 @@ final class LibraryController: NSObject {
     }
 
     var paletteSort: SortOrder {
-        get { SortOrder(rawValue: preferences.object(forKey: "paletteSort") as? Int ?? SortOrder.oldest.rawValue) ?? .oldest }
-        set { preferences.set(newValue.rawValue, forKey: "paletteSort"); changed() }
+        get { SortOrder(rawValue: AppPreferences.shared.object(forKey: "paletteSort") as? Int ?? SortOrder.oldest.rawValue) ?? .oldest }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "paletteSort"); changed() }
     }
 
     func hexes(in id: UUID) -> [String] { library.hexes(inSwatch: id, by: paletteSort) }

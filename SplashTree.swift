@@ -41,7 +41,7 @@ final class SplashTreeView: NSView {
     private var bands: [Target: Band] = [:]
     private var bandTimer: Timer?
     /// The band comes in from the left: its point travels to its place, and once it has settled the tail follows and the notch shows.
-    private static let slide: TimeInterval = 0.48, tailWait: TimeInterval = 0.56, tail: TimeInterval = 0.3
+    private static let slide = SelectionRibbon.slide, tailWait = SelectionRibbon.tailWait, tail = SelectionRibbon.tail
     private enum Kind { case catalogue, collection(String), party(Int), category(UUID, Int), stream(UUID, String, Int), member(UUID, String), placeholder, pending, group(String, String), add(Level) }
     private struct Line {
         let kind: Kind; let name: String; let depth: Int; let caption: String; let removable: Bool
@@ -249,28 +249,10 @@ final class SplashTreeView: NSView {
     /// sections. It grows in from off the left edge: the head travels to its place, the body behind it off the edge still, and
     /// once the head has settled the tail comes in after it and the notch shows. Leaving, it slides back out the way it came.
     private func drawBand(_ band: Band, top: CGFloat, at now: TimeInterval) {
-        func ease(_ u: Double) -> CGFloat { CGFloat(1 - pow(1 - max(0, min(1, u)), 3)) }
-        let tip: CGFloat = 14, notch: CGFloat = 10, mid = top + A.unit / 2
-        let end = bounds.width - tip - 2, off = -(end + tip)
-        let age = now - band.start
-        var head: CGFloat, tailX: CGFloat
-        if band.leaving {
-            head = end - (end - off) * ease(age / Self.slide)
-            tailX = min(0, head - (end + tip))
-        } else {
-            head = off + (end - off) * ease(age / Self.slide)
-            tailX = -(notch + 24) + (notch + 24) * ease((age - Self.tailWait) / Self.tail)
-            tailX = min(tailX, head - tip - 1)
-        }
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: tailX, y: top))
-        path.line(to: NSPoint(x: head, y: top))
-        path.line(to: NSPoint(x: head + tip, y: mid))
-        path.line(to: NSPoint(x: head, y: top + A.unit))
-        path.line(to: NSPoint(x: tailX, y: top + A.unit))
-        path.line(to: NSPoint(x: tailX + notch, y: mid))
-        path.close()
-        Self.colour(band.colour).setFill(); path.fill()
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        SelectionRibbon.draw(top: top, height: A.unit, reach: bounds.width - 2,
+                             age: reduced ? (band.leaving ? SelectionRibbon.slide : SelectionRibbon.duration) : now - band.start,
+                             leaving: band.leaving, colour: Self.colour(band.colour))
     }
 
     // MARK: Changing it

@@ -1,0 +1,11 @@
+<!doctype html>
+<!-- THESIS: Compare ten genuinely different rail row systems without moving Colorgain's header grid.
+OWN-WORLD: Neutral light/dark app surfaces; original colour spectra remain the visual emphasis.
+STORY: Choose a study, operate both rails, compare themes, shortlist a direction.
+FIRST VIEWPORT: Study selector left, fixed-grid Library and Palettes pair right, shared controls above.
+FORM: User-requested 10 paired light/dark interface studies, within the established app shell. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Colorgain — Rail studies</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="gallery-head"><div><p>Colorgain · Interface studies</p><h1>Two rails. Ten directions.</h1></div><a href="#gallery">Browse all 20 views ↓</a></header>
+<div class="workspace"><aside class="chooser"><h2>Choose a direction</h2><nav id="designs" aria-label="Rail designs"></nav><div class="constraint"><strong>The fixed parts</strong><p>Original header grid.<br>168px spectra in both rails.<br>Same content in every design.</p></div></aside><main><div class="study-head"><div><span id="number"></span><h2 id="title"></h2><p id="description"></p></div><div class="theme-switch" role="group" aria-label="Preview appearance"><button data-theme="light" aria-pressed="true">Light</button><button data-theme="dark" aria-pressed="false">Dark</button><button data-theme="compare" aria-pressed="false">Compare</button></div></div><div id="preview"></div><div class="interaction-note"><span class="live-dot"></span><span>Live prototype · Expand folders, choose palettes, toggle favourites and set a pick target.</span><button id="reset">Reset demo</button></div><div id="selection" aria-live="polite"></div></main></div>
+<section id="gallery"><div class="gallery-title"><div><h2>All twenty studies</h2><p>Each direction has a light and a dark counterpart. Open any view to try it.</p></div><span>10 Light / 10 Dark</span></div><div id="contact-sheet"></div></section>
+<footer>Design exploration · Sample catalogue data · Native app unchanged</footer><script src="app.js"></script></body></html>

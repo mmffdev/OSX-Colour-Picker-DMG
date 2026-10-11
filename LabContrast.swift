@@ -163,7 +163,7 @@ private final class PaletteShelf: NSView {
     override var isFlipped: Bool { true }
 
     private func closedKey(_ key: String) -> String { "contrastShelfClosed.\(key)" }
-    private func isClosed(_ key: String) -> Bool { preferences.bool(forKey: closedKey(key)) }
+    private func isClosed(_ key: String) -> Bool { AppPreferences.shared.bool(forKey: closedKey(key)) }
 
     private static let headingHeight: CGFloat = 24, rowHeight: CGFloat = 30
     /// Clear space under each group, held at the top of the next heading's row.
@@ -248,7 +248,7 @@ private final class PaletteShelf: NSView {
         case .heading(_, let key):
             // The whole heading is the switch, arrow and name alike.
             guard p.y >= hit.rect.maxY - PaletteShelf.headingHeight else { return }
-            preferences.set(!isClosed(key), forKey: closedKey(key))
+            AppPreferences.shared.set(!isClosed(key), forKey: closedKey(key))
             needsDisplay = true
             onResize?()
         }
@@ -492,7 +492,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     init(library: LibraryController) {
         self.library = library
         saveBar = SaveBar(library: library)
-        state = preferences.data(forKey: ContrastViewController.key).flatMap { try? JSONDecoder().decode(ContrastState.self, from: $0) } ?? ContrastState()
+        state = AppPreferences.shared.data(forKey: ContrastViewController.key).flatMap { try? JSONDecoder().decode(ContrastState.self, from: $0) } ?? ContrastState()
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -835,7 +835,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(state) { preferences.set(data, forKey: ContrastViewController.key) }
+        if let data = try? JSONEncoder().encode(state) { AppPreferences.shared.set(data, forKey: ContrastViewController.key) }
     }
 
     /// One change, one step to undo.

@@ -1,0 +1,6 @@
+# Rail studies
+Operate mode within Colorgain's established grid. Fixed 430px rails, 24px side insets, 17px medium headings, 11px uppercase column labels, shared rule at y=79px, header height 108px, and 64px app chrome. Headers are identical across the ten treatments apart from light/dark foreground and background colours. Content typography is 13px minimum for names and controls, 11px for secondary captions.
+Every palette spectrum is 168px wide in both rails in every study, regardless of colour count. Colours stay discrete and in their original order. Selected, favourite and target states remain separate. Tree hierarchy and counts remain visible. The ten treatments differ below the header through actual row topology, density, surface and interaction treatments. Each has an explicit light and dark version.
+Gallery controls live outside the proposed app interface. Prototype state is local to this page. Keyboard focus is visible. Gallery thumbnails scale the actual study layouts for comparison.
+
+Header measurements follow StudioWindow.swift AreaHeader and Design.swift: heading baseline 36, label baseline 69, rule 79. Top navigation uses the existing 24px gaps. User explicitly locked the full top bar and header region.

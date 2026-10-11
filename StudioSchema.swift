@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 
 // ---------- Settings ▸ Schema, on the Studio window ----------
 //
@@ -42,6 +43,53 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     var onResize: (() -> Void)?
     /// The page's edge to its first column: the view starts at the rail's divider so a row's ground can reach it, and the words start here.
     var leading: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
+
+    private var safetyLocked = !Prefs.schemaSafetyLockDisabled
+    private let safetyCover = SchemaSafetyCover()
+    private let padlock = NSButton()
+    private var safetyCapturePending = false
+    private var safetyCaptureSize = NSSize.zero
+
+    func enterPage() {
+        closeMenu()
+        window?.makeFirstResponder(self)
+        safetyLocked = !Prefs.schemaSafetyLockDisabled
+        safetyCover.reset()
+        safetyCaptureSize = .zero
+        updateSafety()
+    }
+    private func updateSafety() {
+        safetyCover.isHidden = !safetyLocked
+        nameField.isEnabled = !safetyLocked
+        about.isEditable = !safetyLocked
+        setUpButton.isEnabled = !safetyLocked
+        padlock.image = NSImage(systemSymbolName: safetyLocked ? "lock" : "lock.open", accessibilityDescription: safetyLocked ? "Schema locked" : "Schema unlocked")?.withSymbolConfiguration(.init(pointSize: 48, weight: .light))
+        padlock.toolTip = safetyLocked ? "Slide below to unlock Schema" : "Lock Schema and require unlocking on future visits"
+        padlock.setAccessibilityLabel(safetyLocked ? "Schema locked" : "Lock Schema")
+        needsLayout = true
+    }
+    @objc private func lockSchema() {
+        guard !safetyLocked else { return }
+        window?.makeFirstResponder(self)
+        Prefs.schemaSafetyLockDisabled = false
+        safetyLocked = true
+        safetyCover.reset()
+        safetyCaptureSize = .zero
+        closeMenu()
+        updateSafety()
+    }
+    private func unlockSchema() {
+        guard safetyLocked else { return }
+        Prefs.schemaSafetyLockDisabled = safetyCover.remember.state == .on
+        safetyLocked = false
+        updateSafety()
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = -0.18; turn.toValue = 0; turn.duration = 0.28
+            padlock.layer?.add(turn, forKey: "unlock")
+        }
+        window?.makeFirstResponder(self)
+    }
 
     // MARK: State
 
@@ -87,10 +135,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     // MARK: The views
 
     private let nameField = NSTextField(string: "")
-    /// The description: a box of five lines, each line on the beat, in its own scroll.
+    /// The description: a box of four lines, each line on the beat, in its own scroll.
     private let about = NSTextView()
     private let aboutScroll = NSScrollView()
-    private let mapScroll = NSScrollView(), typeScroll = NSScrollView()
+    private let mapScroll = SchemaTypeScroll()
+    private let typeScroll = SchemaTypeScroll()
     private let map = Canvas(), types = Canvas()
 
     /// What a row's action is: a child beneath, a sibling after, or the bin.
@@ -160,12 +209,22 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         addSubview(aboutScroll)
         for (scroll, canvas) in [(mapScroll, map), (typeScroll, types)] {
             scroll.drawsBackground = false
+            scroll.verticalScroller = SchemaYellowScroller()
             scroll.hasVerticalScroller = true
-            scroll.autohidesScrollers = true
-            scroll.scrollerStyle = .overlay
+            scroll.autohidesScrollers = false
+            scroll.scrollerStyle = .legacy
             scroll.documentView = canvas
             addSubview(scroll)
         }
+        padlock.isBordered = false
+        padlock.contentTintColor = Design.ink
+        padlock.imageScaling = .scaleProportionallyUpOrDown
+        padlock.wantsLayer = true
+        padlock.target = self; padlock.action = #selector(lockSchema)
+        addSubview(padlock)
+        addSubview(safetyCover)
+        safetyCover.onUnlock = { [weak self] in self?.unlockSchema() }
+        updateSafety()
         rollover.keys = { [weak self] in self?.keys ?? [] }
         rollover.locked = { [weak self] k in self?.locked(k) ?? false }
         rollover.redraw = { [weak self] in self?.map.needsDisplay = true; self?.types.needsDisplay = true }
@@ -378,15 +437,16 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     private func geometry(width w: CGFloat) -> Geometry {
         var g = Geometry()
         let u = Self.u, gut = Design.App.areaGutter, l = leading   // the split is an area gutter
-        // Both columns: a header on row 0, words on rows 1 to 3, a second header on row 4 with its rule, content from row 5. The map takes 60 of the width, the selected row 40.
-        g.lw = ((w - gut) * 0.6).rounded(); g.rx = l + g.lw + gut; g.rw = w - g.lw - gut
-        g.mapTop = 5 * u
+        // Both columns: a header on row 0, words on rows 1 to 3, a second header on row 4 with its rule, content from row 5. Both panes use the shared page-column split.
+        g.rx = l + SettingsSheet.contentColumn(width: w, window: window?.frame.width ?? Design.App.size.width)
+        g.lw = g.rx - l - gut; g.rw = l + w - g.rx
+        g.mapTop = SettingsSheet.schemaContentStart + 5 * u
         g.form = form()
-        g.formTop = 5 * u
-        // Under the Type rule: Name over its field, Description over its box of five lines, then the types; every piece a whole number of units, so the types' rows keep the map's beat.
+        g.formTop = SettingsSheet.schemaContentStart + 5 * u
+        // Under the Type rule: Name over its field, Description over its box of four lines, then the types; every piece a whole number of units, so the types' rows keep the map's beat.
         var y = g.formTop
         if g.form.canName { g.nameLabel = y; g.nameRow = NSRect(x: g.rx, y: y + u, width: g.rw, height: u); y += 2 * u }
-        if g.form.said != nil { g.aboutLabel = y; g.aboutRow = NSRect(x: g.rx, y: y + u, width: g.rw, height: 5 * u); y += 6 * u }
+        if g.form.said != nil { g.aboutLabel = y; g.aboutRow = NSRect(x: g.rx, y: y + u, width: g.rw, height: 4 * u); y += 5 * u }
         g.typesTop = y
         return g
     }
@@ -395,10 +455,14 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
 
     /// The section fills the page; the map and the types scroll within it.
-    func height(forWidth width: CGFloat) -> CGFloat { 0 }
+    func height(forWidth width: CGFloat) -> CGFloat { 24 * Self.u }
 
     override func layout() {
         super.layout()
+        let titleHeight = SettingsSheet.glyphBounds(Design.attributed("Schema.", SettingsSheet.titleStyle)).height
+        padlock.frame = NSRect(x: bounds.width - titleHeight, y: SettingsSheet.titleBaseline - titleHeight, width: titleHeight, height: titleHeight)
+        let top = SettingsSheet.headerGuide
+        safetyCover.frame = NSRect(x: 0, y: top, width: bounds.width, height: max(0, bounds.height - top))
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line
         mapRows = buildMap()
         typeRows = g.form.templates
@@ -408,15 +472,15 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         setUpButton.isHidden = !all.isEmpty
         setUpButton.frame = NSRect(x: leading, y: g.mapTop + u - setUpButton.intrinsicContentSize.height + 4, width: setUpButton.intrinsicContentSize.width, height: setUpButton.intrinsicContentSize.height)
         // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
-        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - g.mapTop))
+        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter, height: max(0, bounds.height - g.mapTop))
         let mapHeight = CGFloat(mapRows.count) * u + u
-        map.frame = NSRect(x: 0, y: 0, width: mapScroll.frame.width, height: max(mapScroll.frame.height, mapHeight))
+        map.frame = NSRect(x: 0, y: 0, width: leading + g.lw, height: max(mapScroll.frame.height, mapHeight))
         mapScroll.verticalScrollElasticity = mapHeight > mapScroll.frame.height ? .allowed : .none
         rowRects = mapRows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
-        let lead = Design.App.areaGutter / 2
+        let lead: CGFloat = 0
         typeScroll.frame = NSRect(x: g.rx - lead, y: g.typesTop, width: g.rw + lead, height: max(0, bounds.height - g.typesTop))
         let typesHeight = CGFloat(typeRows.count) * u + u
-        types.frame = NSRect(x: 0, y: 0, width: g.rw + lead, height: max(typeScroll.frame.height, typesHeight))
+        types.frame = NSRect(x: 0, y: 0, width: max(0, g.rw + lead - Design.App.gutter), height: max(typeScroll.frame.height, typesHeight))
         typeScroll.verticalScrollElasticity = typesHeight > typeScroll.frame.height ? .allowed : .none
         typeScroll.isHidden = typeRows.isEmpty
         // A 13 field's text sits 15 below its top: on the line.
@@ -431,22 +495,48 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             about.textContainer?.containerSize = NSSize(width: r.width, height: .greatestFiniteMagnitude)
         }
         if window?.firstResponder !== about { about.string = g.form.said ?? "" }
+        if safetyLocked && safetyCaptureSize != bounds.size && !safetyCapturePending {
+            safetyCapturePending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.safetyCapturePending = false
+                guard self.safetyLocked else { return }
+                self.safetyCaptureSize = self.bounds.size
+                self.safetyCover.isHidden = true
+                if let rep = self.bitmapImageRepForCachingDisplay(in: self.bounds) {
+                    self.cacheDisplay(in: self.bounds, to: rep)
+                    if let cg = rep.cgImage {
+                        let input = CIImage(cgImage: cg)
+                        let scale = CGFloat(cg.height) / self.bounds.height
+                        let crop = CGRect(x: 0, y: 0, width: cg.width, height: Int(self.safetyCover.bounds.height * scale))
+                        let blurred = input.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 6 * scale]).cropped(to: crop)
+                        if let image = CIContext().createCGImage(blurred, from: crop) {
+                            self.safetyCover.background.image = NSImage(cgImage: image, size: self.safetyCover.bounds.size)
+                        }
+                    }
+                }
+                self.safetyCover.isHidden = false
+            }
+        }
     }
 
     // MARK: Drawing: the headers and words here, the map and the types on their own canvases
 
     override func draw(_ dirtyRect: NSRect) {
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line, l = leading
+        SettingsSheet.title("Schema.", x: l)
+        SettingsSheet.divider(above: SettingsSheet.headerGuide, x: l, width: bounds.width - l)
+        let offset = SettingsSheet.schemaContentStart
         // The two first-order headers on the first line, their words in a box of three units under each, then the second pair of headers on one line with their rules.
-        Design.attributed("Structure", .header).draw(x: l, baseline: line)
-        Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
-        Design.attributed("Schema", .header).draw(x: l, baseline: 4 * u + line)
-        hairline(x: l, y: g.mapTop - 1, width: g.lw, Design.rule)
+        Design.attributed("Structure", .header).draw(x: l, baseline: offset + line)
+        SettingsSheet.paragraph(leftHelp, x: l, firstBaseline: offset + u + line, width: g.lw, height: Self.helpUnits * u, colour: Design.quiet)
+        Design.attributed("Schema", .header).draw(x: l, baseline: offset + 4 * u + line)
+        hairline(x: 0, y: g.mapTop - 1, width: l + g.lw, Design.rule)
         guard selected != nil else { return }
         let rx = g.rx
-        Design.attributed(g.form.title, .header).draw(x: rx, baseline: line)
-        Design.attributed(g.form.help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
-        Design.attributed(g.form.templates ? "Templates" : "Type", .header).draw(x: rx, baseline: 4 * u + line)
+        Design.attributed(g.form.title, .header).draw(x: rx, baseline: offset + line)
+        SettingsSheet.paragraph(g.form.help, x: rx, firstBaseline: offset + u + line, width: g.rw, height: Self.helpUnits * u, colour: Design.quiet)
+        Design.attributed(g.form.templates ? "Templates" : "Type", .header).draw(x: rx, baseline: offset + 4 * u + line)
         hairline(x: rx, y: g.formTop - 1, width: g.rw, Design.rule)
         if g.form.canName {
             Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: g.nameLabel + line)
@@ -480,11 +570,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         let line = Self.line, l = leading
         doHits = []; gripRects = []
         guard rowRects.count == mapRows.count else { return }
-        // The grounds first, each a point taller at the top so it sits over the rule above it; then the tree's lines; then the rows.
+        // The grounds first, contained between their row dividers; then the tree's lines; then the rows.
         for (i, r) in mapRows.enumerated() {
             let box = rowRects[i]
             let on = r.target == selected
-            if on { fill(NSRect(x: 0, y: box.minY - 1, width: box.maxX + Design.App.areaGutter / 2, height: box.height + 1), Design.mist) }
+            if on { fill(NSRect(x: 0, y: box.minY, width: box.maxX, height: box.height - 1), Design.mist) }
             let x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(on ? (draft ?? r.text) : r.text, on || r.strong ? .bodyStrong : .body, colour: on || r.strong ? Design.ink : Design.quiet)
             rollover.pane(.row(r.target), box: box, reach: x + 36 + name.size().width + Self.step)
@@ -504,7 +594,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
                 for dx in [0, 4] as [CGFloat] { for dy in [-4, 0, 4] as [CGFloat] { fill(NSRect(x: grip.minX + 2 + dx, y: b - 5 + dy, width: 1.5, height: 1.5), on ? Design.quiet : Design.soft) } }
                 gripRects.append(grip)
             } else { gripRects.append(.zero) }
-            var right = box.maxX
+            var right = box.maxX - Design.App.gutter
             if on {
                 // Add Child, Add Sibling and the bin, from the right: the bin an icon alone.
                 for (act, run) in r.does.reversed() {
@@ -523,7 +613,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
                 right -= t.size().width + 12
             }
             name.draw(x: x + 36, baseline: b, width: right - x - 36)
-            hairline(x: l, y: box.maxY - 1, width: box.width, Design.mist)
+            hairline(x: 0, y: box.maxY - 1, width: box.maxX, Design.mist)
         }
         if let slot = dragSlot, let d = dragging, let i = mapRows.firstIndex(where: { $0.target == d }) {
             let y = slotY(slot, for: d)
@@ -532,11 +622,11 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
 
     private func drawTypes() {
-        let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.areaGutter / 2, air: CGFloat = 16
+        let u = Self.u, line = Self.line, w = types.bounds.width, lead = Design.App.gutter, air = Design.App.gutter
         typeHits = []; templateHits = []
         for (i, t) in typeRows.enumerated() {
             let box = NSRect(x: 0, y: CGFloat(i) * u, width: w, height: u), b = box.minY + line
-            if t.chosen { fill(NSRect(x: 0, y: box.minY - 1, width: w, height: u + 1), Design.mist) }
+            if t.chosen { fill(NSRect(x: 0, y: box.minY, width: w, height: u - 1), Design.mist) }
             let name = Design.attributed(t.name, t.chosen ? .bodyStrong : .body, colour: t.locked ? Design.soft : t.chosen ? Design.ink : Design.quiet)
             // The pane: from the middle of the gutter, over the square and the name, to the name's end plus a step.
             rollover.pane(.type(t.name), box: box, reach: lead + 24 + name.size().width + Self.step)
@@ -549,7 +639,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
             let inTemplates = form().templates
             let menuRect = trailing(in: NSRect(x: lead, y: box.minY, width: w - lead - air, height: u), baseline: b, symbol: t.symbol,
                                     word: inTemplates ? (t.name == Self.saveTemplateRow ? nil : "Delete") : Self.isRole(t.name) ? nil : "Template")
-            hairline(x: lead, y: box.maxY - 1, width: w - lead - air, Design.mist)
+            hairline(x: 0, y: box.maxY - 1, width: w, Design.mist)
             if !t.locked {
                 if !menuRect.isEmpty { templateHits.append((menuRect, t.name)) }
                 typeHits.append((box, t.name))
@@ -580,6 +670,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     // MARK: The pointer: select, act, choose a type, drag a group among its siblings
 
     private func mapDown(at p: NSPoint) {
+        guard !safetyLocked else { return }
         window?.makeFirstResponder(self)
         if let d = doHits.first(where: { $0.0.contains(p) }) { d.1(); return }
         if let i = rowRects.firstIndex(where: { $0.contains(p) }) {
@@ -592,6 +683,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         }
     }
     private func typesDown(at p: NSPoint) {
+        guard !safetyLocked else { return }
         if form().templates {
             if let h = templateHits.first(where: { $0.0.contains(p) }), let t = SchemaTrial.templates.first(where: { $0.name == h.1 }) { deleteTemplate(t); return }
             if let h = typeHits.first(where: { $0.0.contains(p) }) { h.1 == Self.saveTemplateRow ? saveAsTemplate() : useTemplate(named: h.1) }
@@ -678,6 +770,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         }
     }
     private func mapDragged(to p: NSPoint) {
+        guard !safetyLocked else { return }
         guard let d = dragging, let start = dragStart else { return }
         guard abs(p.y - start.y) > 4 || dragSlot != nil else { return }
         let sibs = peers(of: d)
@@ -930,9 +1023,10 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         guard let field = obj.object as? NSTextField else { return }
         if field === nameField { draft = field.stringValue; map.needsDisplay = true }
     }
-    func textDidEndEditing(_ notification: Notification) { describe(about.string); show() }
+    func textDidEndEditing(_ notification: Notification) { guard !safetyLocked else { return }; describe(about.string); show() }
     func textDidBeginEditing(_ notification: Notification) { needsDisplay = true }
     func controlTextDidEndEditing(_ obj: Notification) {
+        guard !safetyLocked else { return }
         guard let field = obj.object as? NSTextField, let what = selected, collection(what.collection) != nil else { return }
         if field === nameField {
             draft = nil
@@ -978,4 +1072,83 @@ final class Canvas: NSView {
     override func mouseUp(with event: NSEvent) { onUp?() }
     override func mouseMoved(with event: NSEvent) { onMove?(convert(event.locationInWindow, from: nil)) }
     override func mouseExited(with event: NSEvent) { onMove?(nil) }
+}
+
+/// Page-local interception: the title remains clear; no pointer or keyboard editing reaches the schema.
+private final class SchemaSafetyCover: NSView {
+    let remember = SchemaSafetyCheckbox(checkboxWithTitle: "Turn off the Schema safety lock on future visits", target: nil, action: nil)
+    var onUnlock: (() -> Void)?
+    let background = NSImageView()
+    private let card = NSView()
+    private let heading = Design.text("Unlock Schema", .header)
+    private let note = Design.text("Schema controls how your work is organised. Incorrect changes can cause work to be lost.", .body)
+    private let acknowledgement = Design.text("I understand the risk of losing work when changing Schema.", .caption)
+    private let slide = SwissSlide()
+    override var isFlipped: Bool { true }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        background.imageScaling = .scaleAxesIndependently
+        addSubview(background)
+        SwissModalStyle.apply(to: card)
+        addSubview(card)
+        note.maximumNumberOfLines = 3; note.lineBreakMode = .byWordWrapping
+        acknowledgement.maximumNumberOfLines = 2; acknowledgement.lineBreakMode = .byWordWrapping
+        remember.cell?.wraps = true
+        remember.font = Design.Text.body.font(); remember.contentTintColor = Design.ink
+        remember.setAccessibilityHelp("Only saved after completing Slide To Unlock.")
+        slide.words = "Slide To Unlock"
+        slide.onArmed = { [weak self] armed in if armed { self?.onUnlock?() } }
+        for v in [heading, note, acknowledgement, remember, slide] { card.addSubview(v) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func draw(_ dirtyRect: NSRect) { Design.card.setFill(); bounds.fill() }
+    func reset() { remember.state = .off; slide.reset() }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, bounds.contains(convert(point, from: superview)) else { return nil }
+        return super.hitTest(point) ?? self
+    }
+    override func layout() {
+        super.layout()
+        background.frame = bounds
+        let w = min(504, max(280, bounds.width - 64)), h: CGFloat = 280
+        card.frame = NSRect(x: (bounds.width - w) / 2, y: max(28, (min(bounds.height, 560) - h) / 2), width: w, height: h)
+        // Card is unflipped: lay out top to bottom in whole grid rows.
+        heading.frame = NSRect(x: 28, y: h - 56, width: w - 56, height: 28)
+        note.frame = NSRect(x: 28, y: h - 112, width: w - 56, height: 48)
+        acknowledgement.frame = NSRect(x: 28, y: h - 154, width: w - 56, height: 28)
+        remember.frame = NSRect(x: 28, y: h - 182, width: w - 56, height: 28)
+        slide.frame = NSRect(x: 28, y: 28, width: w - 56, height: SwissSlide.height)
+    }
+}
+
+private final class SchemaSafetyCheckbox: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        Design.ink.setStroke()
+        let box = NSRect(x: 1, y: (bounds.height - 12) / 2, width: 12, height: 12)
+        NSBezierPath(rect: box).stroke()
+        if state == .on { Design.ink.setFill(); box.insetBy(dx: 3, dy: 3).fill() }
+        Design.attributed(title, .body).draw(at: NSPoint(x: 22, y: (bounds.height - 16) / 2))
+    }
+}
+
+/// Reserve a gutter beside the row canvas, even while the overlay scroller is hidden.
+private final class SchemaTypeScroll: NSScrollView {
+    override func tile() {
+        super.tile()
+        let gutter = Design.App.gutter
+        contentView.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - gutter), height: bounds.height)
+        verticalScroller?.frame = NSRect(x: bounds.width - gutter, y: 0, width: gutter, height: bounds.height)
+    }
+}
+
+private final class SchemaYellowScroller: NSScroller {
+    override func draw(_ dirtyRect: NSRect) {
+        Design.card.setFill(); bounds.fill()
+        if knobProportion < 1 { drawKnob() }
+    }
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+    override func drawKnob() {
+        Design.houseYellow.setFill()
+        NSBezierPath(roundedRect: rect(for: .knob).insetBy(dx: 3, dy: 1), xRadius: 3, yRadius: 3).fill()
+    }
 }

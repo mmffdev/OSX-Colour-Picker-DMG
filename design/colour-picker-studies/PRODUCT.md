@@ -1,0 +1,2 @@
+# Colorgain colour picker studies
+Review five colour selection layouts in two themes before native implementation. The picker replaces the complete app body while open. The left pane lists existing configurable interface colour slots, grouped into halo information, primary/secondary/tertiary rings, sidebar selection, and button hover/active. Future theme-builder capabilities are outside this study. Hex is the temporary representation requested by Rick.

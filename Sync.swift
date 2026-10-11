@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // ---------- Merging two copies of a library ----------
 //
@@ -305,15 +305,20 @@ struct Catalogues {
         var path: String
     }
 
-    /// "catalogues.json" in the app's home: the catalogues that live outside it. Those inside are found by looking.
-    var registryURL: URL { root.appendingPathComponent("catalogues.json") }
-
+    var registryURL: URL { AppDataStore(root: root).url }
     var registry: [Entry] {
-        get { (try? Data(contentsOf: registryURL)).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? [] }
-        nonmutating set {
-            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            if let data = try? ColourFiles.encoder().encode(newValue) { try? data.write(to: registryURL, options: .atomic) }
+        get {
+            do {
+                let rows = try AppDataStore(root: root).read()["catalogues"] ?? []
+                return try JSONDecoder().decode([Entry].self, from: JSONSerialization.data(withJSONObject: rows))
+            } catch { NSLog("Catalogue index: %@", error.localizedDescription); return [] }
         }
+        nonmutating set {
+            do { try writeRegistry(newValue) } catch { NSApp.presentError(error) }
+        }
+    }
+    private func writeRegistry(_ entries: [Entry]) throws {
+        try AppDataStore(root: root).update { $0["catalogues"] = entries.map { ["name": $0.name, "path": $0.path] } }
     }
 
     /// Puts a catalogue that lives in `dir` on the list under `name`, replacing an entry of that name.
@@ -328,7 +333,7 @@ struct Catalogues {
         var all = registry.filter { $0.name != name }
         all.append(Entry(name: name, path: dir.path))
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try ColourFiles.encoder().encode(all).write(to: registryURL, options: .atomic)
+        try writeRegistry(all)
     }
 
     func unregister(_ name: String) { registry = registry.filter { $0.name != name } }
@@ -337,10 +342,10 @@ struct Catalogues {
     static var currentName: String {
         get {
             let names = standard.names()
-            let saved = preferences.string(forKey: currentKey) ?? mainName
+            let saved = AppPreferences.shared.string(forKey: currentKey) ?? mainName
             return names.contains(saved) ? saved : (names.first ?? mainName)
         }
-        set { preferences.set(newValue, forKey: currentKey) }
+        set { AppPreferences.shared.set(newValue, forKey: currentKey) }
     }
 
     var folder: URL { root.appendingPathComponent("Catalogues") }
@@ -475,7 +480,7 @@ struct Catalogues {
                 if fm.fileExists(atPath: history.path), !fm.fileExists(atPath: historyNamed.path) { try? fm.moveItem(at: history, to: historyNamed) }
             }
         }
-        if Catalogues.currentName == old || preferences.string(forKey: Catalogues.currentKey) == old {
+        if Catalogues.currentName == old || AppPreferences.shared.string(forKey: Catalogues.currentKey) == old {
             Catalogues.currentName = new
         }
         return new
@@ -797,7 +802,7 @@ let preferences: UserDefaults = {
 }()
 
 enum SyncSettings {
-    private static let d = preferences
+    private static let d = AppPreferences.shared
 
     /// The folder the user chose — the cloud folder, or the sync folder inside it. nil = sync off.
     static var folder: URL? {

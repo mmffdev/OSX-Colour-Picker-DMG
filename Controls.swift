@@ -8,6 +8,14 @@ protocol Overlay: AnyObject {
     var overlayWindows: [NSWindow] { get }
     /// Goes away, letting go of whatever was in it.
     func dismissOverlay()
+    func containsOverlayEvent(_ event: NSEvent) -> Bool
+}
+
+extension Overlay {
+    func containsOverlayEvent(_ event: NSEvent) -> Bool {
+        guard let window = event.window else { return false }
+        return overlayWindows.contains { $0 === window }
+    }
 }
 
 /// The one handler for everything that opens over the window. Each overlay says when it opens and
@@ -23,7 +31,7 @@ enum Overlays {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { e in
             guard !open.isEmpty else { return e }
             if e.type == .keyDown { return e.keyCode == 53 ? { closeAll(); return nil }() : e }
-            if let w = e.window, open.contains(where: { $0.overlayWindows.contains { $0 === w } }) { return e }
+            if open.contains(where: { $0.containsOverlayEvent(e) }) { return e }
             closeAll()
             return e
         }
@@ -258,6 +266,23 @@ final class SwissSlide: NSView {
     private var grabbed: CGFloat?
 
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .slider }
+    override func accessibilityLabel() -> String? { words }
+    override func accessibilityValue() -> Any? { span > 0 ? Int(offset / span * 100) : 0 }
+    override func accessibilityPerformIncrement() -> Bool { advance(0.1); return true }
+    override func accessibilityPerformDecrement() -> Bool { advance(-0.1); return true }
+    private func advance(_ amount: CGFloat) {
+        offset = max(0, min(span, offset + span * amount))
+        let now = offset >= span - 1
+        if now != armed { armed = now; onArmed?(armed) }
+    }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 124 { advance(0.1) }
+        else if event.keyCode == 123 { advance(-0.1) }
+        else { super.keyDown(with: event) }
+    }
     private var span: CGFloat { max(0, bounds.width - Self.handle) }
     private var grip: NSRect { NSRect(x: offset, y: 0, width: Self.handle, height: bounds.height) }
 
@@ -295,6 +320,7 @@ final class SwissSlide: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        window?.makeFirstResponder(self)
         grabbed = grip.contains(p) ? p.x - offset : nil
     }
     override func mouseDragged(with event: NSEvent) {

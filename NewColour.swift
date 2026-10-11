@@ -53,7 +53,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         self.done = done
         super.init(frame: .zero)
         // Opens on the kind asked for, or the kind used last time.
-        let first = start?.kind ?? preferences.integer(forKey: "newColourKind")
+        let first = start?.kind ?? AppPreferences.shared.integer(forKey: "newColourKind")
         kinds.selectedSegment = Kind(rawValue: first).flatMap { Kind.offered.firstIndex(of: $0) } ?? 0
         shown = kind
         let chosen = start?.press ?? chosen
@@ -359,7 +359,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
         if let at = Kind.offered.firstIndex(of: made.kind), kinds.selectedSegment != at { kinds.selectedSegment = at }
         if shown != made.kind {
             shown = made.kind
-            preferences.set(made.kind.rawValue, forKey: "newColourKind")
+            AppPreferences.shared.set(made.kind.rawValue, forKey: "newColourKind")
         }
         show()
         for (field, value) in zip(fields, made.values) { field.stringValue = value }
@@ -387,7 +387,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     @objc private func kindChanged() {
         guard kind != shown else { return }
         shown = kind
-        preferences.set(kind.rawValue, forKey: "newColourKind")
+        AppPreferences.shared.set(kind.rawValue, forKey: "newColourKind")
         // A pick follows the kind: the same colour, converted again.
         if picked != nil { convertPick() } else { show() }
     }
@@ -406,7 +406,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     @objc private func confirmTapped() {
         let result = typed
         guard let colour = result.colour else { problem.stringValue = result.problem; return }
-        preferences.set(kind.rawValue, forKey: "newColourKind")
+        AppPreferences.shared.set(kind.rawValue, forKey: "newColourKind")
         removeFromSuperview()
         done(colour)
     }

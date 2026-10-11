@@ -966,7 +966,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if let id = node.projectID { return "sidebarCollapsed.project.\(id.uuidString)" }
         return "sidebarCollapsed.\(node.kind)"
     }
-    private func isCollapsed(_ node: SidebarNode) -> Bool { preferences.bool(forKey: key(node)) }
+    private func isCollapsed(_ node: SidebarNode) -> Bool { AppPreferences.shared.bool(forKey: key(node)) }
 
     /// Opens a project in the list and scrolls to it, without changing what the page shows.
     func reveal(project id: UUID) {
@@ -1322,11 +1322,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineViewItemDidCollapse(_ n: Notification) {
-        if !settingSelection, let node = n.userInfo?["NSObject"] as? SidebarNode { preferences.set(true, forKey: key(node)) }
+        if !settingSelection, let node = n.userInfo?["NSObject"] as? SidebarNode { AppPreferences.shared.set(true, forKey: key(node)) }
     }
 
     func outlineViewItemDidExpand(_ n: Notification) {
-        if !settingSelection, let node = n.userInfo?["NSObject"] as? SidebarNode { preferences.set(false, forKey: key(node)) }
+        if !settingSelection, let node = n.userInfo?["NSObject"] as? SidebarNode { AppPreferences.shared.set(false, forKey: key(node)) }
     }
 
     // MARK: Drag and drop

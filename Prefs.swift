@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // ---------- Preferences (per Mac) ----------
 
@@ -31,7 +31,7 @@ enum Arrange: Int, CaseIterable {
 }
 
 enum Prefs {
-    private static let d = preferences
+    private static let d = AppPreferences.shared
 
     private static func changed() { NotificationCenter.default.post(name: .prefsDidChange, object: nil) }
 
@@ -47,6 +47,12 @@ enum Prefs {
     static var lowercaseHex: Bool {
         get { bool("lowercaseHex", false) }
         set { d.set(newValue, forKey: "lowercaseHex"); changed() }
+    }
+
+    /// Persisted in the app preferences data file; absent means protected.
+    static var schemaSafetyLockDisabled: Bool {
+        get { bool("schema.safetyLockDisabled", false) }
+        set { d.set(newValue, forKey: "schema.safetyLockDisabled") }
     }
 
     // MARK: Theme
@@ -128,7 +134,7 @@ enum Prefs {
     /// The setup assistant has been through once: where the app's data is, the first catalogue, the schema.
     static var assistantDone: Bool {
         get { bool("assistantDone", false) }
-        set { d.set(newValue, forKey: "assistantDone") }
+        set { d.set(newValue, forKey: "assistantDone"); if newValue { do { try KeyProfiles.ensure() } catch { NSApp.presentError(error) } } }
     }
 
     /// The launch artwork before the window. New-user testing always includes this stage.

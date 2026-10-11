@@ -5,7 +5,7 @@ import AppKit
 /// right across the whole track; let go short of the end and it springs back. At the end it becomes
 /// the button that commits, named for the act. Esc, or Cancel, is the way out.
 enum SlideConfirm {
-    static let gold = NSColor(red: 0xFC / 255, green: 0xC8 / 255, blue: 0x0A / 255, alpha: 1)   // #FCC80A
+    static let gold = Design.houseYellow
     static let ink = NSColor(red: 0x1B / 255, green: 0x1B / 255, blue: 0x1B / 255, alpha: 1)    // #1B1B1B
     static let slate = NSColor(red: 0x2C / 255, green: 0x2C / 255, blue: 0x2C / 255, alpha: 1)  // #2C2C2C
 

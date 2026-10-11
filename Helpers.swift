@@ -165,25 +165,25 @@ enum Theme {
     /// The background L has put on, as a place in `lights`; nil is the theme itself. The key is new
     /// with charcoal, so a place saved when the list was black and white is not read as another colour.
     static var lightsOut: Int? {
-        get { let v = preferences.integer(forKey: "theme.step"); return preferences.object(forKey: "theme.step") == nil || !lights.indices.contains(v) ? nil : v }
-        set { preferences.set(newValue ?? -1, forKey: "theme.step") }
+        get { let v = AppPreferences.shared.integer(forKey: "theme.step"); return AppPreferences.shared.object(forKey: "theme.step") == nil || !lights.indices.contains(v) ? nil : v }
+        set { AppPreferences.shared.set(newValue ?? -1, forKey: "theme.step") }
     }
 
     /// Light, dark, whichever the Mac is set to, or the user's own colours.
     static var mode: ThemeMode {
-        get { preferences.string(forKey: "theme.mode").flatMap(ThemeMode.init(rawValue:)) ?? .system }
-        set { preferences.set(newValue.rawValue, forKey: "theme.mode") }
+        get { AppPreferences.shared.string(forKey: "theme.mode").flatMap(ThemeMode.init(rawValue:)) ?? .system }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "theme.mode") }
     }
 
     /// The user's own background, for My Own Colours; a mid grey until one is chosen.
     static var customBackground: String {
-        get { preferences.string(forKey: "theme.background").flatMap { colorFromHex($0) == nil ? nil : $0 } ?? "#808080" }
-        set { preferences.set(newValue, forKey: "theme.background") }
+        get { AppPreferences.shared.string(forKey: "theme.background").flatMap { colorFromHex($0) == nil ? nil : $0 } ?? "#808080" }
+        set { AppPreferences.shared.set(newValue, forKey: "theme.background") }
     }
 
     static var customText: ThemeText {
-        get { preferences.string(forKey: "theme.text").flatMap(ThemeText.init(rawValue:)) ?? .automatic }
-        set { preferences.set(newValue.rawValue, forKey: "theme.text") }
+        get { AppPreferences.shared.string(forKey: "theme.text").flatMap(ThemeText.init(rawValue:)) ?? .automatic }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "theme.text") }
     }
 
     /// The background as a hex where it is a fixed colour: one of L's steps, or the user's own. nil is the theme's own light or dark.

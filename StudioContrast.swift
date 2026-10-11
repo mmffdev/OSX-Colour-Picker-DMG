@@ -61,7 +61,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     init(library: LibraryController) {
         self.library = library
-        state = preferences.data(forKey: ContrastPage.key).flatMap { try? JSONDecoder().decode(ContrastState.self, from: $0) } ?? ContrastState()
+        state = AppPreferences.shared.data(forKey: ContrastPage.key).flatMap { try? JSONDecoder().decode(ContrastState.self, from: $0) } ?? ContrastState()
         super.init(frame: .zero)
         for (f, label) in [(inkField, "Text colour hex"), (paperField, "Background hex"), (nameField, "Palette name")] {
             f.isBordered = false
@@ -103,7 +103,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     // MARK: The state
 
     private func save() {
-        if let data = try? JSONEncoder().encode(state) { preferences.set(data, forKey: ContrastPage.key) }
+        if let data = try? JSONEncoder().encode(state) { AppPreferences.shared.set(data, forKey: ContrastPage.key) }
     }
     /// One change, one step to undo.
     private func change(_ body: (inout ContrastState) -> Void) {

@@ -62,8 +62,8 @@ enum ColourProfiles {
 
     /// The profile a palette with no choice of its own, in a project with none, falls back to.
     static var houseDefault: UUID? {
-        get { preferences.string(forKey: "colourProfile.default").flatMap(UUID.init(uuidString:)) }
-        set { preferences.set(newValue?.uuidString, forKey: "colourProfile.default") }
+        get { AppPreferences.shared.string(forKey: "colourProfile.default").flatMap(UUID.init(uuidString:)) }
+        set { AppPreferences.shared.set(newValue?.uuidString, forKey: "colourProfile.default") }
     }
 }
 

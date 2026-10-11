@@ -125,7 +125,8 @@ enum Design {
 
     static let paper = hex("#C4C4C4")
     /// The step being worked, and every other step card. Rick's trial of 2026-10-07.
-    static let active = hex("#FCC80A")
+    static let houseYellow = hex("#F4BE00")
+    static let active = houseYellow
     static let inactive = hex("#B8B5AF")
     static let card = hex("#F8F7F5")
     static let mist = hex("#E3E2DE")
@@ -206,7 +207,7 @@ enum Design {
         static func ground(_ box: NSRect) -> NSRect { NSRect(x: box.minX, y: box.minY, width: box.width, height: box.height + groundBelow) }
         /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
         static var masterGrid = false
-        static let gridColour = hex("#FCC80A")
+        static let gridColour = Design.houseYellow
         static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter - CGFloat(wideAfter.count) * extra) / CGFloat(columns) }
         static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) + CGFloat(wideAfter.filter { $0 < c }.count) * extra }
         static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { column(to, in: width) + columnWidth(in: width) - column(from, in: width) }
@@ -305,9 +306,34 @@ enum RowMark {
     }
 }
 
-/// The rollover, first made for the schema page: a pane in the grid's colour that flies out from the left edge under the
-/// pointer, eased, the whole flight in a tenth of a second, and stays out on whatever is locked, the chosen row. One clock
-/// for any set of keys; the owner says which keys there are, which are locked, and what to redraw as the panes move.
+/// Shared setup/rail ribbon: the head arrives first, then the notched tail follows.
+enum SelectionRibbon {
+    static let slide: TimeInterval = 0.48, tailWait: TimeInterval = 0.56, tail: TimeInterval = 0.30
+    static var duration: TimeInterval { tailWait + tail }
+    static func draw(top: CGFloat, height: CGFloat, reach: CGFloat, age: TimeInterval, leaving: Bool = false, colour: NSColor) {
+        func ease(_ value: Double) -> CGFloat { CGFloat(1 - pow(1 - max(0, min(1, value)), 3)) }
+        let tip: CGFloat = 14, notch: CGFloat = 10, end = reach - tip, off = -reach
+        let mid = top + height / 2
+        let head: CGFloat, tailX: CGFloat
+        if leaving {
+            head = end - (end - off) * ease(age / slide)
+            tailX = min(0, head - reach)
+        } else {
+            head = off + (end - off) * ease(age / slide)
+            tailX = min(-34 + 34 * ease((age - tailWait) / tail), head - tip - 1)
+        }
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: tailX, y: top))
+        path.line(to: NSPoint(x: head, y: top))
+        path.line(to: NSPoint(x: head + tip, y: mid))
+        path.line(to: NSPoint(x: head, y: top + height))
+        path.line(to: NSPoint(x: tailX, y: top + height))
+        path.line(to: NSPoint(x: tailX + notch, y: mid))
+        path.close(); colour.setFill(); path.fill()
+    }
+}
+
+/// One ribbon clock for a set of row keys, with selected rows held open.
 final class Rollover<Key: Hashable> {
     private(set) var hover: Key?
     private var reveal: [Key: CGFloat] = [:]
@@ -319,22 +345,25 @@ final class Rollover<Key: Hashable> {
     deinit { clock?.invalidate() }
 
     /// Where a pane should be: out under the pointer and on what is locked, home for the rest.
-    func goal(_ k: Key) -> CGFloat { k == hover || locked(k) ? 1 : 0 }
+    func goal(_ k: Key) -> CGFloat { k == hover || locked(k) ? CGFloat(SelectionRibbon.duration) : 0 }
     /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
     func settle() {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            reveal = Dictionary(uniqueKeysWithValues: keys().map { ($0, goal($0)) })
+            redraw(); return
+        }
         let moving = keys().contains { (reveal[$0] ?? 0) != goal($0) }
         guard moving, clock == nil else { return }
         lastTick = Date()
         clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            // Fast: the whole flight in a tenth of a second, so the wave follows the pointer without lag.
-            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick) / 0.1)
+            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick))
             self.lastTick = now
             var done = true
             for k in self.keys() {
                 let g = self.goal(k), v = self.reveal[k] ?? 0
                 if v == g { continue }
-                let next = v < g ? min(g, v + step) : max(g, v - step)
+                let next = v < g ? min(g, v + step) : max(g, v - step * CGFloat(SelectionRibbon.duration / SelectionRibbon.slide))
                 self.reveal[k] = next
                 if next != g { done = false }
             }
@@ -346,11 +375,13 @@ final class Rollover<Key: Hashable> {
     }
     /// The pointer is over another key, or over none.
     func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
-    /// Draws a key's pane, as far out as it has flown: from the left edge to `reach`, over `box` and one point above it, over the rule.
+    /// Draws a key's pane, as far out as it has flown: from the left edge to `reach`, inside the row, leaving its bottom divider visible.
     func pane(_ k: Key, box: NSRect, reach: CGFloat) {
         guard let v = reveal[k], v > 0 else { return }
-        let eased = 1 - pow(1 - v, 3)
-        fill(NSRect(x: 0, y: box.minY - 1, width: (reach * eased).rounded(), height: box.height + 1), Design.App.gridColour)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: 0, y: box.minY, width: box.maxX, height: box.height)).addClip()
+        SelectionRibbon.draw(top: box.minY, height: max(0, box.height - 1), reach: min(reach, box.maxX), age: TimeInterval(v), colour: Design.houseYellow)
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 

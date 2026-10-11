@@ -338,26 +338,26 @@ final class HistogramBar: NSView {
 extension Prefs {
     /// Histograms on every swatch of a palette's vertical view.
     static var histogramType: HistogramType {
-        get { HistogramType(rawValue: preferences.integer(forKey: "histogramType")) ?? .rgb }
-        set { preferences.set(newValue.rawValue, forKey: "histogramType") }
+        get { HistogramType(rawValue: AppPreferences.shared.integer(forKey: "histogramType")) ?? .rgb }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "histogramType") }
     }
     static var histogramSplit: Bool {
-        get { preferences.bool(forKey: "histogramSplit") }
-        set { preferences.set(newValue, forKey: "histogramSplit") }
+        get { AppPreferences.shared.bool(forKey: "histogramSplit") }
+        set { AppPreferences.shared.set(newValue, forKey: "histogramSplit") }
     }
     /// Every swatch's channels, and every swatch's history, in a palette's vertical view.
     static var paletteChannels: Bool {
-        get { preferences.bool(forKey: "paletteChannels") }
-        set { preferences.set(newValue, forKey: "paletteChannels") }
+        get { AppPreferences.shared.bool(forKey: "paletteChannels") }
+        set { AppPreferences.shared.set(newValue, forKey: "paletteChannels") }
     }
     static var paletteHistory: Bool {
-        get { preferences.bool(forKey: "paletteHistory") }
-        set { preferences.set(newValue, forKey: "paletteHistory") }
+        get { AppPreferences.shared.bool(forKey: "paletteHistory") }
+        set { AppPreferences.shared.set(newValue, forKey: "paletteHistory") }
     }
     /// How the contrast on a card is worked out: "wcag" or "apca".
     static var contrastMethod: String {
-        get { preferences.string(forKey: "contrastMethod") == "apca" ? "apca" : "wcag" }
-        set { preferences.set(newValue, forKey: "contrastMethod") }
+        get { AppPreferences.shared.string(forKey: "contrastMethod") == "apca" ? "apca" : "wcag" }
+        set { AppPreferences.shared.set(newValue, forKey: "contrastMethod") }
     }
     /// The contrast lines for a colour: a title, then white and black text on it, by the method chosen.
     static func contrastLines(for hex: String) -> (title: String, line: String) {
@@ -398,16 +398,16 @@ extension Prefs {
 
     /// Which view the gamut map shows: the round Lab view until another is chosen.
     static var gamutView: GamutView {
-        get { GamutView(rawValue: preferences.integer(forKey: "gamutView")) ?? .lab }
-        set { preferences.set(newValue.rawValue, forKey: "gamutView") }
+        get { GamutView(rawValue: AppPreferences.shared.integer(forKey: "gamutView")) ?? .lab }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "gamutView") }
     }
     /// Notes are shown until switched off.
     static var paletteNotes: Bool {
-        get { preferences.object(forKey: "paletteNotes") == nil ? true : preferences.bool(forKey: "paletteNotes") }
-        set { preferences.set(newValue, forKey: "paletteNotes") }
+        get { AppPreferences.shared.object(forKey: "paletteNotes") == nil ? true : AppPreferences.shared.bool(forKey: "paletteNotes") }
+        set { AppPreferences.shared.set(newValue, forKey: "paletteNotes") }
     }
     static var histograms: Bool {
-        get { preferences.bool(forKey: "paletteHistograms") }
-        set { preferences.set(newValue, forKey: "paletteHistograms") }
+        get { AppPreferences.shared.bool(forKey: "paletteHistograms") }
+        set { AppPreferences.shared.set(newValue, forKey: "paletteHistograms") }
     }
 }

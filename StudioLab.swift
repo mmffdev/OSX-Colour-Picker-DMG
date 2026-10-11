@@ -29,8 +29,8 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     /// The model the tiles' values are written in and copied as.
     private var format: ColourFormat {
-        get { (preferences.string(forKey: Self.formatKey)).flatMap(ColourFormat.init(rawValue:)) ?? .lab }
-        set { preferences.set(newValue.rawValue, forKey: Self.formatKey) }
+        get { (AppPreferences.shared.string(forKey: Self.formatKey)).flatMap(ColourFormat.init(rawValue:)) ?? .lab }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: Self.formatKey) }
     }
 
     // MARK: The views: the house buttons and the name field; everything else is drawn.
@@ -44,14 +44,14 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     /// The way the proof compares the master with the print: the house's method, CIEDE2000 until it says otherwise.
     private var method: DifferenceMethod {
-        get { (preferences.string(forKey: Self.methodKey)).flatMap(DifferenceMethod.init(rawValue:)) ?? .ciede2000 }
-        set { preferences.set(newValue.rawValue, forKey: Self.methodKey) }
+        get { (AppPreferences.shared.string(forKey: Self.methodKey)).flatMap(DifferenceMethod.init(rawValue:)) ?? .ciede2000 }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: Self.methodKey) }
     }
 
     /// The white the colour's values are quoted under: D50, the master's own, until the house says otherwise.
     private var illuminant: Illuminant {
-        get { Illuminant.named(preferences.string(forKey: Self.illuminantKey)) ?? .d50 }
-        set { preferences.set(newValue.key, forKey: Self.illuminantKey) }
+        get { Illuminant.named(AppPreferences.shared.string(forKey: Self.illuminantKey)) ?? .d50 }
+        set { AppPreferences.shared.set(newValue.key, forKey: Self.illuminantKey) }
     }
 
     /// What a press is on, worked out as the page draws.
@@ -83,7 +83,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
 
     init(library: LibraryController) {
         self.library = library
-        let saved = preferences.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(LabState.self, from: $0) }
+        let saved = AppPreferences.shared.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(LabState.self, from: $0) }
         state = saved.flatMap { $0.nodes.isEmpty || !$0.nodes.indices.contains($0.base) ? nil : $0 }
             ?? LabState(rule: .analogous, base: LabNode(hex: Brand.masterHex) ?? LabNode(h: 260, s: 0.8, v: 1))
         super.init(frame: .zero)
@@ -200,7 +200,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
     private func publish() {
         library.labPalette = ExportPalette(name: chosenName, colours: keys.map { ExportColour(name: library.library.name(of: $0, in: nil), hex: $0) })
     }
-    private func save() { if let data = try? JSONEncoder().encode(state) { preferences.set(data, forKey: Self.key) } }
+    private func save() { if let data = try? JSONEncoder().encode(state) { AppPreferences.shared.set(data, forKey: Self.key) } }
 
     /// One change, one step to undo.
     private func change(_ body: (inout LabState) -> Void) {

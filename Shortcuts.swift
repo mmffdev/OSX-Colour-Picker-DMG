@@ -14,7 +14,7 @@ struct ShortcutModifiers: OptionSet, Hashable {
     static let control = ShortcutModifiers(rawValue: 8)
 }
 
-struct Shortcut: Equatable {
+struct Shortcut: Hashable {
     /// The key as a menu item wants it: the unshifted character, lowercase.
     var key: String
     var modifiers: ShortcutModifiers
@@ -122,7 +122,11 @@ enum Shortcuts {
     }
 
     private static func shortcut(of item: NSMenuItem) -> Shortcut? {
-        item.keyEquivalent.isEmpty ? nil : Shortcut(key: item.keyEquivalent, modifiers: ShortcutModifiers(item.keyEquivalentModifierMask))
+        guard !item.keyEquivalent.isEmpty else { return nil }
+        var modifiers = ShortcutModifiers(item.keyEquivalentModifierMask)
+        // AppKit expresses Shift-letter defaults with uppercase key equivalents.
+        if item.keyEquivalent != item.keyEquivalent.lowercased() { modifiers.insert(.shift) }
+        return Shortcut(key: item.keyEquivalent, modifiers: modifiers)
     }
 
     /// Top-level menu items with an action, split into the app's own and the standard ones.
@@ -156,8 +160,12 @@ enum Shortcuts {
         own = Set(bar.items.flatMap { $0.submenu?.items ?? [] }.compactMap { $0.action.map(NSStringFromSelector) })
         defaults = [:]
         for entry in items(fixed: false) { defaults[entry.id] = shortcut(of: entry.item) }
+        do { try KeyProfiles.ensure(); try KeyProfiles.activate(KeyProfiles.activeURL) } catch { NSApp.presentError(error) }
         apply()
     }
+
+    static func defaultShortcut(for id: String) -> Shortcut? { defaults[id] }
+    static func refresh() { apply() }
 
     private static func apply() {
         let saved = Prefs.shortcuts

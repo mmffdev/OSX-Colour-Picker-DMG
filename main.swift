@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings() {
         // In the Studio window, Settings is a page of its own; the old panels wait for their redesign.
-        if let studio = StudioWindowController.shared, studio.window?.isVisible == true { studio.frame.go(.settings); return }
+        if let studio = StudioWindowController.shared, studio.window?.isVisible == true { studio.frame.openSettings(); return }
         if settings == nil { settings = SettingsWindowController(library: library) }
         settings?.refresh()
         settings?.showWindow(nil)

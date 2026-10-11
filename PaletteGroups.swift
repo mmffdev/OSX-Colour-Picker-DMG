@@ -75,12 +75,12 @@ enum PaletteSlot: Equatable {
 
 extension Prefs {
     static var paletteGrouping: PaletteGrouping {
-        get { preferences.string(forKey: "paletteGrouping").flatMap(PaletteGrouping.init(rawValue:)) ?? .none }
-        set { preferences.set(newValue.rawValue, forKey: "paletteGrouping") }
+        get { AppPreferences.shared.string(forKey: "paletteGrouping").flatMap(PaletteGrouping.init(rawValue:)) ?? .none }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "paletteGrouping") }
     }
     static var paletteFilter: PaletteFilter {
-        get { preferences.string(forKey: "paletteFilter").flatMap(PaletteFilter.init(rawValue:)) ?? .all }
-        set { preferences.set(newValue.rawValue, forKey: "paletteFilter") }
+        get { AppPreferences.shared.string(forKey: "paletteFilter").flatMap(PaletteFilter.init(rawValue:)) ?? .all }
+        set { AppPreferences.shared.set(newValue.rawValue, forKey: "paletteFilter") }
     }
 }
 

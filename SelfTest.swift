@@ -38,6 +38,14 @@ func runSelfTest() -> Never {
     check(lib.swatches.isEmpty && lib.activeSwatchID == nil, "starts with no swatches")
     check(fm.fileExists(atPath: store.url.path), "v2 library file is created")
 
+    let safetySlide = SwissSlide(frame: NSRect(x: 0, y: 0, width: 440, height: SwissSlide.height))
+    for _ in 0..<9 { _ = safetySlide.accessibilityPerformIncrement() }
+    check(!safetySlide.armed, "safety slide cannot arm before reaching the end")
+    _ = safetySlide.accessibilityPerformIncrement()
+    check(safetySlide.armed, "safety slide arms at the far end with accessible input")
+    safetySlide.reset()
+    check(!safetySlide.armed, "safety slide resets for the next protected visit")
+
     print("swatches")
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     var first: UUID!, second: UUID!
@@ -187,6 +195,7 @@ func runSelfTest() -> Never {
     runColourTests(in: root, check: check)
     runHaloTests(check: check)
     runShortcutTests(check: check)
+    runAppDataTests(check: check)
     runProjectTests(check: check)
     runImportTests(check: check)
     runColourSpaceTests(check: check)
@@ -199,6 +208,7 @@ func runSelfTest() -> Never {
     runContrastTests(check: check)
     runTypographyTests(check: check)
     runSetupTests(check: check)
+    runPaletteWheelTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
     exit(failed == 0 ? 0 : 1)
@@ -2802,4 +2812,41 @@ func runSetupTests(check: (Bool, String) -> Void) {
           "a launch counts as needing Documents only for a folder inside it, not one that merely starts with its name")
     check(ThemedButton.readable(on: Brand.master) == .white && ThemedButton.readable(on: NSColor(srgbRed: 0.95, green: 0.66, blue: 0, alpha: 1)) == .black,
           "a lead button's text is white on Blue Ribbon and black on saffron")
+}
+
+
+private func runAppDataTests(check: (Bool, String) -> Void) {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("coldata-test-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    do {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let legacy = root.appendingPathComponent("catalogues.json")
+        let entries = [Catalogues.Entry(name: "Test", path: "/test/catalogue")]
+        try ColourFiles.encoder().encode(entries).write(to: legacy)
+        let store = AppDataStore(root: root)
+        let migrated = try store.read()
+        check((migrated["catalogues"] as? [[String: String]])?.first?["name"] == "Test", "legacy catalogue index migrates into coldata")
+        check(FileManager.default.fileExists(atPath: legacy.path), "migration retains the legacy index backup")
+        try store.update { $0["settings"] = ["sounds": false]; $0["futureField"] = "preserve" }
+        let catalogues = Catalogues(root: root, legacyURL: nil)
+        try catalogues.registerChecked("Second", at: root.appendingPathComponent("Second"))
+        let updated = try store.read()
+        check((updated["settings"] as? [String: Bool])?["sounds"] == false && updated["futureField"] as? String == "preserve", "catalogue updates preserve settings and unknown manifest fields")
+        check(catalogues.registry.count == 2, "registry reads the new manifest")
+        let profile = KeyProfile(name: "Test Profile", description: "Round trip", shortcuts: [:], quickKeys: ["pick": "3"])
+        let file = root.appendingPathComponent("test.colkeys")
+        try KeyProfiles.write(profile, to: file)
+        let read = try KeyProfiles.read(file)
+        check(read.name == profile.name && read.description == profile.description && read.quickKeys == profile.quickKeys, "colkeys preserves metadata and assignments")
+        var lower = profile; lower.quickKeys = ["pick": "a"]
+        try KeyProfiles.write(lower, to: file)
+        check(try KeyProfiles.read(file).quickKeys["pick"] == "A", "imported quick keys use the event character convention")
+        var duplicate = profile; duplicate.quickKeys = ["pick": "A", "newPalette": "A"]
+        do { try KeyProfiles.validate(duplicate); check(false, "duplicate quick keys rejected") } catch { check(true, "duplicate quick keys rejected") }
+        var invalid = profile; invalid.version = 99; try KeyProfiles.write(invalid, to: file)
+        do { _ = try KeyProfiles.read(file); check(false, "future key profile rejected") } catch { check(true, "future key profile rejected") }
+        let broken = Data("broken manifest".utf8); try broken.write(to: store.url)
+        do { try store.update { $0["settings"] = [:] }; check(false, "corrupt manifest blocks writes") } catch { check(true, "corrupt manifest blocks writes") }
+        check(try Data(contentsOf: store.url) == broken, "corrupt manifest remains untouched")
+    } catch { check(false, "app data tests: \(error)") }
 }

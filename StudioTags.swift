@@ -301,9 +301,10 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
     private struct Geometry { var lw: CGFloat = 0, rx: CGFloat = 0, rw: CGFloat = 0 }
     private func geometry() -> Geometry {
-        let w = bounds.width - leading, gut = Design.App.areaGutter   // the split is an area gutter
+        let w = bounds.width - leading   // the split is an area gutter
         var g = Geometry()
-        g.lw = ((w - gut) * 0.6).rounded(); g.rx = leading + g.lw + gut; g.rw = w - g.lw - gut
+        g.rx = leading + SettingsSheet.contentColumn(width: w, window: window?.frame.width ?? Design.App.size.width)
+        g.lw = bounds.width - g.rx; g.rw = g.lw
         return g
     }
     /// The list's columns, from the left column's edge: the name after the square, the scope, then the two counts flush right.
@@ -314,26 +315,27 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
     private static let listTop: CGFloat = 9
 
     /// The right column needs seventeen units; at least that, so a short window scrolls the page rather than cutting the buttons.
-    func height(forWidth width: CGFloat) -> CGFloat { 17 * Self.u }
+    func height(forWidth width: CGFloat) -> CGFloat { (chosen == nil ? 21 : 33) * Self.u }
 
     override func layout() {
         super.layout()
         let g = geometry(), u = Self.u, line = Self.line
         let top = Self.listTop * u
-        listScroll.frame = NSRect(x: 0, y: top, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - top))
+        listScroll.frame = NSRect(x: g.rx - leading, y: top, width: leading + g.lw, height: 4 * u)
         let listHeight = CGFloat(max(rows.count, 1)) * u + u
         list.frame = NSRect(x: 0, y: 0, width: listScroll.frame.width, height: max(listScroll.frame.height, listHeight))
         listScroll.verticalScrollElasticity = listHeight > listScroll.frame.height ? .allowed : .none
         rowRects = rows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
         // The name field on row 6: a 13 field's text sits on the line when its frame starts 12 above it.
         nameField.isHidden = chosen == nil
-        nameField.frame = NSRect(x: g.rx - 2, y: 6 * u + line - 12, width: g.rw + 2, height: 20)
+        nameField.frame = NSRect(x: g.rx - 2, y: 19 * u + line - 12, width: g.rw + 2, height: 20)
         if nameField.currentEditor() == nil { nameField.stringValue = chosen ?? "" }
         // The buttons on row 16, their words on its line.
-        let by = 16 * u + line - 22
+        let by = SettingsSheet.buttonTop(baseline: SettingsSheet.baseline(chosen == nil ? 18 : 32))
         newButton.frame = NSRect(x: g.rx, y: by, width: newButton.intrinsicContentSize.width, height: SwissButton.height)
         deleteButton.frame = NSRect(x: newButton.frame.maxX + 16, y: by, width: deleteButton.intrinsicContentSize.width, height: SwissButton.height)
         deleteButton.isEnabled = chosen != nil
+        deleteButton.isHidden = chosen == nil
     }
 
     // MARK: Drawing: the headers, the filters and the chosen tag here; the list on its own canvas
@@ -342,7 +344,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         "Every tag in the catalogue: its colour, where it may be worn and what wears it. A global tag goes on anything; a member's or a group's only inside it. Double-click a name to rename it everywhere it is worn."
     }
     private func rightHelp(_ name: String?) -> String {
-        guard let name = name else { return "Choose a tag in the list, or make one with New Tag." }
+        guard let name = name else { return "Create a tag to organise colours and palettes. Select a tag above to edit its name, colour and scope." }
         switch lib.scope(ofTag: name) {
         case .global: return "\(name) is global: any palette or colour in the catalogue can wear it. Give it a member or a group to keep it there."
         case .member(let p): return "\(name) belongs to \(lib.project(p)?.name ?? "a member"): only the palettes and colours inside it can wear it, and it is offered nowhere else."
@@ -370,44 +372,37 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
     override func draw(_ dirtyRect: NSRect) {
         let g = geometry(), u = Self.u, line = Self.line, l = leading, gut = Design.App.gutter
         filterHits = []; colourHits = []; scopeHit = .zero
-        // Left: the first-order header and its words, then the list's header on its rule.
-        Design.attributed("Tag Library", .header).draw(x: l, baseline: line)
-        Design.attributed(leftHelp, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
-        Design.attributed("Every Tag", .header).draw(x: l, baseline: 4 * u + line)
-        Design.attributed(rows.count == lib.allTags.count ? plural(rows.count, "tag") : "\(rows.count) of \(lib.allTags.count)", .caption, colour: Design.quiet).draw(right: l + g.lw, baseline: 4 * u + line)
-        hairline(x: l, y: 5 * u - 1, width: g.lw, Design.rule)
-        // The filters, side by side on rows 5 and 6, a gutter between.
+        SettingsSheet.title("Tags.", x: l)
+        SettingsSheet.introduction("Library & scope", "Organise colours and palettes with shared tags.", x: g.rx, width: bounds.width, leading: l)
+        SettingsSheet.section(1, "Library", guide: SettingsSheet.headerGuide, x: l, contentX: g.rx, width: bounds.width - l)
+        Design.attributed("Filter by scope or palette. Double-click a tag to rename it.", .caption).draw(x: g.rx, baseline: 4 * u + line, width: g.rw)
         let fw = ((g.lw - gut) / 2).rounded()
-        filterHits.append((dropdown("Scope", value: scopeFilter.map { TagScopes.name($0, in: lib) } ?? "All", x: l, row: 5, width: fw, open: droppedFrom == 0), 0))
-        filterHits.append((dropdown("Palette", value: paletteFilter.flatMap { lib.swatch($0)?.name } ?? "All", x: l + fw + gut, row: 5, width: g.lw - fw - gut, open: droppedFrom == 1), 1))
-        // The list's column titles on row 8, quiet, on a rule.
+        filterHits.append((dropdown("Scope", value: scopeFilter.map { TagScopes.name($0, in: lib) } ?? "All", x: g.rx, row: 5, width: fw, open: droppedFrom == 0), 0))
+        filterHits.append((dropdown("Palette", value: paletteFilter.flatMap { lib.swatch($0)?.name } ?? "All", x: g.rx + fw + gut, row: 5, width: g.lw - fw - gut, open: droppedFrom == 1), 1))
         let col = columns(g.lw), tb = 8 * u + line
-        Design.attributed("Name", .caption, colour: Design.quiet).draw(x: l + col.name, baseline: tb)
-        Design.attributed("Scope", .caption, colour: Design.quiet).draw(x: l + col.scope, baseline: tb)
-        Design.attributed("Colours", .caption, colour: Design.quiet).draw(right: l + col.colours, baseline: tb)
-        Design.attributed("Palettes", .caption, colour: Design.quiet).draw(right: l + col.palettes, baseline: tb)
-        hairline(x: l, y: Self.listTop * u - 1, width: g.lw, Design.rule)
-
-        // Right: the chosen tag.
+        Design.attributed("Name", .caption, colour: Design.quiet).draw(x: g.rx + col.name, baseline: tb)
+        Design.attributed("Scope", .caption, colour: Design.quiet).draw(x: g.rx + col.scope, baseline: tb)
+        Design.attributed("Colours", .caption, colour: Design.quiet).draw(right: g.rx + col.colours, baseline: tb)
+        Design.attributed("Palettes", .caption, colour: Design.quiet).draw(right: g.rx + col.palettes, baseline: tb)
+        hairline(x: g.rx, y: Self.listTop * u - 1, width: g.lw, Design.rule)
+        SettingsSheet.section(2, chosen == nil ? "Create a tag" : "Edit tag", guide: 14 * u + line, x: l, contentX: g.rx, width: bounds.width - l)
         let rx = g.rx, rw = g.rw
-        Design.attributed("Tag", .header).draw(x: rx, baseline: line)
-        Design.attributed(rightHelp(chosen), .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: rw, height: Self.helpUnits * u))
-        Design.attributed("Details", .header).draw(x: rx, baseline: 4 * u + line)
-        hairline(x: rx, y: 5 * u - 1, width: rw, Design.rule)
+        SettingsSheet.paragraph(rightHelp(chosen), x: rx, firstBaseline: 16 * u + line, width: rw, height: 2 * u)
+        if chosen != nil { SettingsSheet.divider(above: 30 * u + line, x: l, width: bounds.width - l) }
         guard let name = chosen else { return }
         let info = lib.info(forTag: name)
         // Name, on rows 5 and 6.
-        Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: 5 * u + line)
-        hairline(x: rx, y: 7 * u - 1, width: rw, nameField.currentEditor() != nil ? Design.ink : Design.rule)
+        Design.attributed("Name", .label, colour: Design.quiet).draw(x: rx, baseline: 18 * u + line)
+        hairline(x: rx, y: 20 * u - 1, width: rw, nameField.currentEditor() != nil ? Design.ink : Design.rule)
         // Colour, on rows 7 and 8: the squares to choose from, the first none; the chosen one framed in ink.
-        Design.attributed("Colour", .label, colour: Design.quiet).draw(x: rx, baseline: 7 * u + line)
+        Design.attributed("Colour", .label, colour: Design.quiet).draw(x: rx, baseline: 20 * u + line)
         var choices: [String?] = [nil] + Self.colours.map { Optional($0) }
         if let own = info?.colour, !Self.colours.contains(own) { choices.append(own) }
         let gap: CGFloat = 6, n = CGFloat(choices.count)
         let side = max(10, min(16, ((rw - gap * (n - 1)) / n).rounded(.down)))
-        let cb = 8 * u + line
+        let cb = 21 * u + line
         for (i, hex) in choices.enumerated() {
-            let r = NSRect(x: rx + CGFloat(i) * (side + gap), y: cb + 2 - side, width: side, height: side)
+            let r = NSRect(x: rx + CGFloat(i) * (side + gap), y: cb - 5 - side / 2, width: side, height: side)
             if let h = hex { fill(r, Design.hex(h)) } else {
                 fill(r, Design.card)
                 Design.quiet.setStroke()
@@ -421,13 +416,13 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
             colourHits.append((r.insetBy(dx: -gap / 2, dy: -6), hex))
         }
         // Scope, on rows 9 and 10.
-        scopeHit = dropdown("Scope", value: TagScopes.name(lib.scope(ofTag: name), in: lib), x: rx, row: 9, width: rw, open: droppedFrom == 2)
+        scopeHit = dropdown("Scope", value: TagScopes.name(lib.scope(ofTag: name), in: lib), x: rx, row: 22, width: rw, open: droppedFrom == 2)
         // What wears it: the palettes on rows 11 and 12, the colours on 13 and 14, each as small square chips.
         let uses = lib.uses(ofTag: name)
         let hexes = Set(lib.hexes(tagged: name))
         let colours = lib.colours.map { $0.hex }.filter { hexes.contains($0) }
-        chips("Palettes", count: uses.palettes.count, row: 11, x: rx, width: rw, items: uses.palettes.map { p in Array(p.entries.prefix(4).map { colour($0.hex) }) })
-        chips("Colours", count: colours.count, row: 13, x: rx, width: rw, items: colours.map { [colour($0)] })
+        chips("Palettes", count: uses.palettes.count, row: 24, x: rx, width: rw, items: uses.palettes.map { p in Array(p.entries.prefix(4).map { colour($0.hex) }) })
+        chips("Colours", count: colours.count, row: 26, x: rx, width: rw, items: colours.map { [colour($0)] })
     }
     private func colour(_ hex: String) -> NSColor { shade[hex] ?? colorFromHex(hex) ?? Design.mist }
 
@@ -442,7 +437,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         let fits = max(1, Int((width + gap) / (side + gap)))
         let shown = items.count > fits ? fits - 1 : items.count
         for (i, cs) in items.prefix(shown).enumerated() {
-            let r = NSRect(x: x + CGFloat(i) * (side + gap), y: b + 2 - side, width: side, height: side)
+            let r = NSRect(x: x + CGFloat(i) * (side + gap), y: b - 5 - side / 2, width: side, height: side)
             if cs.isEmpty { fill(r, Design.mist) }
             else if cs.count == 1 { fill(r, cs[0]) }
             else {
@@ -461,7 +456,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         nameRects = []
         guard rowRects.count == rows.count else { return }
         if rows.isEmpty {
-            Design.attributed(lib.allTags.isEmpty ? "No tags yet. New Tag makes one; the halo tags a palette or a colour." : "No tag matches the filters.", .body, colour: Design.soft).draw(x: l, baseline: line, width: g.lw)
+            Design.attributed(lib.allTags.isEmpty ? "No tags yet. Choose New Tag below to create one." : "No tag matches the filters.", .body, colour: Design.soft).draw(x: l, baseline: line, width: g.lw)
             return
         }
         for (i, name) in rows.enumerated() {

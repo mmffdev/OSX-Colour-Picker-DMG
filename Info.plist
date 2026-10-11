@@ -29,6 +29,18 @@
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colour.coldata</string>
+            <key>UTTypeDescription</key><string>Colorgain App Data</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>coldata</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colour.colkeys</string>
+            <key>UTTypeDescription</key><string>Colorgain Key Profile</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colkeys</string></array></dict>
+        </dict>
+        <dict>
             <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.catalogue</string>
             <key>UTTypeDescription</key>

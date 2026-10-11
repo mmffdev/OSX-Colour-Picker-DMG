@@ -534,7 +534,7 @@ final class LabViewController: NSViewController {
     init(library: LibraryController) {
         self.library = library
         saveBar = SaveBar(library: library)
-        let saved = preferences.data(forKey: LabViewController.key).flatMap { try? JSONDecoder().decode(LabState.self, from: $0) }
+        let saved = AppPreferences.shared.data(forKey: LabViewController.key).flatMap { try? JSONDecoder().decode(LabState.self, from: $0) }
         state = saved.flatMap { $0.nodes.isEmpty || !$0.nodes.indices.contains($0.base) ? nil : $0 }
             ?? LabState(rule: .analogous, base: LabNode(hex: "#2456F5") ?? LabNode(h: 260, s: 0.8, v: 1))
         super.init(nibName: nil, bundle: nil)
@@ -688,7 +688,7 @@ final class LabViewController: NSViewController {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(state) { preferences.set(data, forKey: LabViewController.key) }
+        if let data = try? JSONEncoder().encode(state) { AppPreferences.shared.set(data, forKey: LabViewController.key) }
     }
 
     /// One change, one step to undo.

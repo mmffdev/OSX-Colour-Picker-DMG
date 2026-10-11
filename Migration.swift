@@ -42,7 +42,7 @@ enum Migration {
     /// store happened to read the catalogue first did the work, and the user is still told once.
     static var reports: [String: Report] = [:]
     /// What belongs to the app's home, not to the catalogue at its root.
-    private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", TreeFiles.backups]
+    private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", "colorgain.coldata", "Keys", TreeFiles.backups]
 
     /// Whether a folder holds a catalogue in an earlier layout: a version 2 tree, a version 1 index, or the one file.
     static func needed(in root: URL) -> Bool {
@@ -187,7 +187,7 @@ enum Migration {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH.mm"
-        let isHome = fm.fileExists(atPath: root.appendingPathComponent("catalogues.json").path) || fm.fileExists(atPath: root.appendingPathComponent("Catalogues").path)
+        let isHome = fm.fileExists(atPath: root.appendingPathComponent("colorgain.coldata").path) || fm.fileExists(atPath: root.appendingPathComponent("catalogues.json").path) || fm.fileExists(atPath: root.appendingPathComponent("Catalogues").path)
         let label = "\(isHome ? name : root.lastPathComponent) Before Migration \(f.string(from: now))"
         let parent = isHome ? root.appendingPathComponent(TreeFiles.backups) : root.deletingLastPathComponent()
         let dest = parent.appendingPathComponent(uniqueName(label, among: (try? fm.contentsOfDirectory(atPath: parent.path)) ?? []))

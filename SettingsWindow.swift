@@ -105,7 +105,7 @@ class SettingsPanel: NSViewController {
             // Each word of a heading starts with a capital on the bar.
             let titles = sections.map { $0.title.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") }
             let bar = ToggleBar(labels: titles, target: self, action: #selector(sectionChosen))
-            bar.selectedSegment = min(max(0, preferences.integer(forKey: sectionKey)), sections.count - 1)
+            bar.selectedSegment = min(max(0, AppPreferences.shared.integer(forKey: sectionKey)), sections.count - 1)
             sectionBar = bar
             sectionGrids = sections.map { grid($0.rows) }
             body.addArrangedSubview(bar)
@@ -131,7 +131,7 @@ class SettingsPanel: NSViewController {
 
     @objc private func sectionChosen() {
         guard let bar = sectionBar else { return }
-        preferences.set(bar.selectedSegment, forKey: sectionKey)
+        AppPreferences.shared.set(bar.selectedSegment, forKey: sectionKey)
         for (at, one) in sectionGrids.enumerated() { one.isHidden = at != bar.selectedSegment }
         view.layoutSubtreeIfNeeded()
         resizeWindow()
@@ -1081,8 +1081,8 @@ final class SettingsWindowController: NSWindowController {
         win.center()
         shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3Settings")   // comes back where it was left
-        showPanel(preferences.integer(forKey: "settingsPanel"))
-        panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in preferences.set(tabs.selectedTabViewItemIndex, forKey: "settingsPanel") }
+        showPanel(AppPreferences.shared.integer(forKey: "settingsPanel"))
+        panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in AppPreferences.shared.set(tabs.selectedTabViewItemIndex, forKey: "settingsPanel") }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .appStateDidChange, object: library)
     }
     private var panelWatch: NSKeyValueObservation?

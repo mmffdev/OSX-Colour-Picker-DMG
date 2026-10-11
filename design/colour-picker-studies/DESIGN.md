@@ -1,0 +1,4 @@
+# Colour picker studies
+Extend Colorgain's Swiss visual system: Helvetica Neue, rectangular controls, hairline separators, 24px insets, 64px app header and footer. The picker covers the full body including both rails and history, retaining the shared app header. Theme surfaces all use semantic CSS variables. The only circular forms are the incumbent halo mark and a literal halo context preview.
+
+Five alternatives hold chrome, left setting hierarchy and right inspector constant so the colour-selection structure is the variable. Light and dark each have all five layouts. Original Vector data anchors the spiral and atlas. Colour selection, hex entry, target selection, default restore and prototype apply work. The spectrum field also supports pointer drag and arrows. LocalStorage records prototype assignments; native settings remain untouched. This is a desktop-app study; narrower windows retain a scrollable 620px minimum workspace.
