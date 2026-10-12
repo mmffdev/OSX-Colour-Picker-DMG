@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The standard About panel, with the credit the colour name list's licence asks for.
     @objc func showAbout() {
         let credit = NSAttributedString(string: colourNamesCredit, attributes: [
-            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
         NSApp.orderFrontStandardAboutPanel(options: [.credits: credit])
     }
 

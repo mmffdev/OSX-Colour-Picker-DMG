@@ -12,7 +12,9 @@ protocol PageSection: NSView {
     var onResize: (() -> Void)? { get set }
     func reload()
     func height(forWidth width: CGFloat) -> CGFloat
+    var sectionAnchors: [(String, CGFloat)] { get }
 }
+extension PageSection { var sectionAnchors: [(String, CGFloat)] { [] } }
 
 /// The single keys that work anywhere in the window: what they do, and the key each is on.
 enum QuickKeys {
@@ -101,6 +103,12 @@ final class ShortcutsSettings: NSView, PageSection {
             result[result.count - 1].1.append((command.title, command.shortcut?.display ?? "", .menu(command.id)))
         }
         return result
+    }
+    var sectionAnchors: [(String, CGFloat)] {
+        var y = firstGuide
+        var anchors: [(String,CGFloat)] = [("Profile",SettingsSheet.headerGuide+1)]
+        for group in groups { anchors.append((group.0,y+1)); y += max(5*Self.u,CGFloat(group.1.count+3)*Self.u) }
+        anchors.append(("Manage",endGuide+1)); return anchors
     }
     private var endGuide: CGFloat {
         firstGuide + groups.reduce(CGFloat(0)) { $0 + max(5 * Self.u, CGFloat($1.1.count + 3) * Self.u) }
@@ -196,6 +204,16 @@ final class ShortcutsSettings: NSView, PageSection {
 
 /// Keeps the native colour-panel interaction, with the Studio's square swatch treatment.
 private final class HaloColourWell: NSColorWell {
+    var part = "centre.background"
+    override func mouseDown(with event: NSEvent) { openPicker() }
+    override func accessibilityPerformPress() -> Bool { openPicker(); return true }
+    override func activate(_ exclusive: Bool) { openPicker() }
+    private func openPicker() {
+        guard let frame = window?.contentView as? StudioFrame else { return }
+        let picker = StudioColourPicker(target: part)
+        picker.onDismiss = { [weak frame] in frame?.reload() }
+        picker.present(over: frame)
+    }
     override func draw(_ dirtyRect: NSRect) {
         color.setFill(); bounds.fill()
         Design.ink.setStroke()
@@ -206,6 +224,7 @@ private final class HaloColourWell: NSColorWell {
 }
 
 private final class HaloResetButton: NSButton {
+    var symbol = "arrow.counterclockwise"
     private var hovering = false
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -217,7 +236,7 @@ private final class HaloResetButton: NSButton {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override func draw(_ dirtyRect: NSRect) {
         if hovering || isHighlighted { Design.rule.setFill(); bounds.fill() }
-        let icon = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset Colour")?
+        let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip ?? "Reset Colour")?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [Design.ink]))
         icon?.draw(in: NSRect(x: bounds.midX - 8, y: bounds.midY - 8, width: 16, height: 16))
@@ -298,6 +317,7 @@ enum SettingsSheet {
 }
 
 final class HaloSettings: NSView, PageSection {
+    var sectionAnchors: [(String,CGFloat)] { [("Motion",SettingsSheet.headerGuide+1),("Colours",SettingsSheet.baseline(7)+1)] }
     var onResize: (() -> Void)?
     private static var u: CGFloat { Design.App.unit }
     private static var line: CGFloat { Design.App.textBaseline }
@@ -336,6 +356,7 @@ final class HaloSettings: NSView, PageSection {
             for suffix in row.cursor ? ["cursorBackground", "cursorText"] : ["background", "text"] {
                 let part = row.prefix + "." + suffix
                 let well = HaloColourWell()
+                well.part = part
                 well.isBordered = false
                 well.color = Theme.halo(part)
                 well.target = self; well.action = #selector(colourChanged(_:))
@@ -529,4 +550,91 @@ extension ShortcutsSettings {
             modal.present(over: self)
         } catch { showError(error) }
     }
+}
+
+final class SoundsSettings: NSView, PageSection {
+    var sectionAnchors: [(String,CGFloat)] { [("All Sounds",SettingsSheet.headerGuide+1),("Copy Swatch",SettingsSheet.baseline(6)+1),("Colour Pick",SettingsSheet.baseline(14)+1)] }
+    var onResize: (() -> Void)?
+    private let all = SwissButton("All Sounds: On", .secondary)
+    private let copyToggle = SwissButton("Copy Swatch: On", .secondary)
+    private let pickToggle = SwissButton("Colour Pick: On", .secondary)
+    private let copyTest = HaloResetButton(frame: .zero)
+    private let pickTest = HaloResetButton(frame: .zero)
+    private var selectors: [SwissDropdown] = []
+    private var contentX: CGFloat { SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
+    init() {
+        super.init(frame: .zero)
+        for button in [copyTest, pickTest] { button.symbol = "speaker.wave.2"; button.title = ""; button.isBordered = false; button.toolTip = "Test Sound"; button.setAccessibilityLabel("Test Sound") }
+        for (i, button) in ([all, copyToggle, pickToggle, copyTest, pickTest] as [NSButton]).enumerated() {
+            button.tag = i; button.target = self; button.action = #selector(pressed(_:)); addSubview(button)
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    func reload() {
+        all.title = "All Sounds: " + (Prefs.sounds ? "On" : "Off")
+        copyToggle.title = "Copy Swatch: " + (AppSounds.enabled(.copy) ? "On" : "Off")
+        pickToggle.title = "Colour Pick: " + (AppSounds.enabled(.pick) ? "On" : "Off")
+        selectors.forEach { $0.removeFromSuperview() }; selectors = []
+        for event in [AppSounds.Event.copy, .pick] {
+            let selector = SwissDropdown("Sound", value: AppSounds.selection(event), options: AppSounds.choices, allowsOwn: false, width: 200)
+            selector.onPreview = { AppSounds.preview($0) }
+            selector.onChange = { name in AppPreferences.shared.set(name, forKey: "sound." + event.rawValue) }
+            selectors.append(selector); addSubview(selector)
+        }
+        needsLayout = true; needsDisplay = true; onResize?()
+    }
+    @objc private func pressed(_ sender: NSButton) {
+        switch sender.tag {
+        case 0: Prefs.sounds.toggle()
+        case 1, 2:
+            let event: AppSounds.Event = sender.tag == 1 ? .copy : .pick
+            AppPreferences.shared.set(!AppSounds.enabled(event), forKey: "sound." + event.rawValue + ".enabled")
+        case 3: AppSounds.play(.copy, test: true)
+        default: AppSounds.play(.pick, test: true)
+        }
+        reload()
+    }
+    func height(forWidth width: CGFloat) -> CGFloat { SettingsSheet.baseline(24) }
+    override func layout() {
+        super.layout()
+        let x = contentX, width = max(140, bounds.width - x)
+        for (button, row) in [(all, CGFloat(4)), (copyToggle, 9), (pickToggle, 17)] {
+            button.frame = NSRect(x: x, y: SettingsSheet.buttonTop(baseline: SettingsSheet.baseline(row)), width: min(width, max(200, button.intrinsicContentSize.width)), height: 32)
+        }
+        for (i, selector) in selectors.enumerated() {
+            let toggle = i == 0 ? copyToggle : pickToggle
+            selector.frame = NSRect(x: x, y: SettingsSheet.baseline(i == 0 ? 10 : 18), width: toggle.frame.width, height: 56)
+            let test = i == 0 ? copyTest : pickTest
+            test.frame = NSRect(x: selector.frame.maxX + Design.App.gutter, y: selector.frame.maxY - 44, width: 32, height: 32)
+        }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        SettingsSheet.title("Sounds.")
+        SettingsSheet.introduction("Audio feedback", "Choose a sound for copying and picking colours.", x: contentX, width: bounds.width)
+        SettingsSheet.section(1, "All Sounds", guide: SettingsSheet.headerGuide, contentX: contentX, width: bounds.width)
+        SettingsSheet.section(2, "Copy Swatch", guide: SettingsSheet.baseline(6), contentX: contentX, width: bounds.width)
+        SettingsSheet.section(3, "Colour Pick", guide: SettingsSheet.baseline(14), contentX: contentX, width: bounds.width)
+        SettingsSheet.divider(above: SettingsSheet.baseline(23), width: bounds.width)
+    }
+}
+
+/// Quiet header tabs retain the house underline and expose native button keyboard access.
+final class SectionAnchorButton: NSButton {
+    var active = false
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        let hover = window.map { bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil)) } ?? false
+        if hover { Design.mist.setFill(); bounds.fill() }
+        attributedTitle.draw(x:0,baseline:17,width:bounds.width-12)
+        if active { Design.ink.setFill(); NSRect(x:0,y:bounds.height-3,width:max(0,bounds.width-24),height:1).fill() }
+        if window?.firstResponder === self { Design.ink.setStroke(); NSBezierPath(rect:bounds.insetBy(dx:1,dy:1)).stroke() }
+    }
+    override func resetCursorRects() { addCursorRect(bounds,cursor:.pointingHand) }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
+    }
+    override func mouseEntered(with event:NSEvent) { needsDisplay=true }
+    override func mouseExited(with event:NSEvent) { needsDisplay=true }
 }

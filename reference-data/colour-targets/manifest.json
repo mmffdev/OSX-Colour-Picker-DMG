@@ -1,0 +1,120 @@
+{
+  "downloaded": "2026-10-11",
+  "files": [
+    {
+      "file": "reference-data/colour-targets/fogra/F51-52.zip",
+      "url": "https://fogra.org/fileadmin/files/7_downloads/Charakterisierungsdaten/F51-52.zip",
+      "bytes": 184493,
+      "sha256": "5c6bf8f7b1c428ed529c012a0bc742f31b86ca3e5c1bdf2b473b54d3a100564d",
+      "contents": [
+        "FOGRA51.txt",
+        "FOGRA51_Spectral.txt",
+        "FOGRA52.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/fogra/FOGRA39_to_FOGRA60_v2.zip",
+      "url": "https://fogra.org/fileadmin/files/7_downloads/Charakterisierungsdaten/FOGRA39_to_FOGRA60_v2.zip",
+      "bytes": 861566,
+      "sha256": "4d20d72b4f6ffa07e7e3e3bb301c8b2d18b0ac1af06940f78b3126527cc8f0b1",
+      "contents": [
+        "FOGRA39.txt",
+        "FOGRA40.txt",
+        "FOGRA41.txt",
+        "FOGRA42.txt",
+        "FOGRA43.txt",
+        "FOGRA44.txt",
+        "FOGRA45.txt",
+        "FOGRA46.txt",
+        "FOGRA47.txt",
+        "FOGRA48.txt",
+        "FOGRA49.txt",
+        "FOGRA50.txt",
+        "FOGRA51.txt",
+        "FOGRA51_Spectral.txt",
+        "FOGRA52.txt",
+        "FOGRA53.txt",
+        "FOGRA54.txt",
+        "FOGRA55.txt",
+        "FOGRA56.txt",
+        "FOGRA57.txt",
+        "FOGRA58.txt",
+        "FOGRA59.txt",
+        "FOGRA60.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/fogra/MK3_Subsets_FOGRA39_until_FOGRA60.zip",
+      "url": "https://fogra.org/fileadmin/files/7_downloads/Charakterisierungsdaten/MK3_Subsets_FOGRA39_until_FOGRA60.zip",
+      "bytes": 37049,
+      "sha256": "aae0f2edb8a30e7d6202256d4a426232f74554f76210f545c100dead7454aefb",
+      "contents": [
+        "readmeMW3_Subsets.txt",
+        "FOGRA39_MW3_Subset.txt",
+        "FOGRA40_MW3_Subset.txt",
+        "FOGRA41_MW3_Subset.txt",
+        "FOGRA42_MW3_Subset.txt",
+        "FOGRA43_MW3_Subset.txt",
+        "FOGRA44_MW3_Subset.txt",
+        "FOGRA45_MW3_Subset.txt",
+        "FOGRA46_MW3_Subset.txt",
+        "FOGRA47_MW3_Subset.txt",
+        "FOGRA48_MW3_Subset.txt",
+        "FOGRA49_MW3_Subset.txt",
+        "FOGRA50_MW3_Subset.txt",
+        "FOGRA51_MW3_Subset.txt",
+        "FOGRA52_MW3_Subset.txt",
+        "FOGRA53_MW3_Subset.txt",
+        "FOGRA54_MW3_Subset.txt",
+        "FOGRA56_MW3_Subset.txt",
+        "FOGRA57_MW3_Subset.txt",
+        "FOGRA58_MW_Textile_V1_subset.txt",
+        "FOGRA59_MW3_Subset.txt",
+        "FOGRA60_MW3_Subset.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/colorchecker/ColorCheckerSG_After_Nov2014.zip",
+      "url": "https://zenodo.org/api/records/3245895/files/ColorCheckerSG_After_Nov2014.zip/content",
+      "bytes": 1945,
+      "sha256": "ba75e6b0b765ebefaafcefb6584a8c88f67fe89f25d82433b89caf0e1585acca",
+      "contents": [
+        "ColorCheckerSG_After_Nov2014.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/colorchecker/ColorCheckerSG_Before_Nov2014.zip",
+      "url": "https://zenodo.org/api/records/3245895/files/ColorCheckerSG_Before_Nov2014.zip/content",
+      "bytes": 1822,
+      "sha256": "46e4d8b0ade131dbf73fce356633e42d69157997afc13abbc56810f826414740",
+      "contents": [
+        "ColorCheckerSG_Before_Nov2014.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/colorchecker/urls.txt",
+      "url": "https://zenodo.org/api/records/3245895/files/urls.txt/content",
+      "bytes": 553,
+      "sha256": "bd0542ecbc817386d676bd2335115e6ed96f8ad944021f2263be95d28ac3c4d8",
+      "contents": []
+    },
+    {
+      "file": "reference-data/colour-targets/colorchecker/ColorChecker24_After_Nov2014.zip",
+      "url": "https://zenodo.org/api/records/3245895/files/ColorChecker24_After_Nov2014.zip/content",
+      "bytes": 794,
+      "sha256": "4fb63f1e33dfaa4f0d3500508db1abb0064518b503143c0a7e21d0d95d3cd39e",
+      "contents": [
+        "ColorChecker24_After_Nov2014.txt"
+      ]
+    },
+    {
+      "file": "reference-data/colour-targets/colorchecker/ColorChecker24_Before_Nov2014.zip",
+      "url": "https://zenodo.org/api/records/3245895/files/ColorChecker24_Before_Nov2014.zip/content",
+      "bytes": 781,
+      "sha256": "8c3dc0f5d24ddbf1b32be2f2fb8f8ef930772d8d9990b10737fc64e159ce4510",
+      "contents": [
+        "ColorChecker24_Before_Nov2014.txt"
+      ]
+    }
+  ]
+}

@@ -145,7 +145,8 @@ final class LibraryController: NSObject {
 
     /// Every change goes through here, and becomes a step in the history under `title`.
     /// A change to anything in a locked project is refused before it is saved.
-    func apply(_ title: String = "Change", schema: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) -> Void) {
+    @discardableResult
+    func apply(_ title: String = "Change", schema: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) -> Void) -> Bool {
         let before = library
         do {
             library = try store.mutate(schema: schema) { lib in
@@ -163,26 +164,32 @@ final class LibraryController: NSObject {
         } catch let locked as LockedProject {
             flash("\(locked.errorDescription ?? "") \(locked.recoverySuggestion ?? "")")
             NSSound.beep()
-            return
+            return false
         } catch {
             show(error)
+            return false
         }
         if library != before { recordStep(title, before: before) }
         changed()
         sync()
-        watch?.settle()
+        watch?.settle(); assetsWatch?.settle()
+        return true
     }
 
     // MARK: History
 
     private(set) var history = StepHistory()
+    private(set) var globalHistory = StepHistory()
+    private var globalHistoryIndex: URL { Catalogues.standard.root.appendingPathComponent("Global.colcat") }
     private var historyTimer: Timer?
 
     var historyEnabled: Bool { Prefs.historyEnabled(for: catalogue) }
 
     private func recordStep(_ title: String, before: Library?) {
-        guard historyEnabled else { return }
-        history.record(title, library: library, before: before, limit: Prefs.historySteps)
+        if historyEnabled { history.record(title, library: library, before: before, limit: Prefs.historySteps) }
+        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
+        globalHistory.record("\(catalogue): \(title)", library: library, before: before, limit: Prefs.historySteps)
+        do { try HistoryStore.save(globalHistory, beside: globalHistoryIndex) } catch { flash("Could not save global history: \(error.localizedDescription)") }
         historyChanged()
     }
 
@@ -198,20 +205,28 @@ final class LibraryController: NSObject {
     }
 
     func loadHistory() {
+        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
         history = historyEnabled ? HistoryStore.load(beside: store.url) : StepHistory()
-        if history.isEmpty, historyEnabled { history.record("Opened", library: library, before: nil, limit: Prefs.historySteps) }
+        if globalHistory.isEmpty, !history.isEmpty {
+            globalHistory = StepHistory(steps: history.steps.map { HistoryStep(id: $0.id, date: $0.date, title: "\(catalogue): " + $0.title, project: $0.project, delta: $0.delta) }, current: history.current)
+        }
+        if history.isEmpty, historyEnabled { history.record("Opened", library: GlobalAssets.split(library).local, before: nil, limit: Prefs.historySteps) }
+        do {
+            if historyEnabled { try HistoryStore.save(history, beside: store.url) }
+            try HistoryStore.save(globalHistory, beside: globalHistoryIndex)
+        } catch { flash("Could not initialise history: \(error.localizedDescription)") }
         NotificationCenter.default.post(name: .historyDidChange, object: self)
     }
 
     /// Takes the library back (or forward) to a step, the schema with it, and writes the tree as it was then. Not a step itself.
     func goToStep(_ index: Int) {
         guard let then = history.go(to: index, from: library, schema: SchemaTrial.schema(for: store.root) ?? store.schema) else { return }
-        do { try store.save(then.library, schema: then.schema); library = then.library; loadedStamp = store.modificationDate } catch { show(error); return }
+        do { let restored = then.library; try store.save(restored, schema: then.schema); library = restored; loadedStamp = store.modificationDate } catch { show(error); return }
         NotificationCenter.default.post(name: .schemaDidChange, object: nil)
         historyChanged()
         changed()
         sync()
-        watch?.settle()
+        watch?.settle(); assetsWatch?.settle()
     }
 
     func deleteStep(_ index: Int) {
@@ -260,9 +275,15 @@ final class LibraryController: NSObject {
     // MARK: Watching the tree
 
     private var watch: CatalogueWatch?
+    private var assetsWatch: CatalogueWatch?
 
     /// Keeps the watch on the open catalogue's folder, and takes the tree as it stands as the app's own doing.
     private func watchTree() {
+        if assetsWatch == nil {
+            let made = CatalogueWatch(root: GlobalAssets(home: Catalogues.standard.root).root) { [weak self] in self?.treeChangedOutside() }
+            made.start(); assetsWatch = made
+        }
+        assetsWatch?.settle()
         if let w = watch, w.root.standardizedFileURL == store.root.standardizedFileURL { w.settle(); return }
         watch?.stop()
         let made = CatalogueWatch(root: store.root) { [weak self] in self?.treeChangedOutside() }
@@ -272,17 +293,20 @@ final class LibraryController: NSObject {
 
     /// Finder, or another app, changed the tree: it is read again, unless a name is being typed or a pick is under way.
     private func treeChangedOutside() {
-        if window?.firstResponder is NSText || picking { watch?.settle(); return }
+        if window?.firstResponder is NSText || picking { watch?.settle(); assetsWatch?.settle(); return }
         reload()
         flash("The catalogue changed in Finder and was read again")
     }
 
     /// The schema was written through the store: a step in the history, when it changed.
     private func schemaChanged(_ n: Notification) {
-        defer { watch?.settle() }
+        defer { watch?.settle(); assetsWatch?.settle() }
         guard let before = n.userInfo?["before"] as? SchemaTrial.SchemaFile, let after = n.userInfo?["after"] as? SchemaTrial.SchemaFile, before != after else { return }
         loadedStamp = store.modificationDate
         if historyEnabled { history.record("Change Schema", library: library, before: library, schema: (before, after), limit: Prefs.historySteps); historyChanged() }
+        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
+        globalHistory.record("\(catalogue): Change Schema", library: library, before: library, schema: (before, after), limit: Prefs.historySteps)
+        do { try HistoryStore.save(globalHistory, beside: globalHistoryIndex) } catch { show(error) }
     }
 
     private func stateChanged() { NotificationCenter.default.post(name: .appStateDidChange, object: self) }
@@ -305,16 +329,14 @@ final class LibraryController: NSObject {
     /// A click on a swatch: copies in the format chosen in Settings.
     func copy(_ hex: String) {
         let text = Prefs.copyText(hex)
-        copyToClipboard(text)
-        playShutter()
+        ColourCopies.copy(hex, text: text)
         flash("Copied \(text)")
     }
 
     /// A click on a card row, or Copy As: copies in that format whatever the setting.
     func copy(_ hex: String, as format: ColourFormat) {
         let text = format.text(hex, lowercase: Prefs.lowercaseHex)
-        copyToClipboard(text)
-        playShutter()
+        ColourCopies.copy(hex, text: text)
         flash("Copied \(format.label)  \(text)")
     }
 
@@ -358,7 +380,7 @@ final class LibraryController: NSObject {
             var key: String?
             self.apply("Pick Colour") { key = $0.addPick(picked) }
             guard let hex = key else { return }
-            copyToClipboard(Prefs.copyText(hex))
+            ColourCopies.copy(hex, sound: false)
             self.onReveal?(hex)
             let into = self.library.activeSwatch.map { " \u{2192} \($0.name)" } ?? ""
             self.flash("Picked \(colourName(hex))  \(ColourKeys.label(hex))\(into)" + (picked.fitsSRGB ? "" : "  \u{00B7}  Beyond sRGB, Kept Whole"))
@@ -621,7 +643,7 @@ final class LibraryController: NSObject {
     /// between projects, or back to the Palettes list, it goes as a copy: a project owns its
     /// palettes outright, so its notes, lock and history are its own and the original is untouched.
     /// A palette with notes asks first whether the copy takes them.
-    func move(palette id: UUID, to project: UUID?, index: Int) {
+    func move(palette id: UUID, to project: UUID?, index: Int, reveal: Bool = true) {
         guard let s = library.swatch(id) else { return }
         if s.projectID == project {
             apply("Move Palette") { $0.move(id, to: project, index: index) }
@@ -634,7 +656,7 @@ final class LibraryController: NSObject {
             guard let made = copy, self.library.swatch(made) != nil else { return }   // refused: the project is locked
             let home = project.flatMap { self.library.project($0)?.name }
             self.flash(home.map { "Copied \(s.name) Into \($0)" + (notes ? ", With Its Notes" : "") } ?? "Copied \(s.name) To Palettes")
-            self.onShow?(.palette(made), false)
+            if reveal { self.onShow?(.palette(made), false) }
         }
         // Notes may be wanted in the copy or not, so when there are some the user is asked, whichever way the copy goes.
         guard library.hasNotes(id), let ask = onAsk else { place(false); return }
@@ -1228,6 +1250,7 @@ final class LibraryController: NSObject {
     func open(catalogue requested: String) {
         guard requested != catalogue || store.root.standardizedFileURL != Catalogues.standard.directory(for: requested).standardizedFileURL else { return }
         stopPicking()
+        historyTimer?.invalidate(); saveHistory()
         var name = requested
         if !Catalogues.standard.names().contains(name) { // so far it only exists in the sync folder
             do { name = try Catalogues.standard.create(name) } catch { show(error); return }

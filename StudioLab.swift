@@ -298,8 +298,10 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         for b in [random, addOne, undo, redo] { place(b, x: x, row: 15); x += b.intrinsicContentSize.width + 24 }
         // Contrast leaves the page: the arrow at the top right of the side.
         placeRight(contrast, right: g.w, top: 0)
-        placeRight(toPalette, right: g.w, top: g.saveTop)
-        placeRight(toProject, right: toPalette.frame.minX - Design.App.gutter, top: g.saveTop)
+        // Both save buttons end on the proof numeral's baseline.
+        let saveButtonTop = g.proof.maxY - SwissButton.height - line + 22
+        placeRight(toPalette, right: g.w, top: saveButtonTop)
+        placeRight(toProject, right: toPalette.frame.minX - Design.App.gutter, top: saveButtonTop)
         // The name on its hairline, from the left side's second column; a 13 field's words sit twelve below its top.
         let fx = g.x(1)
         nameField.frame = NSRect(x: fx - 2, y: g.saveTop + line - 12, width: g.lw - fx + 2, height: 20)
@@ -644,7 +646,7 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
             gestureStart = state
             slide(to: p.x)
         case .rule(let r): change { $0.setRule(r) }
-        case .block(let i): library.copy(definition(of: i).key, as: format)
+        case .block(let i): library.copy(definition(of: i).key, as: Prefs.copyFormat)
         case .name(let i), .base(let i):
             if state.rule == .custom { selected = i }
             change { $0.makeBase(i) }

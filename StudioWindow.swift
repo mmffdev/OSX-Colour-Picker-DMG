@@ -62,7 +62,7 @@ final class StudioWindowController: NSWindowController {
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
         else {
-            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share)]
+            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share), ("--appbridge", .appbridge), ("--appbridge-settings", .appbridgeSettings)]
             c.frame.go(views.first { args.contains($0.0) }?.1 ?? .catalogue)
         }
         c.showWindow(nil)
@@ -160,6 +160,30 @@ private func when(_ d: Date) -> String {
     return f.string(from: d)
 }
 
+/// Shared square register selection and colour strips.
+private enum RailTile {
+    static func ground(_ rect: NSRect, selected: Bool, alternate: Bool = false) {
+        fill(rect, selected ? (Prefs.sidebarSelectionBackground.flatMap(colorFromHex) ?? Design.houseYellow.withAlphaComponent(0.22)) : alternate ? Design.mist.withAlphaComponent(0.45) : Design.card)
+        if selected {
+            Design.houseYellow.setStroke()
+            let edge = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+            edge.lineWidth = 1; edge.stroke()
+        }
+    }
+    static func spectrum(_ colours: [NSColor], in rect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: rect).addClip()
+        fill(rect, Design.mist)
+        if !colours.isEmpty {
+            let width = rect.width / CGFloat(colours.count)
+            for (i, colour) in colours.enumerated() {
+                fill(NSRect(x: rect.minX + CGFloat(i) * width, y: rect.minY, width: width + 0.5, height: rect.height), colour)
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 // MARK: - The frame
 
 final class StudioFrame: NSView {
@@ -169,7 +193,7 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, tags, lab, contrast, share }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, tags, lab, proofing, contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -194,6 +218,9 @@ final class StudioFrame: NSView {
     let contrastPage: ContrastPage
     /// Export and Import as a wizard in the page (StudioShare.swift), begun from a palette's halo, a page's Export or the catalogue settings.
     let sharePage: SharePage
+    let proofingPage: ProofingPage
+    private var beforeProofingRail: CGFloat = 1
+    let appbridge = AppbridgeStore()
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
     private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
     private var goal = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
@@ -206,10 +233,11 @@ final class StudioFrame: NSView {
         self.library = library
         contrastPage = ContrastPage(library: library)
         sharePage = SharePage(library: library)
+        proofingPage = ProofingPage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
-        for v in [header, rail1, rail2, page, history, footer, strip, paletteWheel, overlay] { addSubview(v) }
+        for v in [header, rail1, rail2, proofingPage.settingsRail, page, history, footer, strip, paletteWheel, overlay] { addSubview(v) }
         settingsCurtainClip.wantsLayer = true
         settingsCurtainClip.layer?.masksToBounds = true
         settingsCurtainClip.isHidden = true
@@ -238,17 +266,48 @@ final class StudioFrame: NSView {
             }
         }
         paletteWheel.currentID = { [weak self] in
-            if case .palette(let id) = self?.place { return id }; return nil
+            guard let self else { return nil }
+            if let target = self.library.library.activeSwatchID,
+               let palette = self.library.library.swatch(target), !palette.isTypography { return target }
+            if case .palette(let id) = self.place { return id }
+            return nil
         }
         paletteWheel.onOpen = { [weak self] id in
             guard let self, self.library.library.swatch(id) != nil else { return }
             self.go(.palette(id))
         }
-        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .contrast, .projects][i]) }
+        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .proofing, .contrast, .projects, .appbridge][i]) }
         header.onSettings = { [weak self] in self?.openSettings() }
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
         header.onSearchCommitted = { [weak self] in self?.fillHistory() }
+        header.searchResults = { [weak self] query in
+            guard let self else { return [] }
+            let lib = self.library.library
+            func matches(_ value: String) -> Bool { value.localizedCaseInsensitiveContains(query) }
+            var results: [StudioHeader.SearchResult] = []
+            for palette in lib.listedPalettes where matches(palette.name) {
+                results.append(.init(title: palette.name, detail: "Palette", select: { [weak self] in self?.go(.palette(palette.id)) }))
+            }
+            for project in lib.orderedProjects where matches(project.name) {
+                results.append(.init(title: project.name, detail: "Project", select: { [weak self] in self?.go(.project(project.id)) }))
+            }
+            for file in self.appbridge.files where matches(file.url.lastPathComponent) {
+                results.append(.init(title: file.url.lastPathComponent, detail: "ASE File", select: { [weak self] in self?.appbridge.selected = file.id; self?.go(.appbridge) }))
+            }
+            for hex in lib.catalogueHexes(by: self.library.paletteSort) {
+                let name = lib.name(of: hex, in: nil)
+                guard matches(name) || matches(hex) else { continue }
+                results.append(.init(title: name, detail: displayHex(hex), select: { [weak self] in
+                    guard let self else { return }
+                    self.go(.catalogue); self.choose(hex)
+                    self.layoutSubtreeIfNeeded(); self.page.grid.reveal(hex)
+                }))
+                if results.count >= 100 { break }
+            }
+            return Array(results.prefix(100))
+        }
+
         page.onAcross = { [weak self] n in self?.page.grid.across = n }
         rail1.onPick = { [weak self] p in self?.go(p) }
         rail1.onArrow = { [weak self] in guard let self = self else { return }; self.goal.rail1 = self.goal.rail1 < 1 ? 1 : 0; self.slide() }
@@ -261,15 +320,15 @@ final class StudioFrame: NSView {
             // The page takes the whole width: the history goes, rail2 goes, rail1 shuts; the arrow back gives the rails their width.
             self.expanded.toggle()
             self.page.expanded = self.expanded
-            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (1, self.railTwo, self.goal.history) }
+            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (self.place == .proofing ? 0 : 1, self.railTwo, self.goal.history) }
             self.slide()
         }
-        // A palette dropped on a member moves into its Palettes, and rail2 turns to that member to show it there.
+        // Dropping into the tree updates the library without navigating away from the source palette list.
         rail1.onDrop = { [weak self] palette, member in
             guard let self = self else { return }
             // Into another member it is a copy, as agreed: the original stays; within its own member it is a move.
-            self.library.move(palette: palette, to: member, index: 0)
-            self.go(.project(member))
+            self.library.move(palette: palette, to: member, index: 0, reveal: false)
+            self.reload()
         }
         // A name typed over its words on either rail, written once the typing ends: a palette, a member, or a folder.
         let rename: (StudioFrame.Place, String) -> Void = { [weak self] p, name in
@@ -282,7 +341,8 @@ final class StudioFrame: NSView {
             }
         }
         rail1.onRename = rename
-        rail2.onRename = rename
+        rail2.onDesignPalette = { [weak self] in self?.library.newPalette() }
+        rail2.onRename = { [weak self] p, name in guard self?.place != .appbridge else { return }; rename(p, name) }
         rail1.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
         rail1.onTarget = { [weak self] id in guard let self = self else { return }; self.library.setTarget(self.library.library.activeSwatchID == id ? nil : id) }
         rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
@@ -292,13 +352,24 @@ final class StudioFrame: NSView {
         // On the Contrast page a row chooses the palette the pair is picked from; everywhere else it opens the place.
         rail2.onPick = { [weak self] p in
             guard let self = self else { return }
+            if self.place == .appbridge {
+                if case .palette(let id) = p { self.page.cancelASEName(); self.appbridge.selected = id; self.reload(); return }
+                if p == .appbridge { self.beginNewASE(); return }
+            }
             if self.place == .contrast, self.contrastPage.pick(p) { return }
             self.go(p)
         }
         contrastPage.onPaletteChange = { [weak self] in if self?.place == .contrast { self?.fillContextRail() } }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
-        page.grid.onCopy = { [weak self] text in copyToClipboard(text); self?.library.flash("Copied \(text)") }
+        page.grid.onCopy = { [weak self] text in self?.library.flash("Copied \(text)") }
         page.grid.onHalo = { [weak self] hex, rect in self?.openColourHalo(hex, rect: rect) }
+        page.onPaletteDrop = { [weak self] id in
+            guard let self, self.place == .appbridge,
+                  let palette = self.library.library.swatches.first(where: { $0.id == id }), !palette.isTypography else { return false }
+            return self.appbridge.append(ExportPalette(name: palette.name, colours: palette.entries.map {
+                ExportColour(name: $0.name ?? $0.hex, hex: $0.hex)
+            }))
+        }
         page.onFormat = { [weak self] in self?.reload() }
         header.onPick = { [weak self] in self?.library.togglePicking() }
         header.onSample = { [weak self] in self?.library.sampleArea() }
@@ -313,17 +384,33 @@ final class StudioFrame: NSView {
         // The New button makes a member where members are listed; on a member's Typography page, a typography palette, opened in Contrast for its first pairing.
         page.onNew = { [weak self] in self?.newFromPage() }
         page.add(ShortcutsSettings(), as: .shortcuts)
+        page.add(SoundsSettings(), as: .sounds)
         page.add(HaloSettings(), as: .halo)
         // Tags: every tag with its colour, name, scope and what wears it, the one place for all of them (StudioTags.swift).
         page.add(TagsSettings(library: library), as: .tags)
         page.add(LabPage(library: library), as: .lab)
+        page.add(proofingPage, as: .proofing)
         page.add(contrastPage, as: .contrast)
         page.add(sharePage, as: .share)
-        sharePage.onLeave = { [weak self] in self?.go(.catalogue) }
-        page.onExport = { [weak self] in self?.exportFromPage() }
+        let appbridgePage = AppbridgePage(store: appbridge)
+        appbridgePage.onOpen = { [weak self] id in
+            guard let self else { return }
+            self.appbridge.selected = id; self.go(.appbridge)
+        }
+        appbridgePage.onCreate = { [weak self] in self?.beginNewASE() }
+        page.add(appbridgePage, as: .appbridge)
+        appbridge.onNotice = { [weak self] message in self?.library.flash(message) }
+        appbridge.onChange = { [weak self] in guard let self else { return }; if self.place == .appbridge || self.place == .appbridgeSettings { self.reload() } }
+        sharePage.onLeave = { [weak self] in guard let self else { return }; self.go(self.sharePage.didImportCatalogue ? .catalogue : self.shareReturn) }
+        page.onExport = { [weak self] in
+            guard let self else { return }
+            if self.place == .appbridge { self.appbridge.exportCurrent() }
+            else { self.exportFromPage() }
+        }
         page.settings.onImport = { [weak self] in self?.startImport() }
         page.settings.onExport = { [weak self] in guard let self = self else { return }; self.startExport(.catalogue, subject: nil, name: self.library.catalogue) }
         page.schema.onSetUp = { [weak self] in self?.showSplash() }
+        history.onScope = { [weak self] in self?.fillHistory() }
         history.onPick = { [weak self] hex in self?.choose(hex) }
         footer.onAct = { [weak self] i in self?.act(i) }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
@@ -358,7 +445,7 @@ final class StudioFrame: NSView {
         RunLoop.main.add(slideClock!, forMode: .common)
     }
 
-    // The regions, from the grid: rails of two columns each side, the page in the six between, each as open as it is.
+    // Grid regions: three columns for the indexed library, two for the register, then the page.
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
@@ -366,23 +453,25 @@ final class StudioFrame: NSView {
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
-        // The dividers stand in the middle of the area gutters, after columns 2 and 4; the history's is a column gutter.
-        let r1Full = A.column(3, in: w) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
-        let r2Full = A.column(5, in: w) - A.areaGutter / 2 - r1Full - 1
+        // Rail dividers bisect the gutters after columns 3 and 5.
+        let r1Full = A.column(4, in: w) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
+        let r2Full = place == .proofing ? r1Full - r1Min - 1 : A.column(6, in: w) - A.areaGutter / 2 - r1Full - 1
         let hFull = w - A.column(11, in: w) + A.gutter / 2
-        let r1W = (r1Min + (r1Full - r1Min) * ease(open.rail1)).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
-        header.railEdge = r1W
+        let r1W = (r1Min + (r1Full - r1Min) * (isSettings(place) ? 0 : ease(open.rail1))).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
+        header.railEdge = r1Full
         rail1.frame = NSRect(x: 0, y: top, width: r1W, height: bodyH)
         settingsCurtainClip.frame = rail1.frame
         settingsCurtain.frame = NSRect(x: 0, y: -bodyH * (1 - curtainProgress), width: r1W, height: bodyH)
-        rail1.collapsed = open.rail1 < 0.5
+        rail1.collapsed = isSettings(place) || open.rail1 < 0.5
         rail1.arrow = goal.rail1 < 1 ? .open : .close
         rail2.frame = NSRect(x: rail1.frame.maxX + 1, y: top, width: r2W, height: bodyH)
-        rail2.isHidden = r2W < 2
+        rail2.isHidden = r2W < 2 || place == .proofing
+        proofingPage.settingsRail.frame = rail2.frame
+        proofingPage.settingsRail.isHidden = r2W < 2 || place != .proofing
         // The history slides in from the right edge, and off it completely, its width never changing.
         history.frame = NSRect(x: w - hW, y: top, width: hFull, height: bodyH)
         history.isHidden = hW < 1
-        page.frame = NSRect(x: rail2.frame.maxX + (rail2.isHidden ? 0 : 1), y: top, width: w - hW - (history.isHidden ? 0 : 1) - rail2.frame.maxX - (rail2.isHidden ? 0 : 1), height: bodyH)
+        page.frame = NSRect(x: rail2.frame.maxX + (r2W < 2 ? 0 : 1), y: top, width: w - hW - (history.isHidden ? 0 : 1) - rail2.frame.maxX - (r2W < 2 ? 0 : 1), height: bodyH)
         header.grid = (A.column(1, in: w), A.columnWidth(in: w))
         footer.grid = (A.column(1, in: w), A.columnWidth(in: w), A.column(5, in: w))
         // Every area's words sit exactly on its columns: the left edge on the first, the right edge at the end of the last; the page's edges
@@ -392,6 +481,7 @@ final class StudioFrame: NSView {
         }
         (rail1.inset, rail1.insetRight) = (A.column(1, in: w), A.areaGutter / 2)
         (rail2.inset, rail2.insetRight) = (A.areaGutter / 2 - 1, A.areaGutter / 2)
+        (proofingPage.settingsRail.inset, proofingPage.settingsRail.insetRight) = (rail2.inset, rail2.insetRight)
         (page.inset, page.insetRight) = (A.areaGutter / 2 - 1, open.history > 0 ? A.gutter / 2 - 1 : A.margin)
         overlay.page = NSRect(x: page.frame.minX + page.inset, y: 0, width: page.frame.width - page.inset - page.insetRight, height: 0)
         (history.inset, history.insetRight) = (A.gutter / 2, A.margin)
@@ -442,7 +532,7 @@ final class StudioFrame: NSView {
     // MARK: What is shown
 
     private func isSettings(_ p: Place) -> Bool {
-        switch p { case .settings, .schema, .shortcuts, .halo, .tags: return true; default: return false }
+        switch p { case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .appbridgeSettings: return true; default: return false }
     }
 
     /// The Settings entry point resumes the last section; Catalogues remains an explicit rail destination.
@@ -465,6 +555,8 @@ final class StudioFrame: NSView {
     }
 
     func go(_ p: Place) {
+        if p != place, case .palette = p { header.clearFilter() }
+        page.cancelASEName()
         if isSettings(p) { lastSettingsPage = p }
         if isSettings(p) && !isSettings(place) {
             settingsReturn = place
@@ -475,8 +567,42 @@ final class StudioFrame: NSView {
         }
         paletteWheel.dismiss()
         if p == .contrast && place != .contrast { contrastPage.arrive(fromLab: place == .lab) }
+        if p == .proofing && place != .proofing {
+            beforeProofingRail = goal.rail1
+            goal.rail1 = 0
+        } else if place == .proofing && p != .proofing {
+            goal.rail1 = beforeProofingRail
+        }
         place = p
+        slide()
         reload()
+    }
+
+    private func beginNewASE() {
+        appbridge.selected = nil
+        go(.appbridge)
+        page.beginASEName { [weak self] name in
+            guard let self else { return false }
+            let picker = NSOpenPanel()
+            picker.title = "Save New ASE File"
+            picker.message = "Choose the folder for \(name).ase"
+            picker.prompt = "Save"
+            picker.canChooseFiles = false; picker.canChooseDirectories = true
+            picker.canCreateDirectories = true; picker.allowsMultipleSelection = false
+            picker.directoryURL = self.appbridge.creationDirectory
+            guard picker.runModal() == .OK, let folder = picker.url else { return false }
+            do {
+                try FolderAccess.authorize(folder)
+                let file = folder.appendingPathComponent(name + ".ase")
+                try AdobeASE.empty.write(to: file, options: .withoutOverwriting)
+                ASEIcon.apply(to: file)
+                self.appbridge.add(file, folder: false)
+                return true
+            } catch {
+                self.library.flash("Could not create ASE: " + error.localizedDescription)
+                return false
+            }
+        }
     }
 
     /// The Lab has no rail2: its columns go to the page. Contrast keeps it, as the list of palettes to pick the pair from.
@@ -492,12 +618,14 @@ final class StudioFrame: NSView {
     private var shade: [String: NSColor] = [:]
     /// Rebuilds every region from the library and the schema. Cheap enough to do whole on any change.
     func reload() {
+        appbridge.bind(to: library.store.root)
         let lib = library.library
         shade = lib.displayTable()
         // A place that is gone goes back to the catalogue.
         switch place {
         case .palette(let id) where lib.swatch(id) == nil: place = .catalogue
         case .project(let id) where lib.project(id) == nil: place = .catalogue
+        case .overview(let id, _) where lib.project(id) == nil: place = .catalogue
         case .group(let id, _) where lib.project(id) == nil: place = .catalogue
         case .collection(let id) where !SchemaTrial.collections.contains(where: { $0.id == id }): place = .catalogue
         case .folder(let c, let f) where !(SchemaTrial.collections.first { $0.id == c }?.folders.contains { $0.id == f } ?? false): place = .catalogue
@@ -513,7 +641,7 @@ final class StudioFrame: NSView {
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .tags, .share: return nil; case .group: return 0; case .lab: return 2; case .contrast: return 3; case .projects: return 4; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .proofing: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -521,17 +649,20 @@ final class StudioFrame: NSView {
     // MARK: Sharing
 
     /// The wizard on a level of the catalogue: the whole catalogue from its settings, a collection or member from its page, a palette from its halo.
+    private var shareReturn: Place = .catalogue
     func startExport(_ level: ShareLevel, subject: UUID?, name: String) {
+        shareReturn = place
         sharePage.beginExport(level: level, subject: subject, name: name)
         go(.share)
     }
     func startImport() {
+        shareReturn = place
         sharePage.beginImport()
         go(.share)
     }
     private func exportFromPage() {
         switch place {
-        case .project(let id): startExport(.workGroup, subject: id, name: library.library.project(id)?.name ?? "Member")
+        case .project(let id), .overview(let id, _): startExport(.workGroup, subject: id, name: library.library.project(id)?.name ?? "Member")
         case .folder(let cid, let fid):
             let name = SchemaTrial.collections.first { $0.id == cid }?.folders.first { $0.id == fid }?.name ?? "Group"
             startExport(.workGroup, subject: fid, name: name)
@@ -593,7 +724,16 @@ final class StudioFrame: NSView {
         colourHalo = h
         h.label = colourName(hex)
         h.caption = page.format.text(hex, lowercase: Prefs.lowercaseHex)
-        h.actions = SwatchMenu.ring(for: hex, in: inPalette, library: library, editTags: { [weak self] hexes in self?.tag(swatches: hexes) })
+        if place == .appbridge {
+            h.actions = StudioPage.models.map { format in
+                HaloAction(id: format.rawValue, label: "Copy " + format.label, symbol: "doc.on.doc", onSelect: { [weak self] in
+                    let source = self?.page.grid.items.first { $0.hex == hex }?.sourceCMYK
+                    ColourCopies.copy(hex, text: format == .cmyk ? (source ?? format.text(hex)) : format.text(hex, lowercase: Prefs.lowercaseHex), sourceCMYK: source)
+                })
+            }
+        } else {
+            h.actions = SwatchMenu.ring(for: hex, in: inPalette, library: library, editTags: { [weak self] hexes in self?.tag(swatches: hexes) })
+        }
         h.open(centredOn: rect, in: page.grid)
     }
     /// Tags typed on the window's own panel, separated by commas, with the scope a new one takes (StudioTags.swift).
@@ -704,13 +844,18 @@ final class StudioFrame: NSView {
         rows += loose.map { two($0) }
         rows.append(.row("All Palettes", palettes(lib.swatches).count, .palettes, 0))
         rail1.shut = Prefs.railShut(in: library.catalogue)
-        rail1.set(rows: rows, chosen: place)
+        let treeSelection: Place
+        if case .overview(let id, _) = place { treeSelection = .project(id) } else { treeSelection = place }
+        rail1.set(rows: rows, chosen: treeSelection)
     }
 
     /// rail2 follows the place: the palettes of the catalogue or a project's level, or, for a member, its
     /// whole stack as the schema lays it out: Information, Palettes, Typography, Tags and any group of its own.
     private func fillContextRail() {
         let lib = library.library
+        rail2.warningIDs = place == .appbridge ? Set(appbridge.missing.map { $0.id }) : []
+        rail2.onWarning = { [weak self] in guard let self else { return }; self.appbridge.showMissing(over: self) }
+        rail2.readOnlyRows = place == .appbridge
         func paletteRow(_ s: Swatch, indent: Int = 0) -> PaletteTable.Row {
             .palette(s.id, s.name, s.entries.count, s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) }, place == .palette(s.id), indent)
         }
@@ -733,7 +878,7 @@ final class StudioFrame: NSView {
             }
             return out
         }
-        var heading = "Palettes", labels = ("Palette", "Colours"), rows: [PaletteTable.Row] = []
+        var heading = "Palettes", labels = ("Palette", "Count"), rows: [PaletteTable.Row] = []
         switch place {
         case .catalogue, .palettes:
             rows = palettes(lib.listedPalettes).map { paletteRow($0) }
@@ -748,14 +893,27 @@ final class StudioFrame: NSView {
             guard let c = SchemaTrial.collections.first(where: { $0.id == cid }), let f = c.folders.first(where: { $0.id == fid }) else { return }
             heading = f.name; labels = (SchemaTrial.memberName(of: c), "Palettes")
             rows = memberRows(members(of: c, folder: .some(fid)))
-        case .project(let id), .group(let id, _):
+        case .project(let id), .overview(let id, _), .group(let id, _):
             guard let project = lib.project(id) else { return }
             return fillStack(of: project, in: lib)
-        case .settings, .schema, .shortcuts, .halo, .tags, .share:
+        case .appbridge:
+            heading = "Appbridge"; labels = ("ASE File", "Swatches")
+            rows.append(.item("Create New ASE", nil, 0, .appbridge, false))
+            let folders = Dictionary(grouping: appbridge.files) { $0.url.deletingLastPathComponent().path }
+            for path in folders.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+                rows.append(.divider(URL(fileURLWithPath: path).lastPathComponent))
+                for file in folders[path, default: []].sorted(by: { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }) {
+                    rows.append(.palette(file.id, file.url.lastPathComponent, file.swatches.count,
+                                         file.swatches.map { $0.preview }, appbridge.selected == file.id, 0))
+                }
+            }
+            rows.append(.item("Appbridge Settings", nil, 0, .appbridgeSettings, false))
+        case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings:
             heading = "Settings"; labels = ("Section", "")
             rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
-                    .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Tags", nil, 0, .tags, place == .tags)]
-        case .lab:
+                    .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Sounds", nil, 0, .sounds, place == .sounds), .item("Tags", nil, 0, .tags, place == .tags),
+                    .item("Appbridge", nil, 0, .appbridgeSettings, place == .appbridgeSettings)]
+        case .lab, .proofing:
             return   // no rail2: the page has its columns
         case .contrast:
             // The palettes the pair is picked from: the Lab's wheel when it is on offer, Favourites, each member's, then every palette; colours only.
@@ -789,6 +947,7 @@ final class StudioFrame: NSView {
     /// what they always have, any other a label with its own groups inside it.
     private func fillStack(of project: Project, in lib: Library) {
         let schema = SchemaTrial.schema(for: project.id)
+        let firstOverview = SchemaTrial.rows(of: schema).first { SchemaTrial.role(of: $0.node) == .information }?.node.id
         let held = lib.palettes(in: project.id)
         let own = lib.allTags.filter { lib.project(ofTag: $0) == project.id }
         var rows: [PaletteTable.Row] = []
@@ -801,7 +960,8 @@ final class StudioFrame: NSView {
             switch SchemaTrial.role(of: group) {
             case .information?:
                 if name.isEmpty { name = "Information" }
-                inner.append(.item("Overview", nil, indent, .project(project.id), place == .project(project.id)))
+                let overview = Place.overview(project.id, group.id)
+                inner.append(.item("Overview", nil, indent, overview, place == overview || (place == .project(project.id) && group.id == firstOverview)))
             case .palettes?:
                 if name.isEmpty { name = "Palettes" }
                 let colours = held.filter { !$0.isTypography }
@@ -839,6 +999,7 @@ final class StudioFrame: NSView {
     }
 
     private func fillPage() {
+        page.paletteCount = nil
         let lib = library.library
         let search = header.search.lowercased()
         func keep(_ name: String, _ hex: String?) -> Bool { search.isEmpty || name.lowercased().contains(search) || (hex?.lowercased().contains(search) ?? false) }
@@ -846,7 +1007,7 @@ final class StudioFrame: NSView {
         func tiles(_ hexes: [String], in palette: UUID?) -> [TileGrid.Item] {
             hexes.compactMap { hex in
                 let name = lib.name(of: hex, in: palette)
-                return keep(name, hex) ? TileGrid.Item(title: name, caption: page.format.text(hex, lowercase: Prefs.lowercaseHex), colours: [shade[hex] ?? Design.hex(hex)], hex: hex, id: nil) : nil
+                return keep(name, hex) ? TileGrid.Item(title: name + " / " + ColourFormat.hex.text(hex), caption: "CMYK " + ColourFormat.cmyk.text(hex), colours: [shade[hex] ?? Design.hex(hex)], hex: hex, id: nil) : nil
             }
         }
         func cards(_ list: [Swatch]) -> [TileGrid.Item] {
@@ -861,6 +1022,9 @@ final class StudioFrame: NSView {
         var items: [TileGrid.Item] = [], title = "", meta = ("", "")
         page.show(.tiles)
         page.grid.note = nil
+        page.acceptsPaletteDrop = place == .appbridge && appbridge.current?.problem == nil && appbridge.current != nil && !appbridge.writing
+        page.showsFormat = place != .appbridge
+        page.grid.showsHalo = true
         // A new member can be made wherever members are listed: the Members view, a collection, a folder.
         func newWord(_ c: SchemaCollection) -> String { "New " + SchemaTrial.memberName(of: c) }
         func memberCards(_ list: [Project]) -> [TileGrid.Item] {
@@ -872,6 +1036,19 @@ final class StudioFrame: NSView {
             }
         }
         switch place {
+        case .appbridge:
+            title = "Appbridge"; meta = ("Directory: Choose on save", "Connected folders")
+            if let file = appbridge.current {
+                title = file.url.deletingPathExtension().lastPathComponent
+                if file.problem == nil { page.showExport("Export A Copy…") }
+                meta = ("Directory: " + AppbridgePath.display(file.url.deletingLastPathComponent().path), plural(file.swatches.count, "swatch"))
+                if let problem = file.problem { page.grid.note = problem }
+                else if file.swatches.isEmpty { page.grid.note = "Drop a palette from Rail 1 here to add its swatches." }
+                items = file.swatches.map { swatch in
+                    TileGrid.Item(title: (swatch.group.isEmpty ? swatch.name : swatch.group) + " / " + (hexOf(swatch.preview) ?? "—"),
+                        caption: "CMYK " + swatch.cmykText, colours: [swatch.preview], hex: hexOf(swatch.preview), id: nil, sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil)
+                }
+            } else { page.grid.note = appbridge.files.isEmpty ? "Import an ASE file in Appbridge Settings to begin." : "Select an ASE file from Rail 2 to open its swatches." }
         case .projects:
             let all = SchemaTrial.collections
             items = memberCards(lib.orderedProjects)
@@ -881,9 +1058,15 @@ final class StudioFrame: NSView {
             let all = SchemaTrial.collections
             title = "Schema"; meta = (plural(all.count, "collection"), plural(lib.projects.count, "member"))
             page.show(.schema)
+        case .appbridgeSettings:
+            title = "Appbridge"; meta = ("Adobe ASE", "Folders & Notifications")
+            page.show(.appbridge)
         case .shortcuts:
             title = "Shortcuts"; meta = ("\(QuickKeys.commands.count) quick keys", plural(Shortcuts.commands.count, "command"))
             page.show(.shortcuts)
+        case .sounds:
+            title = "Sounds"; meta = ("Audio feedback", "Copy and pick")
+            page.show(.sounds)
         case .halo:
             title = "Halo"; meta = ("Scrolling", "Colours")
             page.show(.halo)
@@ -891,8 +1074,11 @@ final class StudioFrame: NSView {
             title = "Tags"; meta = (plural(lib.allTags.count, "tag"), "Global and scoped")
             page.show(.tags)
         case .share:
-            title = "Share"; meta = ("Export and import", "One checked file")
+            title = sharePage.pageTitle; meta = (sharePage.pageTitle, "One catalogue file")
             page.show(.share)
+        case .proofing:
+            title = "Proofing"; meta = ("Reference & Output", "D50 · 2° Observer")
+            page.show(.proofing)
         case .lab:
             title = "Colour Lab"; meta = ("The wheel", "Build on a colour")
             page.show(.lab)
@@ -906,8 +1092,9 @@ final class StudioFrame: NSView {
             let s = lib.swatch(id)
             items = tiles(lib.hexes(inSwatch: id, by: library.paletteSort), in: id)
             title = s?.name ?? "Palette"
-            meta = ("\(items.count) colours", s?.projectID.flatMap { lib.project($0)?.name } ?? "No project")
-        case .project(let id):
+            page.paletteCount = "\(items.count) Colours"
+            meta = (s?.projectID.flatMap { lib.project($0)?.name } ?? "No Project", "")
+        case .project(let id), .overview(let id, _):
             let list = palettes(lib.palettes(in: id))
             items = cards(list)
             title = lib.project(id)?.name ?? "Project"
@@ -967,9 +1154,10 @@ final class StudioFrame: NSView {
         switch place {
         case .collection(let id): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)); page.showExport("Export Collection\u{2026}") }
         case .folder(let cid, _): if let c = SchemaTrial.collections.first(where: { $0.id == cid }) { page.showNew(newWord(c)); page.showExport("Export \(c.folderName ?? "Group")\u{2026}") }
-        case .project(let id): page.showExport("Export \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))\u{2026}")
+        case .project(let id), .overview(let id, _): page.showExport("Export \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))\u{2026}")
         default: break
         }
+        page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
     }
@@ -977,18 +1165,19 @@ final class StudioFrame: NSView {
     /// Every step the catalogue took, newest first, each with what it did: the colours that came or went, by name, and the
     /// member it touched. On a member, or one of its palettes or groups, only that member's own steps: each has a history of its own.
     private func fillHistory() {
-        let lib = library.library, steps = library.history.steps
+        let lib = library.library, log = history.global ? library.globalHistory : library.history
+        let steps = log.steps
         var member: UUID?
         switch place {
-        case .project(let id), .group(let id, _): member = id
+        case .project(let id), .overview(let id, _), .group(let id, _): member = id
         case .palette(let id): member = lib.swatch(id)?.projectID
         default: break
         }
         var rows: [HistoryRail.Row] = []
         for i in steps.indices.reversed() {
             let step = steps[i]
-            if let m = member, step.project != m { continue }
-            let change = library.history.change(at: i)
+            if !history.global, let m = member, step.project != m { continue }
+            let change = log.change(at: i)
             var parts: [String] = []
             if !change.added.isEmpty { parts.append(change.added.prefix(2).map { lib.name(of: $0, in: nil) }.joined(separator: ", ") + (change.added.count > 2 ? " +\(change.added.count - 2)" : "") + " added") }
             if !change.removed.isEmpty { parts.append(change.removed.prefix(2).map { lib.name(of: $0, in: nil) }.joined(separator: ", ") + (change.removed.count > 2 ? " +\(change.removed.count - 2)" : "") + " removed") }
@@ -998,8 +1187,8 @@ final class StudioFrame: NSView {
                                         chips: chips.map { shade[$0] ?? Design.hex($0) }, hex: chips.first))
             if rows.count >= 120 { break }
         }
-        var dated = Array(zip(steps.indices.reversed().filter { member == nil || steps[$0].project == member }.prefix(rows.count).map { steps[$0].date }, rows))
-        dated += header.savedSearches.map { ( $0.date, HistoryRail.Row(symbol: "magnifyingglass", title: "Search: " + $0.query, detail: "Search journey", time: when($0.date), chips: [], hex: nil)) }
+        var dated = Array(zip(steps.indices.reversed().filter { history.global || member == nil || steps[$0].project == member }.prefix(rows.count).map { steps[$0].date }, rows))
+        if history.global { dated += header.savedSearches.map { ( $0.date, HistoryRail.Row(symbol: "magnifyingglass", title: "Search: " + $0.query, detail: "Search journey", time: when($0.date), chips: [], hex: nil)) } }
         history.set(rows: dated.sorted { $0.0 > $1.0 }.prefix(120).map { $0.1 })
     }
 
@@ -1059,6 +1248,9 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         guard let data = UserDefaults.standard.data(forKey: searchStorageKey) else { return [] }
         return (try? JSONDecoder().decode([SavedSearch].self, from: data)) ?? []
     }
+    struct SearchResult { let title: String; let detail: String; let select: () -> Void }
+    var searchResults: ((String) -> [SearchResult])?
+    private var visibleResults: [SearchResult] = []
     var onSearchCommitted: (() -> Void)?
     private var searchPanel: NSPanel?
     private var searchExpanded = false
@@ -1071,7 +1263,9 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var onPaletteWheel: (() -> Void)?
     private let paletteHalo = PaletteHaloButton(frame: .zero)
     /// The picker and the rectangle picker, two clean marks after the wordmark, standing inside rail1's edge.
-    var railEdge: CGFloat = 248 { didSet { needsDisplay = true } }
+    var railEdge: CGFloat = 248 { didSet { needsLayout = true; needsDisplay = true } }
+    private var navigationStart: CGFloat { max(248, railEdge) + Design.App.areaGutter / 2 }
+    private var copyRect = NSRect.zero
     var onPick: (() -> Void)?
     var onSample: (() -> Void)?
     private var pickRects: [NSRect] = []
@@ -1086,7 +1280,8 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
-    private let tabs = ["Library", "Palettes", "Lab", "Contrast", "Projects"]
+    func clearFilter() { hideSearch() }
+    private let tabs = ["Library", "Palettes", "Lab", "Proofing", "Contrast", "Projects", "Appbridge"]
     private var tabRects: [NSRect] = []
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
@@ -1127,7 +1322,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         }
         let font = Design.Text.body.font()
         let textCentre = Self.baseline - (font.ascender + font.descender) / 2
-        paletteHalo.frame = NSRect(x: col(3) + tabWidth - 6, y: textCentre - 14, width: 28, height: 28)
+        paletteHalo.frame = NSRect(x: navigationStart + tabWidth - 6, y: textCentre - 14, width: 28, height: 28)
         // Law 1: the field's text on the baseline.
         let right = bounds.width - Design.App.margin
         let end = right - 220
@@ -1144,12 +1339,12 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         // The picker, then the rectangle picker, right-aligned to the rail's edge less the margin; the quick keys 2 and shift-2.
         pickRects = []
         for (k, name) in ["eyedropper", "rectangle.dashed"].enumerated() {
-            let x = railEdge - Design.App.margin - 16 - CGFloat(1 - k) * 28
+            let x = navigationStart - Design.App.margin - 16 - CGFloat(1 - k) * 28
             RowMark.draw(name, x: x, baseline: b, colour: Design.ink)
             pickRects.append(NSRect(x: x - 6, y: b - 24, width: 28, height: 32))
         }
         // The tabs from column 3, 24 apart; the live one Medium in ink, the rest quiet. Lab and Projects wait for their redesign.
-        var x = col(3)
+        var x = navigationStart
         tabRects = []
         for (i, t) in tabs.enumerated() {
             let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
@@ -1164,6 +1359,14 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         let centreY = b - (font.ascender + font.descender) / 2
         searchRect = NSRect(x: right - 228, y: centreY - 12, width: 24, height: 24)
         settingsRect = NSRect(x: right - 132, y: centreY - 12, width: 24, height: 24)
+        copyRect = .zero
+        if !searchExpanded {
+            let label = Design.attributed("Copy " + Prefs.copyFormat.label + " ▾", .body, colour: Design.quiet)
+            let x = searchRect.minX - Design.App.gutter - label.size().width
+            label.draw(x: x, baseline: b)
+            copyRect = NSRect(x: x - 4, y: centreY - 16, width: label.size().width + 8, height: 32)
+        }
+
         for (name, rect) in [("magnifyingglass", searchRect), ("gearshape", settingsRect)] {
             let image = NSImage(systemSymbolName: name, accessibilityDescription: name)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(NSImage.SymbolConfiguration(paletteColors: [Design.ink])))
             image?.draw(in: rect.insetBy(dx: 4, dy: 4), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
@@ -1191,7 +1394,6 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if searchRect.contains(p) { showSearch(focus: false) }
         let over = markRects.firstIndex { $0.contains(p) }
         if over != markHover { markHover = over; needsDisplay = true }
     }
@@ -1230,7 +1432,20 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if searchRect.contains(p) { showSearch(focus: true); return }
+        if copyRect.contains(p), let win = window {
+            if dropped != nil { closeMenu(); return }
+            let formats = StudioPage.models
+            let panel = SwissDropdown.MenuPanel(items: formats.map { $0.label }, chosen: Prefs.copyFormat.label, width: 200) { [weak self] index in
+                Prefs.copyFormat = formats[index]
+                self?.closeMenu(); self?.needsDisplay = true
+            }
+            let anchor = win.convertToScreen(convert(copyRect, to: nil))
+            panel.place(below: NSPoint(x: anchor.minX, y: anchor.minY - 4))
+            win.addChildWindow(panel, ordered: .above)
+            dropped = panel; Overlays.opened(self)
+            return
+        }
+        if searchRect.contains(p) { if searchExpanded { hideSearch() } else { showSearch(focus: true) }; return }
         if let i = markRects.firstIndex(where: { $0.contains(p) }) {
             switch i {
             case 3: window?.performClose(nil)
@@ -1245,23 +1460,22 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         if settingsRect.contains(p) { onSettings?(); return }
         super.mouseDown(with: event)
     }
-    @objc private func searched() { commitSearch() }
-    func controlTextDidChange(_ obj: Notification) {
-        onSearch?(field.stringValue)
-        commitTimer?.invalidate()
-        commitTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in self?.commitSearch() }
+    @objc private func searched() { if !visibleResults.isEmpty { selectResult(0) } }
+    func controlTextDidChange(_ obj: Notification) { showSearchDropdown() }
+    private func selectResult(_ index: Int) {
+        guard visibleResults.indices.contains(index) else { return }
+        let result = visibleResults[index]
+        commitSearch(); hideSearch(); result.select()
     }
     private func commitSearch() {
-        commitTimer?.invalidate()
         let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        onSearch?(query)
         guard !query.isEmpty else { return }
         var entries = savedSearches
         let favourite = entries.first { $0.query == query }?.favourite ?? false
         entries.removeAll { $0.query == query }
         entries.insert(SavedSearch(query: query, date: Date(), favourite: favourite), at: 0)
         saveSearches(Array(entries.prefix(200)))
-        onSearchCommitted?(); showSearchDropdown()
+        onSearchCommitted?()
     }
     private func saveSearches(_ entries: [SavedSearch]) {
         if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: searchStorageKey) }
@@ -1272,7 +1486,10 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
     private func hideSearch() {
         commitTimer?.invalidate()
+        let hadQuery = !field.stringValue.isEmpty
+        field.stringValue = ""; visibleResults = []
         searchExpanded = false; animateSearch(); Overlays.closed(self)
+        if hadQuery { onSearch?("") }
         searchPanel?.parent?.removeChildWindow(searchPanel!); searchPanel?.orderOut(nil); searchPanel = nil
     }
     private func animateSearch() {
@@ -1294,28 +1511,38 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     private func showSearchDropdown() {
         guard searchExpanded, let win = window else { return }
         searchPanel?.parent?.removeChildWindow(searchPanel!); searchPanel?.orderOut(nil); searchPanel = nil
-        let entries = savedSearches
-        guard !entries.isEmpty else { return }
-        let favourites = entries.filter { $0.favourite }, recent = entries.filter { !$0.favourite }
-        let ordered = favourites + recent
-        dropdownQueries = ordered.map { $0.query }
         let end = bounds.width - Design.App.margin - 220
         let gridStart = grid.x + 7 * (grid.column + Design.App.gutter)
-        let width = max(80, end - max(gridStart, paletteHalo.frame.maxX + 24))
-        let list = SearchHistoryList(entries: ordered, width: width)
-        list.onSelect = { [weak self] i in
-            guard let self, self.dropdownQueries.indices.contains(i) else { return }
-            self.field.stringValue = self.dropdownQueries[i]; self.commitSearch(); self.window?.makeFirstResponder(self.field)
-        }
-        list.onStar = { [weak self] i in
-            guard let self, self.dropdownQueries.indices.contains(i) else { return }
-            var entries = self.savedSearches
-            if let n = entries.firstIndex(where: { $0.query == self.dropdownQueries[i] }) { entries[n].favourite.toggle() }
-            self.saveSearches(entries); self.showSearchDropdown()
+        let width = max(240, end - max(gridStart, paletteHalo.frame.maxX + 24))
+        let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list: NSView
+        if !query.isEmpty {
+            visibleResults = searchResults?(query) ?? []
+            let results = SearchResultList(results: visibleResults, width: width)
+            results.onSelect = { [weak self] in self?.selectResult($0) }
+            list = results
+        } else {
+            visibleResults = []
+            let entries = savedSearches
+            guard !entries.isEmpty else { return }
+            let ordered = entries.filter { $0.favourite } + entries.filter { !$0.favourite }
+            dropdownQueries = ordered.map { $0.query }
+            let history = SearchHistoryList(entries: ordered, width: width)
+            history.onSelect = { [weak self] i in
+                guard let self, self.dropdownQueries.indices.contains(i) else { return }
+                self.field.stringValue = self.dropdownQueries[i]; self.showSearchDropdown(); self.window?.makeFirstResponder(self.field)
+            }
+            history.onStar = { [weak self] i in
+                guard let self, self.dropdownQueries.indices.contains(i) else { return }
+                var entries = self.savedSearches
+                if let n = entries.firstIndex(where: { $0.query == self.dropdownQueries[i] }) { entries[n].favourite.toggle() }
+                self.saveSearches(entries); self.showSearchDropdown()
+            }
+            list = history
         }
         let height = list.frame.height
         let pageHeight = (win.contentView?.bounds.height ?? 600) - Design.App.header - Design.App.footer
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: min(height, pageHeight * 0.5)))
+        let scroll = FittedScrollView(frame: NSRect(x: 0, y: 0, width: width, height: min(height, pageHeight * 0.5)))
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = true; scroll.backgroundColor = Design.card; scroll.documentView = list
         let panel = NSPanel(contentRect: scroll.bounds, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentView = scroll; panel.hasShadow = true; panel.backgroundColor = Design.card
@@ -1330,7 +1557,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
     @objc private func repeatSearch(_ sender: NSButton) {
         guard dropdownQueries.indices.contains(sender.tag) else { return }
-        field.stringValue = dropdownQueries[sender.tag]; commitSearch(); window?.makeFirstResponder(field)
+        field.stringValue = dropdownQueries[sender.tag]; showSearchDropdown(); window?.makeFirstResponder(field)
     }
     /// Escape in the search clears it and lets go, so the page is whole again and the quick keys work.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
@@ -1348,6 +1575,32 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         }
         NotificationCenter.default.addObserver(forName: NSControl.textDidEndEditingNotification, object: field, queue: .main) { [weak self] _ in self?.needsDisplay = true }
     }
+}
+
+private final class SearchResultList: NSView {
+    var onSelect: ((Int) -> Void)?
+    private let empty: Bool
+    override var isFlipped: Bool { true }
+    init(results: [StudioHeader.SearchResult], width: CGFloat) {
+        empty = results.isEmpty
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 56 + CGFloat(max(1, results.count)) * 56))
+        for (i, result) in results.enumerated() {
+            let button = NSButton(frame: NSRect(x: 24, y: 48 + CGFloat(i) * 56, width: width - 48, height: 48))
+            button.isBordered = false; button.alignment = .left
+            let title = NSMutableAttributedString(attributedString: Design.attributed(result.title, .body))
+            title.append(Design.attributed("\n" + result.detail, .caption, colour: Design.quiet))
+            button.attributedTitle = title; button.toolTip = result.title + " / " + result.detail
+            button.setAccessibilityLabel(result.title + ", " + result.detail)
+            button.target = self; button.action = #selector(selected(_:)); button.tag = i
+            addSubview(button)
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func draw(_ dirtyRect: NSRect) {
+        Design.attributed("Results", .heading).draw(x: 24, baseline: 36)
+        if empty { Design.attributed("No results", .body, colour: Design.quiet).draw(x: 24, baseline: 73) }
+    }
+    @objc private func selected(_ sender: NSButton) { onSelect?(sender.tag) }
 }
 
 private final class SearchHistoryList: NSView {
@@ -1425,7 +1678,8 @@ class StudioRail: NSView {
         super.mouseDown(with: event)
     }
     static let top: CGFloat = 22
-    let scroll = NSScrollView()
+    var contentOffset: CGFloat = 0
+    let scroll = FittedScrollView()
     let body: RailBody
     var heading = "" { didSet { needsDisplay = true } }
     /// The two Labels under the heading.
@@ -1448,10 +1702,10 @@ class StudioRail: NSView {
     /// The header stays put; only the rows scroll, under the Rule.
     override func layout() {
         super.layout()
-        scroll.frame = NSRect(x: 0, y: AreaHeader.height, width: bounds.width, height: bounds.height - AreaHeader.height)
+        scroll.frame = NSRect(x: 0, y: AreaHeader.height + contentOffset, width: bounds.width, height: bounds.height - AreaHeader.height - contentOffset)
         body.inset = inset
-        body.insetRight = insetRight
-        body.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(scroll.frame.height, body.height))
+        body.insetRight = max(0, insetRight - QuietScroller.lane)
+        body.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.frame.height, body.height))
         // Rows that fit do not scroll at all; only a longer list moves under the header.
         scroll.verticalScrollElasticity = body.height > scroll.frame.height ? .allowed : .none
         body.needsDisplay = true
@@ -1617,6 +1871,8 @@ final class LibraryRail: StudioRail {
         private var tagLinks: [(NSRect, UUID)] = []
         static var row: CGFloat { unit }
         static var two: CGFloat { unit * 2 }
+        /// Retained for a future tree presentation; keep the current rail free of elbow connectors.
+        static let showsTreeConnectors = false
         static var groupAbove: CGFloat { unit }
         static let step: CGFloat = 16
         /// After a row's 14 mark, the caret's slot, then the words: mark, caret, words, on every row so the words of a level align
@@ -1631,6 +1887,7 @@ final class LibraryRail: StudioRail {
         private var renaming: StudioFrame.Place?
         /// The palette under the mouse at mouseDown, so a drag can take it; the member a drag is over.
         private var pressed: (UUID, String, [NSColor])?
+        private var pendingPaletteClick: (NSRect, StudioFrame.Place)?
         /// Where and when the mouse went down, so a drag starts only once the pointer has clearly left the press.
         private var pressedAt: (NSPoint, TimeInterval) = (.zero, 0)
         private var target: UUID?
@@ -1759,14 +2016,15 @@ final class LibraryRail: StudioRail {
                     tree.append(TreeLines.Row(top: yy, height: Self.row, level: s.level, anchor: mx + 7, markLeft: mx, baseline: Self.line))
                     yy += Self.row
                 case .palette(let pr):
-                    if .palette(pr.id) == chosen { grounds.append((NSRect(x: 0, y: yy, width: bounds.width, height: Self.two), Design.mist)) }
                     let mx = inset + 12 + CGFloat(pr.indent) * Self.step
                     tree.append(TreeLines.Row(top: yy, height: Self.two, level: s.level, anchor: mx + 7, markLeft: mx, baseline: Self.line))
                     yy += Self.two
                 }
             }
-            for (box, colour) in grounds { fill(box, colour) }
-            TreeLines.draw(tree, colour: Design.rule)
+            for (box, _) in grounds {
+                RailTile.ground(NSRect(x: inset, y: box.minY, width: max(1, right - inset), height: box.height), selected: true)
+            }
+            if Self.showsTreeConnectors { TreeLines.draw(tree, colour: Design.rule) }
             for (i, s) in shown.enumerated() {
                 switch s.row {
                 case .group(let title, _):
@@ -1813,7 +2071,7 @@ final class LibraryRail: StudioRail {
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let b = y + Self.line, mx = inset + 12 + CGFloat(indent) * Self.step, x = mx + Self.words
                     let on = chosen == .group(pid, nid)
-                    if on { fill(box, Design.mist) }
+                    if on { RailTile.ground(NSRect(x: inset, y: y, width: max(1, right - inset), height: Self.row), selected: true) }
                     // The old sidebar's marks for a member's groups: palettes, information, typography, tags, and a dashed square for one of your own.
                     let role = SchemaTrial.role(of: SchemaNode(name: name))
                     let mark = role == .palettes ? "swatchpalette" : role == .information ? "info.circle" : role == .typography ? "textformat" : role == .tags ? "tag" : "square.dashed"
@@ -1839,38 +2097,19 @@ final class LibraryRail: StudioRail {
                     y += Self.row
                 case .palette(let pr):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
-                    let place = StudioFrame.Place.palette(pr.id)
-                    let on = place == chosen
-                    let mx = inset + 12 + CGFloat(pr.indent) * Self.step, x = mx + Self.words
-                    RowMark.draw("swatchpalette", x: mx, baseline: y + Self.line, colour: on ? Design.ink : Design.quiet)
-                    let nameText = Design.attributed(pr.name, on ? .bodyStrong : .body)
-                    if renaming != place {
-                        nameText.draw(x: x, baseline: y + Self.line, width: right - x - (on ? 10 : 0))
-                        if on { fill(NSRect(x: x + min(nameText.size().width, right - x - 10) + 6, y: y + Self.line - 6, width: 4, height: 4), Design.ink) }
-                    }
-                    nameHits.append((NSRect(x: x, y: y, width: right - x, height: Self.row), place, pr.name, on ? .bodyStrong : .body))
-                    // The second line: the colours as a strip half the row's width, then, from the right, the count and the three icons before it.
-                    let countText = Design.attributed(String(pr.count), .caption, colour: Design.quiet)
-                    let b2 = y + Self.unit + Self.line
-                    countText.draw(right: right, baseline: b2)
-                    // The star under the palette's mark, then the strip; from the right, the count, then the halo and the picks' target before it.
-                    let star = NSRect(x: mx - 1, y: b2 - 13, width: 16, height: 16)
-                    icon(0, in: star, on: pr.favourite, colour: pr.favourite ? Design.ink : Design.quiet)
-                    iconHits.append((star.insetBy(dx: -4, dy: -4), 0, pr.id))
-                    var ix = right - countText.size().width - 12
-                    for which in [2, 1] {
-                        ix -= 16
-                        let g = NSRect(x: ix, y: b2 - 13, width: 16, height: 16)
-                        let lit = which == 1 && pr.target
-                        icon(which, in: g, on: lit, colour: lit ? Design.ink : Design.quiet)
-                        iconHits.append((g.insetBy(dx: -4, dy: -4), which, pr.id))
-                        ix -= 8
-                    }
-                    let strip = NSRect(x: x, y: b2 - 10, width: ((right - x) / 2).rounded(), height: 10)
-                    if pr.colours.isEmpty { fill(strip, Design.mist) }
-                    else {
-                        let bw = strip.width / CGFloat(pr.colours.count)
-                        for (k, c) in pr.colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == pr.colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
+                    let place = StudioFrame.Place.palette(pr.id), on = place == chosen
+                    let mx = inset + 12 + CGFloat(pr.indent) * Self.step
+                    let x = mx + 28, tileRight = right - 4
+                    RailTile.ground(NSRect(x: mx, y: y, width: max(1, right - mx), height: Self.two), selected: on)
+                    let nameW = max(1, tileRight - x)
+                    if renaming != place { Design.attributed(pr.name, on ? .bodyStrong : .body, colour: on ? (Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? Design.ink) : Design.ink).draw(x: x, baseline: y + Self.line, width: nameW) }
+                    nameHits.append((NSRect(x: x, y: y, width: nameW, height: Self.row), place, pr.name, .body))
+                    RailTile.spectrum(pr.colours, in: NSRect(x: x, y: y + Self.unit + 7, width: max(1, tileRight - x - 28), height: 10))
+                    for which in [0, 1, 2] {
+                        let rect = NSRect(x: which == 2 ? tileRight - 16 : mx + 3, y: y + (which == 0 ? 0 : Self.unit) + 4, width: 16, height: 16)
+                        let lit = which == 0 ? pr.favourite : which == 1 && pr.target
+                        icon(which, in: rect, on: lit, colour: lit ? Design.ink : Design.quiet)
+                        iconHits.append((rect.insetBy(dx: -4, dy: -4), which, pr.id))
                     }
                     hits.append((box, place))
                     y += Self.two
@@ -1894,6 +2133,7 @@ final class LibraryRail: StudioRail {
 
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
+            pressed = nil; pendingPaletteClick = nil; pressedIcon = nil
             // An icon acts on the release, not the press: the halo opens under the pointer, and a press that opened it must not be the click that chooses on it.
             if let h = iconHits.first(where: { $0.0.contains(p) }) { pressedIcon = h; return }
             // A caret opens or shuts its bucket and goes nowhere; the words beside it still go where they always have.
@@ -1902,7 +2142,10 @@ final class LibraryRail: StudioRail {
             pressed = palette(at: p); pressedAt = (event.locationInWindow, event.timestamp)
             // Edit Tags under a member opens Settings, Tags filtered to that member.
             if let l = tagLinks.first(where: { $0.0.contains(p) }) { TagsSettings.pendingScope = .member(l.1) }
-            if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
+            if let h = hits.first(where: { $0.0.contains(p) }) {
+                if pressed != nil { pendingPaletteClick = h }
+                else { onPick?(h.1) }
+            }
         }
         /// A double-click on a name: the cursor goes into the words where they are, and the name is written when the typing ends.
         private func rename(_ h: (NSRect, StudioFrame.Place, String, Design.Text), at p: NSPoint) {
@@ -1914,12 +2157,20 @@ final class LibraryRail: StudioRail {
         }
         override func mouseDragged(with event: NSEvent) {
             guard let (id, name, colours) = pressed, PaletteDrag.counts(event, from: pressedAt) else { return }
-            pressed = nil
+            pressed = nil; pendingPaletteClick = nil
             PaletteDrag.begin(id, name: name, colours: colours, event: event, in: self)
         }
         private var pressedIcon: (NSRect, Int, UUID)?
+        private func finishPaletteClick(_ event: NSEvent) {
+            let pending = pendingPaletteClick
+            pendingPaletteClick = nil; pressed = nil
+            if let pending, pending.0.contains(convert(event.locationInWindow, from: nil)),
+               hypot(event.locationInWindow.x - pressedAt.0.x, event.locationInWindow.y - pressedAt.0.y) < PaletteDrag.threshold {
+                onPick?(pending.1)
+            }
+        }
         override func mouseUp(with event: NSEvent) {
-            pressed = nil
+            finishPaletteClick(event)
             if let h = pressedIcon {
                 pressedIcon = nil
                 if h.0.contains(convert(event.locationInWindow, from: nil)) {
@@ -1931,7 +2182,7 @@ final class LibraryRail: StudioRail {
                 }
             }
         }
-        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [.copy, .move] }
 
         // MARK: A palette dropped on a member, or on one of the member's own palettes
 
@@ -2014,6 +2265,28 @@ enum PaletteDrag {
 /// its count at the right; a group row is a Label, one step in for each level down; an item row is a
 /// name with a detail at the right, going somewhere when it has a place.
 final class PaletteTable: StudioRail {
+    var onDesignPalette: (() -> Void)?
+    private let designPalette = NSButton(title: "", target: nil, action: nil)
+    @objc private func createPalette() { onDesignPalette?() }
+
+    var warningIDs = Set<UUID>()
+    var onWarning: (() -> Void)?
+    private var warnings: [NSButton] = []
+    override func layout() {
+        super.layout()
+        designPalette.frame = NSRect(x: inset, y: AreaHeader.height, width: bounds.width - inset - insetRight, height: Design.App.unit)
+        warnings.forEach { $0.removeFromSuperview() }; warnings = []
+        var y: CGFloat = 0
+        for row in table.rows {
+            if case .palette(let id, _, _, _, _, _) = row, warningIDs.contains(id) {
+                let button = AppbridgeListButton("Missing ASE files — Locate or Remove", symbol: "exclamationmark.triangle") { [weak self] in self?.onWarning?() }
+                button.frame = NSRect(x: table.bounds.width - table.insetRight - 24, y: y, width: 24, height: Body.row)
+                table.addSubview(button); warnings.append(button)
+            }
+            y += Body.height(of: row)
+        }
+    }
+
     enum Row {
         /// A group's heading, with the place its page is and whether that page is showing; `fold`, when it holds rows, the key
         /// its open or shut state is kept under and whether it is open. A shut group's rows are left out by whoever fills the rail.
@@ -2023,19 +2296,31 @@ final class PaletteTable: StudioRail {
         /// A word on a hairline between runs of rows, as "Just Added" parts this week's palettes from the rest.
         case divider(String)
     }
+    var readOnlyRows = false { didSet { table.readOnlyRows = readOnlyRows } }
     var onPick: ((StudioFrame.Place) -> Void)?
     var onRename: ((StudioFrame.Place, String) -> Void)?
     /// A group's caret pressed: its key, and whether it is now shut.
     var onShut: ((String, Bool) -> Void)?
     private var table: Body { body as! Body }
     init() {
-        super.init(body: Body()); labels = ("Palette", "Colours")
+        super.init(body: Body()); labels = ("Palette", "Count")
+        designPalette.isBordered = false
+        designPalette.alignment = .left
+        designPalette.attributedTitle = Design.attributed("⊕  Design Palette", .body)
+        designPalette.target = self; designPalette.action = #selector(createPalette)
+        designPalette.setAccessibilityLabel("Design Palette")
+        designPalette.toolTip = "Create a new palette"
+        designPalette.isHidden = true
+        addSubview(designPalette)
         table.onPick = { [weak self] p in self?.onPick?(p) }
         table.onRename = { [weak self] p, n in self?.onRename?(p, n) }
         table.onShut = { [weak self] k, s in self?.onShut?(k, s) }
     }
     required init?(coder: NSCoder) { fatalError() }
     func set(heading: String, labels: (String, String), rows: [Row]) {
+        let offersDesign = labels.0 == "Palette" && labels.1 == "Count"
+        designPalette.isHidden = !offersDesign
+        contentOffset = offersDesign ? 2 * Design.App.unit : 0
         self.heading = heading; self.labels = labels; table.rows = rows; needsLayout = true
         // The chosen row is brought into view when it is out of it, which the eye expects when it was chosen elsewhere;
         // a row already in view, clicked here, leaves the list exactly where it is.
@@ -2054,6 +2339,7 @@ final class PaletteTable: StudioRail {
     }
 
     final class Body: RailBody, NSDraggingSource {
+        var readOnlyRows = false
         var rows: [Row] = [] { didSet { rollover.settle() } }
         var onPick: ((StudioFrame.Place) -> Void)?
         var onRename: ((StudioFrame.Place, String) -> Void)?
@@ -2069,12 +2355,13 @@ final class PaletteTable: StudioRail {
         private var nameHits: [(NSRect, StudioFrame.Place, String, Design.Text)] = []
         private var renaming: StudioFrame.Place?
         private var pressed: (UUID, String, [NSColor])?
+        private var pendingPaletteClick: (NSRect, StudioFrame.Place)?
         /// Where and when the mouse went down, so a drag starts only once the pointer has clearly left the press.
         private var pressedAt: (NSPoint, TimeInterval) = (.zero, 0)
         /// The schema page's rollover: the pane flies out under the pointer and stays out on the chosen row, over its Mist ground.
         private let rollover = Rollover<StudioFrame.Place>()
         static func height(of r: Row) -> CGFloat {
-            switch r { case .group: return group; case .divider: return divider; default: return row }
+            switch r { case .group: return group; case .divider: return divider; case .palette: return row; default: return row }
         }
         override var height: CGFloat { rows.reduce(0) { $0 + Self.height(of: $1) } + Self.unit }
 
@@ -2106,9 +2393,9 @@ final class PaletteTable: StudioRail {
                 case .group(let name, let indent, _, let chosen, _):
                     let x = inset + CGFloat(indent) * Self.step + Self.caretSlot
                     return (x, Design.attributed(name, chosen ? .bodyStrong : .body), right - x)
-                case .palette(_, let name, let count, _, let chosen, let indent):
-                    let x = inset + CGFloat(indent) * Self.step + Self.strip + 10
-                    return (x, Design.attributed(name, chosen ? .bodyStrong : .body), right - x - Design.attributed(String(count), .caption).size().width - 12)
+                case .palette(_, let name, _, _, let chosen, let indent):
+                    let x = inset + CGFloat(indent) * Self.step + 4
+                    return (x, Design.attributed(name, chosen ? .bodyStrong : .body), max(1, right - 4 - x - 28) * 0.52)
                 case .item(let name, let detail, let indent, _, let chosen):
                     let x = inset + CGFloat(indent) * Self.step
                     return (x, Design.attributed(name, chosen ? .bodyStrong : .body), right - x - Design.attributed(detail ?? "", .caption).size().width - 12)
@@ -2142,23 +2429,19 @@ final class PaletteTable: StudioRail {
                     if let p = place { hits.append((NSRect(x: 0, y: y, width: bounds.width, height: Self.group), p)) }
                     y += Self.group
                 case .palette(let id, let name, let count, let colours, let chosen, let indent):
-                    let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
-                    let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
-                    // The whole palette as a strip, each colour an equal band, its foot on the line; an empty one is Mist.
-                    let strip = NSRect(x: x, y: b - 10, width: Self.strip, height: 10)
-                    if colours.isEmpty { fill(strip, Design.mist) }
-                    else {
-                        let bw = strip.width / CGFloat(colours.count)
-                        for (k, c) in colours.enumerated() { fill(NSRect(x: strip.minX + CGFloat(k) * bw, y: strip.minY, width: k == colours.count - 1 ? strip.width - CGFloat(k) * bw : bw + 0.5, height: strip.height), c) }
-                    }
-                    let countText = Design.attributed(String(count), .caption, colour: Design.quiet)
-                    let nameX = x + Self.strip + 10, nameW = right - nameX - countText.size().width - 12
-                    if renaming != .palette(id) { Design.attributed(name, chosen ? .bodyStrong : .body).draw(x: nameX, baseline: b, width: nameW) }
-                    nameHits.append((NSRect(x: nameX, y: y, width: nameW, height: Self.row), .palette(id), name, chosen ? .bodyStrong : .body))
-                    countText.draw(right: right, baseline: b)
-                    hairline(x: 0, y: y + Self.row - 1, width: bounds.width, Design.mist)
+                    let h = Self.height(of: r)
+                    let box = NSRect(x: 0, y: y, width: bounds.width, height: h)
+                    let x = inset + CGFloat(indent) * Self.step, nameX = x + 4, tileRight = right - 4
+                    let b = y + Self.line, countText = Design.attributed(String(count), .caption, colour: Design.quiet)
+                    let available = max(1, tileRight - nameX - 28)
+                    let nameW = available * 0.52, stripX = nameX + nameW + 8
+                    if renaming != .palette(id) { Design.attributed(name, chosen ? .bodyStrong : .body, colour: chosen ? (Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? Design.ink) : Design.ink).draw(x: nameX, baseline: b, width: nameW) }
+                    nameHits.append((NSRect(x: nameX, y: y, width: nameW, height: Self.row), .palette(id), name, .body))
+                    if !readOnlyRows || count > 0 { countText.draw(right: tileRight, baseline: b) }
+                    RailTile.spectrum(colours, in: NSRect(x: stripX, y: y + (h - 16) / 2, width: max(1, available - nameW - 8), height: 16))
+                    hairline(x: x, y: y + h - 1, width: right - x, Design.rule)
                     hits.append((box, .palette(id)))
-                    y += Self.row
+                    y += h
                 case .item(let name, let detail, let indent, let place, let chosen):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let b = y + Self.line, x = inset + CGFloat(indent) * Self.step
@@ -2191,16 +2474,17 @@ final class PaletteTable: StudioRail {
         private func palette(at p: NSPoint) -> (UUID, String, [NSColor])? {
             var y: CGFloat = 0
             for r in rows {
-                if case .palette(let id, let name, _, let colours, _, _) = r, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return (id, name, colours) }
+                if case .palette(let id, let name, _, let colours, _, _) = r, NSRect(x: 0, y: y, width: bounds.width, height: Self.height(of: r)).contains(p) { return (id, name, colours) }
                 y += Self.height(of: r)
             }
             return nil
         }
         override func mouseDown(with event: NSEvent) {
             let p = convert(event.locationInWindow, from: nil)
+            pressed = nil; pendingPaletteClick = nil
             // A caret opens or shuts its group and goes nowhere; the group's words still open its page.
             if let c = caretHits.first(where: { $0.0.contains(p) }) { onShut?(c.1, c.2); return }
-            if event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) {
+            if !readOnlyRows, event.clickCount == 2, let h = nameHits.first(where: { $0.0.contains(p) }) {
                 renaming = h.1; needsDisplay = true
                 InlineName.edit(h.2, style: h.3, in: self, x: h.0.minX, baseline: h.0.minY + Self.line, width: h.0.width, at: p) { [weak self] name in
                     self?.renaming = nil; self?.needsDisplay = true
@@ -2209,26 +2493,47 @@ final class PaletteTable: StudioRail {
                 return
             }
             pressed = palette(at: p); pressedAt = (event.locationInWindow, event.timestamp)
-            if let h = hits.first(where: { $0.0.contains(p) }) { onPick?(h.1) }
+            if let h = hits.first(where: { $0.0.contains(p) }) {
+                if pressed != nil { pendingPaletteClick = h }
+                else { onPick?(h.1) }
+            }
         }
         override func mouseDragged(with event: NSEvent) {
-            guard let (id, name, colours) = pressed, PaletteDrag.counts(event, from: pressedAt) else { return }
-            pressed = nil
+            guard !readOnlyRows, let (id, name, colours) = pressed, PaletteDrag.counts(event, from: pressedAt) else { return }
+            pressed = nil; pendingPaletteClick = nil
             PaletteDrag.begin(id, name: name, colours: colours, event: event, in: self)
         }
-        override func mouseUp(with event: NSEvent) { pressed = nil }
-        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
+        override func mouseUp(with event: NSEvent) {
+            let pending = pendingPaletteClick
+            pendingPaletteClick = nil; pressed = nil
+            if let pending, pending.0.contains(convert(event.locationInWindow, from: nil)),
+               hypot(event.locationInWindow.x - pressedAt.0.x, event.locationInWindow.y - pressedAt.0.y) < PaletteDrag.threshold {
+                onPick?(pending.1)
+            }
+        }
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [.copy, .move] }
     }
 }
 
 /// The history rail: a step on two units. The first line, the step's mark where a row's mark stands, its title, and when at
 /// the right; the second, the colours it touched as small squares standing on the line, then what it did to whom.
 final class HistoryRail: StudioRail {
+    var global = false
+    var onScope: (() -> Void)?
+    private lazy var scope = SwissDropdown("History Scope", value: "Catalogue", options: ["Catalogue", "Global"], allowsOwn: false, width: 160)
+    override func layout() {
+        super.layout()
+        let width = max(80, bounds.width - inset - insetRight)
+        scope.constraints.first(where: { $0.firstAttribute == .width })?.constant = width
+        scope.frame = NSRect(x: inset, y: AreaHeader.height, width: width, height: Design.App.unit * 2)
+        scroll.frame.origin.y += Design.App.unit * 2
+        scroll.frame.size.height = max(0, scroll.frame.height - Design.App.unit * 2)
+    }
     /// A step: its mark and title on the first line with when it was, the colours it touched and what it did on the second.
     struct Row { let symbol: String; let title: String; let detail: String; let time: String; let chips: [NSColor]; let hex: String? }
     var onPick: ((String) -> Void)?
     private var list: Body { body as! Body }
-    init() { super.init(body: Body()); heading = "History"; labels = ("Step", "When"); list.onPick = { [weak self] h in self?.onPick?(h) } }
+    init() { super.init(body: Body()); addSubview(scope); scope.onChange = { [weak self] value in self?.global = value == "Global"; self?.onScope?() }; heading = "History"; labels = ("Step", "When"); list.onPick = { [weak self] h in self?.onPick?(h) } }
     required init?(coder: NSCoder) { fatalError() }
     func set(rows: [Row]) { list.rows = rows; needsLayout = true }
 
@@ -2275,14 +2580,16 @@ final class HistoryRail: StudioRail {
 
 /// The page: 34 clear, then a Split header on its own six columns, a hairline, 22 clear, and the grid of tiles.
 final class StudioPage: NSView, Overlay {
+    /// Palette content heading shares the first rail-row baseline.
+    var paletteCount: String? { didSet { needsLayout = true; needsDisplay = true } }
     var inset: CGFloat = 8 { didSet { needsLayout = true } }
     var insetRight: CGFloat = 8 { didSet { needsLayout = true } }
     let grid = TileGrid()
     let settings = CatalogueSettings()
     let schema = SchemaSettings()
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     /// The settings scroll as one piece, the open accordion and all, when they outgrow the page.
-    private let settingsScroll = NSScrollView(), schemaScroll = NSScrollView()
+    private let settingsScroll = FittedScrollView(), schemaScroll = FittedScrollView()
     /// The way to make a member, under the header when the page lists members.
     private let newButton = SwissButton("New Project", .primary)
     var onNew: (() -> Void)?
@@ -2295,6 +2602,7 @@ final class StudioPage: NSView, Overlay {
     /// The colour model the tiles' captions are in, chosen on the menu before the slider.
     var format: ColourFormat = .hex { didSet { needsDisplay = true } }
     var onFormat: (() -> Void)?
+    var showsFormat = true
     private var formatRect = NSRect.zero
     private var dropped: SwissDropdown.MenuPanel?
     static let models: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab, .lch, .luv, .oklch, .oklab, .xyz, .float, .linear]
@@ -2321,12 +2629,72 @@ final class StudioPage: NSView, Overlay {
         dropped = panel
         Overlays.opened(self)
     }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, tags, lab, contrast, share }
+    var acceptsPaletteDrop = false
+    var onPaletteDrop: ((UUID) -> Bool)?
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        acceptsPaletteDrop && PaletteDrag.palette(on: sender.draggingPasteboard) != nil ? .copy : []
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { draggingEntered(sender) }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
+        return onPaletteDrop?(id) ?? false
+    }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, tags, lab, proofing, contrast, share, appbridge }
     private var section = Section.tiles
+    private let sectionTabs = NSScrollView()
+    private let tabBody = NSView()
+    private var tabButtons: [NSButton] = []
+    private var tabSignature = ""
+    private var tabObserver: NSObjectProtocol?
+    private var anchoredScroll: NSScrollView? {
+        section == .catalogues ? settingsScroll : section == .schema ? schemaScroll : extras[section]?.scroll
+    }
+    private var anchors: [(String,CGFloat)] {
+        if section == .catalogues { return settings.sectionAnchors }
+        if section == .schema { return schema.sectionAnchors }
+        return extras[section]?.view.sectionAnchors ?? []
+    }
+    private func updateTabs() {
+        let items = anchors
+        sectionTabs.isHidden = items.isEmpty
+        let signature = items.map { $0.0 }.joined(separator:"|")
+        if signature != tabSignature {
+            tabSignature = signature; tabButtons.forEach { $0.removeFromSuperview() }; tabButtons = []
+            var x: CGFloat = 0
+            for (i,item) in items.enumerated() {
+                let b = SectionAnchorButton(title:item.0,target:self,action:#selector(jumpSection(_:)))
+                b.tag=i; b.isBordered=false; b.alignment = .left; b.toolTip="Go to " + item.0
+                let width = Design.attributed(item.0,.body).size().width + 24
+                b.frame=NSRect(x:x,y:0,width:width,height:28); x += width
+                tabBody.addSubview(b); tabButtons.append(b)
+            }
+            tabBody.frame=NSRect(x:0,y:0,width:x,height:28)
+        }
+        sectionTabs.frame=NSRect(x:inset,y:AreaHeader.labelBaseline-17,width:max(0,bounds.width-inset-insetRight),height:28)
+        updateActiveTab()
+    }
+    private func updateActiveTab() {
+        guard let scroll = anchoredScroll else { return }
+        let y = scroll.contentView.bounds.minY
+        let active = anchors.lastIndex { $0.1 <= y+1 } ?? 0
+        for (i,b) in tabButtons.enumerated() where anchors.indices.contains(i) {
+            b.attributedTitle=Design.attributed(anchors[i].0,i == active ? .bodyStrong : .body,colour:i == active ? Design.ink : Design.quiet)
+            (b as? SectionAnchorButton)?.active = i == active
+            b.state = i == active ? .on : .off
+            b.needsDisplay=true
+        }
+    }
+    @objc private func jumpSection(_ sender: NSButton) {
+        guard let scroll = anchoredScroll, anchors.indices.contains(sender.tag) else { return }
+        layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to:NSPoint(x:0,y:anchors[sender.tag].1))
+        scroll.reflectScrolledClipView(scroll.contentView); updateActiveTab()
+    }
+    deinit { if let tabObserver { NotificationCenter.default.removeObserver(tabObserver) } }
     /// The sections beyond the tiles, the catalogues and the schema, each in a scroll of its own, laid out like the catalogues.
     private var extras: [Section: (view: PageSection, scroll: NSScrollView)] = [:]
     func add(_ view: PageSection, as s: Section) {
-        let scroll = NSScrollView()
+        let scroll = FittedScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -2343,8 +2711,36 @@ final class StudioPage: NSView, Overlay {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
-        if !slider.isHidden, formatRect.contains(p) { openFormats(); return }
+        if showsFormat, !slider.isHidden, formatRect.contains(p) { openFormats(); return }
         super.mouseDown(with: event)
+    }
+    private var aseName: ASENameEditor?
+    func cancelASEName() {
+        if let editor = aseName, window?.firstResponder === editor { window?.makeFirstResponder(nil) }
+        aseName?.removeFromSuperview(); aseName = nil; needsDisplay = true
+    }
+    func beginASEName(save: @escaping (String) -> Bool) {
+        aseName?.removeFromSuperview()
+        title = ""; grid.note = "Name your ASE file, then press Enter to choose its folder."
+        let editor = ASENameEditor(frame: NSRect(x: inset, y: AreaHeader.headingBaseline - Design.Text.heading.font().ascender, width: max(120, bounds.width - inset - insetRight - 180), height: 28))
+        editor.font = Design.Text.heading.font(); editor.textColor = Design.ink
+        editor.drawsBackground = false; editor.isRichText = false
+        editor.textContainerInset = .zero; editor.textContainer?.lineFragmentPadding = 0
+        editor.setAccessibilityLabel("New ASE filename")
+        editor.onSave = { [weak self, weak editor] value in
+            let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains(":"), !name.contains("\n") else { NSSound.beep(); return }
+            let stem = name.lowercased().hasSuffix(".ase") ? String(name.dropLast(4)) : name
+            guard !stem.isEmpty else { NSSound.beep(); return }
+            if save(stem) { editor?.removeFromSuperview(); self?.aseName = nil }
+            else { self?.window?.makeFirstResponder(editor) }
+        }
+        editor.onCancel = { [weak self, weak editor] in editor?.removeFromSuperview(); self?.aseName = nil; self?.title = "Appbridge"; self?.needsDisplay = true }
+        aseName = editor; addSubview(editor); window?.makeFirstResponder(editor); needsDisplay = true
+        DispatchQueue.main.async { [weak self, weak editor] in
+            guard let self, let editor, self.aseName === editor else { return }
+            self.window?.makeFirstResponder(editor)
+        }
     }
     private var title = ""
     private var meta: (String, String) = ("", "")
@@ -2353,6 +2749,7 @@ final class StudioPage: NSView, Overlay {
 
     init() {
         super.init(frame: .zero)
+        registerForDraggedTypes([PaletteDrag.type])
         wantsLayer = true
         layer?.backgroundColor = Design.card.cgColor
         scroll.drawsBackground = false
@@ -2386,6 +2783,12 @@ final class StudioPage: NSView, Overlay {
         grid.onResize = { [weak self] in self?.needsLayout = true }
         settings.onResize = { [weak self] in self?.needsLayout = true }
         schema.onResize = { [weak self] in self?.needsLayout = true }
+        sectionTabs.drawsBackground=false; sectionTabs.hasHorizontalScroller=false; sectionTabs.hasVerticalScroller=false
+        sectionTabs.documentView=tabBody; addSubview(sectionTabs)
+        tabObserver=NotificationCenter.default.addObserver(forName:NSView.boundsDidChangeNotification,object:nil,queue:.main) { [weak self] note in
+            guard let self, let clip=note.object as? NSClipView, clip === self.anchoredScroll?.contentView else { return }
+            self.updateActiveTab()
+        }
     }
 
     /// What the page shows: the tiles, the Catalogues settings or the Schema settings, one in place of the others.
@@ -2457,46 +2860,55 @@ final class StudioPage: NSView, Overlay {
             if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
             top += 2 * u
         }
-        let tilesTop = top + (section == .tiles ? u : 0)
-        scroll.frame = NSRect(x: inset, y: tilesTop, width: bounds.width - inset - insetRight, height: bounds.height - tilesTop)
+        let tilesTop = top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
+        let canvasWidth = bounds.width - inset - insetRight
+        scroll.frame = NSRect(x: inset, y: tilesTop, width: canvasWidth + min(insetRight, QuietScroller.lane), height: bounds.height - tilesTop)
         settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: bounds.height - top)
-        let sh = settings.height(forWidth: scroll.frame.width)
-        settings.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, sh))
+        let sh = settings.height(forWidth: canvasWidth)
+        settings.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, sh))
         settingsScroll.verticalScrollElasticity = sh > scroll.frame.height ? .allowed : .none
         // The schema's scroll starts at the page's edge, so a row's ground can reach the rail's divider; its words start a column in.
         schemaScroll.frame = NSRect(x: 0, y: top, width: inset + scroll.frame.width, height: bounds.height - top)
         schema.leading = inset
-        let kh = schema.height(forWidth: inset + scroll.frame.width)
-        schema.frame = NSRect(x: 0, y: 0, width: inset + scroll.frame.width, height: max(schemaScroll.frame.height, kh))
+        let kh = schema.height(forWidth: inset + canvasWidth)
+        schema.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(schemaScroll.frame.height, kh))
         schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
         for (_, e) in extras {
             e.scroll.frame = settingsScroll.frame
-            let eh = e.view.height(forWidth: scroll.frame.width)
-            e.view.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(e.scroll.frame.height, eh))
+            let eh = e.view.height(forWidth: canvasWidth)
+            e.view.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(e.scroll.frame.height, eh))
             // Tags is laid out as the schema is: from the page's edge, its words a column in.
             if let t = e.view as? TagsSettings {
                 e.scroll.frame = schemaScroll.frame
                 t.leading = inset
-                t.frame = NSRect(x: 0, y: 0, width: schemaScroll.frame.width, height: max(e.scroll.frame.height, eh))
+                t.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(e.scroll.frame.height, eh))
             } else if let sp = e.view as? SharePage {
                 e.scroll.frame = schemaScroll.frame
                 sp.leading = inset
-                sp.frame = NSRect(x: 0, y: 0, width: schemaScroll.frame.width, height: max(e.scroll.frame.height, eh))
+                sp.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(e.scroll.frame.height, eh))
             }
             e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
         }
-        grid.width = scroll.frame.width
-        grid.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, grid.height))
+        grid.width = canvasWidth
+        grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
+        if let scroll = anchoredScroll, let last = anchors.last, let document = scroll.documentView {
+            document.frame.size.height = max(document.frame.height,last.1 + scroll.contentView.bounds.height)
+            scroll.contentView.postsBoundsChangedNotifications = true
+        }
+        updateTabs()
         grid.needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: title, left: meta.0, right: meta.1, in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
+        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty ? meta.0 : "", right: anchors.isEmpty ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
+        if let paletteCount {
+            Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)
+        }
         // The colour model before the slider, a quiet word with its chevron, on the heading's line.
         formatRect = .zero
-        if !slider.isHidden {
+        if showsFormat, !slider.isHidden {
             let b = AreaHeader.headingBaseline
             let t = Design.attributed(format.label, .caption, colour: Design.quiet)
             let right = slider.frame.minX - 24
@@ -2515,7 +2927,7 @@ final class StudioPage: NSView, Overlay {
 /// a caption. A colour tile carries one colour and its hex; a palette card a strip of its colours
 /// and its count, and opens the palette.
 final class TileGrid: NSView {
-    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID? }
+    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil }
     var items: [Item] = [] { didSet { onResize?() } }
     /// Words shown in place of tiles when there are none, as a member's notes on its Information page; nil says Nothing Found.
     var note: String? { didSet { needsDisplay = true } }
@@ -2528,6 +2940,7 @@ final class TileGrid: NSView {
     /// A click on the colour itself copies the caption's value; the halo mark at the right of the caption opens the halo over it.
     var onCopy: ((String) -> Void)?
     var onHalo: ((String, NSRect) -> Void)?
+    var showsHalo = true
     private var markHits: [(NSRect, Int)] = []
     /// On the beat: a block of five units, two units of words with the title and the caption on their lines, a unit between rows; across, the page's own gutter.
     static var block: CGFloat { Design.App.unit * 5 }
@@ -2544,6 +2957,10 @@ final class TileGrid: NSView {
         let rows = (items.count + columns - 1) / columns
         return CGFloat(rows) * (Self.block + Self.words + Self.rowGap)
     }
+    func reveal(_ hex: String) {
+        guard let index = items.firstIndex(where: { $0.hex == hex }) else { return }
+        scrollToVisible(rect(index))
+    }
     private func rect(_ i: Int) -> NSRect {
         let c = i % columns, x = left(c)
         return NSRect(x: x, y: CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
@@ -2553,7 +2970,7 @@ final class TileGrid: NSView {
         markHits = []
         for (i, it) in items.enumerated() {
             let r = rect(i)
-            if let hex = it.hex, hex != "" {
+            if showsHalo, let hex = it.hex, hex != "" {
                 // The halo mark on the caption's line, at the right, for the value beside it.
                 let capB = r.minY + Self.block + Design.App.unit + Design.App.textBaseline
                 let g = NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16)
@@ -2570,8 +2987,8 @@ final class TileGrid: NSView {
             }
             Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 6, baseline: block.maxY + Design.App.textBaseline, width: r.width - 12)
             let capB = block.maxY + Design.App.unit + Design.App.textBaseline
-            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 6, baseline: capB, width: r.width - 12 - (it.hex == nil ? 0 : 24))
-            if it.hex != nil { Design.haloMark(in: NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16), colour: Design.quiet) }
+            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 6, baseline: capB, width: r.width - 12 - (!showsHalo || it.hex == nil ? 0 : 24))
+            if showsHalo, it.hex != nil { Design.haloMark(in: NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16), colour: Design.quiet) }
             if let h = it.hex, h == chosenHex {
                 // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
                 Design.rule.setStroke()
@@ -2589,6 +3006,18 @@ final class TileGrid: NSView {
         } else if items.isEmpty { Design.attributed("Nothing found", .lead, colour: Design.soft).draw(x: 0, baseline: Design.App.textBaseline) }
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if let i = items.indices.first(where: { rect($0).contains(p) }), items[i].hex != nil {
+            toolTip = items[i].caption + " · " + (items[i].sourceCMYK == nil ? PrintCondition.name() : "ASE source · No embedded ICC profile")
+        } else { toolTip = nil }
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if let m = markHits.first(where: { $0.0.contains(p) }), let h = items[m.1].hex { onPick?(h); onHalo?(h, m.0); return }
@@ -2597,7 +3026,11 @@ final class TileGrid: NSView {
             onPick?(h)
             // The colour block itself copies its value; the words beneath only choose.
             let block = NSRect(x: rect(i).minX, y: rect(i).minY, width: rect(i).width, height: Self.block)
-            if block.contains(p) { onCopy?(items[i].caption) }
+            if block.contains(p) {
+                let text = Prefs.copyFormat == .cmyk ? (items[i].sourceCMYK ?? Prefs.copyText(h)) : Prefs.copyText(h)
+                ColourCopies.copy(h, text: text, sourceCMYK: items[i].sourceCMYK)
+                onCopy?(text)
+            }
         }
         else if let id = items[i].id, event.clickCount == 2 { onOpen?(id) }
         else if let id = items[i].id { onOpen?(id) }
@@ -2647,7 +3080,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     private let exportButton = SwissButton("Export Catalogue\u{2026}", .secondary)
     var onImport: (() -> Void)?
     var onExport: (() -> Void)?
-    private let aboutScroll = NSScrollView()
+    private let aboutScroll = FittedScrollView()
     private let about = NSTextView()
     /// On the beat: every row a unit, the notes three, the hue strip two; text on the unit's line.
     static var u: CGFloat { Design.App.unit }
@@ -2813,6 +3246,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     // MARK: Where things are
 
     /// The three buttons sit in the first two units, their words on the second line; the rule closes the third.
+    var sectionAnchors: [(String,CGFloat)] { [("Actions",SettingsSheet.headerGuide+1),("Catalogues",rowsTop+1)] }
     private var rowsTop: CGFloat { SettingsSheet.contentStart + 3 * Self.u - 1 }
     private var others: [String] { names.filter { $0 != expanded } }
     /// The panel's full height, and its height now, part way through opening or closing.
@@ -3458,13 +3892,15 @@ final class StudioFooter: NSView {
         flashTimer?.invalidate()
         flashTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in self?.flash = nil; self?.needsDisplay = true }
     }
-    private let actions = ["Copy Hex", "Copy Name", "Copy RGB"]
-    /// The action last used; none until one is.
-    private var live: Int? = nil
-    private var hits: [NSRect] = []
+    private var swatchHits: [NSRect] = []
+    private var copyObserver: NSObjectProtocol?
     static let baseline: CGFloat = 30
 
-    init() { super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = Design.card.cgColor }
+    init() {
+        super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
+        copyObserver = NotificationCenter.default.addObserver(forName: ColourCopies.changed, object: nil, queue: .main) { [weak self] _ in self?.needsDisplay = true }
+    }
+    deinit { if let copyObserver { NotificationCenter.default.removeObserver(copyObserver) } }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
@@ -3472,29 +3908,26 @@ final class StudioFooter: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let b = Self.baseline
-        fill(NSRect(x: grid.x, y: b - 9, width: 10, height: 10), Design.hex(hex))
-        let n = Design.attributed(name, .body)
-        n.draw(x: grid.x + 18, baseline: b, width: grid.centre - grid.x - 100)
-        Design.attributed(hex, .caption, colour: Design.quiet).draw(x: grid.x + 18 + min(n.size().width, grid.centre - grid.x - 100) + 10, baseline: b)
-        // The actions as text from the page's left edge, the live one Medium; a flash takes their place while it lasts.
-        var x = grid.centre
-        hits = []
-        if let f = flash { Design.attributed(f, .body).draw(x: x, baseline: b, width: grid.x + 12 * grid.column + 11 * Design.App.gutter - 200 - x) }
-        for (i, a) in actions.enumerated() where flash == nil {
-            let t = Design.attributed(a, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
-            t.draw(x: x, baseline: b)
-            hits.append(NSRect(x: x - 8, y: 0, width: t.size().width + 16, height: bounds.height))
-            x += t.size().width + 24
+        swatchHits = []
+        let size = min(24, max(12, (grid.centre - grid.x - 32 - 9 * 8) / 10))
+        for (index, entry) in ColourCopies.recent.enumerated() {
+            let rect = NSRect(x: grid.x + CGFloat(index) * (size + 8), y: (bounds.height - size) / 2, width: size, height: size)
+            fill(rect, Design.hex(entry.key)); swatchHits.append(rect)
         }
+        // The actions as text from the page's left edge, the live one Medium; a flash takes their place while it lasts.
+        let x = grid.centre
+        if let f = flash { Design.attributed(f, .body).draw(x: x, baseline: b, width: grid.x + 12 * grid.column + 11 * Design.App.gutter - 200 - x) }
         Design.attributed(ContentViewController.releaseLine, .caption, colour: Design.quiet).draw(right: grid.x + 12 * grid.column + 11 * Design.App.gutter, baseline: b)
     }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        guard let i = hits.firstIndex(where: { $0.contains(p) }) else { return }
-        live = i
-        needsDisplay = true
-        onAct?(i)
+        if let index = swatchHits.firstIndex(where: { $0.contains(p) }) {
+            let entry = ColourCopies.recent[index]
+            ColourCopies.copy(entry.key, sourceCMYK: entry.sourceCMYK, record: false)
+            return
+        }
+
     }
 }
 

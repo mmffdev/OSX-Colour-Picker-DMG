@@ -23,6 +23,8 @@ final class SwissFocusModal: NSView, Overlay {
     private var nextY: CGFloat = 28
     private var cardHeight: CGFloat = 280
     private var monitor: Any?
+    private var customContent: NSView?
+    private var preferredSize = NSSize(width: 504, height: 560)
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -33,6 +35,13 @@ final class SwissFocusModal: NSView, Overlay {
         SwissModalStyle.apply(to: card); addSubview(card)
         addText(title, style: .header, height: 28)
         addText(message, style: .body, height: 56)
+    }
+    /// Large analytical views use the same focus, backdrop and dismissal as forms.
+    init(content: NSView, size: NSSize) {
+        super.init(frame: .zero)
+        preferredSize = size; customContent = content
+        background.imageScaling = .scaleAxesIndependently; addSubview(background)
+        SwissModalStyle.apply(to: card); addSubview(card); card.addSubview(content)
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
@@ -59,6 +68,10 @@ final class SwissFocusModal: NSView, Overlay {
         button.tag = actions.count; actions.append(run)
         button.frame = NSRect(x: 28, y: nextY, width: 448, height: 32)
         button.autoresizingMask = [.width]; card.addSubview(button); nextY += 44
+    }
+    func content(_ view: NSView, height: CGFloat) {
+        view.frame = NSRect(x: 28, y: nextY, width: 448, height: height)
+        view.autoresizingMask = [.width]; card.addSubview(view); nextY += height + 16
     }
     @objc private func tapped(_ sender: NSButton) { actions[sender.tag]() }
     func present(over view: NSView) {
@@ -87,7 +100,13 @@ final class SwissFocusModal: NSView, Overlay {
     }
     override func layout() {
         super.layout(); background.frame = bounds
-        let width = min(504, bounds.width - 56)
+        let width = min(preferredSize.width, bounds.width - 56)
+        if let content = customContent {
+            let height = min(preferredSize.height, bounds.height - 56)
+            card.frame = NSRect(x: (bounds.width-width)/2, y: (bounds.height-height)/2, width: width, height: height)
+            content.frame = card.bounds.insetBy(dx: 28, dy: 28)
+            return
+        }
         card.frame = NSRect(x: (bounds.width - width) / 2, y: max(28, (bounds.height - cardHeight) / 2), width: width, height: cardHeight)
     }
     func dismissOverlay() {

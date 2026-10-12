@@ -383,7 +383,7 @@ enum GamutChart {
                 let circle = NSBezierPath(ovalIn: NSRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y))
                 circle.lineWidth = 1
                 circle.stroke()
-                if detailed, ring < domain.maxX - 30 { text("\(Int(ring))", ink.withAlphaComponent(0.5), size: 10).draw(at: NSPoint(x: place(GamutPoint(x: ring, y: 0)).x + 3, y: chart.midY + 2)) }
+                if detailed, ring < domain.maxX - 30 { text("\(Int(ring))", ink.withAlphaComponent(0.5), size: 13).draw(at: NSPoint(x: place(GamutPoint(x: ring, y: 0)).x + 3, y: chart.midY + 2)) }
                 ring += 50
             }
             let cross = NSBezierPath()
@@ -398,7 +398,7 @@ enum GamutChart {
                     ("+b* Yellow", NSPoint(x: chart.midX + 5, y: chart.minY + 5), 0, 0), ("\u{2212}b* Blue", NSPoint(x: chart.midX + 5, y: chart.maxY - 5), 0, 1),
                 ]
                 for (word, at, alignX, alignY) in labels {
-                    let s = text(word, dim, size: 10), size = s.size()
+                    let s = text(word, dim, size: 13), size = s.size()
                     s.draw(at: NSPoint(x: at.x - size.width * alignX, y: at.y - size.height * alignY))
                 }
             }
@@ -409,7 +409,7 @@ enum GamutChart {
                 if at <= domain.maxX { let x = place(GamutPoint(x: at, y: 0)).x; grid.move(to: NSPoint(x: x, y: chart.minY)); grid.line(to: NSPoint(x: x, y: chart.maxY)) }
                 if at <= domain.maxY { let y = place(GamutPoint(x: 0, y: at)).y; grid.move(to: NSPoint(x: chart.minX, y: y)); grid.line(to: NSPoint(x: chart.maxX, y: y)) }
                 if detailed, at > 0 {
-                    let label = text(String(format: "%.1f", at), ink.withAlphaComponent(0.5), size: 10)
+                    let label = text(String(format: "%.1f", at), ink.withAlphaComponent(0.5), size: 13)
                     if at <= domain.maxX { label.draw(at: NSPoint(x: place(GamutPoint(x: at, y: 0)).x + 3, y: chart.maxY - 15)) }
                     if at <= domain.maxY { label.draw(at: NSPoint(x: chart.minX + 4, y: place(GamutPoint(x: 0, y: at)).y + 2)) }
                 }
@@ -426,7 +426,7 @@ enum GamutChart {
                 for entry in GamutMaths.locus where [460, 480, 490, 500, 510, 520, 540, 560, 580, 600, 620].contains(entry.nm) {
                     let raw = GamutPoint(x: entry.x, y: entry.y), p = place(view == .xy ? raw : GamutMaths.uv(raw))
                     let away = hypot(p.x - middle.x, p.y - middle.y), ux = (p.x - middle.x) / away, uy = (p.y - middle.y) / away
-                    let label = text("\(entry.nm)", ink.withAlphaComponent(0.6), size: 10), size = label.size()
+                    let label = text("\(entry.nm)", ink.withAlphaComponent(0.6), size: 13), size = label.size()
                     label.draw(at: NSPoint(x: p.x + ux * 14 - size.width / 2, y: p.y + uy * 12 - size.height / 2))
                 }
             }

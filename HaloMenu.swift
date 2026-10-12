@@ -1146,7 +1146,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         let style = NSMutableParagraphStyle()
         style.alignment = align
         style.lineBreakMode = lines == 1 ? .byTruncatingTail : .byWordWrapping
-        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        let font = NSFont.systemFont(ofSize: max(13, size), weight: weight)
         let string = NSAttributedString(string: string, attributes: [
             .font: font, .foregroundColor: colour.withAlphaComponent(opacity), .paragraphStyle: style])
         return (string, ceil(NSLayoutManager().defaultLineHeight(for: font)) * CGFloat(lines))
@@ -1179,14 +1179,14 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         if let edit = menu.editing?.edit {
             // The text box itself is a real field laid over the dial; only its heading and hint are drawn.
             stack([title], in: part(0.28, 0.27, 0.44, 0.16), gap: gap, fromTop: true, ctx)
-            stack([text(edit.hint, size: 11, colour: ink, opacity: 0.8, lines: 2)],
+            stack([text(edit.hint, size: 13, colour: ink, opacity: 0.8, lines: 2)],
                   in: CGRect(x: circle.minX + 0.22 * diameter, y: centre.y + 20, width: 0.56 * diameter, height: 30), gap: 0, fromTop: true, ctx)
             return
         }
         if let confirming = menu.confirming, let ask = confirming.confirmation {
             stack([title], in: part(0.28, 0.27, 0.44, 0.16), gap: gap, fromTop: true, ctx)
             drawSlider(menu, ctx)
-            stack([text(ask.label, size: 12, colour: ink, lines: 2)],
+            stack([text(ask.label, size: 13, colour: ink, lines: 2)],
                   in: CGRect(x: circle.minX + 0.22 * diameter, y: centre.y + 20, width: 0.56 * diameter, height: 34), gap: 0, fromTop: true, ctx)
             return
         }
@@ -1203,16 +1203,16 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             stack([name], in: CGRect(x: column.minX, y: top + icon + between, width: column.width, height: name.1), gap: 0, ctx)
             drawMetadata(menu, in: CGRect(x: column.minX, y: top + icon + between + name.1, width: column.width, height: rows), ctx)
             if let note = note {
-                stack([text(note, size: compact ? 10 : 11, colour: ink, opacity: 0.8, lines: 2)], in: part(0.24, compact ? 0.60 : 0.61, 0.52, 0.08), gap: 0, ctx)
+                stack([text(note, size: 13, colour: ink, opacity: 0.8, lines: 2)], in: part(0.24, compact ? 0.60 : 0.61, 0.52, 0.08), gap: 0, ctx)
             }
             return
         }
 
         var pieces = [title]
         if let description = active?.description {
-            pieces.append(text(description, size: compact ? 10 : 12, colour: ink, opacity: 0.8, lines: compact || !menu.metadata.isEmpty ? 2 : 3))
+            pieces.append(text(description, size: 13, colour: ink, opacity: 0.8, lines: compact || !menu.metadata.isEmpty ? 2 : 3))
         } else if let hint = menu.hint, !compact {
-            pieces.append(text(hint, size: 11, colour: ink, opacity: 0.8, lines: 2))
+            pieces.append(text(hint, size: 13, colour: ink, opacity: 0.8, lines: 2))
         }
         let box = part(0.22, 0.27, 0.56, 0.42)
         if !menu.metadata.isEmpty {
@@ -1221,7 +1221,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             drawMetadata(menu, in: CGRect(x: box.minX, y: box.minY + box.height * 0.55, width: box.width, height: box.height * 0.45), ctx)
             return
         }
-        if let caption = menu.caption { pieces.insert(text(caption, size: compact ? 10 : 12, colour: ink, opacity: 0.8), at: 0) }
+        if let caption = menu.caption { pieces.insert(text(caption, size: 13, colour: ink, opacity: 0.8), at: 0) }
         guard menu.showPositions, !menu.live.isEmpty else {
             stack(pieces, in: box, gap: gap, ctx)
             return
@@ -1243,7 +1243,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
             ctx.setFillColor(ink.cgColor)
             ctx.setStrokeColor(ink.cgColor)
             if on { ctx.fill(square) } else { ctx.stroke(square.insetBy(dx: 0.5, dy: 0.5), width: 1) }
-            let initial = text(String(action.label.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased(), size: 12, colour: on ? menu.colours.centre : ink)
+            let initial = text(String(action.label.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased(), size: 13, colour: on ? menu.colours.centre : ink)
             stack([initial], in: square, gap: 0, ctx)
         }
         ctx.restoreGState()
@@ -1251,12 +1251,12 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
 
     private func metadataHeight(_ menu: HaloMenu) -> CGFloat {
         guard !menu.metadata.isEmpty else { return 0 }
-        let row = text(" ", size: compact ? 10 : 11, colour: .black).1
+        let row = text(" ", size: 13, colour: .black).1
         return (compact ? 4 : 6) + row * CGFloat(menu.metadata.count)
     }
 
     private func drawMetadata(_ menu: HaloMenu, in box: CGRect, _ ctx: CGContext) {
-        let ink = menu.colours.centreInk, size: CGFloat = compact ? 10 : 11
+        let ink = menu.colours.centreInk, size: CGFloat = 13
         var y = box.minY + (compact ? 4 : 6)
         ctx.saveGState()
         ctx.clip(to: box)

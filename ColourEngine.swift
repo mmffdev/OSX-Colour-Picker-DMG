@@ -536,6 +536,13 @@ enum PressProfiles {
         return found.paths
     }
 
+    static func registerProofProfile(_ data: Data) -> String {
+        let key = "Proof ICC " + Sharing.sha256(data)
+        if spaces[key] == nil, let space = CGColorSpace(iccData: data as CFData), space.model == .cmyk {
+            spaces[key] = space; whites[key] = mediaWhite(inProfile: data) ?? .d50
+        }
+        return key
+    }
     private static var spaces: [String: CGColorSpace] = [:]
     private static var whites: [String: XYZ] = [:]
     private static var blacks: [String: Double] = [:]

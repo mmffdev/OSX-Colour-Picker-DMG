@@ -196,7 +196,7 @@ final class TagBar: NSView, NSTokenFieldDelegate {
             for tag in fresh {
                 let menu = NSPopUpButton(frame: .zero, pullsDown: false)
                 menu.controlSize = .small
-                menu.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+                menu.font = NSFont.systemFont(ofSize: TextSize.body)
                 menu.addItem(withTitle: "\(tag): Global")
                 for p in scopes {
                     menu.addItem(withTitle: "\(tag): \(p.name) only")
@@ -373,7 +373,7 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
 
         let scope = NSPopUpButton(frame: .zero, pullsDown: false)
         scope.controlSize = .small
-        scope.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        scope.font = NSFont.systemFont(ofSize: TextSize.body)
         scope.addItem(withTitle: "Global")
         for p in lib.orderedProjects {
             scope.addItem(withTitle: "Project: \(p.name)")

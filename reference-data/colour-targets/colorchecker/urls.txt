@@ -1,0 +1,8 @@
+{
+    "urls" : {
+        "https://xritephoto.com/documents/literature/EN/ColorChecker24_After_Nov2014.zip" : "md5:bc09e5e6a0a5812a26fe693a710522f1",
+        "https://xritephoto.com/documents/literature/EN/ColorChecker24_Before_Nov2014.zip" : "md5:51fce7c53060154ec48d4c77804bd301",
+        "https://xritephoto.com/documents/literature/EN/ColorCheckerSG_After_Nov2014.zip" : "md5:9758a65f8a796a9ae9101981824a9fdc",
+        "https://xritephoto.com/documents/literature/EN/ColorCheckerSG_Before_Nov2014.zip" : "md5:2a81f6888b75f40f5f75aaae16d044e4"
+    }
+}

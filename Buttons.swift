@@ -345,6 +345,8 @@ final class SwissButton: NSButton {
     private var label: NSAttributedString { Design.attributed(title, .action, colour: ink) }
     private var ink: NSColor {
         if !isEnabled { return Design.ink.withAlphaComponent(0.35) }
+        if isHighlighted, let colour = Prefs.buttonActiveText.flatMap(colorFromHex) { return colour }
+        if hovering, let colour = Prefs.buttonHoverText.flatMap(colorFromHex) { return colour }
         return kind == .primary || reversed ? Design.card : Design.ink
     }
     /// The baseline sits where the text's does, so a row of these aligns with text beside it.
@@ -385,6 +387,8 @@ final class SwissButton: NSButton {
             NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)).stroke()
         case .quiet: break
         }
+        if isEnabled, isHighlighted, let colour = Prefs.buttonActiveBackground.flatMap(colorFromHex) { colour.setFill(); box.fill() }
+        else if isEnabled, hovering, let colour = Prefs.buttonHoverBackground.flatMap(colorFromHex) { colour.setFill(); box.fill() }
         let text = label
         let size = text.size()
         let y = (r.height - size.height) / 2

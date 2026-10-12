@@ -1,0 +1,12 @@
+Colour reference datasets — downloaded 2026-10-11
+
+FOGRA source: https://fogra.org/en/downloads/work-tools/characterisation-data
+Includes FOGRA39–60, FOGRA51 spectral data, and MediaWedge subsets.
+Fogra permits use and redistribution of unmodified characterisation data with source attribution; no certification or endorsement is implied.
+
+ColorChecker source: https://zenodo.org/records/3245895
+New Color Specifications for ColorChecker SG and Classic Charts — X-Rite (2016).
+Classic 24-patch and SG references, before and after November 2014. Match the dataset to the chart generation.
+Zenodo lists the licence as not specified; retained here as reference downloads, not added to the app distribution. Original source links are in colorchecker/urls.txt.
+
+Original ZIPs and extracted files are retained. manifest.json records URLs, checksums and archive contents. These files have not been imported into Colorgain.

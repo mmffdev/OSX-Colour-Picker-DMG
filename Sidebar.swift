@@ -121,7 +121,7 @@ final class PaletteCell: NSTableCellView, NSTextFieldDelegate {
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField = name
 
-        count.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        count.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         count.textColor = .tertiaryLabelColor
         strip.radius = 3
         strip.outlinesWhenEmpty = true
@@ -1271,7 +1271,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView = image
             let count = NSTextField(labelWithString: "")
             count.tag = 7
-            count.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            count.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
             count.textColor = .tertiaryLabelColor
             // The name takes up the slack, so the count and the gear stay at the far right: the gear on the icon
             // column every row shares, the count where a member's padlock sits.

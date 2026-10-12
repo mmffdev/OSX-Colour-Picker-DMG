@@ -6,11 +6,35 @@ let shutterPath = "/System/Library/Components/CoreAudio.component/Contents/Share
 /// The camera shutter macOS plays for a screenshot. Kept while it plays, since a sound let go of stops.
 private var shutter: NSSound?
 
-func playShutter() {
-    guard Prefs.sounds else { return }
-    shutter?.stop()
-    shutter = NSSound(contentsOfFile: shutterPath, byReference: true)
-    shutter?.play()
+enum AppSounds {
+    enum Event: String { case copy, pick }
+    static let choices: [String] = ["Camera"] + ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? []).filter { $0.hasSuffix(".aiff") }.map { ($0 as NSString).deletingPathExtension }.sorted()
+    static func enabled(_ event: Event) -> Bool { AppPreferences.shared.object(forKey: "sound." + event.rawValue + ".enabled") as? Bool ?? true }
+    static func selection(_ event: Event) -> String { AppPreferences.shared.string(forKey: "sound." + event.rawValue) ?? "Camera" }
+    static func play(_ event: Event, test: Bool = false) {
+        guard test || (Prefs.sounds && enabled(event)) else { return }
+        preview(selection(event))
+    }
+    static func preview(_ name: String) {
+        guard choices.contains(name) else { return }
+        let path = name == "Camera" ? shutterPath : "/System/Library/Sounds/" + name + ".aiff"
+        shutter?.stop(); shutter = NSSound(contentsOfFile: path, byReference: true); shutter?.play()
+    }
+}
+func playShutter() { AppSounds.play(.pick) }
+
+enum ColourCopies {
+    struct Entry { let key: String; let sourceCMYK: String? }
+    static var recent: [Entry] = []
+    static let changed = Notification.Name("ColourCopies.changed")
+    static func copy(_ key: String, text: String? = nil, sourceCMYK: String? = nil, record: Bool = true, sound: Bool = true) {
+        copyToClipboard(text ?? (Prefs.copyFormat == .cmyk ? (sourceCMYK ?? Prefs.copyText(key)) : Prefs.copyText(key)))
+        if sound { AppSounds.play(.copy) }
+        if record {
+            recent.append(Entry(key: key, sourceCMYK: sourceCMYK)); recent = Array(recent.suffix(10))
+            NotificationCenter.default.post(name: changed, object: nil)
+        }
+    }
 }
 
 func copyToClipboard(_ s: String) {
@@ -56,18 +80,18 @@ func symbolButton(_ name: String, tooltip: String, target: AnyObject, action: Se
     return b
 }
 
-/// The app's type scale, Apple's: 13 for anything read, 11 for labels over fields and captions,
-/// never smaller; 20 for a page title. Text drawn inside swatch tiles is sized to fit and is the one exception.
+/// The app's type scale: 13 points minimum for all readable UI text, including captions; 20 for a page title.
+/// Text drawn inside swatch tiles is sized to fit and is the one exception.
 enum TextSize {
     static let title: CGFloat = 22
     static let body: CGFloat = 13
-    static let caption: CGFloat = 11
+    static let caption: CGFloat = 13
 }
 
 func caption(_ s: String, size: CGFloat = TextSize.caption) -> NSTextField {
     let l = NSTextField(labelWithString: s)
     l.textColor = .secondaryLabelColor
-    l.font = NSFont.systemFont(ofSize: size)
+    l.font = NSFont.systemFont(ofSize: max(13, size))
     l.lineBreakMode = .byTruncatingTail
     return l
 }
@@ -79,7 +103,7 @@ final class PopoverButton: NSPopUpButton {
         super.init(frame: .zero, pullsDown: true)
         addItem(withTitle: title)
         controlSize = .small
-        font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        font = NSFont.systemFont(ofSize: TextSize.body)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -308,53 +332,23 @@ enum ClickAway {
     }
 }
 
-/// The app's scroller: a thin bar with no lane behind it, faint until the pointer is on it, so
-/// it never draws the eye from the colours. It is a grey taken from the text colour, so it
-/// follows the background from white to black.
+/// Shared yellow handle, painted only in the reserved scroll gutter.
 final class QuietScroller: NSScroller {
-    static let lane: CGFloat = 9
-    static let bar: CGFloat = 4
-    private var hovering = false { didSet { needsDisplay = true } }
-    private var tracking: NSTrackingArea?
-
-    override class var isCompatibleWithOverlayScrollers: Bool { true }
+    static let lane: CGFloat = Design.App.gutter
+    override class var isCompatibleWithOverlayScrollers: Bool { false }
     override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { lane }
-
-    /// Gives a scroll view these scrollers, once.
     static func install(in scroll: NSScrollView) {
-        if scroll.hasVerticalScroller, !(scroll.verticalScroller is QuietScroller) {
-            let s = QuietScroller()
-            s.scrollerStyle = scroll.scrollerStyle
-            scroll.verticalScroller = s
-        }
-        if scroll.hasHorizontalScroller, !(scroll.horizontalScroller is QuietScroller) {
-            let s = QuietScroller()
-            s.scrollerStyle = scroll.scrollerStyle
-            scroll.horizontalScroller = s
-        }
+        scroll.scrollerStyle = .legacy
+        if scroll.hasVerticalScroller, !(scroll.verticalScroller is QuietScroller) { scroll.verticalScroller = QuietScroller() }
+        if scroll.hasHorizontalScroller, !(scroll.horizontalScroller is QuietScroller) { scroll.horizontalScroller = QuietScroller() }
     }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = tracking { removeTrackingArea(t) }
-        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
-        addTrackingArea(t)
-        tracking = t
+    override func draw(_ dirtyRect: NSRect) {
+        Design.card.setFill(); bounds.fill()
+        if knobProportion < 1 { drawKnob() }
     }
-    override func mouseEntered(with event: NSEvent) { super.mouseEntered(with: event); hovering = true }
-    override func mouseExited(with event: NSEvent) { super.mouseExited(with: event); hovering = false }
-
-    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
-
     override func drawKnob() {
-        let knob = rect(for: .knob)
-        guard knob.width > 0, knob.height > 0 else { return }
-        let bar = QuietScroller.bar + (hovering ? 2 : 0)
-        let upright = bounds.height >= bounds.width
-        let r = upright ? NSRect(x: knob.maxX - bar - 2, y: knob.minY + 2, width: bar, height: max(bar, knob.height - 4))
-                        : NSRect(x: knob.minX + 2, y: knob.maxY - bar - 2, width: max(bar, knob.width - 4), height: bar)
-        NSColor.labelColor.withAlphaComponent(hovering ? 0.38 : 0.16).setFill()
-        NSBezierPath(roundedRect: r, xRadius: bar / 2, yRadius: bar / 2).fill()
+        Design.houseYellow.setFill()
+        NSBezierPath(roundedRect: rect(for: .knob).insetBy(dx: 3, dy: 1), xRadius: 3, yRadius: 3).fill()
     }
 }
 
@@ -364,6 +358,18 @@ final class QuietScroller: NSScroller {
 /// A scroll view that does not move, or bounce, when everything in it is already on show. Every
 /// page's scroll view is one of these: a page that fits stays still under the wheel.
 class FittedScrollView: NSScrollView {
+    override func layout() { super.layout(); tile() }
+    override func tile() {
+        super.tile()
+        let vertical = hasVerticalScroller ? QuietScroller.lane : 0
+        let horizontal = hasHorizontalScroller ? QuietScroller.lane : 0
+        contentView.frame = NSRect(x: 0, y: horizontal, width: max(0, bounds.width - vertical), height: max(0, bounds.height - horizontal))
+        verticalScroller?.frame = NSRect(x: bounds.width - vertical, y: horizontal, width: vertical, height: max(0, bounds.height - horizontal))
+        horizontalScroller?.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - vertical), height: horizontal)
+        if !hasHorizontalScroller, let document = documentView, abs(document.frame.width - contentView.bounds.width) > 0.5 {
+            document.setFrameSize(NSSize(width: contentView.bounds.width, height: document.frame.height))
+        }
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         QuietScroller.install(in: self)
@@ -443,9 +449,9 @@ func swatchSheet(_ palettes: [ExportPalette], scale: CGFloat = 2) -> Data? {
             NSColor(white: 0, alpha: 0.12).setStroke()
             NSBezierPath(roundedRect: chip.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8).stroke()
             (c.name as NSString).draw(in: NSRect(x: cell.minX, y: cell.minY + 22, width: tile.width - 10, height: 18),
-                                      withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: ink])
+                                      withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: ink])
             (c.hex as NSString).draw(in: NSRect(x: cell.minX, y: cell.minY + 6, width: tile.width - 10, height: 16),
-                                     withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                                     withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
                                                       .foregroundColor: NSColor(white: 0.4, alpha: 1)])
         }
         y -= CGFloat(rows(p)) * tile.height + pad

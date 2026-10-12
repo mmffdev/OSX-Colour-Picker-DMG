@@ -31,7 +31,7 @@ final class OverviewViewController: NSViewController {
     override func loadView() {
         view = NSView()
         profile.controlSize = .small
-        profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        profile.font = NSFont.systemFont(ofSize: TextSize.body)
         profile.target = self
         profile.action = #selector(profileChanged)
         newPalette = symbolButton("plus.rectangle.on.rectangle", tooltip: "New palette in this project", target: self, action: #selector(newPaletteTapped))

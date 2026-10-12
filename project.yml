@@ -50,6 +50,9 @@ targets:
           - .idea
           - .vscode
           - Claude outputs
+      - path: ProofingResources
+        name: Proofing Reference Data
+        buildPhase: resources
       - path: AppIcon.icns
         buildPhase: resources
       - path: icons

@@ -190,7 +190,7 @@ final class AnalysisPlot: NSView {
                 guard row != column, cell.width > 26, cell.height > 18 else { continue }
                 let ratio = contrastRatio(ground, ink), plain = colorFromHex(readableText(on: displayHex(ground))) ?? .white
                 let sample = text("Aa", fill(ink), size: min(22, cell.height * 0.42), weight: .semibold)
-                let figure = text(String(format: "%.1f", ratio), plain.withAlphaComponent(0.75), size: 9.5, weight: .medium)
+                let figure = text(String(format: "%.1f", ratio), plain.withAlphaComponent(0.75), size: 13, weight: .medium)
                 let tall = cell.height > 44
                 centred(sample, in: tall ? NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * 0.68) : rect)
                 if tall { centred(figure, in: NSRect(x: rect.minX, y: rect.minY + rect.height * 0.6, width: rect.width, height: rect.height * 0.34)) }
@@ -219,7 +219,7 @@ final class AnalysisPlot: NSView {
                 NSRect(x: rect.midX, y: rect.minY, width: rect.width / 2 + 1, height: rect.height).fill()
                 guard cell.width > 30, cell.height > 18 else { continue }
                 let close = apart.worst < separationFloor
-                let label = text(String(format: "%.0f", apart.seen) + (close && apart.worst < apart.seen - 0.5 ? String(format: " \u{2192} %.0f", apart.worst) : ""), close ? .black : .white, size: 10, weight: .semibold)
+                let label = text(String(format: "%.0f", apart.seen) + (close && apart.worst < apart.seen - 0.5 ? String(format: " \u{2192} %.0f", apart.worst) : ""), close ? .black : .white, size: 13, weight: .semibold)
                 let size = label.size(), pill = NSRect(x: rect.midX - size.width / 2 - 6, y: rect.midY - size.height / 2 - 2, width: size.width + 12, height: size.height + 4)
                 (close ? NSColor.systemOrange : NSColor.black.withAlphaComponent(0.55)).setFill()
                 NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
@@ -247,7 +247,7 @@ final class AnalysisPlot: NSView {
             lower.fill()
             guard each > 34 else { continue }
             let far = difference > Rendering.visible
-            let label = text(String(format: "\u{0394}E %.1f", difference), far ? .black : .white, size: 10, weight: .semibold)
+            let label = text(String(format: "\u{0394}E %.1f", difference), far ? .black : .white, size: 13, weight: .semibold)
             let size = label.size(), pill = NSRect(x: lower.midX - size.width / 2 - 6, y: lower.maxY - size.height - 12, width: size.width + 12, height: size.height + 4)
             (far ? NSColor.systemOrange : NSColor.black.withAlphaComponent(0.55)).setFill()
             NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
@@ -330,7 +330,7 @@ final class AnalysisPlot: NSView {
         for (k, kind) in kinds.enumerated() {
             let cell = NSRect(x: first + CGFloat(k) * each, y: 0, width: each, height: head)
             centred(text(kind.name, .labelColor, weight: .medium), in: NSRect(x: cell.minX, y: 3, width: cell.width, height: 15))
-            if each > 110 { centred(text(kind.prevalence, .secondaryLabelColor, size: 9.5), in: NSRect(x: cell.minX, y: 17, width: cell.width, height: 14)) }
+            if each > 110 { centred(text(kind.prevalence, .secondaryLabelColor, size: 13), in: NSRect(x: cell.minX, y: 17, width: cell.width, height: 14)) }
         }
         let row = (bounds.height - head) / CGFloat(keys.count)
         for (i, key) in keys.enumerated() {

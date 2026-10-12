@@ -360,7 +360,7 @@ struct Catalogues {
     func store(for name: String) -> LibraryStore {
         let fresh = name == Catalogues.mainName && !hasMain && others().isEmpty
         return LibraryStore(directory: directory(for: name), legacyURL: fresh ? legacyURL : nil,
-                            previousURL: fresh ? previousURL : nil, name: name)
+                            previousURL: fresh ? previousURL : nil, name: name, assetsHome: root)
     }
 
     private var hasMain: Bool { Catalogues.holdsCatalogue(root) }
@@ -383,7 +383,7 @@ struct Catalogues {
     static func catalogueItems(at root: URL) -> [String] {
         let fm = FileManager.default
         var items = [CatalogueFiles.index(in: root)?.lastPathComponent, CatalogueFiles.index(in: root).map { HistoryStore.url(beside: $0).lastPathComponent },
-                     "library.json", "library.history.json", "schema.colschema", TreeFiles.library, TreeFiles.templates, TreeFiles.backups, CatalogueFiles.unfiled, "Projects"].compactMap { $0 }
+                     "library.json", "library.history.json", "schema.colschema", TreeFiles.library, "Support", TreeFiles.templates, TreeFiles.backups, CatalogueFiles.unfiled, "Projects"].compactMap { $0 }
         // The collections' folders, as the structure file names them, or as an earlier version marked them with a file of their own.
         items += (CatalogueTree.catalogue(in: root)?.collections.map { $0.folder } ?? []).filter { !items.contains($0) }
         if let legacy = CatalogueFiles.legacyIndex(in: root) { items.append(legacy.lastPathComponent) }
@@ -480,6 +480,7 @@ struct Catalogues {
                 if fm.fileExists(atPath: history.path), !fm.fileExists(atPath: historyNamed.path) { try? fm.moveItem(at: history, to: historyNamed) }
             }
         }
+        try ASERegistry.seed(directory(for: new), name: new)
         if Catalogues.currentName == old || AppPreferences.shared.string(forKey: Catalogues.currentKey) == old {
             Catalogues.currentName = new
         }
@@ -496,6 +497,7 @@ struct Catalogues {
     /// under Catalogues in the app's home.
     @discardableResult
     func create(_ raw: String, holding library: Library = Library(), under parent: URL? = nil) throws -> String {
+        try AppHomeSeed.ensure(at: root)
         let name = uniqueName(filesystemName(raw), among: names())
         if let parent = parent {
             let dir = parent.appendingPathComponent(name)

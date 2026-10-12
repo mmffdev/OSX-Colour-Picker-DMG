@@ -1,3 +1,4 @@
+import CryptoKit
 import AppKit
 import CoreGraphics
 
@@ -45,6 +46,129 @@ func runSelfTest() -> Never {
     check(safetySlide.armed, "safety slide arms at the far end with accessible input")
     safetySlide.reset()
     check(!safetySlide.armed, "safety slide resets for the next protected visit")
+
+    var monitorRecord = MonitorSetupRecord()
+    monitorRecord.checked = Set(0..<5)
+    check(!monitorRecord.complete, "Visual setup cannot complete with a missing check")
+    monitorRecord.checked.insert(5)
+    check(monitorRecord.complete, "All visual checks complete without claiming measured calibration")
+    monitorRecord.step = 999
+    check(monitorRecord.safeStep == 6, "Restored monitor step stays within the guide")
+    monitorRecord.notes = "Brightness 40; room light steady"
+    let monitorRoundTrip = try! JSONDecoder().decode(MonitorSetupRecord.self, from: JSONEncoder().encode(monitorRecord))
+    check(monitorRoundTrip.checked == monitorRecord.checked && monitorRoundTrip.notes == monitorRecord.notes, "Monitor checklist and settings survive persistence")
+    check(MonitorCheck.shadows.levels.first == 0 && MonitorCheck.highlights.levels.last == 255, "Visual clipping patterns include source black and white endpoints")
+
+    let densityModel = ProofDensitySimulation()
+    check(abs(densityModel.difference(at: densityModel.current)-1.62) < 0.00001, "Density simulation reproduces its illustrative current point")
+    check(densityModel.difference(at: densityModel.optimum) == densityModel.minimum, "Density optimum is the minimum simulated difference")
+    if let range = densityModel.interval {
+        check(abs(densityModel.difference(at: range.lowerBound)-densityModel.tolerance) < 0.000001 && abs(densityModel.difference(at: range.upperBound)-densityModel.tolerance) < 0.000001, "Density operating endpoints meet the simulated tolerance")
+    } else { check(false, "Density default model has an operating interval") }
+    densityModel.tolerance = 1
+    check(densityModel.interval == nil, "No density interval when tolerance is below the achievable minimum")
+    densityModel.tolerance = densityModel.minimum
+    check(densityModel.interval?.lowerBound == densityModel.optimum && densityModel.interval?.upperBound == densityModel.optimum, "Equal tolerance collapses to the optimum density")
+
+    print("proofing reference import and evaluation")
+    let proofText = """
+    CGATS.17
+    ILLUMINATION_NAME "D50"
+    OBSERVER_ANGLE "2"
+    NUMBER_OF_FIELDS 4
+    BEGIN_DATA_FORMAT
+    SAMPLE_ID LAB_L LAB_A LAB_B
+    END_DATA_FORMAT
+    NUMBER_OF_SETS 2
+    BEGIN_DATA
+    A1 50 2,6772 -79,7751
+    A2 60 0 0
+    END_DATA
+    """
+    do {
+        // Bare-binary self-tests explicitly use source fixtures; packaged tests require bundle resources.
+        let referenceDirectory = Bundle.main.bundleURL.pathExtension == "app" ? nil : URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for name in ProofReferences.names {
+            let target = try ProofReferences.read(name, directory: referenceDirectory)
+            check(target.patches.count == 72 && target.hasD50, "Bundled " + name + " has 72 valid D50/2° patches")
+            var targetOptions = ProofOptions(); targetOptions.mode = "Measurement"
+            let targetSession = ProofSession(reference: target, measurement: target, options: targetOptions)
+            check(ProofEngine.summary(ProofEngine.evaluate(targetSession), options: targetOptions).completePass,
+                  "Bundled " + name + " evaluates without a confirmation click")
+            check(target.metadata["FILTER"] == (name == "FOGRA39" ? "M0" : "M1"), "Bundled " + name + " records its measurement mode")
+        }
+        var mixedOptions = ProofOptions(); mixedOptions.mode = "Measurement"
+        let mixed = ProofSession(reference: try ProofReferences.read("FOGRA39", directory: referenceDirectory),
+                                 measurement: try ProofReferences.read("FOGRA51", directory: referenceDirectory), options: mixedOptions)
+        check(ProofEngine.conditionsIssue(mixed) != nil, "Bundled M0/M1 mismatch cannot pass")
+        let aliasCSV = "NAME,ID,LAB_L,LAB_A,LAB_B\nRepeated,A1,50,0,0\nRepeated,A2,60,0,0\n"
+        let aliases = try ProofImport.read(Data(aliasCSV.utf8), name: "Aliases")
+        check(aliases.patches.map(\.id) == ["A1", "A2"] && aliases.patches.map(\.name) == ["Repeated", "Repeated"], "ID takes priority over repeated Name regardless of CSV column order")
+        let reference = try ProofImport.read(Data(proofText.utf8), name: "Reference")
+        check(reference.patches.count == 2 && reference.patches[0].a == 2.6772, "CGATS preserves decimal-comma Lab precision")
+        var measured = reference
+        measured.patches = [ProofPatch(id: "A1", name: "Measured", l: 50, a: 0, b: -82.7485)]
+        var options = ProofOptions(); options.mode = "Measurement"; options.tolerance = 2.1
+        var session = ProofSession(reference: reference, measurement: measured, options: options)
+        var results = ProofEngine.evaluate(session)
+        check(abs((results[0].difference ?? 0) - 2.0425) < 0.0001, "Proofing uses published CIEDE2000 test pair")
+        check(results[1].difference == nil && !ProofEngine.summary(results, options: options).completePass, "Missing measurement cannot produce a complete pass")
+        measured.patches.reverse(); session.measurement = measured
+        check(ProofEngine.evaluate(session)[0].difference != nil, "Measurements match reference by ID")
+        session.measurement?.metadata["FILTER"] = "M0"; session.reference.metadata["FILTER"] = "M1"
+        check(ProofEngine.evaluate(session).allSatisfy { $0.difference == nil }, "Incompatible measurement modes block comparison")
+        session.reference.metadata["FILTER"] = nil; session.measurement?.metadata["FILTER"] = nil
+        session.reference.metadata["OBSERVER_ANGLE"] = "10"; session.options.confirmD50 = true
+        check(ProofEngine.conditionsIssue(session) != nil, "Explicit incompatible observer cannot be overridden")
+        session.reference = reference; session.notes = "A \"quoted\" job"
+        let encoded = try JSONEncoder().encode(session)
+        let decoded = try JSONDecoder().decode(ProofSession.self, from: encoded); try decoded.validate()
+        check(decoded.reference == reference, "Proof session preserves reference and metadata")
+        let configuration = ProofConfiguration(name:"Portable proof",session:session)
+        let portable = try ProofConfiguration.decode(JSONEncoder().encode(configuration))
+        check(portable.session.reference == reference && portable.session.measurement == session.measurement && portable.session.options.tolerance == session.options.tolerance, "Colcal preserves reference, measurements and settings")
+        var future = configuration; future.version = 999
+        check((try? ProofConfiguration.decode(JSONEncoder().encode(future))) == nil, "Future colcal versions rejected")
+        var invalidProfile = configuration; invalidProfile.session.embeddedProfile = Data("invalid".utf8)
+        check((try? invalidProfile.validate()) == nil, "Invalid embedded ICC rejected")
+        let viewport = NSRect(x:0,y:28000,width:600,height:560)
+        let virtualRows = ProofRegister.viewportRows(count:10000,top:0,rowHeight:28,visible:viewport)
+        check(virtualRows == 999..<1021, "10,000-patch register only needs 22 visible/overscan controls")
+        check(ProofRegister.viewportRows(count:72,top:2800,rowHeight:28,visible:NSRect(x:0,y:0,width:600,height:560)).isEmpty, "Offscreen register creates no row controls")
+        let register = (0..<72).map { i in ProofResult(reference:ProofPatch(id:String(i+1),name:"Patch \(i+1)",l:50,a:0,b:0),sample:LabD50(l:Double(i),a:0,b:0),difference:Double(i)) }
+        let ordered = ProofRegister.sorted(Array(register.indices),results:register,options:options,column:2,ascending:false)
+        check(Array(ordered.prefix(10)) == Array((62..<72).reversed()), "Register sorting covers all 72 records before a ten-row page")
+        check(ProofRegister.sorted(Array(register.indices.reversed()),results:register,options:options,column:0,ascending:true) == Array(register.indices), "Register IDs sort numerically")
+        var missing = register; missing[71].difference = nil
+        check(ProofRegister.sorted(Array(missing.indices),results:missing,options:options,column:2,ascending:false).last == 71, "Missing differences sort last")
+        results = ProofEngine.evaluate(session)
+        check(ProofEngine.csv(results, session: session).contains("Not evaluated"), "Report preserves missing results")
+        check((try? ProofImport.read(Data(proofText.replacingOccurrences(of: "A2 60", with: "A1 60").utf8), name: "Duplicate")) == nil, "Duplicate patch IDs rejected")
+        check((try? ProofImport.read(Data(proofText.replacingOccurrences(of: "END_DATA\n", with: "").replacingOccurrences(of: "END_DATA", with: "").utf8), name: "Truncated")) == nil, "Truncated CGATS rejected")
+        let csv = "SAMPLE_ID,LAB_L,LAB_A,LAB_B\nA,50,0,0\n"
+        let imported = try ProofImport.read(Data(csv.utf8), name: "CSV")
+        check(imported.patches.count == 1 && !imported.hasD50, "CSV import never invents measurement conditions")
+        var exact = ProofSession(reference: reference, measurement: reference, options: options)
+        exact.measurement?.patches.reverse()
+        let exactResults = ProofEngine.evaluate(exact)
+        check(exactResults.allSatisfy { $0.difference == 0 } && ProofEngine.summary(exactResults,options:options).completePass, "Reordered measurements match exact IDs and identical Lab passes")
+        let duplicateID = exact.measurement!.patches[1].id
+        exact.measurement?.patches[0].id = duplicateID
+        check(ProofEngine.evaluate(exact).allSatisfy { $0.difference == nil }, "Invalid duplicate session IDs cannot crash evaluation")
+        var unknown = ProofSession(reference: imported, measurement: imported, options: options)
+        check(ProofEngine.evaluate(unknown).allSatisfy { $0.difference == nil }, "Undeclared Lab conditions require confirmation")
+        unknown.options.confirmD50 = true
+        check(ProofEngine.summary(ProofEngine.evaluate(unknown),options:unknown.options).completePass, "Explicit D50/2 confirmation permits otherwise undeclared data")
+        var edge = ProofResult(reference: reference.patches[0], difference: options.tolerance)
+        check(edge.status(options) == .withinTolerance, "Tolerance includes the exact boundary")
+        edge.inks = [100,100,100,1]
+        check(edge.status(options) == .inkLimitExceeded, "Ink review catches excessive total even inside colour tolerance")
+        let stats = ProofEngine.summary((1...20).map { ProofResult(reference:reference.patches[0],difference:Double($0)) },options:options)
+        check(stats.p95 == 19 && stats.mean == 10.5 && stats.maximum == 20, "Proof summary uses nearest-rank P95 and arithmetic mean")
+        check(ProofEngine.csv(exactResults,session:session).contains("Profile SHA256"), "Report includes profile provenance")
+        let bad = "SAMPLE_ID,LAB_L,LAB_A,LAB_B\nA,nan,0,0\n"
+        check((try? ProofImport.read(Data(bad.utf8), name: "Invalid")) == nil, "Non-finite Lab rejected")
+    } catch { check(false, "Proofing test: \(error)") }
 
     print("swatches")
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
@@ -196,6 +320,8 @@ func runSelfTest() -> Never {
     runHaloTests(check: check)
     runShortcutTests(check: check)
     runAppDataTests(check: check)
+    runGlobalAssetsTests(check: check)
+    runAppbridgeTests(check: check)
     runProjectTests(check: check)
     runImportTests(check: check)
     runColourSpaceTests(check: check)
@@ -413,10 +539,10 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
     check((try! cats.create("Client / Web")) == "Client - Web 2", "duplicate catalogue names count up")
     check((try! cats.store(for: client).load()) == Library(), "a new catalogue starts empty, without the v1 colours")
     try! cats.store(for: client).mutate { $0.addPick("#123123", at: at(10)) }
-    check((try! cats.store(for: "Main").load()).colours.isEmpty, "catalogues are separate from each other")
+    check((try! CatalogueTree.read(root: cats.store(for: "Main").root)).library.colours.isEmpty && (try! cats.store(for: "Main").load()).colours.contains { $0.hex == "#123123" }, "catalogue payloads remain separate while unassigned colours are app-wide")
     let exported = try! writeExport(try! workStore.load(), to: root.appendingPathComponent("export"), by: .oldest)
     let opened = try! cats.importFile(exported.appendingPathComponent("library.json"), named: "From Export")
-    check(canonical(try! cats.store(for: opened).load()) == canonical(try! workStore.load()),
+    check(Set((try! workStore.load()).colours.map { $0.hex }).isSubset(of: Set((try! cats.store(for: opened).load()).colours.map { $0.hex })),
           "a library file from an export or backup opens as a catalogue")
 
     let clientSync = SyncEngine(store: cats.store(for: client), chosenFolder: cloud, catalogue: client, machine: "Work Mac")
@@ -446,7 +572,8 @@ private func runSyncTests(in root: URL, check: (Bool, String) -> Void) {
           "Main's files move into a folder of their own, and the catalogue's file takes the catalogue's name")
     check(Set(SyncEngine.catalogues(in: shared)) == ["Studio"], "the sync folder is renamed too, and the old name no longer lists")
     check(SyncEngine.renamedName(in: shared, of: "Main") == "Studio", "the old sync folder says where it went")
-    check((try! mine.store(for: "Main").load()) == Library(), "a Main made after a rename starts empty, not seeded again")
+    _ = try! mine.store(for: "Main").load()
+    check((try! CatalogueTree.read(root: mine.root)).library.colours.isEmpty, "a Main made after a rename has empty catalogue content while global assets remain available")
 
     let homeMain = SyncEngine(store: theirs.store(for: "Main"), chosenFolder: shared, catalogue: "Main", machine: "Home")
     if case .renamed(let to)? = try? homeMain.check() { check(to == "Studio", "the other Mac is told to follow the rename") }
@@ -883,7 +1010,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           && ["Information", "Palettes", "Typography", "Tags"].allSatisfy { exists("Projects/Job A/" + $0) }
           && exists("Projects/Job A/Palettes/Autumn.colpal") && exists("Projects/Job A/Typography/Headings.coltyp") && exists("Projects/Job A/Information/Job A.colinf")
           && exists("Clients/Acme/Acme Web/Information/Acme Web.colinf")
-          && exists("Library/Palettes/Scratch.colpal") && exists("Library/Swatches/Studio Swatches.colswa") && exists("Library/Profiles/Studio Profiles.colprf")
+          && exists("Assets/Palettes/Scratch.colpal") && exists("Assets/Swatches/Studio Swatches.colswa") && exists("Assets/Profiles/Studio Profiles.colprf")
           && !exists("Templates") && ![LegacyTree.collection, LegacyTree.workGroup, LegacyTree.assets, LegacyTree.template, ColourFiles.legacyPalette].contains { anywhere($0, under: treeDir) },
           "the catalogue is one structure file and its assets: every collection, level between, member and group a folder named as the user named it, holding only assets")
     let d = ColourFiles.decoder()
@@ -891,8 +1018,8 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let autumnDoc = try? d.decode(PaletteDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Palettes/Autumn.colpal")))
     let headingsDoc = try? d.decode(PaletteDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Typography/Headings.coltyp")))
     let jobAInfo = try? d.decode(InformationDocument.self, from: Data(contentsOf: jobADir.appendingPathComponent("Information/Job A.colinf")))
-    let swatchesDoc = try? d.decode(SwatchesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Swatches/Studio Swatches.colswa")))
-    let profilesDoc = try? d.decode(ProfilesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Library/Profiles/Studio Profiles.colprf")))
+    let swatchesDoc = try? d.decode(SwatchesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Assets/Swatches/Studio Swatches.colswa")))
+    let profilesDoc = try? d.decode(ProfilesDocument.self, from: Data(contentsOf: treeDir.appendingPathComponent("Assets/Profiles/Studio Profiles.colprf")))
     let projectsEntry = treeCat?.collections.first { $0.id == SchemaTrial.firstCollection }
     let jobAEntry = projectsEntry?.members.first { $0.id == jobA }
     check(autumnDoc?.palette.purposes?.map { $0.purpose } == [.print] && autumnDoc?.palette.purpose == nil && autumnDoc?.file == "Autumn" && autumnDoc?.project == jobA
@@ -1017,7 +1144,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     _ = bare.createSwatch(at: tcat)
     try! bareStore.save(bare, schema: SchemaTrial.SchemaFile(collections: [], places: [:]))
     var bareBack = try! bareStore.load()
-    check(bareStore.schema.collections.isEmpty && CatalogueTree.subfolders(of: bareDir).map { $0.lastPathComponent } == ["Library"] && CatalogueTree.catalogue(in: bareDir)?.collections.isEmpty == true
+    check(bareStore.schema.collections.isEmpty && Set(CatalogueTree.subfolders(of: bareDir).map { $0.lastPathComponent }) == Set(["Assets", "Library"]) && CatalogueTree.catalogue(in: bareDir)?.collections.isEmpty == true
           && bareBack.swatches.count == 1,
           "a catalogue may hold no collection: no folder is made for one, and none is invented when it is read")
     let firstMember = bareBack.createProject(named: "First", at: tcat)
@@ -1087,7 +1214,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(brought.project(oldJob)?.name == "Old Job" && brought.swatch(oldPal)?.projectID == oldJob && brought.swatch(oldPal)?.purpose == .print && brought.swatch(oldPal)?.purposeList == [.print]
           && brought.swatch(loosePal)?.projectID == nil && brought.colours.contains { $0.hex == "#404040" } && brought.info(forTag: "global")?.colour == "#00FF00" && brought.project(ofTag: "mine") == oldJob,
           "every member, palette, tag, colour and channel comes across")
-    check(brought.project(orphanID) == nil && brought.swatch(orphanPal.id)?.projectID == nil && fm.fileExists(atPath: oldDir.appendingPathComponent("Library/Palettes/Lost.colpal").path),
+    check(brought.project(orphanID) == nil && brought.swatch(orphanPal.id)?.projectID == nil && fm.fileExists(atPath: oldDir.appendingPathComponent("Assets/Palettes/Lost.colpal").path),
           "a member folder the index never listed sends its palettes to the Library")
     check(fm.fileExists(atPath: oldDir.appendingPathComponent("Earlier.colcat").path) && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Information/Old Job.colinf").path)
           && fm.fileExists(atPath: oldDir.appendingPathComponent("Jobs/Old Job/Palettes/Spring.colpal").path)
@@ -1150,7 +1277,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     func inSecond(_ p: String) -> Bool { fm.fileExists(atPath: secondDir.appendingPathComponent(p).path) }
     check(inSecond("Second.colcat") && !inSecond("Second.colcatalogue") && inSecond("Second.colhis") && !inSecond("Second.colhistory")
           && inSecond("Studios/North/Harbour/Palettes/Dawn.colpal") && !inSecond("Studios/North/Harbour/Palettes/Dawn.colpalette") && inSecond("Studios/North/Harbour/Information/Harbour.colinf")
-          && inSecond("Studios/North/Harbour/Information/Brief.pdf") && inSecond("Library/Palettes/Dusk.colpal") && inSecond("Library/Swatches/Second Swatches.colswa")
+          && inSecond("Studios/North/Harbour/Information/Brief.pdf") && inSecond("Assets/Palettes/Dusk.colpal") && inSecond("Assets/Swatches/Second Swatches.colswa")
           && !inSecond("Studios/Studios.colcollection") && !inSecond("Studios/North/North.colworkgroup") && !inSecond("Studios/North/Harbour/Harbour.colworkgroup")
           && !inSecond("Library/Palettes/Palettes.colassets") && !inSecond("Library/Swatches/Swatches.colassets") && !inSecond("Templates")
           && !Migration.needed(in: secondDir) && (try? secondStore.load()).map { canonical($0) } == canonical(secondLib),
@@ -1242,7 +1369,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "bringing the same share in again finds the collection, the member and the palettes by id")
     var skipLib = intoBack, skipSchema = intoStore.schema
     let skipped = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .skip), into: &skipLib, schema: &skipSchema, at: tcat)
-    check(skipped.skipped == 1 && skipLib == intoBack && skipSchema == intoStore.schema, "Skip on the collection leaves the catalogue exactly as it was")
+    check(skipped.skipped == 4 && skipLib == intoBack && skipSchema == intoStore.schema, "Skip reuses matching containers and skips their identical assets")
     var bothLib = intoBack, bothSchema = intoStore.schema
     let both = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, otherwise: .keepBoth), into: &bothLib, schema: &bothSchema, at: tcat)
     check(both.added == 4 && bothSchema.collections.map { $0.name } == ["Projects", "Projects 2"] && bothLib.projects.count == 2 && bothLib.swatches.count == 4 && Set(bothLib.swatches.map { $0.id }).count == 4
@@ -1256,7 +1383,8 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "Replace puts the share's version in the place of what was there, id for id")
     var renameLib = intoBack, renameSchema = intoStore.schema
     let renamed = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .skip), into: &renameLib, schema: &renameSchema, at: tcat)
-    check(renamed.skipped == 1 && renamed.renamed == 0 && renameLib.projects.count == 1, "an answer for each thing is kept to: with the collection skipped nothing beneath it comes in")
+    check(renamed.skipped == 1 && renamed.renamed == 3 && renameLib.projects.count == 2, "reusing a matching collection still applies selected child decisions")
+    renameLib = intoBack; renameSchema = intoStore.schema
     let renamedIn = Sharing.commit(staged, choices: Sharing.Choices(ticked: nil, placement: .catalogue, resolutions: [jobA: .rename, inA: .rename, typeA: .rename], otherwise: .replace), into: &renameLib, schema: &renameSchema, at: tcat)
     check(renamedIn.renamed == 3 && renameLib.projects.map { $0.name }.sorted() == ["Job Alpha", "Job Alpha 2"] && renameLib.swatches.contains { $0.name == "Autumn Range 2" },
           "Rename brings a twin in under the next free name, beside the original")
@@ -2849,4 +2977,152 @@ private func runAppDataTests(check: (Bool, String) -> Void) {
         do { try store.update { $0["settings"] = [:] }; check(false, "corrupt manifest blocks writes") } catch { check(true, "corrupt manifest blocks writes") }
         check(try Data(contentsOf: store.url) == broken, "corrupt manifest remains untouched")
     } catch { check(false, "app data tests: \(error)") }
+}
+
+
+private func runGlobalAssetsTests(check: (Bool, String) -> Void) {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("colorgain-assets-tests-" + UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    do {
+        let cats = Catalogues(root: root, legacyURL: nil)
+        let first = try CatalogueSetup.createBlank("A", under: cats.folder, catalogues: cats)
+        check(fm.fileExists(atPath: root.appendingPathComponent("Assets/Assets.colcat").path) && fm.fileExists(atPath: root.appendingPathComponent("Keys/default.colkeys").path) && fm.fileExists(atPath: root.appendingPathComponent("Global.colhis").path), "setup seeds Assets, Keys and global history before catalogue use")
+        let store = cats.store(for: first)
+        var lib = try store.load()
+        let palette = Swatch(id: UUID(), name: "Global Test", createdAt: Date(), entries: [])
+        lib.swatches.append(palette)
+        try store.save(lib)
+        check(try GlobalAssets(home: root).load().swatch(palette.id) != nil, "unassigned palette persists in app-wide Assets")
+        check(try CatalogueTree.read(root: store.root).library.swatch(palette.id) == nil, "catalogue contains no unassigned global palette")
+        let second = try CatalogueSetup.createBlank("B", under: cats.folder, catalogues: cats)
+        check(try cats.store(for: second).load().swatch(palette.id) != nil, "another catalogue sees global assets and blank setup preserves them")
+        var moving = try store.load()
+        let beforeMove = moving
+        let member = moving.createProject(named: "Owned", at: Date())
+        moving.swatches[moving.swatches.firstIndex { $0.id == palette.id }!].projectID = member
+        var log = StepHistory()
+        log.record("Opened", library: beforeMove, before: nil, limit: 20)
+        log.record("Assign", library: moving, before: beforeMove, limit: 20)
+        try store.save(moving)
+        check(try GlobalAssets(home: root).load().swatch(palette.id) == nil, "assigning a global palette transfers ownership out of Assets")
+        if let restored = log.go(to: 0, from: moving, schema: store.schema) {
+            try store.save(restored.library, schema: restored.schema)
+            check(try GlobalAssets(home: root).load().swatch(palette.id) != nil, "undo of assignment restores the global palette")
+        } else { check(false, "assignment can be undone") }
+        let bytes = try Data(contentsOf: GlobalAssets(home: root).index)
+        do {
+            try AssetTransaction.perform(home: root, catalogue: store.root) {
+                try Data("invalid".utf8).write(to: GlobalAssets(home: root).index)
+                throw failure("Injected write failure")
+            }
+        } catch {}
+        check(try Data(contentsOf: GlobalAssets(home: root).index) == bytes, "failed cross-store write restores the global index")
+        let export = root.appendingPathComponent("A.colshr")
+        let local = GlobalAssets.split(try store.load()).local
+        let manifest = try Sharing.export(level: .catalogue, subject: nil, from: local, schema: store.schema, catalogue: .init(id: UUID(), name: "A"), to: export)
+        check(!manifest.files.contains { $0.path.hasSuffix("Global Test.colpal") }, "default catalogue export excludes global assets")
+        check(fm.fileExists(atPath: store.root.appendingPathComponent("Library/ASE").path), "catalogue seeds an empty Library ASE folder")
+        let bucket = root.appendingPathComponent("External ASE Bucket")
+        let bucket2 = root.appendingPathComponent("Other/External ASE Bucket")
+        try fm.createDirectory(at: bucket, withIntermediateDirectories: true)
+        try fm.createDirectory(at: bucket2, withIntermediateDirectories: true)
+        try AdobeASE.empty.write(to: bucket.appendingPathComponent("Own.ase"))
+        try AdobeASE.empty.write(to: bucket2.appendingPathComponent("Own.ase"))
+        let ase = try Sharing.appbridgeEntries(catalogueRoot: store.root, sources: [bucket, bucket2, bucket])
+        check(try Sharing.appbridgeEntries(catalogueRoot: store.root, sources: [bucket, bucket2], excluded: [bucket.appendingPathComponent("Own.ase").path]).count == 1, "detached ASE files stay out of catalogue exports")
+        check(ase.count == 2 && Set(ase.map { $0.path }).count == 2, "ASE export deduplicates source paths and preserves same-name files from different buckets")
+        check(try fm.contentsOfDirectory(atPath: store.root.appendingPathComponent("Library/ASE").path).isEmpty, "ASE collection leaves the live catalogue folder empty")
+        let links = [AppbridgeStore.Source(path: bucket.appendingPathComponent("Own.ase").path, folder: false), AppbridgeStore.Source(path: bucket2.appendingPathComponent("Own.ase").path, folder: false)]
+        try ASERegistry.write(links, root: store.root)
+        let harvested = try ASERegistry.harvest(root: store.root, selected: Set(links.map { $0.id }))
+        check(harvested.filter { $0.path.hasSuffix(".ase") }.count == 2 && harvested.contains { $0.path.hasSuffix(".colase") }, "registry harvest includes selected ASE files and portable catalogue index")
+        let picked = try ASERegistry.harvest(root: store.root, selected: [links[0].id])
+        check(picked.filter { $0.path.hasSuffix(".ase") }.count == 1, "registry harvest honours per-file selection")
+        let portable = try JSONDecoder().decode(ASERegistry.Document.self, from: harvested.first { $0.path.hasSuffix(".colase") }!.data)
+        check(portable.sources.allSatisfy { $0.path.hasPrefix("Library/ASE/") && $0.originalPath?.hasPrefix("/") == true }, "archive registry keeps original destinations and portable ASE paths")
+        try fm.removeItem(at: bucket.appendingPathComponent("Own.ase"))
+        do { _ = try ASERegistry.harvest(root: store.root, selected: [links[0].id]); check(false, "missing registry link blocks export") } catch { check(true, "missing registry link blocks export") }
+        try AdobeASE.empty.write(to: bucket.appendingPathComponent("Own.ase"))
+
+        check(!manifest.files.contains { $0.path.hasSuffix(".ase") }, "ASE files are excluded unless export opts in")
+        let proofReference = try ProofImport.read(Data("SAMPLE_ID,LAB_L,LAB_A,LAB_B\nA,50,0,0\n".utf8),name:"Portable")
+        let proofConfig = ProofConfiguration(name:"Proof One",session:ProofSession(reference:proofReference,options:ProofOptions()))
+        try ProofConfigurationStore.save(proofConfig,root:store.root)
+        try ProofConfigurationStore.save(proofConfig,root:store.root)
+        check(try ProofConfigurationStore.list(root:store.root).count == 2, "Repeated calibration import preserves both configurations")
+        _ = try Sharing.export(level: .catalogue, subject: nil, from: local, schema: store.schema, catalogue: .init(id: UUID(), name: "A"), appbridge: harvested, calibrationRoot:store.root, to: export)
+        let archiveASEPaths = Set(try Zip.read(export).filter { $0.path.hasSuffix(".ase") }.map(\.path))
+        check(Set(portable.sources.map(\.path)) == archiveASEPaths, "Archive preserves exact registry paths across canonical macOS temporary locations")
+        let inspection = try Sharing.inspect(export), staging = try Sharing.stage(inspection)
+        defer { Sharing.discard(staging) }
+        let staged = try Sharing.read(staging: staging, level: .catalogue)
+        check(inspection.ok && staged.appbridge.count == 2, "ASE archive entries pass manifest verification and survive staging")
+        let globalBeforeImport = try GlobalAssets(home: root).load()
+        let imported = try Sharing.importCatalogue(staged, ticked: nil, name: "A", catalogues: cats)
+        check(try Data(contentsOf: cats.directory(for: imported).appendingPathComponent(harvested[0].path)) == AdobeASE.empty, "catalogue import restores bundled ASE bytes")
+        check(try ProofConfigurationStore.list(root:cats.directory(for:imported)).count == 2, "Whole catalogue archive restores the complete calibration collection")
+        check(imported != first && cats.names().contains(imported), "whole catalogue imports independently using an available name")
+        let importedLinks = try ASERegistry.resolved(cats.directory(for: imported))
+        check(importedLinks.count == 2 && importedLinks.allSatisfy { fm.fileExists(atPath: $0.url.path) }, "import rebases links to the new catalogue rather than the old computer")
+        check(importedLinks.map { $0.originalPath } == portable.sources.map { $0.originalPath }, "import preserves original destinations for optional restoration")
+        let one = try Sharing.importCatalogue(staged, ticked: nil, name: "Selected", catalogues: cats, aseSelection: [links[0].id])
+        check(try ASERegistry.read(cats.directory(for: one)).sources.count == 1, "import honours individual ASE selection")
+        let bad = ASERegistry.Document(sources: [.init(path: "Library/ASE/../escape.ase", folder: false)])
+        let unsafe = root.appendingPathComponent("Unsafe")
+        try fm.createDirectory(at: unsafe, withIntermediateDirectories: true)
+        try JSONEncoder().encode(bad).write(to: unsafe.appendingPathComponent("Unsafe.colase"))
+        do { _ = try ASERegistry.read(unsafe); check(false, "registry rejects traversal paths") } catch { check(true, "registry rejects traversal paths") }
+
+        check(try GlobalAssets(home: root).load() == globalBeforeImport, "standalone catalogue import preserves existing global work")
+        let legacyRoot = cats.folder.appendingPathComponent("Legacy")
+        var old = Library(); old.swatches = [palette]
+        try CatalogueTree.write(old, schema: .init(collections: [], places: [:]), index: legacyRoot.appendingPathComponent("Legacy.colcat"), name: "Legacy")
+        try cats.registerChecked("Legacy", at: legacyRoot)
+        _ = try cats.store(for: "Legacy").load()
+        check(fm.fileExists(atPath: legacyRoot.appendingPathComponent("Backups/Before Global Assets/Assets/Palettes/Global Test.colpal").path), "migration preserves a complete original asset backup")
+        check(try CatalogueTree.read(root: legacyRoot).library.palettes(in: nil).isEmpty, "migration removes global assets from catalogue ownership")
+    } catch { check(false, "global assets integration: \(error)") }
+}
+
+
+private func runAppbridgeTests(check: (Bool, String) -> Void) {
+    print("Appbridge Adobe ASE")
+    let saved = AppbridgeStore(previewSources: [.init(path: "/tmp/fixture.ase", folder: false), .init(path: "/tmp/fixture", folder: true)])
+    check(saved.containsInBucket(URL(fileURLWithPath: "/tmp/fixture/Own.ase")) && !saved.containsInBucket(URL(fileURLWithPath: "/tmp/fixture-other/Own.ase")), "ASE buckets include descendants without matching adjacent folders")
+    let page = AppbridgePage(store: saved)
+    page.frame = NSRect(x: 0, y: 0, width: 600, height: 900)
+    page.layout()
+    check(page.subviews.compactMap { $0 as? NSScrollView }.isEmpty && page.subviews.compactMap { $0 as? NSButton }.filter { !$0.isEnabled }.count == 4,
+          "Appbridge uses page scrolling with an expanding Adobe list and disabled Procreate scaffold")
+    page.reload(); page.layout()
+    check(page.subviews.compactMap { $0 as? NSButton }.count == 8, "Appbridge reload preserves both sections without duplicate controls")
+    let data = ExportFormat.ase.data([ExportPalette(name: "Brand", colours: [ExportColour(name: "Red", hex: "#FF0000"), ExportColour(name: "Blue", hex: "#0000FF")])])!
+    let read = try? AdobeASE.read(data)
+    check(read?.map { $0.name } == ["Red", "Blue"] && read?.first?.group == "Brand", "ASE preserves names, groups and file order")
+    check(read?.first?.values == [1, 0, 0] && read?.first?.type == 2, "ASE preserves source components and swatch type")
+    check((try? AdobeASE.read(data.dropLast())) == nil, "ASE rejects truncated payloads")
+    check((try? AdobeASE.read(Data("not ASE".utf8))) == nil, "ASE rejects incorrect signatures")
+    var trailing = data; trailing.append(0)
+    check((try? AdobeASE.read(trailing)) == nil, "ASE rejects trailing bytes outside its block structure")
+    do {
+        let extra = ExportPalette(name: "Added", colours: [ExportColour(name: "Green", hex: "#00FF00")])
+        let extended = try AdobeASE.appending(extra, to: data)
+        check(extended.subdata(in: 12..<data.count) == data.dropFirst(12), "ASE append preserves original blocks byte for byte")
+        let colours = try AdobeASE.read(extended)
+        check(colours.map { $0.name } == ["Red", "Blue", "Green"] && colours.last?.group == "Added", "ASE append adds a named group in order")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("Test.ase")
+        try data.write(to: file)
+        do { try AdobeASE.append(extra, at: file, expectedDigest: "stale"); check(false, "ASE rejects stale preview") }
+        catch { check(try Data(contentsOf: file) == data, "ASE stale preview leaves original unchanged") }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        try AdobeASE.append(extra, at: file, expectedDigest: digest)
+        check(try Data(contentsOf: file) == extended, "ASE append saves extended file")
+        let backup = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "bak" }
+        check(try backup.map { try Data(contentsOf: $0) } == data, "ASE append keeps exact original backup")
+    } catch { check(false, "ASE append: \(error)") }
+    check((try? AdobeASE.read(AdobeASE.empty).isEmpty) == true, "new ASE file is a valid empty library")
 }

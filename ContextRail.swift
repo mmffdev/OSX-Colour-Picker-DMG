@@ -37,14 +37,14 @@ enum RailStyle {
         let probe = NSTableView()
         probe.rowSizeStyle = .default
         switch probe.effectiveRowSizeStyle {
-        case .small: return 11
+        case .small: return 13
         case .large: return 15
         default: return 13
         }
     }
     static var bodyFont: NSFont { NSFont.systemFont(ofSize: textSize) }
     /// A bucket's heading, in every rail: small, semibold and grey, as the Mac's own sidebars head their sections.
-    static var headingFont: NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
+    static var headingFont: NSFont { NSFont.systemFont(ofSize: 13, weight: .semibold) }
     static var headingColour: NSColor { .secondaryLabelColor }
 }
 

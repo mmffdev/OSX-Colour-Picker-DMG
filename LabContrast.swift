@@ -64,8 +64,8 @@ private final class ContrastTable: NSView {
         func put(_ text: String, _ x: CGFloat, _ y: CGFloat, _ colour: NSColor, weight: NSFont.Weight = .regular, size: CGFloat = 11.5) {
             (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight), .foregroundColor: colour])
         }
-        put(headers.0, firstX, 0, .secondaryLabelColor, weight: .semibold, size: 11)
-        put(headers.1, secondX, 0, .secondaryLabelColor, weight: .semibold, size: 11)
+        put(headers.0, firstX, 0, .secondaryLabelColor, weight: .semibold, size: 13)
+        put(headers.1, secondX, 0, .secondaryLabelColor, weight: .semibold, size: 13)
         for (i, r) in rows.enumerated() {
             let y = head + CGFloat(i) * row
             NSColor.separatorColor.setFill()
@@ -301,7 +301,7 @@ private final class ContrastPreview: NSView, NSTextFieldDelegate {
 
     private var pad: CGFloat { min(22, bounds.height * 0.14) }
     private var buttonBox: NSRect {
-        let width = ("Button" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).width + 28
+        let width = ("Button" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width + 28
         return NSRect(x: pad, y: bounds.height - pad - 26, width: width, height: 26)
     }
     /// The button and outline are dropped when there is no room for them under the heading.
@@ -331,7 +331,7 @@ private final class ContrastPreview: NSView, NSTextFieldDelegate {
         let box = buttonBox
         ink.setFill()
         NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
-        let label = NSAttributedString(string: "Button", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: paper])
+        let label = NSAttributedString(string: "Button", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: paper])
         label.draw(at: NSPoint(x: box.minX + 14, y: box.minY + (26 - label.size().height) / 2))
         // An outline and a mark: the "graphics and controls" case.
         let ring = NSRect(x: box.maxX + 12, y: box.minY + 1, width: 24, height: 24)
@@ -462,7 +462,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     private let scroll = LetGoScrollView()
     private let column = ControlColumn()
-    private let inkLabel = caption("Text Colour", size: 11), paperLabel = caption("Background", size: 11)
+    private let inkLabel = caption("Text Colour", size: 13), paperLabel = caption("Background", size: 13)
     private let inkChip = ChipButton(), paperChip = ChipButton()
     private let inkField = NSTextField(), paperField = NSTextField()
     private var swap: NSButton!
@@ -472,7 +472,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let goal = NSPopUpButton()
     private var fixInk: NSButton!, fixPaper: NSButton!
     private let from = NSPopUpButton()
-    private let hint = caption("", size: 11)
+    private let hint = caption("", size: 13)
     private let spectrum = TargetSpectrum()
     private var dropper: NSButton!
     private let shelf = PaletteShelf()
@@ -481,7 +481,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
     private let headingFont = NSPopUpButton(), bodyFont = NSPopUpButton()
     private let preview = ContrastPreview()
-    private let gridTitle = caption("", size: 11)
+    private let gridTitle = caption("", size: 13)
     private let grid = ContrastGrid()
     private var sampler: NSColorSampler?
 
@@ -510,7 +510,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         why.maximumNumberOfLines = 0
         why.lineBreakMode = .byWordWrapping
         method.controlSize = .small
-        method.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        method.font = NSFont.systemFont(ofSize: TextSize.body)
         method.target = self
         method.action = #selector(methodChosen)
         method.toolTip = "How The Pair Is Scored: The WCAG 2 Ratio (The Standard), Or APCA (Drafted For WCAG 3)"
@@ -538,7 +538,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
 
         func small(_ popup: NSPopUpButton, _ tip: String, _ action: Selector) {
             popup.controlSize = .small
-            popup.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            popup.font = NSFont.systemFont(ofSize: TextSize.body)
             popup.target = self
             popup.action = action
             popup.toolTip = tip
@@ -549,7 +549,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
             let b = NSButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
-            b.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            b.font = NSFont.systemFont(ofSize: TextSize.body)
             b.toolTip = tip
             return b
         }
@@ -606,7 +606,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         // In a very large window neither side balloons: the parts keep a size that reads well and the rest is left clear.
         let left = min(620, w - 18 - (w - even - 18) * 0.8)
         scroll.frame = NSRect(x: pad, y: top, width: left, height: height)
-        column.frame = NSRect(x: 0, y: 0, width: left, height: max(height, arrangeColumn(width: left, visible: height)))
+        column.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(height, arrangeColumn(width: scroll.contentSize.width, visible: height)))
 
         let rx = pad + left + 18, rw = max(60, min(1000, b.width - pad - rx))
         let half = (rw - 6) / 2

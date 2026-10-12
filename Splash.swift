@@ -76,7 +76,7 @@ final class SplashWindowController: NSWindowController {
         let tagline = Self.label("One palette. Every possibility.", font: .systemFont(ofSize: 13), colour: Self.rgb(0xBDC4CC))
         tagline.frame = NSRect(x: 0, y: 0, width: 640, height: 20)
         brand.addSubview(tagline)
-        let footer = Self.label("Colour profile management", font: .systemFont(ofSize: 11), colour: Self.rgb(0xB8C1C8))
+        let footer = Self.label("Colour profile management", font: .systemFont(ofSize: 13), colour: Self.rgb(0xB8C1C8))
         footer.alignment = .left
         footer.frame = NSRect(x: 24, y: 15, width: 400, height: 19)
         content.addSubview(footer)

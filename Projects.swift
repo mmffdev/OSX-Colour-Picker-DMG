@@ -314,7 +314,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
         scroll.documentView = document
 
         message.textColor = .systemRed
-        message.font = NSFont.systemFont(ofSize: 11)
+        message.font = NSFont.systemFont(ofSize: 13)
         message.lineBreakMode = .byTruncatingTail
         let cancel: NSButton, save: NSButton
         if embedded {
@@ -668,7 +668,7 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
         let heading = NSTextField(labelWithString: "Project Templates")
         heading.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
         let about = NSTextField(wrappingLabelWithString: "Saved client, studio and rights details. Fill one into a project from the form\u{2019}s \u{201C}Fill from Template\u{201D} menu.")
-        about.font = NSFont.systemFont(ofSize: 11)
+        about.font = NSFont.systemFont(ofSize: 13)
         about.textColor = .secondaryLabelColor
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
@@ -679,7 +679,7 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
         table.target = self
         table.doubleAction = #selector(editTapped)
         table.rowHeight = 24
-        let names = NSScrollView()
+        let names = FittedScrollView()
         names.documentView = table
         names.hasVerticalScroller = true
         names.borderType = .bezelBorder
@@ -691,7 +691,7 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
         preview.drawsBackground = false
         preview.textContainerInset = NSSize(width: 10, height: 10)
         preview.autoresizingMask = [.width]
-        let details = NSScrollView()
+        let details = FittedScrollView()
         details.documentView = preview
         details.hasVerticalScroller = true
         details.borderType = .bezelBorder

@@ -23,6 +23,42 @@ final class SharePage: NSView, PageSection, Overlay {
     var leading: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
 
     private var mode = Mode.export
+    var pageTitle: String { mode == .export ? "Export" : "Import" }
+    private var carryAssets = false
+    private var carryAppbridge = false
+    private var importedName: String?
+    var didImportCatalogue: Bool { importedName != nil }
+    private var standalone: Bool { mode == .bringIn && level == .catalogue }
+    private var exportLibrary: Library {
+        if carryAssets || level == .palette { return library.library }
+        var local = GlobalAssets.split(library.library).local
+        let tags = Set(local.swatches.flatMap { $0.tags ?? [] } + local.colours.flatMap { $0.tags ?? [] })
+        local.tagInfo = library.library.tagInfo.filter { $0.projectID != nil || $0.groupID != nil || tags.contains($0.name) }
+        return local
+    }
+    private var aseSelection = Set<UUID>()
+    private var restoreASELocations = false
+    private var aseLinks: [AppbridgeStore.Source] {
+        if mode == .bringIn { return staged?.aseLinks ?? [] }
+        return (try? ASERegistry.resolved(library.store.root).filter { !$0.folder }) ?? []
+    }
+    private func aseFiles() throws -> [Zip.Entry] {
+        guard carryAppbridge && level == .catalogue else { return [] }
+        return try ASERegistry.harvest(root: library.store.root, selected: aseSelection)
+    }
+    private func aseRows() -> [Row] {
+        let links = aseLinks
+        var result = [Row(text: "Select All ASE Files", act: .aseAll(true)), Row(text: "Deselect All ASE Files", act: .aseAll(false))]
+        let grouped = Dictionary(grouping: links) { URL(fileURLWithPath: $0.originalPath ?? $0.path).deletingLastPathComponent().path }
+        for folder in grouped.keys.sorted() {
+            let children = grouped[folder]!.sorted { $0.path < $1.path }
+            result.append(Row(text: folder, strong: true, square: children.allSatisfy { aseSelection.contains($0.id) }, act: .aseGroup(folder)))
+            result += children.map { source in
+                Row(text: URL(fileURLWithPath: source.path).lastPathComponent, level: 1, square: aseSelection.contains(source.id), mark: "colorgain.ase", act: .ase(source.id), warning: mode == .export && !FileManager.default.fileExists(atPath: source.url.path))
+            }
+        }
+        return result
+    }
     private var levels: [Level] = []
     private var levelIndex = 0
     private var tree: ShareNode?
@@ -42,13 +78,14 @@ final class SharePage: NSView, PageSection, Overlay {
     private var savedTo: URL?
     private var problem: String?
 
-    private var steps: [String] { mode == .export ? ["Level", "Contents", "Options", "Check", "Save"] : ["Choose", "Contents", "Check", "Twins", "Placement", "Confirm", "Done"] }
+    private var steps: [String] { mode == .export ? ["Level", "Contents", "Options", "Check", "Save"] : standalone ? ["Choose", "Contents", "Check", "Confirm", "Done"] : ["Choose", "Contents", "Check", "Twins", "Placement", "Confirm", "Done"] }
     private var level: ShareLevel { mode == .export ? (levels.indices.contains(levelIndex) ? levels[levelIndex].level : .palette) : (inspection?.manifest.level ?? .palette) }
 
     // MARK: The views
 
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     private let canvas = Canvas()
+    private let cancel = SwissButton("Cancel", .secondary)
     private let back = SwissButton("Back", .secondary)
     private let next = SwissButton("Next", .primary)
     private var dropped: SwissDropdown.MenuPanel?
@@ -73,7 +110,7 @@ final class SharePage: NSView, PageSection, Overlay {
 
     /// A row of the left column, as the step lays it out.
     private struct Row {
-        enum Act { case none, level(Int), tick(String), option(Int), placement(Int), answer(UUID?) }
+        enum Act { case none, level(Int), tick(String), option(Int), placement(Int), answer(UUID?), ase(UUID), aseGroup(String), aseAll(Bool) }
         var text: String
         var caption: String?
         var level = 0
@@ -108,12 +145,13 @@ final class SharePage: NSView, PageSection, Overlay {
         back.target = self; back.action = #selector(goBack)
         next.target = self; next.action = #selector(goNext)
         next.arrow = true
-        addSubview(back); addSubview(next)
+        cancel.target = self; cancel.action = #selector(cancelJourney)
+        addSubview(cancel); addSubview(back); addSubview(next)
         canvas.onDraw = { [weak self] in self?.drawRows() }
         canvas.onDown = { [weak self] p in self?.down(at: p) }
         canvas.onMove = { [weak self] p in
             guard let self = self else { return }
-            self.rollover.moved(p.flatMap { pt in self.rowRects.firstIndex { $0.contains(pt) } })
+            self.rollover.moved(p.flatMap { pt in self.rowRects.firstIndex { $0.contains(pt) } }.flatMap { self.actionable(self.rows[$0]) ? $0 : nil })
         }
         rollover.keys = { [weak self] in Array((self?.rows.indices) ?? 0..<0) }
         rollover.locked = { _ in false }
@@ -121,7 +159,7 @@ final class SharePage: NSView, PageSection, Overlay {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
-    func height(forWidth width: CGFloat) -> CGFloat { 0 }
+    func height(forWidth width: CGFloat) -> CGFloat { geometry(width: width - leading).buttonsTop + 4 * Self.u }
     func reload() { refresh() }
     private func refresh() { needsLayout = true; needsDisplay = true; canvas.needsDisplay = true; onResize?() }
 
@@ -175,6 +213,7 @@ final class SharePage: NSView, PageSection, Overlay {
     private func clear() {
         if let s = staging { Sharing.discard(s) }
         levels = []; levelIndex = 0; tree = nil; ticked = []; step = 0; carryTags = true; carryNotes = true
+        carryAssets = false; carryAppbridge = false; importedName = nil; aseSelection = []; restoreASELocations = false
         chosenFile = nil; inspection = nil; staging = nil; staged = nil; placements = []; placementIndex = 0
         twins = []; resolutions = [:]; otherwise = .keepBoth; outcome = nil; savedTo = nil; problem = nil
         closeMenu()
@@ -185,11 +224,14 @@ final class SharePage: NSView, PageSection, Overlay {
         case .export:
             guard levels.indices.contains(levelIndex) else { tree = nil; return }
             let l = levels[levelIndex]
-            tree = Sharing.tree(level: l.level, subject: l.subject, in: library.library, schema: schema, catalogueName: library.catalogue)
+            tree = Sharing.tree(level: l.level, subject: l.subject, in: exportLibrary, schema: schema, catalogueName: library.catalogue)
         case .bringIn:
             tree = inspection?.tree
         }
         ticked = Set(tree?.flattened.map { $0.node.id } ?? [])
+        if mode == .bringIn, let global = tree?.node("library") {
+            ticked.subtract(global.flattened.map { $0.node.id })
+        }
     }
 
     // MARK: Ticks
@@ -230,11 +272,11 @@ final class SharePage: NSView, PageSection, Overlay {
         return t.flattened.map { node, level in
             let st = state(node)
             let count = node.kind == .palette ? nil : plural(node.palettes, "palette")
-            return Row(text: node.name, caption: nil, level: level, node: node, strong: level == 0, square: st != .none, partial: st == .some, mark: mark(for: node.kind), trailing: count, act: .tick(node.id))
+            return Row(text: node.name, caption: nil, level: level, node: node, strong: level == 0, square: level == 0 ? nil : st != .none, partial: st == .some, mark: mark(for: node.kind), trailing: count, act: level == 0 ? .none : .tick(node.id))
         }
     }
     private func fileRows(_ files: [ShareManifest.File]) -> [Row] {
-        files.map { Row(text: $0.path, caption: nil, level: 0, strong: false, square: nil, mark: "doc", trailing: bytes($0.bytes)) }
+        files.map { Row(text: $0.path, caption: nil, level: 0, strong: false, square: nil, mark: $0.path.hasSuffix(".ase") ? "colorgain.ase" : "doc", trailing: bytes($0.bytes)) }
     }
     private func bytes(_ n: Int) -> String { n < 1024 ? "\(n) B" : n < 1_048_576 ? String(format: "%.1f KB", Double(n) / 1024) : String(format: "%.1f MB", Double(n) / 1_048_576) }
 
@@ -242,24 +284,26 @@ final class SharePage: NSView, PageSection, Overlay {
         let name = steps[step]
         switch (mode, name) {
         case (.export, "Level"):
-            return levels.enumerated().map { i, l in Row(text: l.level.title, caption: nil, strong: i == levelIndex, square: i == levelIndex, mark: nil, trailing: l.name, act: .level(i)) }
+            return levels.enumerated().map { i, l in Row(text: l.level.title, caption: nil, strong: i == levelIndex, square: levels.count > 1 ? i == levelIndex : nil, mark: nil, trailing: l.name, act: levels.count > 1 ? .level(i) : .none) }
         case (_, "Contents"):
             return treeRows()
         case (.export, "Options"):
-            return [Row(text: "Carry the tags", strong: carryTags, square: carryTags, trailing: "On each palette and colour", act: .option(0)),
-                    Row(text: "Carry the notes", strong: carryNotes, square: carryNotes, trailing: "The words written on each colour", act: .option(1))]
+            return (level == .catalogue ? [Row(text: "Include global Assets", strong: carryAssets, square: carryAssets, trailing: "Unassigned app-wide assets", act: .option(2)), Row(text: "Include Appbridge ASE files", strong: carryAppbridge, square: carryAppbridge, trailing: "Linked in this catalogue’s .colase", act: .option(3))] : []) + [Row(text: "Carry the tags", strong: carryTags, square: carryTags, trailing: "On each palette and colour", act: .option(0)),
+                    Row(text: "Carry the notes", strong: carryNotes, square: carryNotes, trailing: "The words written on each colour", act: .option(1))] + (carryAppbridge && level == .catalogue ? aseRows() : [])
         case (.export, "Check"):
             guard let t = tree else { return [] }
             let l = levels[levelIndex]
-            let entries = (try? Sharing.package(level: l.level, subject: l.subject, ticked: ticked, strip: (!carryTags, !carryNotes), from: library.library, schema: schema, catalogueName: library.catalogue)) ?? []
+            let entries: [Zip.Entry]
+            do { entries = try Sharing.package(level: l.level, subject: l.subject, ticked: ticked, strip: (!carryTags, !carryNotes), from: exportLibrary, schema: schema, catalogueName: library.catalogue, appbridge: aseFiles()) }
+            catch { return [Row(text: "Cannot prepare export: " + error.localizedDescription, warning: true)] }
             var out = [Row(text: "\(plural(entries.count, "file")), \(bytes(entries.reduce(0) { $0 + $1.data.count })), \(plural(t.flattened.filter { ticked.contains($0.node.id) && $0.node.kind == .palette }.count, "palette"))", strong: true, square: nil)]
-            out += entries.map { Row(text: $0.path, square: nil, mark: "doc", trailing: bytes($0.data.count)) }
+            out += entries.map { Row(text: $0.path, square: nil, mark: $0.path.hasSuffix(".ase") ? "colorgain.ase" : "doc", trailing: bytes($0.data.count)) }
             return out
         case (.export, "Save"):
             if let url = savedTo { return [Row(text: url.lastPathComponent, caption: nil, strong: true, square: nil, mark: "checkmark", trailing: (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)] }
             return [Row(text: problem ?? "Nothing saved yet", square: nil, warning: problem != nil)]
         case (.bringIn, "Choose"):
-            guard let i = inspection, let f = chosenFile else { return [Row(text: problem ?? "No file chosen yet", square: nil, warning: problem != nil)] }
+            guard let i = inspection, let f = chosenFile else { return problem.map { [Row(text: $0, square: nil, warning: true)] } ?? [] }
             let m = i.manifest
             let f2 = DateFormatter(); f2.dateStyle = .medium; f2.timeStyle = .short
             return [Row(text: f.lastPathComponent, strong: true, square: nil, mark: "doc"),
@@ -271,20 +315,24 @@ final class SharePage: NSView, PageSection, Overlay {
             return i.problems.map { Row(text: $0, square: nil, mark: "exclamationmark.triangle", warning: true) }
         case (.bringIn, "Twins"):
             if twins.isEmpty { return [Row(text: "Nothing in the share is already in the catalogue", strong: true, square: nil, mark: "checkmark")] }
-            var out = [Row(text: "For every twin", strong: true, square: nil, trailing: otherwise.title, act: .answer(nil))]
+            var out = [Row(text: "For all matching items", strong: true, square: nil, trailing: otherwise.title, act: .answer(nil))]
             out += twins.map { d in
-                let why = d.why == .sameID ? "The same \(kindWord(d.kind)), by id" : d.why == .sameColours ? "The same colours as \(d.existing)" : "The same name as \(d.existing)"
+                let why = d.why == .sameID ? "The same \(kindWord(d.kind)), by id" : d.why == .sameColours ? "Identical content: \(d.existing)" : "Same name, different content: \(d.existing)"
                 return Row(text: d.name, caption: why, strong: false, square: nil, mark: d.kind == .palette ? "swatchpalette" : "folder", trailing: (resolutions[d.id] ?? otherwise).title, act: .answer(d.id))
             }
             return out
         case (.bringIn, "Placement"):
             return placements.enumerated().map { i, p in Row(text: p.1, strong: i == placementIndex, square: i == placementIndex, act: .placement(i)) }
         case (.bringIn, "Confirm"):
+            if standalone {
+                return [Row(text: "Create a separate catalogue", strong: true), Row(text: inspection?.manifest.subject.name ?? "Catalogue"), Row(text: "Existing catalogues stay unchanged")] + (aseLinks.isEmpty ? [] : [Row(text: "\(aseSelection.count) of \(aseLinks.count) ASE files selected", strong: true), Row(text: "Keep in Library/ASE", square: !restoreASELocations, act: .option(4)), Row(text: "Restore original locations…", square: restoreASELocations, trailing: "Choose folders after import; never overwrite", act: .option(4))] + aseRows())
+            }
             guard let s = staged else { return [] }
             var lib = library.library, schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
             let o = Sharing.commit(s, choices: choices(), into: &lib, schema: &schema)
             return sums(o, heading: "What Bring It In will do")
         case (.bringIn, "Done"):
+            if let name = importedName { return [Row(text: "Imported " + name, strong: true, mark: "checkmark"), Row(text: "Created as a separate catalogue")] }
             guard let o = outcome else { return [Row(text: problem ?? "Nothing brought in", square: nil, warning: problem != nil)] }
             return sums(o, heading: "Brought in")
         default: return []
@@ -313,15 +361,15 @@ final class SharePage: NSView, PageSection, Overlay {
         switch (mode, steps[step]) {
         case (.export, "Level"): return "What goes: the \(levels.first?.level.title.lowercased() ?? "palette") you pressed Export on, or anything above it up to the whole catalogue. One zip, one manifest, every file listed with its digest."
         case (.export, "Contents"): return "Tick what goes. Untick a group and everything beneath it stays home; tick one palette and the folders above it go with it, so it lands where it belongs."
-        case (.export, "Options"): return "Tags and the notes written on colours are yours; leave them out when the share is for someone outside the work."
+        case (.export, "Options"): return "Choose whether to include global Assets and Appbridge ASE files. Select linked ASE files by directory. Copies and their .colase index travel in Library/ASE; originals stay in place."
         case (.export, "Check"): return "Every file that will go, with its size. Nothing is written until Save."
         case (.export, "Save"): return savedTo == nil ? "Choose where the file goes. It is one .colshr file: a zip anyone can open, with its manifest inside." : "Saved. Send it as it is; the manifest lets the other end check it arrived whole."
         case (.bringIn, "Choose"): return chosenFile == nil ? "Choose a .colshr file. It is opened into a staging folder and read there; nothing reaches the catalogue until Confirm." : "What the share says it is. Next reads its contents."
-        case (.bringIn, "Contents"): return "Tick what comes in, down to a single palette. Anything left unticked stays in the file."
+        case (.bringIn, "Contents"): return "Choose the work to import. If included, Global Assets are unassigned app-wide assets; leave that branch unticked to import only the catalogue."
         case (.bringIn, "Check"): return inspection?.ok == true ? "The manifest, every file's digest and the shape its level calls for all hold." : "The share failed its check. Nothing has been written; ask for it to be sent again."
         case (.bringIn, "Twins"): return "What is already here, found by id, by the colours themselves, or by name in the same place. Replace puts the share's version in its place; Skip leaves it out; Rename brings it in under the next free name; Keep Both brings it in as it is, under a new id."
         case (.bringIn, "Placement"): return "Where it lands: only places that fit its level are offered."
-        case (.bringIn, "Confirm"): return "The sums of what Bring It In will do. It goes in as one step in the history, so it can be undone whole."
+        case (.bringIn, "Confirm"): if standalone { return "A new catalogue will be created. Existing catalogues are not compared or changed; an available name is used if this name already exists." }; return "The sums of what Bring It In will do. It goes in as one step in the history, so it can be undone whole."
         case (.bringIn, "Done"): return "Done. The rails show what came in."
         default: return ""
         }
@@ -331,7 +379,7 @@ final class SharePage: NSView, PageSection, Overlay {
         case (.export, "Check"): return "Save As\u{2026}"
         case (.export, "Save"): return savedTo == nil ? "Save As\u{2026}" : "Done"
         case (.bringIn, "Choose"): return chosenFile == nil ? "Choose File\u{2026}" : "Next"
-        case (.bringIn, "Confirm"): return "Bring It In"
+        case (.bringIn, "Confirm"): return standalone ? "Import Catalogue" : "Import"
         case (.bringIn, "Done"): return "Done"
         default: return "Next"
         }
@@ -364,29 +412,35 @@ final class SharePage: NSView, PageSection, Overlay {
         rows = build()
         scroll.frame = NSRect(x: 0, y: g.top, width: leading + g.lw + Design.App.areaGutter / 2, height: max(0, bounds.height - g.top))
         let h = CGFloat(rows.count) * u + u
-        canvas.frame = NSRect(x: 0, y: 0, width: scroll.frame.width, height: max(scroll.frame.height, h))
+        canvas.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.frame.height, h))
         scroll.verticalScrollElasticity = h > scroll.frame.height ? .allowed : .none
         rowRects = rows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
         stepRects = steps.indices.map { NSRect(x: g.rx, y: g.stepsTop + CGFloat($0) * u, width: g.rw, height: u) }
         next.title = nextTitle; next.invalidateIntrinsicContentSize()
         next.isEnabled = canGoOn
         back.isHidden = step == 0 || steps[step] == "Done"
+        cancel.isHidden = steps[step] == "Done"
+        cancel.frame = NSRect(x: g.rx, y: g.buttonsTop + u - 32, width: 90, height: 32)
         let nw = next.intrinsicContentSize.width, bw = back.intrinsicContentSize.width
         next.frame = NSRect(x: g.rx + g.rw - nw, y: g.buttonsTop + u - 32, width: nw, height: 32)
         back.frame = NSRect(x: next.frame.minX - 12 - bw, y: next.frame.minY, width: bw, height: 32)
+        if g.rw < nw + bw + 90 + 32 {
+            cancel.frame.origin.y += 2 * u
+            back.frame = NSRect(x: g.rx + g.rw - bw, y: cancel.frame.minY, width: bw, height: 32)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let g = geometry(width: bounds.width - leading), u = Self.u, line = Self.line, l = leading
         let title = mode == .export ? "Export" : "Import"
         let help = mode == .export ? "Any level goes out as one checked file: the whole catalogue, a collection, a work group, or a palette, with everything beneath it that is ticked."
-                                   : "A share comes in through the same steps in reverse: checked before anything is written, its twins answered one by one, and placed where its level fits."
+                                   : "Import a catalogue as a separate system of work. Collections and individual assets can be brought into the open catalogue."
         Design.attributed(title, .header).draw(x: l, baseline: line)
         Design.attributed(help, .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: l, y: u, width: g.lw, height: Self.helpUnits * u))
         Design.attributed(steps[step], .header).draw(x: l, baseline: 4 * u + line)
         hairline(x: l, y: g.top - 1, width: g.lw, Design.rule)
         let rx = g.rx
-        Design.attributed(mode == .export ? "Five Steps" : "Seven Steps", .header).draw(x: rx, baseline: line)
+        Design.attributed(steps.count == 5 ? "Five Steps" : "Seven Steps", .header).draw(x: rx, baseline: line)
         Design.attributed(levels.indices.contains(levelIndex) && mode == .export ? "\(levels[levelIndex].level.title): \(levels[levelIndex].name)" : (inspection.map { "\($0.manifest.level.title): \($0.manifest.subject.name)" } ?? "Choose a file to begin"), .caption, colour: Design.quiet, lineHeight: true).draw(in: NSRect(x: rx, y: u, width: g.rw, height: Self.helpUnits * u))
         Design.attributed("Steps", .header).draw(x: rx, baseline: 4 * u + line)
         hairline(x: rx, y: g.stepsTop - 1, width: g.rw, Design.rule)
@@ -411,7 +465,7 @@ final class SharePage: NSView, PageSection, Overlay {
         for (i, r) in rows.enumerated() {
             let box = rowRects[i], x = l + CGFloat(r.level) * Self.step
             let name = Design.attributed(r.text, r.strong ? .bodyStrong : .body, colour: r.warning ? Design.orange : r.strong ? Design.ink : Design.quiet)
-            rollover.pane(i, box: box, reach: x + 40 + name.size().width + Self.step)
+            if actionable(r) { rollover.pane(i, box: box, reach: x + 40 + name.size().width + Self.step) }
         }
         if treeRowsHere {
             TreeLines.draw(rows.enumerated().map { k, r in
@@ -430,7 +484,10 @@ final class SharePage: NSView, PageSection, Overlay {
                 if r.partial { fill(sq.insetBy(dx: 3, dy: 3), Design.ink) }
                 x += 20
             }
-            if let m = r.mark { RowMark.draw(m, x: x, baseline: b, colour: r.warning ? Design.orange : Design.soft); x += 20 }
+            if let m = r.mark {
+                if m == "colorgain.ase" { ASEIcon.image.draw(in: NSRect(x: x, y: b - 15, width: 16, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
+                else { RowMark.draw(m, x: x, baseline: b, colour: r.warning ? Design.orange : Design.soft) }; x += 24
+            }
             var right = box.maxX
             if let t = r.trailing {
                 let isMenu: Bool = { if case .answer = r.act { return true }; return false }()
@@ -467,9 +524,14 @@ final class SharePage: NSView, PageSection, Overlay {
         let r = rows[i]
         switch r.act {
         case .none: break
+        case .ase(let id): if aseSelection.contains(id) { aseSelection.remove(id) } else { aseSelection.insert(id) }; refresh()
+        case .aseAll(let on): aseSelection = on ? Set(aseLinks.map { $0.id }) : []; refresh()
+        case .aseGroup(let folder):
+            let ids = Set(aseLinks.filter { URL(fileURLWithPath: $0.originalPath ?? $0.path).deletingLastPathComponent().path == folder }.map { $0.id })
+            if ids.isSubset(of: aseSelection) { aseSelection.subtract(ids) } else { aseSelection.formUnion(ids) }; refresh()
         case .level(let k): levelIndex = k; buildTree(); refresh()
         case .tick(let id): toggle(id); rows = build(); canvas.needsDisplay = true
-        case .option(let k): if k == 0 { carryTags.toggle() } else { carryNotes.toggle() }; refresh()
+        case .option(let k): if k == 0 { carryTags.toggle() } else if k == 1 { carryNotes.toggle() } else if k == 3 { carryAppbridge.toggle(); if carryAppbridge { aseSelection = Set(aseLinks.map { $0.id }) } } else if k == 4 { restoreASELocations.toggle() } else { let previous = ticked; let oldIDs = Set(tree?.flattened.map { $0.node.id } ?? []); carryAssets.toggle(); buildTree(); ticked = previous.intersection(ticked).union(ticked.subtracting(oldIDs)) }; refresh()
         case .placement(let k): placementIndex = k; refresh()
         case .answer(let id):
             let items = Sharing.Resolution.allCases.map { $0.title }
@@ -487,6 +549,9 @@ final class SharePage: NSView, PageSection, Overlay {
         let p = convert(event.locationInWindow, from: nil)
         if let i = stepRects.firstIndex(where: { $0.contains(p) }), i < step, steps[step] != "Done" { step = i; refresh() }
     }
+
+    private func actionable(_ row: Row) -> Bool { if case .none = row.act { return false }; return true }
+    @objc private func cancelJourney() { clear(); onLeave?() }
 
     @objc private func goBack() {
         guard step > 0 else { return }
@@ -513,6 +578,7 @@ final class SharePage: NSView, PageSection, Overlay {
                 staging = dir
                 let s = try Sharing.read(staging: dir, level: i.manifest.level)
                 staged = s
+                aseSelection = Set(s.aseLinks.map { $0.id })
                 let lib = library.library, schema = SchemaTrial.schema(for: library.store.root) ?? library.store.schema
                 placements = Sharing.placements(for: i.manifest.level, in: lib, schema: schema, origin: i.manifest.origin)
                 placementIndex = 0
@@ -527,7 +593,15 @@ final class SharePage: NSView, PageSection, Overlay {
             }
         case (.bringIn, "Confirm"):
             guard let s = staged else { return }
-            outcome = library.bringIn(s, choices: choices())
+            if standalone {
+                do {
+                    let name = try Sharing.importCatalogue(s, ticked: ticked, name: inspection?.manifest.subject.name ?? "Imported Catalogue", catalogues: .standard, aseSelection: aseSelection)
+                    if restoreASELocations { restoreLocations(in: Catalogues.standard.directory(for: name)) }
+                    importedName = name
+                    outcome = Sharing.Outcome()
+                    library.open(catalogue: name)
+                } catch { problem = error.localizedDescription; refresh(); return }
+            } else { do { outcome = try library.bringIn(s, choices: choices()) } catch { problem = error.localizedDescription; refresh(); return } }
             if let dir = staging { Sharing.discard(dir); staging = nil }
         case (.bringIn, "Done"):
             onLeave?(); return
@@ -535,6 +609,31 @@ final class SharePage: NSView, PageSection, Overlay {
         }
         if step + 1 < steps.count { step += 1 }
         refresh()
+    }
+
+    private func restoreLocations(in root: URL) {
+        do {
+            var links = try ASERegistry.resolved(root)
+            let folders = Set(links.compactMap { $0.originalPath }.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
+            var notes: [String] = []
+            for folder in folders.sorted() {
+                let panel = NSOpenPanel(); panel.title = "Restore ASE Files"
+                panel.message = "Original folder: " + folder + "\nChoose this folder or another destination. Cancel keeps these files in the catalogue."
+                panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+                panel.directoryURL = URL(fileURLWithPath: folder)
+                guard panel.runModal() == .OK, let destination = panel.url else { continue }
+                try FolderAccess.authorize(destination)
+                for i in links.indices where links[i].originalPath.map({ URL(fileURLWithPath: $0).deletingLastPathComponent().path }) == folder {
+                    let target = destination.appendingPathComponent(URL(fileURLWithPath: links[i].originalPath!).lastPathComponent)
+                    do {
+                        try FileManager.default.copyItem(at: links[i].url, to: target)
+                        ASEIcon.apply(to: target); links[i].path = target.path
+                    } catch { notes.append(target.lastPathComponent + ": kept in catalogue (" + error.localizedDescription + ")") }
+                }
+            }
+            try ASERegistry.write(links, root: root)
+            if !notes.isEmpty { NSApp.presentError(failure(notes.joined(separator: "\n"))) }
+        } catch { NSApp.presentError(error) }
     }
 
     private func save() {
@@ -550,8 +649,8 @@ final class SharePage: NSView, PageSection, Overlay {
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
                 let named = ShareManifest.Named(id: CatalogueTree.catalogue(in: self.library.store.root)?.id ?? UUID(), name: self.library.catalogue)
-                _ = try Sharing.export(level: l.level, subject: l.subject, from: self.library.library, schema: self.schema, catalogue: named, ticked: self.ticked,
-                                       strip: (!self.carryTags, !self.carryNotes), to: url)
+                _ = try Sharing.export(level: l.level, subject: l.subject, from: self.exportLibrary, schema: self.schema, catalogue: named, ticked: self.ticked,
+                                       strip: (!self.carryTags, !self.carryNotes), appbridge: self.aseFiles(), calibrationRoot: self.library.store.root, to: url)
                 self.savedTo = url
                 self.library.flash("Exported \(l.name) to \(url.lastPathComponent)")
                 if self.steps[self.step] != "Save" { self.step = self.steps.firstIndex(of: "Save") ?? self.step }
@@ -567,8 +666,8 @@ final class SharePage: NSView, PageSection, Overlay {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType(exportedAs: "com.mmffdev.colour.share", conformingTo: .zip), .zip]
-        panel.prompt = "Open Share"
-        panel.message = "Choose a .\(ColourFiles.share) file to bring into \(library.catalogue)"
+        panel.prompt = "Import"
+        panel.message = "Catalogues open independently. Individual collections and assets import into the current catalogue."
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
@@ -585,13 +684,12 @@ final class SharePage: NSView, PageSection, Overlay {
 
 extension LibraryController {
     /// Brings a staged share in as the choices say: the schema first, then the library as one step in the history.
-    func bringIn(_ staged: Sharing.Staged, choices: Sharing.Choices) -> Sharing.Outcome {
+    func bringIn(_ staged: Sharing.Staged, choices: Sharing.Choices) throws -> Sharing.Outcome {
         var lib = library
         var schema = SchemaTrial.schema(for: store.root) ?? store.schema
         let outcome = Sharing.commit(staged, choices: choices, into: &lib, schema: &schema)
-        SchemaTrial.replace(schema)
         let made = lib
-        apply("Import \(staged.level.title)") { $0 = made }
+        guard apply("Import \(staged.level.title)", schema: schema, { $0 = made }) else { throw failure("The import could not be saved. Your existing work was retained.") }
         flash("Brought in \(plural(outcome.palettes, "palette"))" + (outcome.members > 0 ? " and \(plural(outcome.members, "member"))" : ""))
         return outcome
     }

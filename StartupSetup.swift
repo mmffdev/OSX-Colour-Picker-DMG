@@ -36,8 +36,12 @@ enum CatalogueSetup {
         guard !FileManager.default.fileExists(atPath: folder.path), !catalogues.names().contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else {
             throw CatalogueError.nameTaken(name)
         }
-        let store = LibraryStore(directory: folder, legacyURL: nil, name: name)
+        try AppHomeSeed.ensure(at: catalogues.root)
+        let store = LibraryStore(directory: folder, legacyURL: nil, name: name, assetsHome: catalogues.root)
         try store.save(Library(), schema: SchemaTrial.SchemaFile(collections: [], places: [:]))
+        try HistoryStore.save(StepHistory(), beside: store.url)
+        let globalIndex = catalogues.root.appendingPathComponent("Global.colcat")
+        if !FileManager.default.fileExists(atPath: HistoryStore.url(beside: globalIndex).path) { try HistoryStore.save(StepHistory(), beside: globalIndex) }
         try catalogues.registerChecked(name, at: folder)
         return name
     }

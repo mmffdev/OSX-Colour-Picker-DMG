@@ -180,6 +180,7 @@ enum TagPanel {
 }
 
 final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
+    var sectionAnchors: [(String,CGFloat)] { [("Library",SettingsSheet.headerGuide+1),("Tag Editor",SettingsSheet.baseline(14)+1)] }
     /// Rail1's Edit Tags under a member: the page opens filtered to it. Taken by the next reload.
     static var pendingScope: TagScope?
 
@@ -208,7 +209,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
 
     // MARK: Views
 
-    private let listScroll = NSScrollView()
+    private let listScroll = FittedScrollView()
     private let list = Canvas()
     private let nameField = NSTextField(string: "")
     private let newButton = SwissButton("New Tag", .secondary)
@@ -323,7 +324,7 @@ final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
         let top = Self.listTop * u
         listScroll.frame = NSRect(x: g.rx - leading, y: top, width: leading + g.lw, height: 4 * u)
         let listHeight = CGFloat(max(rows.count, 1)) * u + u
-        list.frame = NSRect(x: 0, y: 0, width: listScroll.frame.width, height: max(listScroll.frame.height, listHeight))
+        list.frame = NSRect(x: 0, y: 0, width: listScroll.contentSize.width, height: max(listScroll.frame.height, listHeight))
         listScroll.verticalScrollElasticity = listHeight > listScroll.frame.height ? .allowed : .none
         rowRects = rows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
         // The name field on row 6: a 13 field's text sits on the line when its frame starts 12 above it.

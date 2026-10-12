@@ -173,3 +173,119 @@ enum KeyProfiles {
         try write(profile, to: url); return url
     }
 }
+
+/// App-wide unassigned assets. Member-owned work is never stored here.
+struct GlobalAssets {
+    let home: URL
+    var root: URL { home.appendingPathComponent("Assets") }
+    var index: URL { root.appendingPathComponent("Assets.colcat") }
+    func load() throws -> Library {
+        guard FileManager.default.fileExists(atPath: index.path) else { return Library() }
+        let cat = try ColourFiles.decoder().decode(CatalogueFile.self, from: Data(contentsOf: index))
+        guard cat.version == 3 else { throw failure("The global Assets index is not supported.") }
+        var lib = Library(); lib.tagInfo = cat.tags; lib.deleted = cat.deleted; lib.activeSwatchID = cat.activePalette
+        for link in cat.libraryAssets {
+            let doc = try ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: root.appendingPathComponent(link.file)))
+            var palette = doc.palette; palette.projectID = nil; lib.swatches.append(palette)
+            for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
+        }
+        if let file = cat.swatches {
+            let doc = try ColourFiles.decoder().decode(SwatchesDocument.self, from: Data(contentsOf: root.appendingPathComponent(file)))
+            for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
+        }
+        if let file = cat.profiles { lib.colourProfiles = try ColourFiles.decoder().decode(ProfilesDocument.self, from: Data(contentsOf: root.appendingPathComponent(file))).profiles }
+        return lib
+    }
+    func save(_ lib: Library) throws {
+        try CatalogueTree.write(lib, schema: .init(collections: [], places: [:]), index: index, name: "Assets", poolDirectory: "")
+        try AppDataStore(root: home).update { $0["assets"] = "Assets/Assets.colcat" }
+    }
+    static func split(_ lib: Library) -> (local: Library, global: Library) {
+        var local = lib, global = lib
+        local.swatches = lib.swatches.filter { $0.projectID != nil }
+        global.swatches = lib.swatches.filter { $0.projectID == nil }; global.projects = []
+        let localKeys = Set(local.swatches.flatMap { $0.entries.map { $0.hex } + ($0.styles ?? []).flatMap { [$0.ink, $0.paper] } })
+        let globalKeys = Set(global.swatches.flatMap { $0.entries.map { $0.hex } + ($0.styles ?? []).flatMap { [$0.ink, $0.paper] } })
+        local.colours = lib.colours.filter { localKeys.contains($0.hex) }
+        global.colours = lib.colours.filter { globalKeys.contains($0.hex) || !localKeys.contains($0.hex) }
+        global.tagInfo = lib.tagInfo.filter { $0.projectID == nil && $0.groupID == nil }
+        local.tagInfo = lib.tagInfo.filter { $0.projectID != nil || $0.groupID != nil }
+        let profiles = Set(local.swatches.compactMap { $0.profile } + local.projects.compactMap { $0.profile })
+        local.colourProfiles = lib.colourProfiles.filter { profiles.contains($0.id) }
+        if !local.swatches.contains(where: { $0.id == local.activeSwatchID }) { local.activeSwatchID = nil }
+        if !global.swatches.contains(where: { $0.id == global.activeSwatchID }) { global.activeSwatchID = nil }
+        return (local, global)
+    }
+    static func joined(_ local: Library, _ global: Library) -> Library {
+        var lib = local
+        lib.tagInfo.removeAll { t in t.projectID == nil && t.groupID == nil && global.tagInfo.contains { $0.name == t.name } }
+        lib.swatches += global.swatches.filter { g in !lib.swatches.contains { $0.id == g.id } }
+        lib.colours += global.colours.filter { g in !lib.colours.contains { $0.hex == g.hex } }
+        lib.colourProfiles += global.colourProfiles.filter { g in !lib.colourProfiles.contains { $0.id == g.id } }
+        lib.tagInfo += global.tagInfo.filter { g in !lib.tagInfo.contains { $0.name == g.name && $0.projectID == g.projectID } }
+        if lib.activeSwatchID == nil { lib.activeSwatchID = global.activeSwatchID }
+        return lib
+    }
+}
+
+/// A recoverable journal spanning the catalogue and app-wide Assets. A failed or interrupted
+/// write restores both snapshots before another read; global-to-member moves cannot lose payloads.
+enum AssetTransaction {
+    struct Journal: Codable { var catalogue: String; var home: String; var globalExisted: Bool }
+    static func directory(_ home: URL) -> URL { home.appendingPathComponent("Backups/Asset Transaction") }
+    static func items(_ root: URL, home: URL) throws -> [URL] {
+        let protected: Set<String> = root.standardizedFileURL == home.standardizedFileURL
+            ? ["Backups", "Assets", "Catalogues", "Keys", "colorgain.coldata", "catalogues.json", "Global.colhis"] : ["Backups"]
+        return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).filter { !protected.contains($0.lastPathComponent) }
+    }
+    static func recover(home: URL) throws {
+        let fm = FileManager.default, dir = directory(home), file = directory(home).appendingPathComponent("journal.json")
+        guard fm.fileExists(atPath: file.path) else { return }
+        let journal = try JSONDecoder().decode(Journal.self, from: Data(contentsOf: file))
+        let root = URL(fileURLWithPath: journal.catalogue), assets = home.appendingPathComponent("Assets")
+        for item in try items(root, home: home) { try fm.removeItem(at: item) }
+        for item in try fm.contentsOfDirectory(at: dir.appendingPathComponent("Catalogue"), includingPropertiesForKeys: nil) { try fm.copyItem(at: item, to: root.appendingPathComponent(item.lastPathComponent)) }
+        if fm.fileExists(atPath: assets.path) { try fm.removeItem(at: assets) }
+        if journal.globalExisted { try fm.copyItem(at: dir.appendingPathComponent("Assets"), to: assets) }
+        try fm.removeItem(at: file) // Recovery completed; leftover snapshots are now disposable.
+        try fm.removeItem(at: dir)
+    }
+    static func perform(home: URL, catalogue: URL, _ operation: () throws -> Void) throws {
+        let fm = FileManager.default, dir = directory(home)
+        try recover(home: home)
+        if fm.fileExists(atPath: dir.path) { try fm.removeItem(at: dir) }
+        try fm.createDirectory(at: catalogue, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dir.appendingPathComponent("Catalogue"), withIntermediateDirectories: true)
+        let assets = home.appendingPathComponent("Assets"), exists = fm.fileExists(atPath: assets.path)
+        for item in try items(catalogue, home: home) { try fm.copyItem(at: item, to: dir.appendingPathComponent("Catalogue").appendingPathComponent(item.lastPathComponent)) }
+        if exists { try fm.copyItem(at: assets, to: dir.appendingPathComponent("Assets")) }
+        try JSONEncoder().encode(Journal(catalogue: catalogue.path, home: home.path, globalExisted: exists)).write(to: dir.appendingPathComponent("journal.json"), options: .atomic)
+        do { try operation() }
+        catch { try recover(home: home); throw error }
+        try fm.removeItem(at: dir.appendingPathComponent("journal.json")) // Commit before deleting any snapshot.
+        try? fm.removeItem(at: dir)
+    }
+}
+
+
+/// All new-home journeys use this idempotent seed before constructing a catalogue.
+enum AppHomeSeed {
+    static func ensure(at root: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try AppDataStore(root: root).update { value in
+            value["assets"] = "Assets/Assets.colcat"
+            value["history"] = "Global.colhis"
+            if value["appbridge"] == nil { value["appbridge"] = [] }
+        }
+        let keys = root.appendingPathComponent("Keys")
+        try fm.createDirectory(at: keys, withIntermediateDirectories: true)
+        let key = keys.appendingPathComponent("default.colkeys")
+        if !fm.fileExists(atPath: key.path) { try KeyProfiles.write(KeyProfile(name: "Default", description: "Your keyboard shortcuts.", shortcuts: [:], quickKeys: [:]), to: key) }
+        let assets = GlobalAssets(home: root)
+        if !fm.fileExists(atPath: assets.index.path) { try assets.save(Library()) }
+        let history = root.appendingPathComponent("Global.colcat")
+        if !fm.fileExists(atPath: HistoryStore.url(beside: history).path) { try HistoryStore.save(StepHistory(), beside: history) }
+        try fm.createDirectory(at: root.appendingPathComponent("Catalogues"), withIntermediateDirectories: true)
+    }
+}

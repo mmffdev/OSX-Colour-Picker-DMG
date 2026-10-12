@@ -13,7 +13,7 @@ final class FormatRow: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        label.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        label.font = NSFont.systemFont(ofSize: 13, weight: .bold)
         values.orientation = .horizontal
         values.spacing = 0
         values.distribution = .fillEqually
@@ -54,7 +54,7 @@ final class FormatRow: NSView {
         values.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for field in format.fields(hex, lowercase: Prefs.lowercaseHex) {
             let t = NSTextField(labelWithString: field)
-            t.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            t.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
             t.textColor = ink
             t.alignment = .right
             values.addArrangedSubview(t)
@@ -481,7 +481,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         wcag.setButtonType(.pushOnPushOff)
         wcag.bezelStyle = .recessed
         wcag.controlSize = .small
-        wcag.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        wcag.font = NSFont.systemFont(ofSize: TextSize.body, weight: .semibold)
         wcag.target = self
         wcag.action = #selector(wcagTapped)
         wcag.toolTip = "Show WCAG text contrast on each card"
@@ -496,7 +496,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         labelsPopover = tickPopover(labelChecks)
 
         addTo.controlSize = .small
-        addTo.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        addTo.font = NSFont.systemFont(ofSize: TextSize.body)
         addTo.addItem(withTitle: "Add to Palette")
         addTo.menu?.delegate = self
         func small(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
@@ -521,7 +521,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         sort.addItems(withTitles: ["Order Added", "Newest First", "Colour Order"])
         sort.controlSize = .small
-        sort.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        sort.font = NSFont.systemFont(ofSize: TextSize.body)
         sort.target = self
         sort.action = #selector(sortChanged)
 
@@ -534,7 +534,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
 
         // The shared header: the name has the top row to itself; under it, the count on the left and the actions on the right.
         profile.controlSize = .small
-        profile.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        profile.font = NSFont.systemFont(ofSize: TextSize.body)
         profile.target = self
         profile.action = #selector(profileChanged)
         // The contrast, the profile, the order and the labels are on rail2 now.

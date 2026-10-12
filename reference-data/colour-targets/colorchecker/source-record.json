@@ -1,0 +1,156 @@
+{
+  "created": "2019-06-14T09:38:56.636535+00:00",
+  "modified": "2020-11-30T07:49:27.510196+00:00",
+  "id": 3245895,
+  "conceptrecid": "3245894",
+  "doi": "10.5281/zenodo.3245895",
+  "conceptdoi": "10.5281/zenodo.3245894",
+  "doi_url": "https://doi.org/10.5281/zenodo.3245895",
+  "metadata": {
+    "title": "New Color Specifications for ColorChecker SG and Classic Charts - X-Rite (2016)",
+    "doi": "10.5281/zenodo.3245895",
+    "publication_date": "2019-06-14",
+    "description": "<p><strong>Source</strong>:&nbsp;<a href=\"https://xritephoto.com/ph_product_overview.aspx?ID=938&amp;Action=Support&amp;SupportID=5884\">https://xritephoto.com/ph_product_overview.aspx?ID=938&amp;Action=Support&amp;SupportID=5884</a></p>\n\n<p>The color formulations for the ColorChecker SG and ColorChecker Classic (24 Patches) needed to be changed for regulatory and compliance reasons. This is true for all black and gray shades as well as the color shades. Charts editions, which are manufactured after November 2014 have been and will be produced with the new colorants used within our coating process.</p>\n\n<p>The production date of a ColorChecker SG and a ColorChecker Classic chart (A4 or LTR) is printed on the back side. For more information&nbsp;<a href=\"http://xritephoto.com/ph_product_overview.aspx?ID=938&amp;Action=Support&amp;SupportID=5883&amp;catid=28\">click here</a>.</p>\n\n<p>As a consequence, the new chart editions require the use of new colorimetric reference data for the creation of an accurate color profile. The new data can be downloaded as CGATS formatted text files from the links below. Owners of charts produced prior to November 2014 should continue referring to the reference data &lsquo;Before November 2014&rsquo;. Owners of charts after November 2014 or newer should refer to the new reference data &lsquo;After November 2014&rsquo;.</p>",
+    "access_right": "open",
+    "creators": [
+      {
+        "name": "X-Rite",
+        "affiliation": null
+      }
+    ],
+    "keywords": [
+      "Colour Science",
+      "CIE Lab"
+    ],
+    "version": "1.0.0",
+    "resource_type": {
+      "title": "Dataset",
+      "type": "dataset"
+    },
+    "license": {
+      "id": "notspecified"
+    },
+    "communities": [
+      {
+        "id": "colour-science-datasets-tests"
+      },
+      {
+        "id": "colour-science-datasets"
+      }
+    ],
+    "relations": {
+      "version": [
+        {
+          "index": 0,
+          "is_last": true,
+          "parent": {
+            "pid_type": "recid",
+            "pid_value": "3245894"
+          }
+        }
+      ]
+    }
+  },
+  "title": "New Color Specifications for ColorChecker SG and Classic Charts - X-Rite (2016)",
+  "links": {
+    "self": "https://zenodo.org/api/records/3245895",
+    "self_html": "https://zenodo.org/records/3245895",
+    "preview_html": "https://zenodo.org/records/3245895?preview=1",
+    "doi": "https://doi.org/10.5281/zenodo.3245895",
+    "self_doi": "https://doi.org/10.5281/zenodo.3245895",
+    "self_doi_html": "https://zenodo.org/doi/10.5281/zenodo.3245895",
+    "reserve_doi": "https://zenodo.org/api/records/3245895/draft/pids/doi",
+    "parent": "https://zenodo.org/api/records/3245894",
+    "parent_html": "https://zenodo.org/records/3245894",
+    "parent_doi": "https://doi.org/10.5281/zenodo.3245894",
+    "parent_doi_html": "https://zenodo.org/doi/10.5281/zenodo.3245894",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/record:3245895/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/record:3245895/sequence/default",
+    "files": "https://zenodo.org/api/records/3245895/files",
+    "media_files": "https://zenodo.org/api/records/3245895/media-files",
+    "latest": "https://zenodo.org/api/records/3245895/versions/latest",
+    "latest_html": "https://zenodo.org/records/3245895/latest",
+    "versions": "https://zenodo.org/api/records/3245895/versions",
+    "draft": "https://zenodo.org/api/records/3245895/draft",
+    "access_links": "https://zenodo.org/api/records/3245895/access/links",
+    "access_grants": "https://zenodo.org/api/records/3245895/access/grants",
+    "access_users": "https://zenodo.org/api/records/3245895/access/users",
+    "access_request": "https://zenodo.org/api/records/3245895/access/request",
+    "access": "https://zenodo.org/api/records/3245895/access",
+    "communities": "https://zenodo.org/api/records/3245895/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/3245895/communities-suggestions",
+    "request_deletion": "https://zenodo.org/api/records/3245895/request-deletion",
+    "file_modification": "https://zenodo.org/api/records/3245895/file-modification",
+    "quota_increase": "https://zenodo.org/api/records/3245895/quota-increase",
+    "requests": "https://zenodo.org/api/records/3245895/requests"
+  },
+  "updated": "2020-11-30T07:49:27.510196+00:00",
+  "recid": "3245895",
+  "revision": 7,
+  "files": [
+    {
+      "id": "f6f3ffa6-408e-492a-a340-a2a59fbb351f",
+      "key": "ColorCheckerSG_After_Nov2014.zip",
+      "size": 1945,
+      "checksum": "md5:9758a65f8a796a9ae9101981824a9fdc",
+      "links": {
+        "self": "https://zenodo.org/api/records/3245895/files/ColorCheckerSG_After_Nov2014.zip/content"
+      }
+    },
+    {
+      "id": "fa292cc9-83bb-4bc4-8c74-933b626a2079",
+      "key": "ColorCheckerSG_Before_Nov2014.zip",
+      "size": 1822,
+      "checksum": "md5:2a81f6888b75f40f5f75aaae16d044e4",
+      "links": {
+        "self": "https://zenodo.org/api/records/3245895/files/ColorCheckerSG_Before_Nov2014.zip/content"
+      }
+    },
+    {
+      "id": "62db198a-c254-422e-a8cd-c36fdfbe5ece",
+      "key": "urls.txt",
+      "size": 553,
+      "checksum": "md5:6c65870e0c39143ec946159db7f6de38",
+      "links": {
+        "self": "https://zenodo.org/api/records/3245895/files/urls.txt/content"
+      }
+    },
+    {
+      "id": "1f78d883-5842-4713-8e15-33e2226014fa",
+      "key": "ColorChecker24_After_Nov2014.zip",
+      "size": 794,
+      "checksum": "md5:bc09e5e6a0a5812a26fe693a710522f1",
+      "links": {
+        "self": "https://zenodo.org/api/records/3245895/files/ColorChecker24_After_Nov2014.zip/content"
+      }
+    },
+    {
+      "id": "72d02c92-faa8-4c7a-ade2-29d31e2781ac",
+      "key": "ColorChecker24_Before_Nov2014.zip",
+      "size": 781,
+      "checksum": "md5:51fce7c53060154ec48d4c77804bd301",
+      "links": {
+        "self": "https://zenodo.org/api/records/3245895/files/ColorChecker24_Before_Nov2014.zip/content"
+      }
+    }
+  ],
+  "swh": {},
+  "owners": [
+    {
+      "id": "5866"
+    }
+  ],
+  "status": "published",
+  "stats": {
+    "downloads": 5921,
+    "unique_downloads": 2697,
+    "views": 2435,
+    "unique_views": 2292,
+    "version_downloads": 5906,
+    "version_unique_downloads": 2690,
+    "version_unique_views": 2285,
+    "version_views": 2427
+  },
+  "state": "done",
+  "submitted": true
+}

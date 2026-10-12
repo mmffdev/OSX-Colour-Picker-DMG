@@ -33,7 +33,7 @@ final class ScreenSampler {
             w.orderFrontRegardless()
         }
         NSApp.activate(ignoringOtherApps: true)
-        overlays.first?.makeKey()
+        (overlays.first { $0.frame.contains(NSEvent.mouseLocation) } ?? overlays.first)?.makeKey()
     }
 
     private func finish(_ image: CGImage?) {
@@ -46,7 +46,8 @@ final class ScreenSampler {
     /// Reads the pixels under `rect` (in screen points) once the overlays are out of the way.
     private func capture(_ rect: NSRect, on screen: NSScreen) {
         overlays.forEach { $0.orderOut(nil) }
-        guard rect.width >= 4, rect.height >= 4,
+        let rect = rect.intersection(screen.frame)
+        guard !rect.isNull, rect.width >= 4, rect.height >= 4,
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { finish(nil); return }
         Task { @MainActor in
             let image = await Self.image(of: rect, on: number, screen: screen)
@@ -100,7 +101,12 @@ final class SampleOverlayWindow: NSWindow {
         }
         view.onCancel = { [weak self] in self?.onCancel?() }
         contentView = view
+        // AppKit may position a new window relative to the current main screen.
+        // Set the global frame explicitly, including displays with negative origins.
+        setFrame(screen.frame, display: false)
+        acceptsMouseMovedEvents = true
     }
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { onCancel?() }
     override func keyDown(with event: NSEvent) {
@@ -123,14 +129,19 @@ final class SampleOverlayView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let t = tracking { removeTrackingArea(t) }
-        tracking = NSTrackingArea(rect: bounds, options: [.cursorUpdate, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        tracking = NSTrackingArea(rect: bounds, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(tracking!)
     }
     override func cursorUpdate(with event: NSEvent) { NSCursor.crosshair.set() }
+    override func mouseEntered(with event: NSEvent) {
+        window?.makeKey(); window?.makeFirstResponder(self)
+        NSCursor.crosshair.set()
+    }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeKey(); window?.makeFirstResponder(self)
         start = convert(event.locationInWindow, from: nil)
         current = start
         needsDisplay = true

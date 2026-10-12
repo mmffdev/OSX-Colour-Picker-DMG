@@ -12,6 +12,7 @@ import CoreImage
 // header; the headers and the words stay.
 
 final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, PageSection, Overlay {
+    var sectionAnchors: [(String,CGFloat)] { [("Structure",SettingsSheet.headerGuide+1),("Schema",SettingsSheet.schemaContentStart + 4*Design.App.unit)] }
     /// The template menu open over a type row, if any.
     private var dropped: SwissDropdown.MenuPanel?
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
@@ -137,9 +138,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     private let nameField = NSTextField(string: "")
     /// The description: a box of four lines, each line on the beat, in its own scroll.
     private let about = NSTextView()
-    private let aboutScroll = NSScrollView()
-    private let mapScroll = SchemaTypeScroll()
-    private let typeScroll = SchemaTypeScroll()
+    private let aboutScroll = FittedScrollView()
+    private let mapScroll = FittedScrollView()
+    private let typeScroll = FittedScrollView()
     private let map = Canvas(), types = Canvas()
 
     /// What a row's action is: a child beneath, a sibling after, or the bin.
@@ -209,7 +210,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         addSubview(aboutScroll)
         for (scroll, canvas) in [(mapScroll, map), (typeScroll, types)] {
             scroll.drawsBackground = false
-            scroll.verticalScroller = SchemaYellowScroller()
+            scroll.verticalScroller = QuietScroller()
             scroll.hasVerticalScroller = true
             scroll.autohidesScrollers = false
             scroll.scrollerStyle = .legacy
@@ -1128,27 +1129,5 @@ private final class SchemaSafetyCheckbox: NSButton {
         NSBezierPath(rect: box).stroke()
         if state == .on { Design.ink.setFill(); box.insetBy(dx: 3, dy: 3).fill() }
         Design.attributed(title, .body).draw(at: NSPoint(x: 22, y: (bounds.height - 16) / 2))
-    }
-}
-
-/// Reserve a gutter beside the row canvas, even while the overlay scroller is hidden.
-private final class SchemaTypeScroll: NSScrollView {
-    override func tile() {
-        super.tile()
-        let gutter = Design.App.gutter
-        contentView.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - gutter), height: bounds.height)
-        verticalScroller?.frame = NSRect(x: bounds.width - gutter, y: 0, width: gutter, height: bounds.height)
-    }
-}
-
-private final class SchemaYellowScroller: NSScroller {
-    override func draw(_ dirtyRect: NSRect) {
-        Design.card.setFill(); bounds.fill()
-        if knobProportion < 1 { drawKnob() }
-    }
-    override class var isCompatibleWithOverlayScrollers: Bool { true }
-    override func drawKnob() {
-        Design.houseYellow.setFill()
-        NSBezierPath(roundedRect: rect(for: .knob).insetBy(dx: 3, dy: 1), xRadius: 3, yRadius: 3).fill()
     }
 }

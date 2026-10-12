@@ -29,6 +29,9 @@ targets:
         name: Sources
         includes: ["*.swift"]
         excludes: ["Package.swift", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html", "appstore", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
+      - path: ../ProofingResources
+        name: Proofing Reference Data
+        buildPhase: resources
       - path: ../AppIcon.icns
         buildPhase: resources
       - path: ../icons

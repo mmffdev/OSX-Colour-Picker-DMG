@@ -564,7 +564,7 @@ final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
                 let text = apca ? String(Int(lcv.rounded(.down))) : String(format: "%.1f", (ratio * 10 + 1e-9).rounded(.down) / 10)
                 let weak = apca ? lcv < APCAUse.headline.minimum : ratio < 3
                 // The score and the square of the text colour being judged, a quarter of the cell's size and centred in it, as one group.
-                let size = max(11, (min(cell.width, cell.height) * 0.25).rounded())
+                let size = max(13, (min(cell.width, cell.height) * 0.25).rounded())
                 let t = Design.attributed(text, .caption, size: size, colour: readable.withAlphaComponent(weak ? 0.5 : 1))
                 let tw = t.size().width.rounded(), gap = (size * 0.5).rounded()
                 // The square is the numeral's cap height, so the two sit on one line.

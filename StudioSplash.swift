@@ -43,7 +43,7 @@ final class StudioSplash: NSView {
     private let lighthouse = LighthouseView()
     private static let showLighthouse = false
     private let tree: SplashTreeView
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
     private let band = SplashBand()
     private let surface = SplashBand()
     private let back = SwissButton("Back", .secondary), next = SwissButton("Continue", .primary)
@@ -245,7 +245,7 @@ final class StudioSplash: NSView {
         do {
             if let session = session {
                 guard let name = session.createdName, let folder = session.createdFolder else { throw CatalogueSetup.Failure.missingCatalogue }
-                let store = LibraryStore(directory: folder, legacyURL: nil, name: name)
+                let store = LibraryStore(directory: folder, legacyURL: nil, name: name, assetsHome: Catalogues.standard.root)
                 try CatalogueSetup.build(draft, into: store)
             } else {
                 if let name = draft.catalogueName, name != library.catalogue {
@@ -892,7 +892,7 @@ final class SplashBlocks: SplashSection {
     /// and the words stay, the pane takes the section's columns from row 11 down and a margin more so its scroller sits in the
     /// gutter at the right, and its wheel never reaches the splash.
     let pane: SplashPane
-    private let scroll = NSScrollView()
+    private let scroll = FittedScrollView()
 
     init(index: Int, step: String, first: String, second: String, words: String, pane: SplashPane) {
         (self.step, self.first, self.second, self.words, self.pane) = (step, first, second, words, pane)

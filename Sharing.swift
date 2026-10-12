@@ -128,10 +128,10 @@ enum Sharing {
                 && SchemaTrial.folder(of: $0.id, among: schema.collections, places: schema.places) == folder }
         }
         func groupNode(_ f: SchemaFolder, in c: SchemaCollection) -> ShareNode {
-            ShareNode(id: f.id.uuidString, kind: .group, name: f.name, children: members(of: c, folder: f.id).map(memberNode))
+            ShareNode(id: f.id.uuidString, kind: .group, name: f.name, children: c.children(of: f.id).map { groupNode($0, in: c) } + members(of: c, folder: f.id).map(memberNode))
         }
         func collectionNode(_ c: SchemaCollection) -> ShareNode {
-            ShareNode(id: c.id.uuidString, kind: .collection, name: c.name, children: c.folders.map { groupNode($0, in: c) } + members(of: c, folder: nil).map(memberNode))
+            ShareNode(id: c.id.uuidString, kind: .collection, name: c.name, children: c.children(of: nil).map { groupNode($0, in: c) } + members(of: c, folder: nil).map(memberNode))
         }
         switch level {
         case .palette:
@@ -147,8 +147,10 @@ enum Sharing {
         case .catalogue:
             let loose = lib.palettes(in: nil)
             let pools = [ShareNode(id: "pool:" + TreeFiles.palettesPool, kind: .pool, name: TreeFiles.palettesPool, children: loose.filter { !$0.isTypography }.map(paletteNode)),
-                         ShareNode(id: "pool:" + TreeFiles.typographyPool, kind: .pool, name: TreeFiles.typographyPool, children: loose.filter { $0.isTypography }.map(paletteNode))]
-            var children = [ShareNode(id: "library", kind: .library, name: TreeFiles.library, children: pools)]
+                         ShareNode(id: "pool:" + TreeFiles.typographyPool, kind: .pool, name: TreeFiles.typographyPool, children: loose.filter { $0.isTypography }.map(paletteNode)),
+                         ShareNode(id: "pool:Swatches", kind: .pool, name: "Loose Colours", children: []),
+                         ShareNode(id: "pool:Profiles", kind: .pool, name: "Colour Profiles", children: [])]
+            var children = [ShareNode(id: "library", kind: .library, name: "Global Assets", children: pools)]
             if let t = schema.templates, !t.isEmpty {
                 children.append(ShareNode(id: "templates", kind: .templates, name: "Templates", children: t.map { ShareNode(id: $0.id.uuidString, kind: .template, name: $0.name, children: []) }))
             }
@@ -174,14 +176,16 @@ enum Sharing {
         case .workGroup:
             if let id = subject, let p = lib.project(id) {
                 var home = collection(of: id)
-                home.folders = home.folders.filter { $0.id == folder(of: id) }
+                home.folders = folder(of: id).map { home.chain(to: $0) } ?? []
                 cut.collections = [home]
                 members = [p]
             } else if let c = schema.collections.first(where: { $0.folders.contains { $0.id == subject } }) {
                 var home = c
-                home.folders = c.folders.filter { $0.id == subject }
+                let selected = Set(c.descendants(of: subject!).map { $0.id } + [subject!])
+                let ancestors = Set(c.chain(to: subject!).map { $0.id })
+                home.folders = c.folders.filter { selected.contains($0.id) || ancestors.contains($0.id) }
                 cut.collections = [home]
-                members = lib.orderedProjects.filter { collection(of: $0.id).id == c.id && folder(of: $0.id) == subject && on($0.id) }
+                members = lib.orderedProjects.filter { collection(of: $0.id).id == c.id && folder(of: $0.id).map { selected.contains($0) } == true && on($0.id) }
             }
         case .collection:
             if let c = schema.collections.first(where: { $0.id == subject }) {
@@ -208,13 +212,13 @@ enum Sharing {
         // The colours the palettes use; the whole catalogue also takes the colours no palette holds.
         let keys = Set(palettes.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
         let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
-        out.colours = lib.colours.filter { keys.contains($0.hex) || (level == .catalogue && !used.contains($0.hex)) }
+        out.colours = lib.colours.filter { keys.contains($0.hex) || (level == .catalogue && (ticked?.contains("pool:Swatches") ?? true) && !used.contains($0.hex)) }
         // The tags they wear and the members' own; the profiles they work to.
         let kept = Set(members.map { $0.id })
         let worn = Set(palettes.flatMap { $0.tags ?? [] } + out.colours.flatMap { $0.tags ?? [] })
         out.tagInfo = lib.tagInfo.filter { t in t.projectID.map { kept.contains($0) } ?? (level == .catalogue || worn.contains(t.name)) }
         let profiles = Set(palettes.compactMap { $0.profile } + members.compactMap { $0.profile })
-        out.colourProfiles = lib.colourProfiles.filter { level == .catalogue || profiles.contains($0.id) }
+        out.colourProfiles = lib.colourProfiles.filter { (level == .catalogue && (ticked?.contains("pool:Profiles") ?? true)) || profiles.contains($0.id) }
         if strip.tags {
             out.tagInfo = []
             out.swatches = out.swatches.map { var s = $0; s.tags = nil; s.tagsChangedAt = nil; return s }
@@ -245,9 +249,58 @@ enum Sharing {
         }
     }
 
+    /// Gather catalogue-owned ASEs and explicitly connected locations into a portable tree.
+    static func appbridgeEntries(catalogueRoot: URL, sources: [URL], excluded: Set<String> = []) throws -> [Zip.Entry] {
+        let fm = FileManager.default
+        let local = catalogueRoot.appendingPathComponent(ASERegistry.directory)
+        var entries: [Zip.Entry] = [], seen = Set<String>(), paths = Set<String>(), total = 0
+        func gather(_ root: URL, prefix: String, optional: Bool = false) throws {
+            if optional && !fm.fileExists(atPath: root.path) { return }
+            let values = try root.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else { throw failure("Reconnect the real folder instead of the alias: " + root.lastPathComponent) }
+            var urls: [URL] = []
+            if values.isDirectory == true {
+                var error: Error?
+                guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, e in error = e; return false }) else { throw failure("Cannot read " + root.path) }
+                for case let url as URL in walker {
+                    let v = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                    if v.isSymbolicLink == true { walker.skipDescendants(); continue }
+                    if v.isRegularFile == true && url.pathExtension.lowercased() == "ase" { urls.append(url) }
+                    guard urls.count <= 1000 else { throw failure("An Appbridge folder exceeds the 1,000 ASE file export limit.") }
+                }
+                if let error { throw error }
+            } else if root.pathExtension.lowercased() == "ase" { urls = [root] }
+            for url in urls.sorted(by: { $0.path < $1.path }) {
+                guard !excluded.contains(url.standardizedFileURL.path), seen.insert(url.standardizedFileURL.path).inserted else { continue }
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard size <= 16 * 1024 * 1024, entries.count < 1000, total + size <= 256 * 1024 * 1024 else { throw failure("The selected ASE libraries exceed the export size limit.") }
+                let data = try Data(contentsOf: url); _ = try AdobeASE.read(data)
+                // Foundation enumeration canonicalises /var to /private/var on direct builds.
+                // Derive archive paths from the same canonical root, never from mismatched string lengths.
+                let canonicalRoot = root.resolvingSymlinksInPath().path
+                let canonicalFile = url.resolvingSymlinksInPath().path
+                if values.isDirectory == true, !canonicalFile.hasPrefix(canonicalRoot + "/") {
+                    throw failure("The ASE file is outside its selected folder.")
+                }
+                let relative = values.isDirectory == true ? String(canonicalFile.dropFirst(canonicalRoot.count + 1)) : url.lastPathComponent
+                let base = ASERegistry.directory + "/" + prefix + relative
+                var path = base, n = 2
+                while !paths.insert(path.lowercased()).inserted {
+                    path = (base as NSString).deletingPathExtension + " (\(n)).ase"; n += 1
+                }
+                entries.append(Zip.Entry(path: path, data: data)); total += data.count
+            }
+        }
+        try gather(local, prefix: "", optional: true)
+        for root in sources.sorted(by: { $0.path < $1.path }) {
+            try gather(root, prefix: filesystemName(root.deletingPathExtension().lastPathComponent) + "/")
+        }
+        return entries
+    }
+
     /// The files of a share, path and bytes, before the manifest: the cut written as a catalogue in a scratch folder, or the palette's one file.
     static func package(level: ShareLevel, subject: UUID?, ticked: Set<String>?, strip: (tags: Bool, notes: Bool) = (false, false),
-                        from lib: Library, schema: SchemaTrial.SchemaFile, catalogueName: String) throws -> [Zip.Entry] {
+                        from lib: Library, schema: SchemaTrial.SchemaFile, catalogueName: String, appbridge: [Zip.Entry] = []) throws -> [Zip.Entry] {
         let (sub, cut) = self.cut(level: level, subject: subject, ticked: ticked, strip: strip, from: lib, schema: schema)
         if level == .palette {
             guard let s = sub.swatches.first else { throw ShareFault.notAShare("there is no palette to share") }
@@ -257,7 +310,7 @@ enum Sharing {
         let name = level == .catalogue ? catalogueName : tree(level: level, subject: subject, in: lib, schema: schema, catalogueName: catalogueName).name
         let dir = stagingRoot.appendingPathComponent("Out-" + UUID().uuidString).appendingPathComponent(filesystemName(name))
         defer { discard(dir.deletingLastPathComponent()) }
-        try CatalogueTree.write(sub, schema: cut, index: dir.appendingPathComponent(filesystemName(name) + "." + ColourFiles.catalogue), name: name)
+        try CatalogueTree.write(sub, schema: cut, index: dir.appendingPathComponent(filesystemName(name) + "." + ColourFiles.catalogue), name: name, poolDirectory: sub.palettes(in: nil).isEmpty ? "Support" : "Assets", createEmptyPools: false)
         var entries: [Zip.Entry] = []
         func walk(_ folder: URL) throws {
             for n in CatalogueTree.names(in: folder) {
@@ -266,6 +319,10 @@ enum Sharing {
             }
         }
         try walk(dir)
+        if level == .catalogue {
+            if appbridge.contains(where: { $0.path.hasSuffix(".colase") }) { entries.removeAll { $0.path.hasSuffix(".colase") } }
+            entries += appbridge
+        }
         return entries
     }
 
@@ -274,8 +331,15 @@ enum Sharing {
     /// Writes the share: the manifest first, then the files of the cut. With `ticked` nil everything goes.
     @discardableResult
     static func export(level: ShareLevel, subject: UUID?, from lib: Library, schema: SchemaTrial.SchemaFile, catalogue: ShareManifest.Named, ticked: Set<String>? = nil,
-                       strip: (tags: Bool, notes: Bool) = (false, false), to url: URL, now: Date = Date()) throws -> ShareManifest {
-        let entries = try package(level: level, subject: subject, ticked: ticked, strip: strip, from: lib, schema: schema, catalogueName: catalogue.name)
+                       strip: (tags: Bool, notes: Bool) = (false, false), appbridge: [Zip.Entry] = [], calibrationRoot: URL? = nil, to url: URL, now: Date = Date()) throws -> ShareManifest {
+        var entries = try package(level: level, subject: subject, ticked: ticked, strip: strip, from: lib, schema: schema, catalogueName: catalogue.name, appbridge: appbridge)
+        if level == .catalogue, let calibrationRoot {
+            for entry in try ProofConfigurationStore.entries(root: calibrationRoot) {
+                var config = try ProofConfiguration.decode(entry.data)
+                if strip.notes { config.session.notes = "" }
+                entries.append(Zip.Entry(path: entry.path, data: try JSONEncoder().encode(config)))
+            }
+        }
         let listed = entries.map { ShareManifest.File(path: $0.path, bytes: $0.data.count, sha256: sha256($0.data)) }
         let name = tree(level: level, subject: subject, in: lib, schema: schema, catalogueName: catalogue.name).name
         let manifest = ShareManifest(level: level, exportedAt: now, catalogue: catalogue, subject: ShareManifest.Named(id: subject ?? catalogue.id, name: name),
@@ -303,7 +367,7 @@ enum Sharing {
         guard let m = entries.first(where: { $0.path == ShareManifest.fileName }) else { throw ShareFault.notAShare("there is no manifest in it") }
         guard let manifest = try? d.decode(ShareManifest.self, from: m.data), manifest.format == "colour-share" else { throw ShareFault.notAShare("its manifest could not be read") }
         var problems: [String] = []
-        if manifest.version < 2 { problems.append("it was made by an earlier version of Colorgain, whose shares this version no longer reads") }
+        if manifest.version != 2 { problems.append("it was made by an earlier version of Colorgain, whose shares this version no longer reads") }
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
         for f in manifest.files {
             guard let entry = byPath[f.path] else { problems.append("\(f.path) is listed but missing"); continue }
@@ -366,6 +430,9 @@ enum Sharing {
         var palette: (Swatch, [Colour])?
         /// The node of the Contents tree each member, collection, level between and palette of the staged library is ticked by.
         var paths: [UUID: String] = [:]
+        var appbridge: [Zip.Entry] = []
+        var aseLinks: [AppbridgeStore.Source] = []
+        var calibrations: [Zip.Entry] = []
     }
 
     static func read(staging: URL, level: ShareLevel) throws -> Staged {
@@ -382,6 +449,19 @@ enum Sharing {
             return staged
         }
         let loaded = try CatalogueTree.read(root: staging)
+        if level == .catalogue { staged.calibrations = try ProofConfigurationStore.entries(root: staging) }
+        staged.appbridge = try appbridgeEntries(catalogueRoot: staging, sources: [])
+        if staged.appbridge.isEmpty, FileManager.default.fileExists(atPath: staging.appendingPathComponent("AppBridge/ASE").path) {
+            staged.appbridge = try appbridgeEntries(catalogueRoot: staging, sources: [staging.appendingPathComponent("AppBridge/ASE")])
+        }
+        let registry = try ASERegistry.read(staging)
+        if !registry.sources.isEmpty {
+            let paths = Set(staged.appbridge.map { $0.path })
+            guard registry.sources.allSatisfy({ !$0.folder && !$0.path.hasPrefix("/") && paths.contains($0.path) }) else { throw failure("The ASE registry references files outside this archive.") }
+            staged.aseLinks = registry.sources
+        } else {
+            staged.aseLinks = staged.appbridge.map { AppbridgeStore.Source(path: $0.path, folder: false) }
+        }
         staged.library = loaded.library
         staged.schema = loaded.schema
         for p in loaded.library.projects { staged.paths[p.id] = p.id.uuidString }
@@ -475,14 +555,29 @@ enum Sharing {
     /// The colours a palette holds, as the keys the catalogue holds them by: hex for an sRGB colour, the colour's own key beyond it.
     private static func coloursOf(_ s: Swatch) -> Set<String> { Set(s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] }) }
 
+    /// Semantic equality preserves order, notes, typography and colour definitions. Names and
+    /// bookkeeping do not turn an otherwise identical asset into different content.
+    static func contentKey(_ palette: Swatch, in lib: Library) -> String {
+        let doc = CatalogueTree.paletteDocument(palette, in: lib, member: nil, file: "")
+        guard let data = try? e.encode(doc), var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "" }
+        if var p = object["palette"] as? [String: Any] { p.removeValue(forKey: "name"); object["palette"] = p }
+        func clean(_ value: Any) -> Any {
+            if let list = value as? [Any] { return list.map(clean) }
+            guard let dict = value as? [String: Any] else { return value }
+            let ignored: Set<String> = ["id", "catalogue", "project", "projectID", "file", "generator", "createdAt", "pickedAt", "addedAt", "placedAt", "copiedFrom", "position", "isFavourite"]
+            return dict.filter { !ignored.contains($0.key) && !$0.key.hasSuffix("ChangedAt") }.mapValues(clean)
+        }
+        return (try? JSONSerialization.data(withJSONObject: clean(object), options: [.sortedKeys])).map(sha256) ?? ""
+    }
+
     /// What in the share is already in the catalogue, among what is ticked, where it would land.
     static func duplicates(in staged: Staged, ticked: Set<String>?, into lib: Library, schema: SchemaTrial.SchemaFile, placement: Placement) -> [Duplicate] {
         var out: [Duplicate] = []
         func included(_ id: UUID) -> Bool { ticked.map { t in staged.paths[id].map { t.contains($0) } ?? true } ?? true }
         func paletteTwins(_ s: Swatch, home: UUID?) {
             if let have = lib.swatch(s.id) { out.append(Duplicate(kind: .palette, id: s.id, name: s.name, why: .sameID, existing: have.name)); return }
-            let colours = coloursOf(s)
-            if !colours.isEmpty, let same = lib.swatches.first(where: { coloursOf($0) == colours && $0.isTypography == s.isTypography }) { out.append(Duplicate(kind: .palette, id: s.id, name: s.name, why: .sameColours, existing: same.name)); return }
+            let key = contentKey(s, in: staged.library)
+            if !key.isEmpty, let same = lib.swatches.first(where: { contentKey($0, in: lib) == key }) { out.append(Duplicate(kind: .palette, id: s.id, name: s.name, why: .sameColours, existing: same.name)); return }
             if let same = lib.palettes(in: home).first(where: { $0.name.lowercased() == s.name.lowercased() }) { out.append(Duplicate(kind: .palette, id: s.id, name: s.name, why: .sameName, existing: same.name)) }
         }
         if let (p, _) = staged.palette {
@@ -536,8 +631,8 @@ enum Sharing {
         /// The twin a palette replaces, by id or by the colours it holds.
         func twin(of s: Swatch, in home: UUID?) -> UUID? {
             if lib.swatch(s.id) != nil { return s.id }
-            let colours = coloursOf(s)
-            if !colours.isEmpty, let same = lib.swatches.first(where: { coloursOf($0) == colours && $0.isTypography == s.isTypography }) { return same.id }
+            let key = contentKey(s, in: staged.library)
+            if !key.isEmpty, let same = lib.swatches.first(where: { contentKey($0, in: lib) == key }) { return same.id }
             return lib.palettes(in: home).first { $0.name.lowercased() == s.name.lowercased() }?.id
         }
         func takeColours(_ colours: [Colour]) {
@@ -592,7 +687,15 @@ enum Sharing {
             for c in all where included(c.id) {
                 var made = c
                 switch answer(c.id) {
-                case .skip?: out.skipped += 1; continue
+                case .skip?:
+                    if let existing = schema.collections.first(where: { $0.id == c.id || $0.name.lowercased() == c.name.lowercased() }) {
+                        collectionNow[c.id] = existing.id
+                        for f in c.folders { folderNow[f.id] = existing.folders.first(where: { $0.id == f.id || $0.name == f.name })?.id ?? f.id }
+                        if let at = schema.collections.firstIndex(where: { $0.id == existing.id }) {
+                            for var f in c.folders where !schema.collections[at].folders.contains(where: { $0.id == folderNow[f.id] }) { f.id = folderNow[f.id] ?? f.id; f.parent = f.parent.flatMap { folderNow[$0] }; schema.collections[at].folders.append(f) }
+                        }
+                    }
+                    out.skipped += 1; continue
                 case .replace?:
                     if let at = schema.collections.firstIndex(where: { $0.id == c.id || $0.name.lowercased() == c.name.lowercased() }) {
                         made.id = schema.collections[at].id
@@ -605,6 +708,7 @@ enum Sharing {
                     if schema.collections.contains(where: { $0.id == c.id }) { made.id = UUID() }
                     if answer(c.id) == .rename || schema.collections.contains(where: { $0.name.lowercased() == c.name.lowercased() }) { made.name = uniqueName(c.name, among: schema.collections.map { $0.name }) }
                     made.folders = c.folders.map { f in var g = f; if schema.collections.contains(where: { $0.folders.contains { $0.id == f.id } }) { g.id = UUID() }; folderNow[f.id] = g.id; return g }
+                    made.folders = made.folders.map { f in var g = f; g.parent = f.parent.flatMap { folderNow[$0] }; return g }
                     schema.collections.append(made)
                     if answer(c.id) == .rename { out.renamed += 1 } else { out.added += 1 }
                 case nil:
@@ -628,14 +732,19 @@ enum Sharing {
             made.folder = nil; made.fileKnown = nil
             var replacing = false
             switch answer(p.id) {
-            case .skip?: out.skipped += 1; continue
+            case .skip?:
+                if let existing = lib.project(p.id) ?? lib.orderedProjects.first(where: { $0.name.lowercased() == p.name.lowercased() && SchemaTrial.collection(of: $0.id, among: schema.collections, places: schema.places).id == toCollection }) {
+                    memberNow[p.id] = existing.id
+                    for s in staged.library.palettes(in: p.id) { take(s, colours: staged.library.colours.filter { coloursOf(s).contains($0.hex) }, into: existing.id) }
+                }
+                out.skipped += 1; continue
             case .replace?:
                 let old = lib.project(p.id)?.id ?? lib.orderedProjects.first { $0.name.lowercased() == p.name.lowercased() && SchemaTrial.collection(of: $0.id, among: schema.collections, places: schema.places).id == toCollection }?.id
                 if let old = old {
                     made = made.withID(old)
                     made.position = lib.project(old)?.position
                     // Its palettes go, for the share's to take their place.
-                    for s in lib.palettes(in: old) { lib.deleteSwatch(s.id, at: date) }
+                    // Merge selected assets; an import never deletes unselected existing palettes.
                     lib.projects.removeAll { $0.id == old }
                     replacing = true
                 }
@@ -663,6 +772,7 @@ enum Sharing {
             for profile in staged.library.colourProfiles where !lib.colourProfiles.contains(where: { $0.id == profile.id }) { lib.colourProfiles.append(profile) }
             for t in staged.schema.templates ?? [] where !(schema.templates ?? []).contains(where: { $0.id == t.id }) { schema.templates = (schema.templates ?? []) + [t] }
         }
+        for profile in staged.library.colourProfiles where !lib.colourProfiles.contains(where: { $0.id == profile.id }) { lib.colourProfiles.append(profile) }
         takeTags(staged.library.tagInfo, member: memberNow)
         return out
     }
@@ -679,7 +789,8 @@ extension Project {
 
 extension Sharing {
     /// For the self-test: a palette under a new id.
-    static func renamedCopyForTest(_ s: Swatch) -> Swatch { renamedCopy(s, date: Date()) }
+    static func independentCopy(_ s: Swatch) -> Swatch { renamedCopy(s, date: Date()) }
+    static func renamedCopyForTest(_ s: Swatch) -> Swatch { independentCopy(s) }
     /// The same palette under a new id, its pairings renewed with it, so it stands beside the one it came from.
     private static func renamedCopy(_ s: Swatch, date: Date) -> Swatch {
         var p = Swatch(id: UUID(), name: s.name, createdAt: s.createdAt, entries: s.entries)
@@ -689,5 +800,38 @@ extension Sharing {
         p.stylesChangedAt = s.stylesChangedAt; p.copiedFrom = s.id; p.profile = s.profile; p.profileChangedAt = s.profileChangedAt
         p.purposes = s.purposes; p.purpose = s.purpose; p.purposeChangedAt = s.purposeChangedAt
         return p
+    }
+}
+
+extension Sharing {
+    /// Whole catalogues are independent; matching names/content in another catalogue are irrelevant.
+    static func importCatalogue(_ staged: Staged, ticked: Set<String>?, name: String, catalogues: Catalogues, aseSelection: Set<UUID>? = nil) throws -> String {
+        let fm = FileManager.default
+        var chosen = filesystemName(name), number = 2
+        while catalogues.names().contains(where: { $0.caseInsensitiveCompare(chosen) == .orderedSame }) || fm.fileExists(atPath: catalogues.folder.appendingPathComponent(chosen).path) {
+            chosen = filesystemName(name) + " \(number)"; number += 1
+        }
+        let parts = cut(level: .catalogue, subject: nil, ticked: ticked, from: staged.library, schema: staged.schema)
+        let temp = catalogues.folder.appendingPathComponent(".Import-" + UUID().uuidString)
+        let dest = catalogues.folder.appendingPathComponent(chosen)
+        defer { try? fm.removeItem(at: temp) }
+        try CatalogueTree.write(parts.library, schema: parts.schema, index: temp.appendingPathComponent(chosen + "." + ColourFiles.catalogue), name: chosen)
+        let links = staged.aseLinks.filter { aseSelection == nil || aseSelection!.contains($0.id) }
+        let selectedPaths = Set(links.map { $0.path })
+        for entry in staged.appbridge where selectedPaths.contains(entry.path) {
+            let file = temp.appendingPathComponent(entry.path)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try entry.data.write(to: file, options: .withoutOverwriting)
+            ASEIcon.apply(to: file)
+        }
+        for entry in staged.calibrations {
+            _ = try ProofConfigurationStore.save(ProofConfiguration.decode(entry.data), root: temp)
+        }
+        try ASERegistry.write(links, root: temp, name: chosen)
+        _ = try CatalogueTree.read(root: temp)
+        try fm.moveItem(at: temp, to: dest)
+        do { try catalogues.registerChecked(chosen, at: dest) }
+        catch { try? fm.removeItem(at: dest); throw error }
+        return chosen
     }
 }

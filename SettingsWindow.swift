@@ -277,7 +277,7 @@ final class ExportPanel: SettingsPanel, NSTextFieldDelegate, NSTextViewDelegate 
         prefix.delegate = self
         prefix.placeholderString = "swatch"
         prefix.widthAnchor.constraint(equalToConstant: 160).isActive = true
-        preview.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        preview.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         preview.textColor = .secondaryLabelColor
         return [
             [heading("Exporting palettes"), blank],
@@ -306,7 +306,7 @@ final class ExportPanel: SettingsPanel, NSTextFieldDelegate, NSTextViewDelegate 
         owner.delegate = self
         owner.widthAnchor.constraint(equalToConstant: 260).isActive = true
         licence.isRichText = false
-        licence.font = NSFont.systemFont(ofSize: 11)
+        licence.font = NSFont.systemFont(ofSize: 13)
         licence.isAutomaticQuoteSubstitutionEnabled = false
         licence.textContainerInset = NSSize(width: 4, height: 6)
         licence.delegate = self

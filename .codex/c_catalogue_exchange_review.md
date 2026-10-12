@@ -1,6 +1,18 @@
 # Catalogue storage and exchange review
 
-2026-10-11. Discussion proposal; no engine, UI or user-data changes made by this review.
+2026-10-11. Implemented after discussion. The historical audit below records the original findings; its per-catalogue Assets proposal is superseded by this decision.
+
+## Implemented decision
+
+- App-home `Assets/Assets.colcat` owns unassigned palettes, typography, colours and profiles. Catalogues retain member-owned work and required supporting data. One common writer serves live storage and export.
+- `AppHomeSeed` creates colorgain.coldata, Keys/default.colkeys, Assets, Global.colhis and Catalogues before constructing a catalogue. Existing profiles and assets are preserved.
+- Migration backs up the original catalogue. Journalled two-store writes recover interrupted ownership moves; catalogue undo retains the global side of those moves.
+- Whole-catalogue import creates an independent catalogue with an available name, without comparing it against another catalogue. Optional global assets are excluded from export and unchecked on import by default.
+- Partial import retains conflict choices, compares semantic content, traverses reused containers and preserves unselected work.
+- Export/Import have their own titles, Cancel and meaningful selection controls. The empty import tree is removed; the only export level is fixed. Shortcuts retains Import, Export, Share and Restore Defaults with shared focus modals.
+- History now offers Catalogue and Global viewing. The old implementation filtered a single log by Project/Global; the new app-wide Global.colhis persists activity across catalogue changes.
+
+## Historical audit (before implementation)
 
 ## Clarification after discussion
 

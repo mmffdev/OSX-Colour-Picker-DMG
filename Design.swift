@@ -12,7 +12,7 @@ enum Design {
 
     /// Helvetica Neue by weight. Falls back to the system font only if a weight is missing, which no Mac does.
     static func font(_ size: CGFloat, _ weight: Weight) -> NSFont {
-        NSFont(name: weight.postScriptName, size: size) ?? NSFont.systemFont(ofSize: size, weight: weight.system)
+        NSFont(name: weight.postScriptName, size: max(13, size)) ?? NSFont.systemFont(ofSize: max(13, size), weight: weight.system)
     }
     enum Weight {
         case ultraLight, thin, light, regular, medium, bold
@@ -50,7 +50,7 @@ enum Design {
             case .header: return 15
             case .lead: return 20
             case .body, .bodyStrong, .action: return 13
-            case .caption, .label: return 11
+            case .caption, .label: return 13
             case .section: return 13
             case .numeral: return 64
             }
@@ -105,7 +105,7 @@ enum Design {
     /// `lineHeight` sets the style's line height, for text that wraps; a single-line label leaves it
     /// to the font, since a taller line pushes the glyphs out of a one-line cell.
     static func attributed(_ s: String, _ style: Text, size: CGFloat? = nil, colour: NSColor = Design.ink, align: NSTextAlignment = .left, lineHeight: Bool = false) -> NSAttributedString {
-        let sz = size ?? style.size
+        let sz = max(13, size ?? style.size)
         let p = NSMutableParagraphStyle()
         if lineHeight {
             p.minimumLineHeight = (sz * style.lineHeight).rounded()
@@ -186,9 +186,9 @@ enum Design {
         static let margin: CGFloat = 24
         static let gutter: CGFloat = 16
         /// The gutter between areas, twice the column gutter: between the rails, between rail2 and the page, and at a page's split.
-        /// A two-level grid: the window's twelve columns with the wide gutter after columns 2, 4 and 8, every area's own columns inside (Rick, 2026-10-09).
+        /// A two-level grid: the window's twelve columns with the wide gutter after columns 3, 5 and 8, every area's own columns inside (Rick, 2026-10-09).
         static let areaGutter: CGFloat = 32
-        static let wideAfter = [2, 4, 8]
+        static let wideAfter = [3, 5, 8]
         static var extra: CGFloat { areaGutter - gutter }
         static let columns = 12
         static let header: CGFloat = 64

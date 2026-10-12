@@ -250,3 +250,49 @@ A **colour profile** is a named set of channels: screen, video and rendering spa
 | **ACES, OCIO** | The film and VFX industry's colour standard, and the tool that applies it |
 | **TAC** | Total area coverage: the sum of the four inks, which a press limits |
 | **Spectral data** | How much of each wavelength a surface reflects |
+
+## 12. Print measurement interoperability
+
+Recorded 2026-10-11 at Rick's request. Integration direction; the items below are planned, not a claim of completed hardware support.
+
+- **Measurement conditions:** use ISO 13655 terminology, including M0/M1/M2/M3. Record the actual condition; do not infer it from Lab values or silently compare incompatible conditions.
+- **Exchange:** extend the existing CGATS import with CxF import/export (ISO 17972 family). Preserve spectral data and measurement metadata, not just displayed RGB. CxF is a data format, not a universal instrument-control protocol.
+- **Canonical measurement record:** exact patch ID, original spectral samples with wavelength range/interval and units, original Lab/XYZ where supplied, illuminant/observer, measurement geometry, M condition, backing, instrument/model, calibration and measurement timestamps when available, and source provenance. Keep unknown metadata explicitly unknown. Preserve original data alongside derived values.
+- **Hardware:** separate adapters feed the same measurement record. Evaluate manufacturer SDKs and ArgyllCMS for specific models, licensing, macOS support and App Store sandbox compatibility before selecting an integration. Do not assume a shared USB protocol or that all modes of a supported instrument work.
+- **Sequence:** file exchange first, live acquisition second. Both feed the same patch matching, validation, charts and reports.
+- **Density operating range:** replace the illustrative simulation only when a suitable series of measured ink densities and colour differences exists. Record the density measurement convention and fitting method; do not infer press adjustments from one Lab reading.
+
+Sources: [ISO measurement conditions](https://www.xrite.com/pl-pl/page/learn-more-about-m-standards), [CxF](https://www.xrite.com/it-it/page/cxf-color-exchange-format), [X-Rite integration SDKs](https://www.xrite.com/page/oem-licensing), [ArgyllCMS instruments](https://www.argyllcms.com/doc/instruments.html).
+
+## 13. Monitor setup and measured calibration
+
+Requested by Rick on 2026-10-11: first a guided visual tool for web designers without an instrument, then calibration with a device. Rick owns a Datacolor Spyder; the exact model remains to be confirmed. Stage 1 now has a first implementation (2026-10-12); Stage 2 remains planned.
+
+### Stage 1 — Visual monitor setup
+
+Implemented entry: **Proofing → Monitor Setup…** (`StudioMonitorSetup.swift`). Seven-step guide: preparation, shadows, highlights, neutral greys, RGB channel steps, gradients and review. Full-screen patterns open on the selected display; Space hides controls, arrow keys navigate, Escape returns. Checks, notes and date are saved locally per display UUID. This first release does not include the optional gamma-matching or photographic reference exercises below.
+
+A console-style guided sequence of full-screen test patterns, with instructions for adjusting the monitor's own controls. Label the result **Visually adjusted · Unmeasured**. Visual checks can reveal clipping, tint and banding but cannot establish accurate white point, luminance, gamut or colour differences, and must not produce a claimed measured ICC profile.
+
+1. Select and identify the display; keep patterns on that display, including mixed-scale multi-monitor setups. Start with SDR/web use and explain stable room lighting, warm-up, native resolution and temporarily disabling adaptive brightness, Night Shift, True Tone and dynamic contrast where applicable. Save reminders of the user's original choices.
+2. Show near-black and near-white steps for shadow/highlight separation. Explain brightness/backlight versus black-level and contrast controls; do not tell users to adjust controls their display does not expose.
+3. Show neutral greys, smooth gradients and separate RGB ramps for visible tint, banding and channel clipping. Include familiar colour images for a final subjective check; they cannot verify colour accuracy.
+4. Offer an optional visual gamma comparison with pixel-aligned patterns and clear rendering/scaling limitations. A web-oriented D65 / approximately 2.2 setup is a suggested preset, not a measured result; the sRGB transfer curve is not exactly a 2.2 power law. Do not ask users to judge absolute white point or cd/m² by eye.
+5. Save a per-display checklist, monitor settings entered by the user, date and viewing conditions. Offer repeat checks and a path to measured calibration. Retain the existing display profile; no invented correction or automatic system-profile replacement.
+
+Render patterns with an explicitly controlled colour space and documented ColorSync path. Distinguish colour-managed appearance checks from device-response measurements; avoid double transforms, HDR tone mapping and resampling that would invalidate patterns. Follow the shared Swiss page, modal and grid conventions.
+
+### Stage 2 — Instrument calibration and profiling
+
+- Confirm the Spyder model before promising compatibility. Display Spyders are colorimeters; their emissive display measurements are a separate workflow from reflective print measurements.
+- Use an instrument adapter with discovery, display-type correction selection, calibration/initialisation, placement guidance, progress, cancellation and recoverable errors. Verify SDK/driver licensing and sandbox access before bundling anything.
+- Measure white point, luminance, greyscale response and colour patches. Guide monitor RGB gains and brightness where available; distinguish physical monitor adjustment, video-card calibration curves and ICC display characterisation.
+- Build a per-display ICC profile with a proven profiling engine, then validate with independent patches. Report measured white/luminance, tonal response and colour differences with targets, conditions and provenance. Gamut claims require a supported measurement/model method.
+- Preview and explicitly apply a profile with a restore path to the preceding profile/calibration. Handle display reconnection and identity safely. Hardware LUT programming is model-specific and is not implied by Spyder support.
+- Preserve sessions and validation history; connect the measured display status to Proofing without suggesting that a calibrated screen certifies a printed proof.
+
+References: [Apple Display Calibrator Assistant](https://support.apple.com/en-ie/guide/mac-help/mchlp1109/27/mac/27), [Datacolor settings](https://spyder-support.datacolor.com/hc/en-us/articles/14107939757084-Settings), [instrument-guided RGB adjustment](https://spyder-support.datacolor.com/hc/en-us/articles/14108296618652-Calibration-RGB-Controls-SpyderPro-only), [ArgyllCMS model support](https://www.argyllcms.com/doc/instruments.html).
+
+Engine pivot and licence review (2026-10-12): [implementation and migration notes](.codex/c_colour_engine_pivot.md). LittleCMS core is the recommended transform replacement; ArgyllCMS hardware integration requires separate commercial-licence assessment. Neither is integrated yet.
+
+Consolidated research (2026-10-12): [Proofing, image palettes and print handover](PROOFING-AND-PRINT-HANDOVER-RESEARCH.md) records printer requirements, embedded/separate ICC workflows, saved-result gaps, the confirmed image-to-palette-and-proof direction, licences and implementation order.

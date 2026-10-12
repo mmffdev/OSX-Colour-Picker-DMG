@@ -149,9 +149,10 @@ final class PaletteWheel: NSView {
         isOpen = true
         window?.makeFirstResponder(self)
         animate(to: 1)
-        openButton.isHidden = snapshot.isEmpty
+        openButton.isHidden = true
         needsLayout = true
         announceSelection()
+        if !snapshot.isEmpty { showSelectedDetails() }
     }
     func dismiss() {
         guard isOpen else { return }
@@ -223,7 +224,7 @@ final class PaletteWheel: NSView {
         case 124, 125: showingDetails ? changeColour(1) : step(1)
         case 34:
             showSelectedDetails()
-        case 48: window?.makeFirstResponder(openButton)
+        case 48: step(event.modifierFlags.contains(.shift) ? -1 : 1)
         default: super.keyDown(with: event)
         }
     }
@@ -253,6 +254,10 @@ final class PaletteWheel: NSView {
     private func announceSelection() {
         guard let i = PaletteWheelModel.index(position, count: snapshot.count) else { return }
         let item = snapshot[i]
+        if isOpen, abs(position - destination.rounded()) < 0.001,
+           !showingDetails || detailOrdinal != Int(position.rounded()) {
+            showSelectedDetails()
+        }
         openButton.toolTip = "Show colour details for \(item.name)"
         openButton.setAccessibilityHelp(item.details.map { "\($0.name), \($0.hex)" }.joined(separator: "; "))
         openButton.setAccessibilityLabel("Show colour details for \(item.name), \(item.colours.count) colours, \(i + 1) of \(snapshot.count)")
@@ -309,14 +314,6 @@ final class PaletteWheel: NSView {
         }
         if let ordinal = hit(convert(event.locationInWindow, from: nil)) {
             guard let i = PaletteWheelModel.index(CGFloat(ordinal), count: snapshot.count) else { return }
-            let pointer = convert(event.locationInWindow, from: nil)
-            if let h = hits.first(where: { $0.ordinal == ordinal }) {
-                let dx = pointer.x - centre.x, dy = pointer.y - centre.y
-                let localX = dx * cos(h.angle) + dy * sin(h.angle)
-                if localX >= h.rect.maxX - 30 {
-                    detailOrdinal = ordinal; showingDetails = true; detailOffset = 0; previewIndex = 0; previewExpanded = false; expansion = 0; needsDisplay = true; return
-                }
-            }
             let id = snapshot[i].id
             dismiss(); onOpen?(id)
         } else {
@@ -503,14 +500,7 @@ final class PaletteWheel: NSView {
                 colour.setFill(); NSBezierPath(rect: NSRect(x: spectrum.minX + CGFloat(j) * width, y: spectrum.minY, width: width + 0.3, height: spectrum.height)).fill()
             }
             NSGraphicsContext.restoreGraphicsState()
-            let label = NSRect(x: x + spectrumWidth + 22, y: -9, width: spokeWidth - spectrumWidth - 54, height: 18)
-            let info = NSRect(x: rect.maxX - 23, y: -8, width: 16, height: 16)
-            (selected ? Design.paper : Design.quiet).setStroke()
-            let infoRing = NSBezierPath(ovalIn: info); infoRing.lineWidth = 1; infoRing.stroke()
-            NSGraphicsContext.saveGraphicsState()
-            let upright = NSAffineTransform(); upright.translateX(by: info.midX, yBy: info.midY); upright.rotate(byRadians: -a); upright.concat()
-            text("i", rect: NSRect(x: -6, y: -8, width: 12, height: 16), size: TextSize.caption, colour: selected ? Design.paper : Design.ink, centred: true)
-            NSGraphicsContext.restoreGraphicsState()
+            let label = NSRect(x: x + spectrumWidth + 22, y: -9, width: spokeWidth - spectrumWidth - 32, height: 18)
             if cos(a) < 0 {
                 let flip = NSAffineTransform(); flip.translateX(by: label.midX, yBy: label.midY); flip.rotate(byDegrees: 180); flip.translateX(by: -label.midX, yBy: -label.midY); flip.concat()
             }

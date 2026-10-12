@@ -1009,6 +1009,8 @@ enum StoreError: LocalizedError {
 }
 
 final class LibraryStore {
+    let assetsHome: URL?
+    private var globalAtLoad: Library?
     /// The catalogue's index, "Rick 001.colcatalogue"; the tree is the folder round it.
     let url: URL
     var root: URL { url.deletingLastPathComponent() }
@@ -1031,7 +1033,8 @@ final class LibraryStore {
     private(set) var notes: [String] = []
 
     /// `name` is the catalogue's, which its file is named for.
-    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil) {
+    init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil, assetsHome: URL? = nil) {
+        self.assetsHome = assetsHome
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // The structure file is "<name>.colcat"; an earlier version's index beside it gives the name until it is brought across.
         let found = CatalogueFiles.anyIndex(in: directory)
@@ -1066,8 +1069,10 @@ final class LibraryStore {
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
         let fm = FileManager.default, stamp = Int(Date().timeIntervalSince1970)
+        if let home = assetsHome { try AssetTransaction.recover(home: home) }
         if Migration.needed(in: root) { try Migration.run(root: root, name: name) }
         if let index = CatalogueFiles.index(in: root) {
+            try ASERegistry.seed(root, name: name)
             do {
                 let loaded = try CatalogueTree.read(root: root)
                 schema = loaded.schema
@@ -1075,9 +1080,50 @@ final class LibraryStore {
                 SchemaTrial.adopt(loaded.schema, for: root)
                 // The disk said something the files had not: the files catch up.
                 if loaded.dirty { try? CatalogueTree.write(loaded.library, schema: loaded.schema, index: url, name: name) }
+                if let home = assetsHome {
+                    let assets = GlobalAssets(home: home)
+                    let existing = try assets.load()
+                    var incoming = loaded.library
+                    for i in incoming.swatches.indices where incoming.swatches[i].projectID == nil {
+                        if let prior = existing.swatch(incoming.swatches[i].id), prior != incoming.swatches[i] {
+                            incoming.swatches[i] = Sharing.independentCopy(incoming.swatches[i])
+                        }
+                    }
+                    let combined = GlobalAssets.joined(incoming, existing)
+                    globalAtLoad = existing
+                    let split = GlobalAssets.split(loaded.library)
+                    if !split.global.swatches.isEmpty || !split.global.colours.isEmpty || split.global.colourProfiles.count > split.local.colourProfiles.count || !FileManager.default.fileExists(atPath: assets.index.path) {
+                        // Preserve the original catalogue before moving its unassigned work to app scope.
+                        let backup = root.appendingPathComponent("Backups/Before Global Assets")
+                        if !fm.fileExists(atPath: backup.path) {
+                            try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+                            for item in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where item.lastPathComponent != "Backups" && item.lastPathComponent != "Catalogues" && !(item.lastPathComponent == "Assets" && root.standardizedFileURL == home.standardizedFileURL) {
+                                try fm.copyItem(at: item, to: backup.appendingPathComponent(item.lastPathComponent))
+                            }
+                        }
+                        try save(combined, schema: loaded.schema)
+                        for relative in [loaded.catalogue.swatches, loaded.catalogue.profiles].compactMap({ $0 }) {
+                            let old = root.appendingPathComponent(relative)
+                            if relative.hasPrefix("Library/") || (relative.hasPrefix("Assets/") && root.standardizedFileURL != home.standardizedFileURL) {
+                                if fm.fileExists(atPath: old.path) { try fm.removeItem(at: old) }
+                            }
+                        }
+                        for dir in ["Library", "Assets"] where dir != "Assets" || root.standardizedFileURL != home.standardizedFileURL {
+                            for pool in TreeFiles.pools {
+                                let folder = root.appendingPathComponent(dir).appendingPathComponent(pool)
+                                if (try? fm.contentsOfDirectory(atPath: folder.path).isEmpty) == true { try fm.removeItem(at: folder) }
+                            }
+                            let folder = root.appendingPathComponent(dir)
+                            if (try? fm.contentsOfDirectory(atPath: folder.path).isEmpty) == true { try fm.removeItem(at: folder) }
+                        }
+                    }
+                    globalAtLoad = GlobalAssets.split(combined).global
+                    return combined
+                }
                 return loaded.library
             } catch {
                 Diagnostics.log("store", "could not read \(index.path): \(error.localizedDescription)")
+                if assetsHome != nil { throw error }
             }
             // Never overwrite a file we could not read: move it aside for recovery.
             let aside = root.appendingPathComponent("unreadable-\(stamp)." + ColourFiles.catalogue + ".txt")
@@ -1086,6 +1132,7 @@ final class LibraryStore {
         }
         var lib = loadPrevious() ?? Library()
         lib.mergeLegacy(loadLegacy())
+        if let home = assetsHome { lib = GlobalAssets.joined(lib, try GlobalAssets(home: home).load()) }
         try save(lib)
         return lib
     }
@@ -1095,7 +1142,16 @@ final class LibraryStore {
 
     func save(_ lib: Library, schema f: SchemaTrial.SchemaFile) throws {
         do {
-            try CatalogueTree.write(lib, schema: f, index: url, name: name)
+            if let home = assetsHome {
+                let parts = GlobalAssets.split(lib)
+                let current = try GlobalAssets(home: home).load()
+                let next = globalAtLoad.map { LibraryDelta.between($0, parts.global).applied(to: current) } ?? GlobalAssets.joined(parts.global, current)
+                try AssetTransaction.perform(home: home, catalogue: root) {
+                    try GlobalAssets(home: home).save(next)
+                    try CatalogueTree.write(parts.local, schema: f, index: url, name: name, poolDirectory: "Support", createEmptyPools: false)
+                }
+                globalAtLoad = next
+            } else { try CatalogueTree.write(lib, schema: f, index: url, name: name) }
         } catch let error as StoreError {
             throw error
         } catch {

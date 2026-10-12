@@ -499,7 +499,7 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
     private lazy var done = toolButton("Done", "checkmark", "Keep The Notes And Close (\u{2318}Return)", target: self, action: #selector(doneTapped))
     private lazy var cancel = toolButton("Cancel", "xmark", "Close Without Keeping Changes (Escape)", target: self, action: #selector(cancelTapped))
     private let text = NSTextView()
-    private let textScroll = NSScrollView()
+    private let textScroll = FittedScrollView()
     private let textBox = NSView()
     private let steps = NSStackView()
     private let stepsScroll = LetGoScrollView()

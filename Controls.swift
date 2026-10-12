@@ -30,6 +30,8 @@ enum Overlays {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { e in
             guard !open.isEmpty else { return e }
+            // The monitor pattern window owns its exit; returning must preserve its setup modal.
+            if e.window is MonitorPatternWindow { return e }
             if e.type == .keyDown { return e.keyCode == 53 ? { closeAll(); return nil }() : e }
             if open.contains(where: { $0.containsOverlayEvent(e) }) { return e }
             closeAll()
@@ -58,7 +60,9 @@ final class SwissDropdown: NSView, Overlay {
     private let allowsOwn: Bool
     private var list: MenuPanel?
     var onChange: ((String) -> Void)?
+    var onPreview: ((String) -> Void)?
     var text: String { value.stringValue }
+    func displayValue(_ text: String) { value.stringValue = text }
     var overlayWindows: [NSWindow] { list.map { [$0] } ?? [] }
     func dismissOverlay() { close() }
 
@@ -105,7 +109,7 @@ final class SwissDropdown: NSView, Overlay {
     private func open() {
         guard let win = window else { return }
         let items = options + (allowsOwn ? ["Your own word\u{2026}"] : [])
-        let panel = MenuPanel(items: items, chosen: value.stringValue, width: bounds.width) { [weak self] i in
+        let panel = MenuPanel(items: items, chosen: value.stringValue, width: bounds.width, preview: onPreview) { [weak self] i in
             guard let self = self else { return }
             self.close()
             if self.allowsOwn && i == items.count - 1 { self.typeOwn() }
@@ -152,7 +156,7 @@ final class SwissDropdown: NSView, Overlay {
         static func heading(_ s: String) -> String { "#" + s }
         static func kind(_ s: String) -> Int { s == divider ? 1 : s.hasPrefix("#") ? 2 : 0 }
 
-        init(items: [String], chosen: String, width: CGFloat, pick: @escaping (Int) -> Void) {
+        init(items: [String], chosen: String, width: CGFloat, preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
             let rowHeight: CGFloat = 30, thin: CGFloat = 12
             let heights = items.map { MenuPanel.kind($0) == 1 ? thin : rowHeight }
             let h = heights.reduce(0, +) + 12
@@ -169,16 +173,33 @@ final class SwissDropdown: NSView, Overlay {
             for (i, s) in items.enumerated() {
                 y -= heights[i]
                 let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
+                r.preview = { preview?(s) }
                 card.addSubview(r)
             }
             contentView = card
         }
-        func place(below p: NSPoint) { setFrameTopLeftPoint(p) }
+        func place(below p: NSPoint) {
+            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else { setFrameTopLeftPoint(p); return }
+            let visible = screen.visibleFrame, fullHeight = frame.height
+            let available = max(150, p.y - visible.minY - 8)
+            if fullHeight > available, let card = contentView {
+                let scroll = FittedScrollView(frame: NSRect(x: 0, y: 0, width: frame.width, height: available))
+                scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+                scroll.documentView = card
+                card.frame.size.width = frame.width - QuietScroller.lane
+                for row in card.subviews { row.frame.size.width = card.frame.width }
+                contentView = scroll
+                setContentSize(NSSize(width: frame.width, height: available))
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, fullHeight - available)))
+            }
+            setFrameTopLeftPoint(NSPoint(x: min(p.x, visible.maxX - frame.width), y: min(visible.maxY, max(p.y, visible.minY + frame.height))))
+        }
 
         final class Row: NSView {
             private let act: () -> Void
             private let title: String, chosen: Bool
             private var hover = false
+            var preview: (() -> Void)?
             init(title: String, chosen: Bool, frame: NSRect, act: @escaping () -> Void) {
                 self.title = title; self.chosen = chosen; self.act = act
                 super.init(frame: frame)
@@ -186,7 +207,7 @@ final class SwissDropdown: NSView, Overlay {
             }
             required init?(coder: NSCoder) { fatalError() }
             private var kind: Int { MenuPanel.kind(title) }
-            override func mouseEntered(with event: NSEvent) { if kind == 0 { hover = true; needsDisplay = true } }
+            override func mouseEntered(with event: NSEvent) { if kind == 0 { hover = true; needsDisplay = true; preview?() } }
             override func mouseExited(with event: NSEvent) { hover = false; needsDisplay = true }
             override func mouseUp(with event: NSEvent) { if kind == 0 { act() } }
             override func draw(_ dirtyRect: NSRect) {

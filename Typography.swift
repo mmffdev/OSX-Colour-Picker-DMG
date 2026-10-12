@@ -112,7 +112,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
             .foregroundColor: ratio >= 4.5 ? NSColor.systemGreen : ratio >= 3 ? NSColor.systemOrange : NSColor.systemRed]))
         numbers.attributedStringValue = line
 
-        fonts.font = NSFont.systemFont(ofSize: 11)
+        fonts.font = NSFont.systemFont(ofSize: 13)
         fonts.textColor = .secondaryLabelColor
         fonts.maximumNumberOfLines = 2
         fonts.stringValue = "Heading: \(style.headingFont ?? "System Font")\nText: \(style.bodyFont ?? "System Font")"
@@ -121,7 +121,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
             let b = NSButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
-            b.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            b.font = NSFont.systemFont(ofSize: TextSize.body)
             b.toolTip = tip
             return b
         }
@@ -136,7 +136,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
         var seen = Set<String>()
         for family in style.fonts where !fontInstalled(family) && seen.insert(family).inserted {
             let note = NSTextField(labelWithString: "Font Missing: \(family)")
-            note.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+            note.font = NSFont.systemFont(ofSize: 13, weight: .medium)
             note.textColor = .systemOrange
             note.lineBreakMode = .byTruncatingTail
             note.toolTip = "\(family) Is Not Installed On This Mac, So The System Font Is Shown In Its Place"
@@ -161,7 +161,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
             get.toolTip = "Ways To Find And Install \(family)"
             for p in [replace, get] {
                 p.controlSize = .small
-                p.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+                p.font = NSFont.systemFont(ofSize: TextSize.body)
                 p.tag = missing.count
             }
             for v in [note, replace, get] as [NSView] { addSubview(v) }

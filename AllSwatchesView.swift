@@ -146,13 +146,13 @@ final class TileView: NSView {
             let text = NSRect(x: line.row.minX, y: line.row.minY, width: line.row.width - 16, height: line.row.height)
             if line.key == "name" {
                 (colourName(hex) as NSString).draw(in: text, withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
+                    .font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: style])
             } else if let format = ColourFormat(rawValue: line.key) {
                 (format.label as NSString).draw(in: NSRect(x: text.minX, y: text.minY + 1, width: TileView.labelColumn, height: text.height), withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 8.5, weight: .bold), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style])
+                    .font: NSFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style])
                 (format.text(hex, lowercase: Prefs.lowercaseHex) as NSString).draw(
                     in: NSRect(x: text.minX + TileView.labelColumn, y: text.minY, width: text.width - TileView.labelColumn, height: text.height), withAttributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor,
+                    .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor,
                     .paragraphStyle: style])
             }
             // The copy mark, tinted to sit back from the text.
@@ -179,7 +179,7 @@ final class TileView: NSView {
             // Black on a light bar, white on a dark one.
             let ink = hexOf(first).map { colorFromHex(readableText(on: $0)) ?? .white } ?? .white
             (title as NSString).draw(in: band.insetBy(dx: 6 + TileView.overlap, dy: 1.5), withAttributes: [
-                .font: NSFont.systemFont(ofSize: 9.5, weight: .bold), .foregroundColor: ink, .paragraphStyle: style])
+                .font: NSFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: ink, .paragraphStyle: style])
         }
     }
 }
@@ -262,7 +262,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
 
         for p in [arrange, show, projects, addTo] {
             p.controlSize = .small
-            p.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            p.font = NSFont.systemFont(ofSize: TextSize.body)
             p.target = self
         }
         arrange.addItems(withTitles: Arrange.allCases.map { $0.title })
@@ -806,7 +806,7 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
         table.selectionHighlightStyle = .none
         table.dataSource = self
         table.delegate = self
-        let scroll = NSScrollView()
+        let scroll = FittedScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false

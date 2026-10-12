@@ -30,7 +30,7 @@ enum TreeFiles {
     static let palettesPool = "Palettes", typographyPool = "Typography", swatchesPool = "Swatches", profilesPool = "Profiles"
     static let pools = [palettesPool, typographyPool, swatchesPool, profilesPool]
     /// Folder names at the root that a collection may not take.
-    static let reserved: Set<String> = [library, templates, backups, "Catalogues"]
+    static let reserved: Set<String> = [library, "Assets", "Support", "AppBridge", "Keys", templates, backups, "Catalogues"]
     /// The self-test removes what it takes out; the app puts it in the Bin.
     static var removedGoesToBin = true
 }
@@ -259,7 +259,7 @@ enum CatalogueTree {
             for name in names(in: dir) {
                 let url = dir.appendingPathComponent(name)
                 if isFolder(url) {
-                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues") { continue }
+                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues" || (name == "Assets" && fm.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path))) { continue }
                     walk(url, depth: depth + 1)
                     continue
                 }
@@ -511,11 +511,11 @@ enum CatalogueTree {
         // The assets: each where Finder has it, belonging to the member whose folder holds it, or to the Library.
         var swatches: [Swatch] = [], colours: [Colour] = [], seenColours = Set<String>(), seenPalettes = Set<UUID>()
         func takeColours(_ list: [Colour]) { for c in list where seenColours.insert(c.hex).inserted { colours.append(c) } }
-        let library = root.appendingPathComponent(TreeFiles.library)
+        let library = root.appendingPathComponent("Assets")
         let memberFolders = memberURL.map { ($0.key, $0.value.path + "/") }.sorted { $0.1.count > $1.1.count }
         func owner(of url: URL) -> (found: Bool, member: UUID?) {
             if let m = memberFolders.first(where: { url.path.hasPrefix($0.1) }) { return (true, m.0) }
-            if url.path.hasPrefix(library.path + "/") { return (true, nil) }
+            if url.path.hasPrefix(library.path + "/") || url.path.hasPrefix(root.appendingPathComponent("Library").path + "/") { return (true, nil) }
             return (false, nil)
         }
         var linked: [UUID: AssetLink] = [:], order: [UUID?: [UUID]] = [:]
@@ -556,10 +556,10 @@ enum CatalogueTree {
                 }
                 swatches += held
             }
-            if let file = cat.swatches.map({ root.appendingPathComponent($0) }) ?? files(of: library.appendingPathComponent(TreeFiles.swatchesPool), extension: ColourFiles.swatches).first,
+            if let file = cat.swatches.map({ root.appendingPathComponent($0) }),
                let doc = read(SwatchesDocument.self, at: file) { takeColours(doc.colours) }
         }
-        if let file = cat.profiles.map({ root.appendingPathComponent($0) }) ?? files(of: library.appendingPathComponent(TreeFiles.profilesPool), extension: ColourFiles.profiles).first,
+        if let file = cat.profiles.map({ root.appendingPathComponent($0) }),
            let doc = read(ProfilesDocument.self, at: file) { lib.colourProfiles = doc.profiles }
 
         // The members' order is their positions; a member taken in from Finder goes last.
@@ -594,12 +594,13 @@ enum CatalogueTree {
     /// Writes the library and the schema: every folder and asset settled where the structure says, moved and renamed to
     /// match, then the structure file, then what the app listed and no longer has taken away. `carry`, when given,
     /// describes the folders of an earlier layout, for bringing one across.
-    static func write(_ lib: Library, schema given: SchemaTrial.SchemaFile, index indexURL: URL, name: String? = nil, now: Date = Date(), carry: CatalogueFile? = nil) throws {
+    static func write(_ lib: Library, schema given: SchemaTrial.SchemaFile, index indexURL: URL, name: String? = nil, now: Date = Date(), carry: CatalogueFile? = nil, poolDirectory: String = "Assets", createEmptyPools: Bool = true) throws {
         var schema = given
         // A member always has a home: with no collection at all, the first one is made for it.
         if !lib.projects.isEmpty && schema.collections.isEmpty { schema.collections = SchemaTrial.SchemaFile.fresh.collections }
         let root = indexURL.deletingLastPathComponent()
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        if poolDirectory != "" { try ASERegistry.seed(root, name: name ?? indexURL.deletingPathExtension().lastPathComponent) }
         let old = catalogue(in: root) ?? carry
         let found = scanAssets(root: root)
         let res = resolve(root: root, catalogue: old, assets: found)
@@ -758,8 +759,8 @@ enum CatalogueTree {
         }
 
         // The Library: palettes in no member, colours no palette holds, the profiles.
-        let library = root.appendingPathComponent(TreeFiles.library)
-        for pool in TreeFiles.pools { try fm.createDirectory(at: library.appendingPathComponent(pool), withIntermediateDirectories: true) }
+        let library = root.appendingPathComponent(poolDirectory)
+        if createEmptyPools { for pool in TreeFiles.pools { try fm.createDirectory(at: library.appendingPathComponent(pool), withIntermediateDirectories: true) } }
         var libraryLinks: [AssetLink] = []
         var poolTaken: [String: Set<String>] = [:]
         for palette in lib.palettes(in: nil) {
@@ -777,8 +778,9 @@ enum CatalogueTree {
         let swatchesURL = try settleFile(existing: files(of: swatchesHome, extension: ColourFiles.swatches).first, wanted: filesystemName(catName) + " Swatches", extension: ColourFiles.swatches, in: swatchesHome, taken: &none)
         none = []
         let profilesURL = try settleFile(existing: files(of: profilesHome, extension: ColourFiles.profiles).first, wanted: filesystemName(catName) + " Profiles", extension: ColourFiles.profiles, in: profilesHome, taken: &none)
-        written.append((swatchesURL, try e.encode(SwatchesDocument(catalogue: catID, colours: lib.colours.filter { !used.contains($0.hex) }))))
-        written.append((profilesURL, try e.encode(ProfilesDocument(catalogue: catID, profiles: lib.colourProfiles))))
+        let looseColours = lib.colours.filter { !used.contains($0.hex) }
+        if createEmptyPools || !looseColours.isEmpty { written.append((swatchesURL, try e.encode(SwatchesDocument(catalogue: catID, colours: looseColours)))) }
+        if createEmptyPools || !lib.colourProfiles.isEmpty { written.append((profilesURL, try e.encode(ProfilesDocument(catalogue: catID, profiles: lib.colourProfiles)))) }
 
         // Everything written, each file only when what it holds has changed.
         for (url, data) in written {
@@ -814,7 +816,7 @@ enum CatalogueTree {
         let file = CatalogueFile(id: catID, name: catName, about: old?.about, createdAt: old?.createdAt ?? now, changedAt: now, library: lib.version,
                                  activePalette: lib.activeSwatchID, colours: lib.colours.map { $0.hex }, tags: lib.tagInfo, deleted: lib.deleted,
                                  templates: schema.templates ?? [], collections: collections, libraryAssets: libraryLinks,
-                                 swatches: relative(swatchesURL, to: root), profiles: relative(profilesURL, to: root))
+                                 swatches: createEmptyPools || !looseColours.isEmpty ? relative(swatchesURL, to: root) : nil, profiles: createEmptyPools || !lib.colourProfiles.isEmpty ? relative(profilesURL, to: root) : nil)
         let before = catalogue(in: root)
         var sameDate = file
         sameDate.changedAt = before?.changedAt ?? now

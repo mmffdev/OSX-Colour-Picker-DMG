@@ -319,7 +319,7 @@ final class StripColumn: NSView {
         super.layout()
         // At the smallest window a column is barely wider than six characters, so the text gives way first.
         let narrow = bounds.width < 62, tight = bounds.width < 46
-        label.font = NSFont.monospacedSystemFont(ofSize: tight ? 8 : narrow ? 9.5 : 11, weight: .medium)
+        label.font = NSFont.monospacedSystemFont(ofSize: tight ? 13 : narrow ? 13 : 13, weight: .medium)
         label.stringValue = narrow ? String(hex.dropFirst()) : hex
         label.sizeToFit()
         let inset: CGFloat = tight ? 1 : narrow ? 4 : 10
