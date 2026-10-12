@@ -572,10 +572,12 @@ final class StudioFrame: NSView {
         }
         paletteWheel.dismiss()
         if p == .contrast && place != .contrast { contrastPage.arrive(fromLab: place == .lab) }
-        if p == .proofing && place != .proofing {
+        // Proofing and PrePress close rail1: the page takes its columns, and rail2 holds the route or the settings.
+        func narrows(_ p: Place) -> Bool { if case .prepress = p { return true }; return p == .proofing }
+        if narrows(p) && !narrows(place) {
             beforeProofingRail = goal.rail1
             goal.rail1 = 0
-        } else if place == .proofing && p != .proofing {
+        } else if narrows(place) && !narrows(p) {
             goal.rail1 = beforeProofingRail
         }
         place = p

@@ -37,19 +37,19 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
 
     struct Route { let flow: Flow; let title: String; let who: String; let need: [String]; let get: String; let steps: [String]; let later: Bool }
     static let routes: [Route] = [
-        Route(flow: .verify, title: "Verify A Proof", who: "Prepress · ISO 12647-7", need: ["The proof, with its MediaWedge CMYK V3", "A spectrophotometer, M1, white backing", "The printing condition it simulates"], get: "A proof label: pass or fail against the standard, every number on it", steps: ["Condition", "Measure", "Result", "Label"], later: false),
-        Route(flow: .check, title: "Check A Colour", who: "Brand owner · Agency · Printer", need: ["The master colour in the catalogue", "The tolerance the brand book sets", "The printed sample, measured"], get: "An approval record: the measured value, the condition, who decided", steps: ["Master", "Measure", "Decide"], later: false),
-        Route(flow: .print, title: "Will It Print?", who: "Designer · Before anything is printed", need: ["The palette", "The printing condition it is going to", "Nothing printed yet"], get: "Which colours the press can hold, and a note on the palette saying so", steps: ["Palette", "Result", "Note"], later: false),
-        Route(flow: .press, title: "Press Check", who: "Press operator · ISO 12647-2", need: ["The colour bar on the sheet", "A spectrodensitometer", "The printing condition"], get: "The OK sheet, signed, with solids, tone value and density kept", steps: ["Condition", "Measure", "OK Sheet"], later: true),
+        Route(flow: .verify, title: "Verify A Proof", who: "Prepress · ISO 12647-7", need: ["The proof, with its MediaWedge", "A spectrophotometer, M1", "The condition it simulates"], get: "A proof label, pass or fail, every figure on it", steps: ["Condition", "Measure", "Result", "Label"], later: false),
+        Route(flow: .check, title: "Check A Colour", who: "Brand owner · Agency · Printer", need: ["The master colour in the catalogue", "The brand book's tolerance", "The printed sample, measured"], get: "An approval record, copied for the swatch", steps: ["Master", "Measure", "Decide"], later: false),
+        Route(flow: .print, title: "Will It Print?", who: "Designer · Before anything is printed", need: ["The palette", "The condition it is going to", "Nothing printed yet"], get: "Which colours hold, and a note to keep with the palette", steps: ["Palette", "Result", "Note"], later: false),
+        Route(flow: .press, title: "Press Check", who: "Press operator · ISO 12647-2 · Later release", need: ["The colour bar on the sheet", "A spectrodensitometer", "The printing condition"], get: "The OK sheet, signed, with its densities kept", steps: ["Condition", "Measure", "OK Sheet"], later: true),
     ]
     static func route(_ flow: Flow) -> Route? { routes.first { $0.flow == flow } }
 
     // MARK: Verify A Proof
 
-    struct Condition { let file: String; let name: String; let strip: String }
-    static let conditions = [Condition(file: "FOGRA51", name: "FOGRA51 · PSO Coated v3 · Premium coated", strip: "M1 · White backing"),
-                             Condition(file: "FOGRA52", name: "FOGRA52 · PSO Uncoated v3 · Woodfree uncoated", strip: "M1 · White backing"),
-                             Condition(file: "FOGRA39", name: "FOGRA39 · ISO Coated v2 · Coated, 2008", strip: "M0 · White backing")]
+    struct Condition { let file: String; let name: String; let short: String; let strip: String }
+    static let conditions = [Condition(file: "FOGRA51", name: "FOGRA51 · PSO Coated v3 · Premium coated", short: "FOGRA51 · PSO Coated v3", strip: "M1, white backing"),
+                             Condition(file: "FOGRA52", name: "FOGRA52 · PSO Uncoated v3 · Woodfree uncoated", short: "FOGRA52 · PSO Uncoated v3", strip: "M1, white backing"),
+                             Condition(file: "FOGRA39", name: "FOGRA39 · ISO Coated v2 · Coated, 2008", short: "FOGRA39 · ISO Coated v2", strip: "M0, white backing")]
     private var condition = conditions[0]
     private var reference: ProofDataset?
     private var measurement: ProofDataset?
@@ -105,12 +105,12 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         func mean(_ v: [Double]) -> Double? { v.isEmpty ? nil : v.reduce(0, +) / Double(v.count) }
         let checks = [
             Check(name: "Paper white", clause: "4.3.2", limit: 3.0, value: paper, unit: "ΔE00"),
-            Check(name: "Primary solids C, M, Y, K", clause: "4.3.3", limit: 3.0, value: solidValues.count == 4 ? solidValues.max() : nil, unit: "ΔE00"),
-            Check(name: "C, M, Y solids, hue", clause: "4.3.3", limit: 2.5, value: hues.count == 3 ? hues.max() : nil, unit: "ΔH"),
+            Check(name: "Solids C, M, Y, K", clause: "4.3.3", limit: 3.0, value: solidValues.count == 4 ? solidValues.max() : nil, unit: "ΔE00"),
+            Check(name: "C, M, Y hue", clause: "4.3.3", limit: 2.5, value: hues.count == 3 ? hues.max() : nil, unit: "ΔH"),
             Check(name: "All patches, average", clause: "Table 2", limit: 2.5, value: mean(all), unit: "ΔE00"),
             Check(name: "All patches, maximum", clause: "Table 2", limit: 5.0, value: all.max(), unit: "ΔE00"),
-            Check(name: "Neutral CMY scale, maximum", clause: "Table 2", limit: 3.5, value: neutral.count >= 5 ? neutral.max() : nil, unit: "ΔCh"),
-            Check(name: "Neutral CMY scale, average", clause: "Table 2", limit: 2.0, value: neutral.count >= 5 ? mean(neutral) : nil, unit: "ΔCh"),
+            Check(name: "Neutral scale, maximum", clause: "Table 2", limit: 3.5, value: neutral.count >= 5 ? neutral.max() : nil, unit: "ΔCh"),
+            Check(name: "Neutral scale, average", clause: "Table 2", limit: 2.0, value: neutral.count >= 5 ? mean(neutral) : nil, unit: "ΔCh"),
         ]
         return (checks, pairs.count, reference.patches.count - pairs.count)
     }
@@ -149,8 +149,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         var list: [Section]
         switch flow {
         case .menu: list = Self.routes.map { Section(name: $0.title, rows: $0.need.count + 4) }
-        case .verify: list = [Section(name: "Condition", rows: 6), Section(name: "Measure", rows: 8), Section(name: "Result", rows: 12), Section(name: "Label", rows: 14)]
-        case .check: list = [Section(name: "Master", rows: 9), Section(name: "Measure", rows: 8), Section(name: "Decide", rows: 9)]
+        case .verify: list = [Section(name: "Condition", rows: 6), Section(name: "Measure", rows: 8), Section(name: "Result", rows: 12), Section(name: "Label", rows: 15)]
+        case .check: list = [Section(name: "Master", rows: 9), Section(name: "Measure", rows: 9), Section(name: "Decide", rows: 10)]
         case .print: list = [Section(name: "Palette", rows: 9), Section(name: "Result", rows: max(4, held.count + 3)), Section(name: "Note", rows: 7)]
         case .press: list = [Section(name: "Condition", rows: 5), Section(name: "Measure", rows: 6), Section(name: "OK Sheet", rows: 5)]
         }
@@ -266,7 +266,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
                 else if checks.contains(where: { $0.value == nil }) { verdict = .failed("A check could not be made from this strip") }
                 else { verdict = .passed }
             } else { checks = Self.evaluate(reference: reference ?? ProofDataset(name: "", source: "", sha256: "", metadata: [:], patches: []), measurement: ProofDataset(name: "", source: "", sha256: "", metadata: [:], patches: [])).checks; matched = 0; missing = reference?.patches.count ?? 0; verdict = .waiting }
-            label.condition = condition.name
+            label.condition = condition.short
             label.job = measurement.map { ($0.name as NSString).deletingPathExtension } ?? "No measurement yet"
             label.checks = checks; label.verdict = verdict; label.measurement = measurement; label.needsDisplay = true
         case .check:
@@ -311,9 +311,9 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             place(importMeasurement, x: x, baseline: rowBaseline(1, 0))
             place(exportReport, x: x, baseline: rowBaseline(2, 11))
             label.isHidden = false
-            label.frame = NSRect(x: x, y: rowBaseline(3, 0) - Self.line, width: min(available, 520), height: 10 * u)
-            place(saveLabel, x: x, baseline: rowBaseline(3, 11))
-            place(backToMenu, x: saveLabel.frame.maxX + 24, baseline: rowBaseline(3, 11))
+            label.frame = NSRect(x: x, y: rowBaseline(3, 0) - Self.line, width: min(available, 520), height: 12 * u)
+            place(saveLabel, x: x, baseline: rowBaseline(3, 13))
+            place(backToMenu, x: saveLabel.frame.maxX + 24, baseline: rowBaseline(3, 13))
         case .check:
             for (i, m) in checkMenus.enumerated() where i < 3 { dropdown(m, baseline: rowBaseline(0, i * 2)) }
             if checkMenus.count >= 5 { dropdown(checkMenus[3], baseline: rowBaseline(1, 0)); dropdown(checkMenus[4], baseline: rowBaseline(1, 2)) }
@@ -322,7 +322,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             place(importReading, x: x, baseline: rowBaseline(1, 7))
             place(approve, x: x, baseline: rowBaseline(2, 7))
             place(reject, x: approve.frame.maxX + 16, baseline: rowBaseline(2, 7))
-            place(backToMenu, x: reject.frame.maxX + 24, baseline: rowBaseline(2, 7))
+            place(backToMenu, x: x, baseline: rowBaseline(2, 9))
         case .print:
             for (i, m) in printMenus.enumerated() { dropdown(m, baseline: rowBaseline(0, i * 2)) }
             place(copyNote, x: x, baseline: rowBaseline(2, 5))
@@ -344,8 +344,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         a.draw(x: edge - a.size().width, baseline: baseline)
     }
     /// A row as Shortcuts draws one: the name on the content column, the value on the first column past the middle, a hairline under.
-    private func row(_ title: String, _ value: String, baseline b: CGFloat, quiet: Bool = false, strong: Bool = false) {
-        let x = contentX, w = bounds.width, valueX = column(at: 0.5)
+    private func row(_ title: String, _ value: String, baseline b: CGFloat, quiet: Bool = false, strong: Bool = false, valueAt: CGFloat = 0.5) {
+        let x = contentX, w = bounds.width, valueX = column(at: valueAt)
         text(title, x: x, baseline: b, width: valueX - x - 16)
         text(value, x: valueX, baseline: b, style: strong ? .bodyStrong : .body, colour: quiet ? Design.quiet : Design.ink, width: w - valueX)
         hairline(x: x, y: b + u - Self.line - 1, width: w - x, Design.rule)
@@ -353,7 +353,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func number(_ d: Double?, _ places: Int = 1) -> String { d.map { String(format: "%.\(places)f", $0) } ?? "—" }
     private func lead(_ words: String, section i: Int) {
         // The step's words on the left, under its number, in a box of four lines that never grows.
-        SettingsSheet.paragraph(words, x: 0, firstBaseline: rowBaseline(i, 0), width: max(0, contentX - Design.App.areaGutter), height: 4 * u, colour: Design.quiet)
+        SettingsSheet.paragraph(words, x: 0, firstBaseline: rowBaseline(i, 2), width: max(0, contentX - Design.App.areaGutter), height: 4 * u, colour: Design.quiet)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -362,14 +362,13 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         switch flow {
         case .menu:
             SettingsSheet.title("PrePress.")
-            SettingsSheet.introduction("Which job is it?", "Four workflows, one artefact each. Pick the job in your hand and follow the route.", x: x, width: w)
+            SettingsSheet.introduction("Which job is it?", "Four workflows, one artefact each. Pick the job in hand.", x: x, width: w)
             for (i, route) in Self.routes.enumerated() {
                 SettingsSheet.section(i + 1, route.title, guide: s[i].guide, contentX: x, width: w)
                 var r = 0
-                row("Who", route.who, baseline: rowBaseline(i, r), quiet: true); r += 1
-                for (n, need) in route.need.enumerated() { row(n == 0 ? "In your hand" : "", need, baseline: rowBaseline(i, r)); r += 1 }
-                row("You get", route.get, baseline: rowBaseline(i, r), strong: true); r += 1
-                if route.later { text("Later release. Drawn now so the data model keeps room for it.", x: x, baseline: rowBaseline(i, r + 1), style: .caption, colour: Design.quiet) }
+                row("Who", route.who, baseline: rowBaseline(i, r), quiet: true, valueAt: 0.3); r += 1
+                for (n, need) in route.need.enumerated() { row(n == 0 ? "In your hand" : "", need, baseline: rowBaseline(i, r), valueAt: 0.3); r += 1 }
+                row("You get", route.get, baseline: rowBaseline(i, r), strong: true, valueAt: 0.3); r += 1
                 drawStart(route, baseline: rowBaseline(i, r + 1))
             }
         case .verify: drawVerify(s)
@@ -379,7 +378,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         }
         SettingsSheet.divider(above: endGuide, width: w)
         if !problem.isEmpty { text(problem, x: x, baseline: endGuide + u, style: .caption, colour: Design.ink) }
-        else if flow != .menu { text("Sample numbers are never shown: every figure on this page is measured or worked out from the catalogue.", x: x, baseline: endGuide + u, style: .caption, colour: Design.quiet) }
+        else if flow != .menu { text("Every figure on this page is measured or worked out from the catalogue.", x: x, baseline: endGuide + u, style: .caption, colour: Design.quiet) }
     }
 
     // The menu's Start is a drawn primary button per route: one view each would be four buttons for one job, so the page draws
@@ -387,7 +386,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private var startRects: [(NSRect, Flow)] = []
     private func drawStart(_ route: Route, baseline b: CGFloat) {
         let title = Design.attributed(route.steps.joined(separator: " · "), .caption, colour: Design.quiet)
-        title.draw(x: column(at: 0.5), baseline: b)
+        title.draw(x: column(at: 0.5), baseline: b, width: bounds.width - column(at: 0.5))
         let action = Design.attributed(route.title, .action, colour: Design.card)
         let width = ceil(action.size().width) + 28 + 32
         let rect = NSRect(x: contentX, y: SettingsSheet.buttonTop(baseline: b), width: width, height: SwissButton.height)
@@ -401,16 +400,16 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func drawVerify(_ s: [Section]) {
         let x = contentX, w = bounds.width
         SettingsSheet.title("Verify A Proof.")
-        SettingsSheet.introduction("Prepress · ISO 12647-7:2016", "Condition, measure, result, label. The standard sets the tolerances; the label is the artefact.", x: x, width: w)
+        SettingsSheet.introduction("Prepress · ISO 12647-7:2016", "Condition, measure, result, label. The standard sets the tolerances.", x: x, width: w)
         // 01 Condition: the dropdown takes rows 0 and 1; the strip's facts follow.
         SettingsSheet.section(1, "Condition", guide: s[0].guide, contentX: x, width: w)
         lead("Every proof simulates one printing condition. Pick the one the job was made for; the reference values and the tolerances follow from it. Nothing here is a user's opinion.", section: 0)
-        row("Control strip", "Ugra/Fogra MediaWedge CMYK V3 · \(reference?.patches.count ?? 0) patches", baseline: rowBaseline(0, 3))
+        row("Control strip", "MediaWedge CMYK V3 · \(reference?.patches.count ?? 0) patches", baseline: rowBaseline(0, 3))
         row("Reference measured", reference?.conditions ?? "Reference not found in the app bundle", baseline: rowBaseline(0, 4), quiet: reference == nil)
-        row("Tolerances", "ISO 12647-7:2016 · 4.3.2, 4.3.3, Table 2 · CIEDE2000", baseline: rowBaseline(0, 5))
+        row("Tolerances", "ISO 12647-7:2016 · CIEDE2000", baseline: rowBaseline(0, 5))
         // 02 Measure
         SettingsSheet.section(2, "Measure", guide: s[1].guide, contentX: x, width: w)
-        lead("Measure the wedge in \(condition.strip.lowercased()) and bring the file in. Each patch matches the reference by its ID, never by position. A patch that is missing is never counted as a pass.", section: 1)
+        lead("Measure the wedge, \(condition.strip), and bring the file in. Each patch matches the reference by its ID, never by position. A patch that is missing is never counted as a pass.", section: 1)
         let m = measurement
         row("Measurement file", m?.name ?? "None imported", baseline: rowBaseline(1, 2), quiet: m == nil)
         row("Patches matched by ID", m == nil ? "—" : "\(matched) of \(reference?.patches.count ?? 0)" + (missing > 0 ? " · \(missing) missing" : " · Complete"), baseline: rowBaseline(1, 3), strong: missing > 0)
@@ -429,22 +428,22 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         text(verdictWords, x: x, baseline: rowBaseline(2, 0), style: .headline, colour: verdictColour)
         if case .failed(let why) = verdict { text(why, x: x, baseline: rowBaseline(2, 1), style: .caption, colour: Design.quiet) }
         else { text(m == nil ? "Import the measurement under 02 to see the seven checks." : "All seven checks are within the standard's tolerances; the label carries the figures as they stand.", x: x, baseline: rowBaseline(2, 1), style: .caption, colour: Design.quiet) }
-        let tolX = column(at: 0.5), measX = column(at: 0.68), resX = column(at: 0.84)
+        // The check over two columns, the tolerance with its clause on the third, the measured figure and its verdict on the fourth.
+        let tolX = column(at: 0.5), measX = column(at: 0.75)
         let head = rowBaseline(2, 2)
         text("Check", x: x, baseline: head, style: .caption, colour: Design.quiet)
-        text("Tolerance", x: tolX, baseline: head, style: .caption, colour: Design.quiet)
+        text("Tolerance · Clause", x: tolX, baseline: head, style: .caption, colour: Design.quiet)
         text("Measured", x: measX, baseline: head, style: .caption, colour: Design.quiet)
-        text("Result", x: resX, baseline: head, style: .caption, colour: Design.quiet)
         hairline(x: x, y: head + u - Self.line - 1, width: w - x, Design.rule)
         for (i, c) in checks.enumerated() {
             let b = rowBaseline(2, 3 + i)
-            text(c.name + " · " + c.unit + " · " + c.clause, x: x, baseline: b, width: tolX - x - 16)
-            text("≤ " + number(c.limit), x: tolX, baseline: b)
-            text(number(c.value, 2), x: measX, baseline: b, colour: c.value == nil ? Design.quiet : Design.ink)
-            text(c.within.map { $0 ? "Within" : "Outside" } ?? (m == nil ? "—" : "Not in strip"), x: resX, baseline: b, style: c.within == false ? .bodyStrong : .body, colour: c.within == nil ? Design.quiet : Design.ink)
+            text(c.name + " · " + c.unit, x: x, baseline: b, width: tolX - x - 16)
+            text("≤ " + number(c.limit) + " · " + c.clause, x: tolX, baseline: b, width: measX - tolX - 16)
+            let verdictWord = c.within.map { $0 ? "Within" : "Outside" } ?? (m == nil ? "" : "Not in strip")
+            text(number(c.value, 2) + (verdictWord.isEmpty ? "" : " · " + verdictWord), x: measX, baseline: b, style: c.within == false ? .bodyStrong : .body, colour: c.value == nil ? Design.quiet : Design.ink, width: w - measX)
             hairline(x: x, y: b + u - Self.line - 1, width: w - x, Design.rule)
         }
-        text("Clauses are ISO 12647-7:2016, verified against the standard's text on 12 Oct 2026. A house tolerance may be stricter; the label names the rule used.", x: x, baseline: rowBaseline(2, 10), style: .caption, colour: Design.quiet)
+        text("Clauses of ISO 12647-7:2016, verified against its text on 12 Oct 2026.", x: x, baseline: rowBaseline(2, 10), style: .caption, colour: Design.quiet)
         // 04 Label
         SettingsSheet.section(4, "Label", guide: s[3].guide, contentX: x, width: w)
         lead("The label is the artefact. It names the standard, the condition, the figures, the instrument and the file, and it is stuck to the proof. The same record goes in the report.", section: 3)
@@ -453,7 +452,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func drawCheck(_ s: [Section]) {
         let x = contentX, w = bounds.width
         SettingsSheet.title("Check A Colour.")
-        SettingsSheet.introduction("Brand owner · Agency · Printer", "The master never moves. A sample is measured against it; what is approved is the recipe that supplier used, on that press.", x: x, width: w)
+        SettingsSheet.introduction("Brand owner · Agency · Printer", "The master never moves. A sample is measured against it and a person decides.", x: x, width: w)
         SettingsSheet.section(1, "Master", guide: s[0].guide, contentX: x, width: w)
         lead("Pick the swatch. Its master is the colour as the brand defined it, in Lab D50; the brand book says how far a print may stray from it.", section: 0)
         if let lab = masterLab, let hex = checkHex {
@@ -467,43 +466,43 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         text("Sample · L* a* b* · type the reading, or import a one-patch CGATS file", x: x, baseline: rowBaseline(1, 4), style: .caption, colour: Design.quiet)
         hairline(x: x, y: rowBaseline(1, 5) + 6, width: w - x, Design.rule)
         if let m = masterLab {
-            let a = NSRect(x: x, y: rowBaseline(2, 0) - Self.line, width: 3 * u, height: 2 * u), b = a.offsetBy(dx: 3 * u + 16, dy: 0)
+            // The master and the sample side by side, as previews only, beside the typed reading.
+            let a = NSRect(x: column(at: 0.5), y: rowBaseline(1, 6) - Self.line, width: 3 * u, height: 2 * u), b = a.offsetBy(dx: 3 * u + 16, dy: 0)
             fill(a, m.xyz.display); fill(b, sample?.xyz.display ?? Design.mist)
             Design.ink.setStroke(); NSBezierPath(rect: a.insetBy(dx: 0.5, dy: 0.5)).stroke(); NSBezierPath(rect: b.insetBy(dx: 0.5, dy: 0.5)).stroke()
-            text("Master", x: a.minX, baseline: rowBaseline(2, 2), style: .caption, colour: Design.quiet)
-            text("Sample", x: b.minX, baseline: rowBaseline(2, 2), style: .caption, colour: Design.quiet)
+            text("Master", x: a.minX, baseline: rowBaseline(1, 8), style: .caption, colour: Design.quiet)
+            text("Sample", x: b.minX, baseline: rowBaseline(1, 8), style: .caption, colour: Design.quiet)
         }
         SettingsSheet.section(3, "Decide", guide: s[2].guide, contentX: x, width: w)
         lead("The difference is the standard's CIEDE2000, master first. The decision is a person's; the page records it, it does not make it.", section: 2)
         if let m = masterLab, let sm = sample {
             let d = deltaE2000(m, sm), dl = sm.l - m.l, da = sm.a - m.a, db = sm.b - m.b
-            text(d <= checkTolerance ? "Within the brand tolerance" : "Outside the brand tolerance", x: column(at: 0.5), baseline: rowBaseline(2, 0), style: .headline)
-            text(String(format: "ΔE00 %.2f · tolerance %.1f", d, checkTolerance), x: column(at: 0.5), baseline: rowBaseline(2, 1), style: .bodyStrong)
+            text(d <= checkTolerance ? "Within the brand tolerance" : "Outside the brand tolerance", x: x, baseline: rowBaseline(2, 0), style: .headline)
+            text(String(format: "ΔE00 %.2f · tolerance %.1f", d, checkTolerance), x: x, baseline: rowBaseline(2, 1), style: .bodyStrong)
             func direction(_ v: Double, _ up: String, _ down: String, _ same: String) -> String { abs(v) < 0.05 ? same : v > 0 ? up : down }
-            text([direction(dl, "lighter", "darker", "same lightness"), direction(da, "redder", "greener", "same a*"), direction(db, "yellower", "bluer", "same b*")].joined(separator: " · ") + String(format: "   ΔL %.2f · Δa %.2f · Δb %.2f", dl, da, db), x: column(at: 0.5), baseline: rowBaseline(2, 2), style: .caption, colour: Design.quiet)
-        } else { text("Type or import a sample under 02 to see the difference.", x: column(at: 0.5), baseline: rowBaseline(2, 0), style: .caption, colour: Design.quiet) }
+            text([direction(dl, "lighter", "darker", "same lightness"), direction(da, "redder", "greener", "same a*"), direction(db, "yellower", "bluer", "same b*")].joined(separator: " · ") + String(format: "   ΔL %.2f · Δa %.2f · Δb %.2f", dl, da, db), x: x, baseline: rowBaseline(2, 2), style: .caption, colour: Design.quiet)
+        } else { text("Type or import a sample under 02 to see the difference.", x: x, baseline: rowBaseline(2, 0), style: .caption, colour: Design.quiet) }
         row("Condition", checkCondition, baseline: rowBaseline(2, 4))
         row("Mode · Backing", checkMode, baseline: rowBaseline(2, 5))
         row("Decision", decision ?? "Not yet decided", baseline: rowBaseline(2, 6), quiet: decision == nil, strong: decision != nil)
-        text("Approve copies the record to the clipboard; writing it onto the swatch comes with the approvals model in Vector.", x: x, baseline: rowBaseline(2, 8) + u, style: .caption, colour: Design.quiet)
+        text("Approve copies the record; the swatch keeps it once the approvals model is built.", x: x, baseline: rowBaseline(2, 8), style: .caption, colour: Design.quiet)
     }
 
     private func drawPrint(_ s: [Section]) {
         let x = contentX, w = bounds.width
         SettingsSheet.title("Will It Print?")
-        SettingsSheet.introduction("Designer · Before anything is printed", "A prediction through the press profile, not a proof. It belongs at the start of a job, when a colour can still change or the client be warned.", x: x, width: w)
+        SettingsSheet.introduction("Designer · Before anything is printed", "A prediction through the press profile, not a proof. For the start of a job.", x: x, width: w)
         SettingsSheet.section(1, "Palette", guide: s[0].guide, contentX: x, width: w)
         lead("Choose the palette and the press it is going to. The check says which colours that condition can hold and how far the rest will fall.", section: 0)
         SettingsSheet.section(2, "Result", guide: s[1].guide, contentX: x, width: w)
         let outside = held.filter { ($0.difference ?? .infinity) > printFlag }.count
         if held.isEmpty { text("No palette chosen, or the press profile is not on this Mac.", x: x, baseline: rowBaseline(1, 0), style: .caption, colour: Design.quiet) }
         else { text(outside == 0 ? "All \(held.count) hold" : "\(outside) of \(held.count) outside", x: x, baseline: rowBaseline(1, 0), style: .headline) }
-        let inkX = column(at: 0.5), deX = column(at: 0.68), holdX = column(at: 0.84)
+        let inkX = column(at: 0.5), deX = column(at: 0.75)
         let head = rowBaseline(1, 1)
         text("Colour · master, then printed", x: x, baseline: head, style: .caption, colour: Design.quiet)
         text("Total ink", x: inkX, baseline: head, style: .caption, colour: Design.quiet)
-        text("ΔE00", x: deX, baseline: head, style: .caption, colour: Design.quiet)
-        text("Holds", x: holdX, baseline: head, style: .caption, colour: Design.quiet)
+        text("ΔE00 · Holds", x: deX, baseline: head, style: .caption, colour: Design.quiet)
         hairline(x: x, y: head + u - Self.line - 1, width: w - x, Design.rule)
         for (i, h) in held.enumerated() {
             let b = rowBaseline(1, 2 + i)
@@ -511,9 +510,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             fill(a, h.master.xyz.display); fill(p, h.printed?.xyz.display ?? Design.mist)
             text(h.name, x: x + 40, baseline: b, width: inkX - x - 56)
             text(h.ink.map { String(format: "%.0f%%", $0) } ?? "—", x: inkX, baseline: b)
-            text(number(h.difference, 1), x: deX, baseline: b)
             let holds = h.difference.map { $0 <= printFlag }
-            text(holds.map { $0 ? "Yes" : "No" } ?? "No profile", x: holdX, baseline: b, style: holds == false ? .bodyStrong : .body, colour: holds == nil ? Design.quiet : Design.ink)
+            text(number(h.difference, 1) + " · " + (holds.map { $0 ? "Yes" : "No" } ?? "No profile"), x: deX, baseline: b, style: holds == false ? .bodyStrong : .body, colour: holds == nil ? Design.quiet : Design.ink, width: w - deX)
             hairline(x: x, y: b + u - Self.line - 1, width: w - x, Design.rule)
         }
         SettingsSheet.section(3, "Note", guide: s[2].guide, contentX: x, width: w)
@@ -533,22 +531,22 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func drawPress(_ s: [Section]) {
         let x = contentX, w = bounds.width
         SettingsSheet.title("Press Check.")
-        SettingsSheet.introduction("Press operator · ISO 12647-2 · Later release", "The pressroom's workflow, in its own vocabulary: density, dot gain, grey. Drawn now so the data model keeps room for it.", x: x, width: w)
+        SettingsSheet.introduction("Press operator · ISO 12647-2 · Later release", "The pressroom's workflow in its own words: density, dot gain, grey.", x: x, width: w)
         SettingsSheet.section(1, "Condition", guide: s[0].guide, contentX: x, width: w)
         lead("Pick the printing condition and the colour bar on the sheet. ISO 12647-2 sets the solids, the tone value increase and the grey balance the press has to hold.", section: 0)
-        row("Printing condition", "From the condition's aims, e.g. FOGRA51 · ISO 12647-2:2013", baseline: rowBaseline(0, 0), quiet: true)
-        row("Colour bar", "Solids, 50% tints, three-colour grey, overprints", baseline: rowBaseline(0, 1), quiet: true)
-        row("Instrument", "A spectrodensitometer the app reads, M1", baseline: rowBaseline(0, 2), quiet: true)
+        row("Printing condition", "The condition's aims, e.g. FOGRA51", baseline: rowBaseline(0, 0), quiet: true, valueAt: 0.3)
+        row("Colour bar", "Solids, 50% tints, grey, overprints", baseline: rowBaseline(0, 1), quiet: true, valueAt: 0.3)
+        row("Instrument", "A spectrodensitometer the app reads", baseline: rowBaseline(0, 2), quiet: true, valueAt: 0.3)
         SettingsSheet.section(2, "Measure", guide: s[1].guide, contentX: x, width: w)
         lead("Solids by ΔE00, tone value increase by the deviation from the curve, grey balance by ΔCh. Density is read from the same pass and kept for the operator, measured, never modelled.", section: 1)
-        row("Solids", "ΔE00 from the condition's aims · tolerance from the purchased standard", baseline: rowBaseline(1, 0), quiet: true)
-        row("Tone value increase", "Deviation from the curve at 50% · per ink", baseline: rowBaseline(1, 1), quiet: true)
-        row("Grey balance", "ΔCh of the three-colour grey against its aim", baseline: rowBaseline(1, 2), quiet: true)
-        row("Density", "C · M · Y · K as the operator ran them", baseline: rowBaseline(1, 3), quiet: true)
+        row("Solids", "ΔE00 from the condition's aims", baseline: rowBaseline(1, 0), quiet: true, valueAt: 0.3)
+        row("Tone value increase", "Deviation from the curve at 50%, per ink", baseline: rowBaseline(1, 1), quiet: true, valueAt: 0.3)
+        row("Grey balance", "ΔCh of the three-colour grey", baseline: rowBaseline(1, 2), quiet: true, valueAt: 0.3)
+        row("Density", "C · M · Y · K as the operator ran them", baseline: rowBaseline(1, 3), quiet: true, valueAt: 0.3)
         SettingsSheet.section(3, "OK Sheet", guide: s[2].guide, contentX: x, width: w)
         lead("The OK sheet says the run was started within the condition, by whom, and at what densities, so the run can be held there. A later sheet is checked against it, not against memory.", section: 2)
-        row("Needs", "An instrument the app reads, and a measured density series", baseline: rowBaseline(2, 0), quiet: true)
-        row("Gets", "Every reading with sheet and time, the densities, who signed", baseline: rowBaseline(2, 1), quiet: true)
+        row("Needs", "An instrument the app reads", baseline: rowBaseline(2, 0), quiet: true, valueAt: 0.3)
+        row("Gets", "Every reading, the densities, who signed", baseline: rowBaseline(2, 1), quiet: true, valueAt: 0.3)
     }
 
     // MARK: Actions
@@ -671,8 +669,8 @@ final class ProofLabelView: NSView {
             ("Simulates", condition),
             ("Result", passed == true ? "Passed · 7 of 7 checks" : passed == false ? "Failed" : "No measurement"),
             ("Average · Maximum ΔE00", value("All patches, average") + " · " + value("All patches, maximum")),
-            ("Paper · Primaries · CMY hue ΔH", value("Paper white") + " · " + value("Primary solids C, M, Y, K") + " · " + value("C, M, Y solids, hue")),
-            ("Grey ΔCh max · avg", value("Neutral CMY scale, maximum") + " · " + value("Neutral CMY scale, average")),
+            ("Paper · Solids · CMY hue ΔH", value("Paper white") + " · " + value("Solids C, M, Y, K") + " · " + value("C, M, Y hue")),
+            ("Grey ΔCh max · avg", value("Neutral scale, maximum") + " · " + value("Neutral scale, average")),
             ("Measured", measurement?.conditions ?? "—"),
             ("Measurement file", measurement?.name ?? "—"),
             ("Software", "Colorgain 3.0 · Fogra data, unmodified"),
