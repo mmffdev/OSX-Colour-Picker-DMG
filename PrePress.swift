@@ -43,7 +43,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     static let routes: [Route] = [
         Route(flow: .verify, title: "Verify A Proof", who: "Prepress · ISO 12647-7", need: ["The proof, with its MediaWedge", "A spectrophotometer, M1", "The condition it simulates"], get: "A proof label, pass or fail, every figure on it", steps: ["Condition", "Measure", "Result", "Label"], later: false),
         Route(flow: .check, title: "Check A Colour", who: "Brand owner · Agency · Printer", need: ["The master colour in the catalogue", "The brand book's tolerance", "The printed sample, measured"], get: "An approval record, copied for the swatch", steps: ["Master", "Measure", "Decide"], later: false),
-        Route(flow: .print, title: "Will It Print?", who: "Designer · Before anything is printed", need: ["The palette", "The condition it is going to", "Nothing printed yet"], get: "Which colours hold, and a note to keep with the palette", steps: ["Palette", "Result", "Note"], later: false),
+        Route(flow: .print, title: "Will It Print?", who: "Designer · Before anything is printed", need: ["The palette", "The condition it is going to", "Nothing printed yet"], get: "Which colours hold, with a note for the palette", steps: ["Palette", "Result", "Note"], later: false),
         Route(flow: .press, title: "Press Check", who: "Press operator · ISO 12647-2 · Later release", need: ["The colour bar on the sheet", "A spectrodensitometer", "The printing condition"], get: "The OK sheet, signed, with its densities kept", steps: ["Condition", "Measure", "OK Sheet"], later: true),
     ]
     static func route(_ flow: Flow) -> Route? { routes.first { $0.flow == flow } }
@@ -389,8 +389,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     // them from the house button's own numbers and keeps the hit rects.
     private var startRects: [(NSRect, Flow)] = []
     private func drawStart(_ route: Route, baseline b: CGFloat) {
-        let title = Design.attributed(route.steps.joined(separator: " · "), .caption, colour: Design.quiet)
-        title.draw(x: column(at: 0.5), baseline: b, width: bounds.width - column(at: 0.5))
+        let title = Design.attributed(route.steps.joined(separator: ", "), .caption, colour: Design.quiet)
+        title.draw(x: bounds.width - title.size().width, baseline: b)
         let action = Design.attributed(route.title, .action, colour: Design.card)
         let width = ceil(action.size().width) + 28 + 32
         let rect = NSRect(x: contentX, y: SettingsSheet.buttonTop(baseline: b), width: width, height: SwissButton.height)
@@ -408,7 +408,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         // 01 Condition: the dropdown takes rows 0 and 1; the strip's facts follow.
         SettingsSheet.section(1, "Condition", guide: s[0].guide, contentX: x, width: w)
         lead("Every proof simulates one printing condition. Pick the one the job was made for; the reference values and the tolerances follow from it. Nothing here is a user's opinion.", section: 0)
-        row("Control strip", "MediaWedge CMYK V3 · \(reference?.patches.count ?? 0) patches", baseline: rowBaseline(0, 3))
+        row("Control strip", "MediaWedge V3 · \(reference?.patches.count ?? 0) patches", baseline: rowBaseline(0, 3))
         row("Reference measured", reference?.conditions ?? "Reference not found in the app bundle", baseline: rowBaseline(0, 4), quiet: reference == nil)
         row("Tolerances", "ISO 12647-7:2016 · CIEDE2000", baseline: rowBaseline(0, 5))
         // 02 Measure
