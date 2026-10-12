@@ -62,7 +62,7 @@ final class StudioWindowController: NSWindowController {
         if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
         else {
-            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share), ("--appbridge", .appbridge), ("--appbridge-settings", .appbridgeSettings)]
+            let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--prepress", .prepress(0)), ("--prepress-verify", .prepress(1)), ("--prepress-check", .prepress(2)), ("--prepress-print", .prepress(3)), ("--prepress-press", .prepress(4)), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share), ("--appbridge", .appbridge), ("--appbridge-settings", .appbridgeSettings)]
             c.frame.go(views.first { args.contains($0.0) }?.1 ?? .catalogue)
         }
         c.showWindow(nil)
@@ -193,7 +193,7 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, tags, lab, proofing, contrast, share, appbridge, appbridgeSettings }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, tags, lab, proofing, prepress(Int), contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
     private(set) var chosenHex: String?
 
@@ -219,6 +219,8 @@ final class StudioFrame: NSView {
     /// Export and Import as a wizard in the page (StudioShare.swift), begun from a palette's halo, a page's Export or the catalogue settings.
     let sharePage: SharePage
     let proofingPage: ProofingPage
+    /// PrePress: the four print workflows as routes, each a page of steps (PrePress.swift).
+    let prePressPage: PrePressPage
     private var beforeProofingRail: CGFloat = 1
     let appbridge = AppbridgeStore()
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
@@ -234,6 +236,7 @@ final class StudioFrame: NSView {
         contrastPage = ContrastPage(library: library)
         sharePage = SharePage(library: library)
         proofingPage = ProofingPage(library: library)
+        prePressPage = PrePressPage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
@@ -276,7 +279,7 @@ final class StudioFrame: NSView {
             guard let self, self.library.library.swatch(id) != nil else { return }
             self.go(.palette(id))
         }
-        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .proofing, .contrast, .projects, .appbridge][i]) }
+        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .proofing, .prepress(0), .contrast, .projects, .appbridge][i]) }
         header.onSettings = { [weak self] in self?.openSettings() }
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -390,6 +393,8 @@ final class StudioFrame: NSView {
         page.add(TagsSettings(library: library), as: .tags)
         page.add(LabPage(library: library), as: .lab)
         page.add(proofingPage, as: .proofing)
+        prePressPage.onNavigate = { [weak self] n in self?.go(.prepress(n)) }
+        page.add(prePressPage, as: .prepress)
         page.add(contrastPage, as: .contrast)
         page.add(sharePage, as: .share)
         let appbridgePage = AppbridgePage(store: appbridge)
@@ -641,7 +646,7 @@ final class StudioFrame: NSView {
         fillPage()
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .proofing: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .proofing: return 3; case .prepress: return 4; case .contrast: return 5; case .projects: return 6; case .appbridge: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -913,6 +918,13 @@ final class StudioFrame: NSView {
             rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
                     .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Sounds", nil, 0, .sounds, place == .sounds), .item("Tags", nil, 0, .tags, place == .tags),
                     .item("Appbridge", nil, 0, .appbridgeSettings, place == .appbridgeSettings)]
+        case .prepress(let n):
+            heading = "PrePress"; labels = ("Workflow", "Steps")
+            rows.append(.item("Which job is it?", nil, 0, .prepress(0), n == 0))
+            rows.append(.divider("Workflows"))
+            for route in PrePressPage.routes {
+                rows.append(.item(route.title, route.later ? "Later" : "\(route.steps.count)", 0, .prepress(route.flow.rawValue), n == route.flow.rawValue))
+            }
         case .lab, .proofing:
             return   // no rail2: the page has its columns
         case .contrast:
@@ -1079,6 +1091,12 @@ final class StudioFrame: NSView {
         case .proofing:
             title = "Proofing"; meta = ("Reference & Output", "D50 · 2° Observer")
             page.show(.proofing)
+        case .prepress(let n):
+            let flow = PrePressPage.Flow(rawValue: n) ?? .menu
+            prePressPage.flow = flow
+            if let route = PrePressPage.route(flow) { title = route.title; meta = (route.who, route.steps.joined(separator: " · ")) }
+            else { title = "PrePress"; meta = ("Four workflows", "One artefact each") }
+            page.show(.prepress)
         case .lab:
             title = "Colour Lab"; meta = ("The wheel", "Build on a colour")
             page.show(.lab)
@@ -1281,7 +1299,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
     func clearFilter() { hideSearch() }
-    private let tabs = ["Library", "Palettes", "Lab", "Proofing", "Contrast", "Projects", "Appbridge"]
+    private let tabs = ["Library", "Palettes", "Lab", "Proofing", "PrePress", "Contrast", "Projects", "Appbridge"]
     private var tabRects: [NSRect] = []
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
@@ -2639,7 +2657,7 @@ final class StudioPage: NSView, Overlay {
         guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
         return onPaletteDrop?(id) ?? false
     }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, tags, lab, proofing, contrast, share, appbridge }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, tags, lab, proofing, prepress, contrast, share, appbridge }
     private var section = Section.tiles
     private let sectionTabs = NSScrollView()
     private let tabBody = NSView()
