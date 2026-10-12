@@ -24,7 +24,11 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private static var line: CGFloat { Design.App.textBaseline }
     private var u: CGFloat { Self.u }
     private var firstGuide: CGFloat { SettingsSheet.headerGuide + 4 * u }
-    private var contentX: CGFloat { SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
+    /// The content column is the page's own split, where the area gutter falls: the words on the left, the controls and tables on the right.
+    private var contentX: CGFloat {
+        let grid = Design.App.pageColumns(width: bounds.width, in: window?.frame.width ?? Design.App.size.width)
+        return grid.x.indices.contains(grid.split) ? grid.x[grid.split] : SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width)
+    }
     private var columns: [CGFloat] { SettingsSheet.columns(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
     /// The first page column at or past a fraction of the content area: values and numerals sit on columns, never at arbitrary x.
     private func column(at fraction: CGFloat) -> CGFloat {
@@ -353,7 +357,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func number(_ d: Double?, _ places: Int = 1) -> String { d.map { String(format: "%.\(places)f", $0) } ?? "—" }
     private func lead(_ words: String, section i: Int) {
         // The step's words on the left, under its number, in a box of four lines that never grows.
-        SettingsSheet.paragraph(words, x: 0, firstBaseline: rowBaseline(i, 2), width: max(0, contentX - Design.App.areaGutter), height: 4 * u, colour: Design.quiet)
+        SettingsSheet.paragraph(words, x: 0, firstBaseline: rowBaseline(i, 2), width: max(0, min(contentX - Design.App.areaGutter, 400)), height: 4 * u, colour: Design.quiet)
     }
 
     override func draw(_ dirtyRect: NSRect) {
