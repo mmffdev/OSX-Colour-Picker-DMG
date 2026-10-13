@@ -111,8 +111,8 @@ final class PrintBloomView: NSView {
     private var hovered: String?
     private var tracking: NSTrackingArea?
     private var expandRect = NSRect.zero
-    private var diameter: CGFloat { max(20, min(bounds.width - 64, bounds.height - 220)) }
-    var captionGuide: CGFloat { SettingsSheet.baseline(ceil((102 + diameter + 40 - Design.App.textBaseline) / Design.App.unit)) }
+    private var diameter: CGFloat { max(20, min(bounds.width - 112, bounds.height - 316)) }
+    var captionGuide: CGFloat { SettingsSheet.baseline(ceil((150 + diameter + 56 - Design.App.textBaseline) / Design.App.unit)) }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func updateTrackingAreas() {
@@ -125,24 +125,28 @@ final class PrintBloomView: NSView {
         paths = []
         let now = ProcessInfo.processInfo.systemUptime
         // Wait until the plot itself scrolls into view before spending its entrance animation.
-        let plot = NSRect(x: 0, y: 102, width: bounds.width, height: diameter)
+        let plot = NSRect(x: 0, y: 150, width: bounds.width, height: diameter)
         if !items.isEmpty && visibleRect.intersects(plot) { prepareMotion(at: now) }
         Design.attributed("Colour Bloom", .bodyStrong).draw(x: 0, baseline: 17)
         expandRect = expanded ? .zero : NSRect(x: bounds.width - 28, y: 0, width: 28, height: 28)
         if !expanded { Design.arrow(14, colour: Design.ink, back: expanded).draw(in: expandRect.insetBy(dx: 7, dy: 7), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
         let diameter = self.diameter
-        let centre = NSPoint(x: bounds.midX, y: 102 + diameter / 2), radius = diameter / 2 - 10, inner = radius * 0.20
+        let centre = NSPoint(x: bounds.midX, y: 150 + diameter / 2), radius = diameter / 2 - 10, inner = radius * 0.20
         let ceiling = max(tolerance * 1.6, (items.compactMap(\.delta).max() ?? tolerance) * 1.12, 0.1)
         func reach(_ value: Double) -> CGFloat { inner + (radius - inner) * CGFloat(max(0, value) / ceiling) }
         let toleranceRadius = reach(tolerance)
         var petalScale: CGFloat = 1
         func point(_ r: CGFloat, _ a: CGFloat) -> NSPoint { NSPoint(x: centre.x + r * petalScale * cos(a), y: centre.y + r * petalScale * sin(a)) }
-        func petal(_ start: CGFloat, _ end: CGFloat, _ r: CGFloat, from hole: CGFloat? = nil) -> NSBezierPath {
+        func petal(_ start: CGFloat, _ end: CGFloat, _ r: CGFloat, from hole: CGFloat? = nil, rounded: Bool = false) -> NSBezierPath {
             let holeRadius = hole ?? inner
             let path = NSBezierPath(); path.move(to: point(holeRadius, start))
-            path.line(to: point(r, start))
+            let corner = rounded ? min(8, (r - holeRadius) * 0.5, r * (end - start) * 0.15) : 0
+            let angle = corner / max(1, r)
+            path.line(to: point(r - corner, start))
+            path.curve(to: point(r, start + angle), controlPoint1: point(r, start), controlPoint2: point(r, start))
             let segments = max(3, Int((end - start) * 24))
-            for n in 1...segments { path.line(to: point(r, start + (end - start) * CGFloat(n) / CGFloat(segments))) }
+            for n in 1...segments { path.line(to: point(r, start + angle + (end - start - 2 * angle) * CGFloat(n) / CGFloat(segments))) }
+            path.curve(to: point(r - corner, end), controlPoint1: point(r, end), controlPoint2: point(r, end))
             path.line(to: point(holeRadius, end))
             for n in 1...segments { path.line(to: point(holeRadius, end - (end - start) * CGFloat(n) / CGFloat(segments))) }
             path.close(); path.lineJoinStyle = .round; return path
@@ -153,7 +157,8 @@ final class PrintBloomView: NSView {
             petalScale = CGFloat(pose?.scale ?? (entrancePending ? 0 : 1))
             let start = CGFloat(pose?.angle ?? Double(-CGFloat.pi / 2 + CGFloat(index) * step + gap)), end = start + step - gap * 2
             guard petalScale > 0.001 else { continue }
-            let envelope = petal(start, end, radius)
+            let envelope = petal(start, end, radius, rounded: true)
+            NSGraphicsContext.saveGraphicsState(); envelope.addClip()
             item.master.withAlphaComponent(0.08).setFill(); petal(start, end, toleranceRadius).fill()
             (item.printed ?? Design.mist).withAlphaComponent(0.08).setFill(); petal(start, end, radius, from: toleranceRadius).fill()
             Design.rule.withAlphaComponent(0.55).setStroke(); envelope.lineWidth = 0.5; envelope.stroke()
@@ -166,13 +171,19 @@ final class PrintBloomView: NSView {
             }
             let status: NSColor = item.delta.map { $0 <= tolerance ? NSColor(calibratedRed: 0.16, green: 0.48, blue: 0.34, alpha: 1) : NSColor(calibratedRed: 0.77, green: 0.22, blue: 0.23, alpha: 1) } ?? Design.quiet
 
-            // The outer arc of each petal reports its own result, in physical pixels.
-            let rim = NSBezierPath()
-            let arcRadius = radius - 7.5 / max(1, window?.backingScaleFactor ?? 1)
-            rim.move(to: point(arcRadius, start))
-            let segments = max(3, Int((end - start) * 48))
-            for n in 1...segments { rim.line(to: point(arcRadius, start + (end - start) * CGFloat(n) / CGFloat(segments))) }
-            status.setStroke(); rim.lineWidth = 15 * petalScale / max(1, window?.backingScaleFactor ?? 1); rim.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+            // A gently rounded outer rim preserves the result colour and physical thickness.
+            let rimWidth = 15 / max(1, window?.backingScaleFactor ?? 1)
+            status.setFill()
+            petal(start, end, radius, from: radius - rimWidth, rounded: true).fill()
+            if selected == item.id {
+                // The number sits 24 points outside the petal; selection sits another 24 out.
+                let selection = NSBezierPath()
+                selection.move(to: point(radius + 48, start))
+                let segments = max(3, Int((end - start) * 48))
+                for n in 1...segments { selection.line(to: point(radius + 48, start + (end - start) * CGFloat(n) / CGFloat(segments))) }
+                Design.ink.setStroke(); selection.lineWidth = 2; selection.lineCapStyle = .round; selection.stroke()
+            }
             paths.append((envelope, item.id))
             if items.count <= 12, petalScale > 0.75, let delta = item.delta {
                 let position = point(radius + 24, (start + end) / 2)
@@ -231,23 +242,25 @@ final class PrintBloomDetail: NSView {
     let chart = PrintBloomView()
     private let close = NSButton()
     var onClose: (() -> Void)?
-    var order: PrintBloomView.Order = .palette { didSet { chart.order = order } }
+    var order: PrintBloomView.Order = .palette { didSet { chart.order = order; if oldValue != order { updateFeedback() } } }
     @objc private func closePressed() { onClose?() }
-    private let feedback = PrintBloomFeedback()
+    private let feedback = PrintBloomReport()
+    private var pendingAnchor: String?
     private let scroll = FittedScrollView()
     private final class SettingsContent: NSView { override var isFlipped: Bool { true } }
     private let settingsScroll = FittedScrollView()
     private let settingsContent = SettingsContent()
     private let profileSelector = PrintProfileSelector()
     private let summaryLabel = Design.text("", .caption, colour: Design.quiet)
-    var selected: String? { didSet { chart.selected = selected; updateFeedback() } }
+    var selected: String? { didSet { chart.selected = selected; pendingAnchor = selected; needsLayout = true } }
     var tolerance: Double = 2 { didSet { chart.tolerance = tolerance; updateFeedback() } }
     var controls: [SwissDropdown] = [] { didSet { oldValue.forEach { $0.removeFromSuperview() }; controls.forEach { settingsContent.addSubview($0) }; needsLayout = true } }
     var summary = "" { didSet { summaryLabel.stringValue = summary; needsLayout = true } }
     var items: [PrintBloomView.Item] = [] { didSet { chart.items = items; updateFeedback(); needsLayout = true; needsDisplay = true } }
     var printingCondition = "" { didSet { updateFeedback() } }
     private func updateFeedback() {
-        feedback.update(item: items.first { $0.id == selected }, tolerance: tolerance, condition: printingCondition)
+        feedback.update(items: order.arrange(items, tolerance: tolerance), tolerance: tolerance, condition: printingCondition)
+        pendingAnchor = selected
         needsLayout = true
     }
     override var isFlipped: Bool { true }
@@ -284,6 +297,11 @@ final class PrintBloomDetail: NSView {
         }
         scroll.frame = NSRect(x: column(9), y: 2 * Design.App.unit, width: max(0, bounds.width - column(9)), height: max(0, bounds.height - 2 * Design.App.unit))
         feedback.fit(width: scroll.contentSize.width, minimumHeight: scroll.contentSize.height)
+        if let id = pendingAnchor, let y = feedback.anchors[id] {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            pendingAnchor = nil
+        }
     }
     override func draw(_ dirtyRect: NSRect) {
         if Design.App.masterGrid {
@@ -296,7 +314,7 @@ final class PrintBloomDetail: NSView {
         }
         let middle = column(1), middleWidth = Design.App.span(1, 3, in: gridWidth), right = column(9), width = scroll.contentSize.width
         Design.attributed("Palette Prediction", .bodyStrong).draw(x: middle, baseline: SettingsSheet.baseline(0), width: max(0, middleWidth - 36))
-        Design.attributed("Outcome", .bodyStrong).draw(x: right, baseline: SettingsSheet.baseline(0), width: max(0, width - 36))
+        Design.attributed("Palette Report", .bodyStrong).draw(x: right, baseline: SettingsSheet.baseline(0), width: max(0, width - 36))
     }
 }
 
@@ -354,5 +372,43 @@ private final class PrintBloomFeedback: NSView {
             y += height
         }
         frame = NSRect(x: 0, y: 0, width: width, height: max(minimumHeight, y + 24))
+    }
+}
+
+/// One continuous report, ordered like the bloom, with colour-identity anchors.
+private final class PrintBloomReport: NSView {
+    private var sections: [(String, PrintBloomFeedback)] = []
+    private(set) var anchors: [String: CGFloat] = [:]
+    override var isFlipped: Bool { true }
+    func update(items: [PrintBloomView.Item], tolerance: Double, condition: String) {
+        sections.forEach { $0.1.removeFromSuperview() }; sections.removeAll()
+        if items.isEmpty {
+            let section = PrintBloomFeedback()
+            section.update(item: nil, tolerance: tolerance, condition: condition)
+            sections.append(("", section)); addSubview(section)
+        } else {
+            for item in items {
+                let section = PrintBloomFeedback()
+                section.update(item: item, tolerance: tolerance, condition: condition)
+                sections.append((item.id, section)); addSubview(section)
+            }
+        }
+    }
+    func fit(width: CGFloat, minimumHeight: CGFloat) {
+        anchors.removeAll()
+        var y: CGFloat = 0
+        for (index, section) in sections.enumerated() {
+            anchors[section.0] = y
+            section.1.fit(width: width, minimumHeight: index == sections.count - 1 ? minimumHeight : 0)
+            section.1.setFrameOrigin(NSPoint(x: 0, y: y))
+            y += section.1.frame.height + 32
+        }
+        frame = NSRect(x: 0, y: 0, width: width, height: max(minimumHeight, y))
+        needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        for section in sections.dropFirst() {
+            hairline(x: 0, y: section.1.frame.minY - 16, width: bounds.width, Design.rule)
+        }
     }
 }
