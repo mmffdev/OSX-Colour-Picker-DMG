@@ -1,5 +1,7 @@
 # MMFFDev Colour Picker
 
+App layout lookup: [Component registry](.codex/c_layout_registry.md) — canonical region names, hierarchy, source symbols and panel primitive. Read it before locating or changing app sections.
+
 macOS colour picker app (MMFFDev Colour 3). The source is at the repository root; the two earlier apps were removed on 2026-10-02 and live only in git history. Build: `./build.sh` (compiles, runs the self-test, installs); installers: `./make_dmg.sh`, `./make_pkg.sh`. Day to day, open `Package.swift` in Xcode and Cmd+R: it rebuilds only what changed and runs the bare binary; the installed app still comes from `./build.sh`.
 
 ## Two build targets
