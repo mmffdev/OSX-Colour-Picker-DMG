@@ -1434,6 +1434,33 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     for dir in [staging, paletteStaging] { Sharing.discard(dir) }
     check(!fm.fileExists(atPath: staging.path), "a staging folder is gone once the share is in or set aside")
 
+    let openingPetal = PrintBloomView.PetalMotion(from: -.pi / 2, to: .pi, scaleFrom: 0, started: 10, duration: 0.62)
+    check(openingPetal.pose(at: 10).scale == 0 && openingPetal.pose(at: 11).scale == 1 && openingPetal.pose(at: 11).angle == .pi,
+          "bloom entrance grows from the centre and settles at the exact target")
+    let crossing = PrintBloomView.PetalMotion.nearest(-.pi + 0.1, from: .pi - 0.1)
+    check(abs(crossing - (.pi + 0.1)) < 0.00001, "bloom reorder crosses the angle boundary by the short rotation")
+    let mid = openingPetal.pose(at: 10.31)
+    let interruptedPetal = PrintBloomView.PetalMotion(from: mid.angle, to: 0, scaleFrom: mid.scale, started: 10.31, duration: 0.38)
+    check(interruptedPetal.pose(at: 10.31).angle == mid.angle && interruptedPetal.pose(at: 10.31).scale == mid.scale,
+          "a second bloom ordering starts from the currently displayed pose without jumping")
+    let reducedPetal = PrintBloomView.PetalMotion(from: 0, to: 2, scaleFrom: 0, started: 10, duration: 0)
+    check(reducedPetal.pose(at: 10).angle == 2 && reducedPetal.pose(at: 10).scale == 1, "reduced-motion bloom settles immediately")
+
+    let bloomSamples: [PrintBloomView.Item] = [
+        .init(id: "unknown", name: "Unknown", master: .gray, printed: nil, delta: nil, ink: nil),
+        .init(id: "pass", name: "Blue", master: .blue, printed: .blue, delta: 1, ink: nil),
+        .init(id: "fail", name: "Amber", master: .orange, printed: .orange, delta: 4, ink: nil),
+        .init(id: "boundary", name: "Blue", master: .blue, printed: .blue, delta: 2, ink: nil)
+    ]
+    func bloomIDs(_ order: PrintBloomView.Order, tolerance: Double = 2) -> [String] {
+        order.arrange(bloomSamples, tolerance: tolerance).map { $0.id }
+    }
+    check(bloomIDs(.palette) == ["unknown", "pass", "fail", "boundary"], "bloom palette order preserves source order")
+    check(bloomIDs(.failFirst) == ["fail", "pass", "boundary", "unknown"] && bloomIDs(.passFirst) == ["pass", "boundary", "fail", "unknown"], "bloom status ordering is stable, inclusive at tolerance and keeps unknown predictions last")
+    check(bloomIDs(.highest) == ["fail", "boundary", "pass", "unknown"] && bloomIDs(.lowest) == ["pass", "boundary", "fail", "unknown"], "bloom delta ordering keeps missing values last in either direction")
+    check(bloomIDs(.name) == ["fail", "pass", "boundary", "unknown"], "bloom name ordering preserves equal-name identities")
+    check(bloomIDs(.failFirst, tolerance: 0.5) == ["pass", "fail", "boundary", "unknown"], "bloom status ordering responds to tolerance changes")
+
     print("the splash builds the tree")
     func answered(_ who: [(String, [String])], kinds: [String], streams: [String], oneKind: Bool = false, groups: [String]? = nil, members: [String]) -> (SchemaTrial.SchemaFile, Library) {
         let d = SplashDraft()

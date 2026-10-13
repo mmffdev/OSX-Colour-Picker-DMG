@@ -187,20 +187,36 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         selectedPrintColour = id; bloom.selected = id; bloomDetail?.selected = id
         bloomDetail?.needsDisplay = true; needsDisplay = true
     }
+    private func arrangeBloom(_ order: PrintBloomView.Order) {
+        bloom.order = order; bloomDetail?.order = order
+    }
     private func updateBloom() {
         let items = held.map { PrintBloomView.Item(id: $0.id, name: $0.name, master: $0.master.xyz.display, printed: $0.printed?.xyz.display, delta: $0.difference, ink: $0.ink) }
         if !items.contains(where: { $0.id == selectedPrintColour }) { selectedPrintColour = items.first?.id }
         bloom.items = items; bloom.tolerance = printFlag; bloom.selected = selectedPrintColour
         if let detail = bloomDetail {
-            detail.items = items; detail.tolerance = printFlag; detail.selected = selectedPrintColour
+            detail.order = bloom.order; detail.items = items; detail.tolerance = printFlag; detail.selected = selectedPrintColour
+            detail.printingCondition = printPress
+            let palettes = library.library.listedPalettes.filter { !$0.isTypography && $0.claim == nil }
+            let paletteName = palettes.firstIndex(where: { $0.id == printPalette?.id }).map { "\($0 + 1). \(palettes[$0].name)" } ?? "Choose Palette"
+            let values = [paletteName, printPress, printIntent.name, printBlackPoint ? "On" : "Off", Self.toleranceName(printFlag)]
+            for (control, value) in zip(detail.controls, values) { control.displayValue(value) }
             detail.summary = "Profile Prediction · BPC " + (printBlackPoint ? "On":"Off") + " · No Measured Proof"
         }
     }
     func refreshGrid() { bloomDetail?.needsDisplay = true }
+    private func spectra(for palettes: [Swatch]) -> [[NSColor]] {
+        palettes.map { palette in palette.entries.compactMap { entry in
+            (ColourKeys.definition(of: entry.hex) ?? ColourDefinition.of(hex: entry.hex))?.master.display
+        } }
+    }
     private func expandBloom() {
         let detail = PrintBloomDetail(frame: .zero)
         let modal = SwissFocusModal(content: detail, size: NSSize(width: 1120, height: 700))
+        modal.fillsWorkspace = true
         bloomDetail = detail
+        detail.onClose = { [weak modal] in modal?.dismissOverlay() }
+        detail.chart.onOrder = { [weak self] in self?.arrangeBloom($0) }
         detail.chart.onExpand = { [weak modal] in modal?.dismissOverlay() }
         detail.chart.onSelect = { [weak self] id in self?.selectPrintColour(id) }
         let palettes = library.library.listedPalettes.filter { !$0.isTypography && $0.claim == nil }
@@ -222,6 +238,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
                 self?.printFlag = Self.tolerances.first { Self.toleranceName($0) == value } ?? 2; self?.savePrintSettings()
             }
         ]
+        detail.controls.first?.spectra = spectra(for: palettes)
         updateBloom(); modal.present(over: self)
     }
 
@@ -262,6 +279,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             header.tag = index; header.isBordered = false; header.target = self; header.action = #selector(sortPrintResults(_:)); addSubview(header)
         }
         bloom.onSelect = { [weak self] id in self?.selectPrintColour(id) }
+        bloom.onOrder = { [weak self] in self?.arrangeBloom($0) }
         bloom.onExpand = { [weak self] in self?.expandBloom() }; addSubview(bloom)
         backToMenu.leadingArrow = true
         for f in [sampleL, sampleA, sampleB] {
@@ -308,6 +326,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             m.onChange = change; addSubview(m); return m
         }
         let paletteNames = palettes.map { $0.name }
+        let printPaletteNames = palettes.enumerated().map { "\($0.offset + 1). \($0.element.name)" }
         switch flow {
         case .verify:
             conditionMenu = menu("Printing condition the proof simulates", value: condition.name, options: Self.conditions.map { $0.name }) { [weak self] value in
@@ -334,8 +353,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         case .print:
             if printPalette == nil { printPalette = palettes.first }
             printMenus = [
-                menu("Palette", value: printPalette?.name ?? "No palettes yet", options: paletteNames) { [weak self] value in
-                    guard let self else { return }; self.printPalette = palettes.first { $0.name == value }; self.menuSignature = ""; self.recompute(); self.reload()
+                menu("Palette", value: palettes.firstIndex(where: { $0.id == printPalette?.id }).map { printPaletteNames[$0] } ?? "No palettes yet", options: printPaletteNames) { [weak self] value in
+                    guard let self, let index = printPaletteNames.firstIndex(of: value) else { return }; self.printPalette = palettes[index]; self.menuSignature = ""; self.recompute(); self.reload()
                 },
                 menu("Printing condition", value: printPress, options: PressProfiles.all.map(\.name)) { [weak self] value in self?.printPress = value; self?.savePrintSettings() },
                 menu("Rendering intent", value: printIntent.name, options: [RenderingIntent.relative, .absolute, .perceptual].map(\.name)) { [weak self] value in
@@ -348,6 +367,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             ]
         default: break
         }
+        if flow == .print { printMenus.first?.spectra = spectra(for: palettes) }
     }
     static let tolerances = [1.0, 1.5, 2.0, 3.0, 5.0]
     static func toleranceName(_ t: Double) -> String {

@@ -3,6 +3,12 @@ import UniformTypeIdentifiers
 
 /// Both the PrePress controls and palette header consume the same .coldata profile list.
 final class PrintProfileSelector:NSView,Overlay {
+    var dismissOnOutsideClick:Bool{true}
+    func handleOverlayEscape()->Bool{dismissOverlay();return true}
+    func containsOverlayEvent(_ event:NSEvent)->Bool{
+        if event.window === dropped{return true}
+        return event.window === window && bounds.contains(convert(event.locationInWindow,from:nil))
+    }
     let compact:Bool
     private let button=PrintProfileValueButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -17,6 +23,7 @@ final class PrintProfileSelector:NSView,Overlay {
     override func draw(_ dirtyRect:NSRect){if !compact{Design.attributed("Saved Print Profile",.caption,colour:Design.quiet).draw(x:0,baseline:11,width:bounds.width);hairline(x:0,y:47,width:bounds.width,Design.rule)}}
     func dismissOverlay(){if let dropped{dropped.parent?.removeChildWindow(dropped);dropped.orderOut(nil)};dropped=nil;Overlays.closed(self)}
     @objc private func open(){
+        if dropped != nil {dismissOverlay();return}
         guard let window else{return};do{document=try SavedPrintProfiles.load()}catch{NSApp.presentError(error);return};dismissOverlay()
         let actions=["Save Profile…","Edit Profile…","Duplicate Profile","Remove Profile…","Import Profile…","Export Profile…"]
         let labels=actions+["#Saved Profiles","Current Settings"]+document.profiles.map{$0.name}

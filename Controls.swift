@@ -10,9 +10,11 @@ protocol Overlay: AnyObject {
     func dismissOverlay()
     func containsOverlayEvent(_ event: NSEvent) -> Bool
     func handleOverlayEscape() -> Bool
+    var dismissOnOutsideClick: Bool { get }
 }
 
 extension Overlay {
+    var dismissOnOutsideClick: Bool { false }
     func handleOverlayEscape() -> Bool { false }
     func containsOverlayEvent(_ event: NSEvent) -> Bool {
         guard let window = event.window else { return false }
@@ -38,7 +40,11 @@ enum Overlays {
                 if e.keyCode == 53 { if open.last?.handleOverlayEscape() != true { closeAll() }; return nil }
                 return e
             }
-            if open.contains(where: { $0.containsOverlayEvent(e) }) { return e }
+            // A containing modal must not shield its dropdown from outside clicks.
+            for overlay in open.reversed() where overlay.dismissOnOutsideClick && !overlay.containsOverlayEvent(e) {
+                overlay.dismissOverlay()
+            }
+            if open.isEmpty || open.contains(where: { $0.containsOverlayEvent(e) }) { return e }
             closeAll()
             return e
         }
@@ -57,6 +63,22 @@ enum Overlays {
 /// a chevron at the right. The menu is a Card with a Rule edge under the field, rows with a Mist
 /// hover and a tick on the chosen one, and "Your own word…" turns the value into a field to type in.
 final class SwissDropdown: NSView, Overlay {
+    var dismissOnOutsideClick: Bool { true }
+    func handleOverlayEscape() -> Bool { dismissOverlay(); return true }
+    func containsOverlayEvent(_ event: NSEvent) -> Bool {
+        if event.window === list { return true }
+        return event.window === window && bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+    var spectra: [[NSColor]] = [] { didSet { needsDisplay = true } }
+    override func draw(_ dirtyRect: NSRect) {
+        guard let i = options.firstIndex(of: text), spectra.indices.contains(i) else { return }
+        Self.drawSpectrum(spectra[i], in: NSRect(x: 0, y: 1, width: bounds.width, height: 6))
+    }
+    static func drawSpectrum(_ colours: [NSColor], in rect: NSRect) {
+        guard !colours.isEmpty else { return }
+        let width = rect.width / CGFloat(colours.count)
+        for (i, colour) in colours.enumerated() { fill(NSRect(x: rect.minX + CGFloat(i) * width, y: rect.minY, width: width + 0.5, height: rect.height), colour) }
+    }
     private let cap: NSTextField
     private let value = NSTextField(string: "")
     private let chevron = Design.text("\u{25BE}", .caption, colour: Design.quiet)
@@ -67,7 +89,7 @@ final class SwissDropdown: NSView, Overlay {
     var onChange: ((String) -> Void)?
     var onPreview: ((String) -> Void)?
     var text: String { value.stringValue }
-    func displayValue(_ text: String) { value.stringValue = text }
+    func displayValue(_ text: String) { value.stringValue = text; needsDisplay = true }
     var overlayWindows: [NSWindow] { list.map { [$0] } ?? [] }
     func dismissOverlay() { close() }
 
@@ -108,13 +130,13 @@ final class SwissDropdown: NSView, Overlay {
 
     override func mouseDown(with event: NSEvent) {
         if value.isEditable { super.mouseDown(with: event); return }
-        open()
+        if list != nil { close() } else { open() }
     }
 
     private func open() {
         guard let win = window else { return }
         let items = options + (allowsOwn ? ["Your own word\u{2026}"] : [])
-        let panel = MenuPanel(items: items, chosen: value.stringValue, width: bounds.width, preview: onPreview) { [weak self] i in
+        let panel = MenuPanel(items: items, chosen: value.stringValue, width: bounds.width, spectra: spectra, preview: onPreview) { [weak self] i in
             guard let self = self else { return }
             self.close()
             if self.allowsOwn && i == items.count - 1 { self.typeOwn() }
@@ -136,7 +158,7 @@ final class SwissDropdown: NSView, Overlay {
     }
 
     private func set(_ s: String) {
-        value.stringValue = s
+        value.stringValue = s; needsDisplay = true
         onChange?(s)
     }
 
@@ -172,9 +194,9 @@ final class SwissDropdown: NSView, Overlay {
             let row = menuRows[index]
             return convertPoint(toScreen: row.convert(NSPoint(x: row.bounds.maxX, y: row.bounds.maxY), to: nil))
         }
-        init(items: [String], chosen: String, width: CGFloat, literalItems: Bool = false, preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
+        init(items: [String], chosen: String, width: CGFloat, literalItems: Bool = false, spectra: [[NSColor]] = [], preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
             let rowHeight: CGFloat = 30, thin: CGFloat = 12
-            let heights = items.map { !literalItems && MenuPanel.kind($0) == 1 ? thin : rowHeight }
+            let heights = items.enumerated().map { i, title in !literalItems && MenuPanel.kind(title) == 1 ? thin : (spectra.indices.contains(i) && !spectra[i].isEmpty ? 48 : rowHeight) }
             let h = heights.reduce(0, +) + 12
             super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: h), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             isOpaque = false
@@ -189,6 +211,7 @@ final class SwissDropdown: NSView, Overlay {
             for (i, s) in items.enumerated() {
                 y -= heights[i]
                 let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
+                r.spectrum = spectra.indices.contains(i) ? spectra[i] : []
                 r.literalTitle = literalItems
                 r.preview = { [weak self] in preview?(s); self?.onPreviewIndex?(i) }
                 card.addSubview(r); menuRows.append(r)
@@ -216,6 +239,7 @@ final class SwissDropdown: NSView, Overlay {
             private let act: () -> Void
             private let title: String, chosen: Bool
             private var hover = false
+            var spectrum: [NSColor] = []
             var literalTitle = false
             var hasSubmenu = false
             var enabled = true { didSet { needsDisplay = true } }
@@ -241,7 +265,8 @@ final class SwissDropdown: NSView, Overlay {
                 }
                 if hover { Design.mist.setFill(); bounds.fill() }
                 let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
-                t.draw(x: 14, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender, width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
+                if !spectrum.isEmpty { SwissDropdown.drawSpectrum(spectrum, in: NSRect(x: 14, y: 8, width: max(0, bounds.width - 44), height: 7)) }
+                t.draw(x: 14, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender + (spectrum.isEmpty ? 0 : 6), width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
                 if hasSubmenu {
                     let arrow = Design.attributed("›", .bodyStrong, colour: enabled ? Design.ink : Design.soft)
                     arrow.draw(at: NSPoint(x: bounds.width - 24, y: (bounds.height - arrow.size().height) / 2))

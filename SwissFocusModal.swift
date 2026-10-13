@@ -24,6 +24,7 @@ final class SwissFocusModal: NSView, Overlay {
     private var cardHeight: CGFloat = 280
     private var monitor: Any?
     private var customContent: NSView?
+    var fillsWorkspace = false
     private var preferredSize = NSSize(width: 504, height: 560)
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     override var isFlipped: Bool { true }
@@ -100,6 +101,11 @@ final class SwissFocusModal: NSView, Overlay {
     }
     override func layout() {
         super.layout(); background.frame = bounds
+        if fillsWorkspace, let content = customContent {
+            card.frame = NSRect(x: 0, y: Design.App.header, width: bounds.width, height: max(0, bounds.height - Design.App.header - Design.App.footer))
+            content.frame = card.bounds.insetBy(dx: Design.App.margin, dy: Design.App.margin)
+            return
+        }
         let width = min(preferredSize.width, bounds.width - 56)
         if let content = customContent {
             let height = min(preferredSize.height, bounds.height - 56)
@@ -109,6 +115,7 @@ final class SwissFocusModal: NSView, Overlay {
         }
         card.frame = NSRect(x: (bounds.width - width) / 2, y: max(28, (bounds.height - cardHeight) / 2), width: width, height: cardHeight)
     }
+    func handleOverlayEscape() -> Bool { dismissOverlay(); return true }
     func dismissOverlay() {
         let win = window; Overlays.closed(self)
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
