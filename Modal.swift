@@ -214,13 +214,13 @@ final class ChoiceSheet: NSView {
         body.textColor = .secondaryLabelColor
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        var buttons: [NSView] = [spacer]
+        var buttons: [NSView] = []
         for (i, choice) in choices.enumerated() {
             let b = toolButton(choice.title, choice.symbol, choice.title, target: self, action: #selector(chosen(_:)))
             b.tag = i
             buttons.append(b)
         }
-        let bar = NSStackView(views: buttons)
+        let bar = NSStackView(views: buttons + [spacer])
         bar.orientation = .horizontal
         bar.spacing = PageStyle.barSpacing
 

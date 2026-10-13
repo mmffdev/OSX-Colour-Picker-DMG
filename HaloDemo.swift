@@ -55,7 +55,7 @@ final class HaloDemo: NSObject, NSApplicationDelegate {
 
         halos = [swatch, palette, sort, details]
         let row = NSStackView(views: zip(["Swatch", "Palette", "Sort", "Colour"], halos).map { title, halo in
-            let button = NSButton(title: title, target: nil, action: nil)
+            let button = ActionButton(title: title, target: nil, action: nil)
             halo.attach(to: button)
             return button
         })

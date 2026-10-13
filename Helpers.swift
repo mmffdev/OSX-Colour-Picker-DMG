@@ -24,15 +24,23 @@ enum AppSounds {
 func playShutter() { AppSounds.play(.pick) }
 
 enum ColourCopies {
-    struct Entry { let key: String; let sourceCMYK: String? }
-    static var recent: [Entry] = []
+    struct Entry: Codable { let key: String; let sourceCMYK: String? }
+    static var recent: [Entry] = {
+        guard !CommandLine.arguments.contains("--self-test"), let data = AppPreferences.shared.data(forKey: "colourCopyHistory"),
+              let saved = try? JSONDecoder().decode([Entry].self, from: data) else { return [] }
+        return Array(saved.suffix(20))
+    }()
+    static func remember(_ key: String, sourceCMYK: String? = nil) {
+        recent.append(Entry(key: key, sourceCMYK: sourceCMYK)); recent = Array(recent.suffix(20))
+        if !CommandLine.arguments.contains("--self-test"), let data = try? JSONEncoder().encode(recent) { AppPreferences.shared.set(data, forKey: "colourCopyHistory") }
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
     static let changed = Notification.Name("ColourCopies.changed")
     static func copy(_ key: String, text: String? = nil, sourceCMYK: String? = nil, record: Bool = true, sound: Bool = true) {
         copyToClipboard(text ?? (Prefs.copyFormat == .cmyk ? (sourceCMYK ?? Prefs.copyText(key)) : Prefs.copyText(key)))
         if sound { AppSounds.play(.copy) }
         if record {
-            recent.append(Entry(key: key, sourceCMYK: sourceCMYK)); recent = Array(recent.suffix(10))
-            NotificationCenter.default.post(name: changed, object: nil)
+            remember(key, sourceCMYK: sourceCMYK)
         }
     }
 }

@@ -534,6 +534,20 @@ enum CatalogueTree {
                 guard seenPalettes.insert(doc.palette.id).inserted else { notes.append("\(a.url.lastPathComponent) is a second copy of a palette already read and was left alone"); continue }
                 var p = doc.palette
                 p.projectID = member
+                // Infer legacy ownership from the actual schema folder, including repeated role buckets.
+                if let member, let entry = entries[member], let home = memberURL[member] {
+                    let tree = entry.schema ?? collections.first(where: { $0.id == res.places[member]?.collection })?.stack ?? SchemaTrial.start
+                    var paths: [(UUID, URL)] = []
+                    func walk(_ node: SchemaNode, under: URL) {
+                        let url = under.appendingPathComponent(entry.buckets[node.id.uuidString] ?? filesystemName(node.name))
+                        if SchemaTrial.role(of: node) == (p.isTypography ? .typography : .palettes) { paths.append((node.id, url)) }
+                        for child in node.children { walk(child, under: url) }
+                    }
+                    for child in tree.children { walk(child, under: home) }
+                    if (paths.count > 1 || p.bucketID != nil), let actual = paths.filter({ a.url.path.hasPrefix($0.1.path + "/") }).max(by: { $0.1.path.count < $1.1.path.count }), p.bucketID != actual.0 {
+                        p.bucketID = actual.0; dirty = true
+                    }
+                }
                 let base = a.url.deletingPathExtension().lastPathComponent
                 if let was = doc.file, was != base, filesystemName(p.name) == was {
                     notes.append("\(p.name) was renamed to \(base) in Finder")
@@ -737,7 +751,7 @@ enum CatalogueTree {
             var links: [AssetLink] = []
             for palette in held {
                 let role: SchemaRole = palette.isTypography ? .typography : .palettes
-                let home = bucket(for: role) ?? folder.appendingPathComponent(role.title)
+                let home = palette.bucketID.flatMap { id in SchemaTrial.rows(of: tree).contains(where: { $0.node.id == id && SchemaTrial.role(of: $0.node) == role }) ? bucketURL[id] : nil } ?? bucket(for: role) ?? folder.appendingPathComponent(role.title)
                 var takenHere = fileTaken[home.path] ?? []
                 let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere)
                 fileTaken[home.path] = takenHere

@@ -255,7 +255,7 @@ final class MonitorFullscreenView:NSView {
         previous.frame=NSRect(x:24,y:bounds.height-56,width:previous.intrinsicContentSize.width,height:32)
         next.frame=NSRect(x:previous.frame.maxX+16,y:bounds.height-56,width:next.intrinsicContentSize.width,height:32)
         hide.frame=NSRect(x:next.frame.maxX+32,y:bounds.height-56,width:hide.intrinsicContentSize.width,height:32)
-        exit.frame=NSRect(x:bounds.width-exit.intrinsicContentSize.width-24,y:bounds.height-56,width:exit.intrinsicContentSize.width,height:32)
+        exit.frame=NSRect(x:hide.frame.maxX+32,y:bounds.height-56,width:exit.intrinsicContentSize.width,height:32)
     }
     override func draw(_ dirtyRect:NSRect) {
         guard !hiddenControls else { return }; fill(bounds,Design.card)

@@ -200,6 +200,11 @@ enum ColourFormat: String, CaseIterable {
         }
     }
 
+    func caption(_ key: String, sourceCMYK: String? = nil) -> String {
+        let value = self == .cmyk ? sourceCMYK ?? text(key) : text(key)
+        return label + " " + value
+    }
+
     func text(_ raw: String, lowercase: Bool = false) -> String {
         guard let v = ColourValues(raw) else { return raw }
         func f(_ d: Double) -> String { String(format: "%.3f", d) }

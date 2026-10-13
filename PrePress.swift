@@ -18,6 +18,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     var flow: Flow = .menu { didSet { if flow != oldValue { enter() } } }
     /// Asked to show another flow: the window moves the place, so the rails follow.
     var onNavigate: ((Int) -> Void)?
+    var onPrintPaletteChange: ((UUID?) -> Void)?
+    private let startButtons = PrePressPage.routes.map { SwissButton($0.title, .primary) }
     var onResize: (() -> Void)?
     private let library: LibraryController
     private static var u: CGFloat { Design.App.unit }
@@ -137,13 +139,91 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     // MARK: Will It Print?
 
     private var printPalette: Swatch?
+    var selectedPrintPaletteID: UUID? { printPalette?.id }
+    func selectPrintPalette(_ id: UUID) {
+        guard let palette = library.library.swatch(id), !palette.isTypography, palette.claim == nil else { return }
+        printPalette = palette; menuSignature = ""; recompute(); reload()
+    }
     private var printPress = PressProfiles.generic
     private var printIntent = RenderingIntent.relative
     private var printFlag = 2.0
-    struct Held { let name: String; let master: LabD50; let printed: LabD50?; let ink: Double?; let difference: Double? }
+    private var printBlackPoint = false
+    private let profileSelector=PrintProfileSelector()
+    struct Held { let id: String; let name: String; let master: LabD50; let printed: LabD50?; let ink: Double?; let difference: Double? }
     private var held: [Held] = []
     private let copyNote = SwissButton("Copy Note", .primary)
     private var printMenus: [SwissDropdown] = []
+    private let bloom = PrintBloomView()
+    private weak var bloomDetail: PrintBloomDetail?
+    private var selectedPrintColour: String?
+    private var resultSort: Int?
+    private var resultAscending = true
+    private let resultHeaders = [PrintSortHeader(title: "Master → Printed", target: nil, action: nil), PrintSortHeader(title: "Total Ink", target: nil, action: nil), PrintSortHeader(title: "ΔE00 · Holds", target: nil, action: nil)]
+    private var resultHits: [(NSRect, String)] = []
+    private var bloomHeight: CGFloat { max(280, contentX - Design.App.areaGutter + 128) }
+    private var sortedHeld: [Held] {
+        guard let column = resultSort else { return held }
+        return held.enumerated().sorted { a, b in
+            if column == 0 {
+                let order = a.element.name.localizedStandardCompare(b.element.name)
+                return order == .orderedSame ? a.offset < b.offset : (resultAscending ? order == .orderedAscending : order == .orderedDescending)
+            }
+            let x = column == 1 ? a.element.ink : a.element.difference
+            let y = column == 1 ? b.element.ink : b.element.difference
+            guard let x else { return y == nil && a.offset < b.offset }
+            guard let y else { return true }
+            return x == y ? a.offset < b.offset : (resultAscending ? x < y : x > y)
+        }.map { $0.element }
+    }
+    @objc private func sortPrintResults(_ button: NSButton) {
+        if resultSort == button.tag { resultAscending.toggle() } else { resultSort = button.tag; resultAscending = true }
+        for (index, header) in resultHeaders.enumerated() {
+            header.direction = resultSort == index ? resultAscending : nil
+            header.setAccessibilityLabel("Sort " + ["Colour Name", "Total Ink", "Delta E"][index] + (header.direction.map { $0 ? ", Ascending" : ", Descending" } ?? ""))
+        }
+        needsDisplay = true
+    }
+    private func selectPrintColour(_ id: String) {
+        selectedPrintColour = id; bloom.selected = id; bloomDetail?.selected = id
+        bloomDetail?.needsDisplay = true; needsDisplay = true
+    }
+    private func updateBloom() {
+        let items = held.map { PrintBloomView.Item(id: $0.id, name: $0.name, master: $0.master.xyz.display, printed: $0.printed?.xyz.display, delta: $0.difference, ink: $0.ink) }
+        if !items.contains(where: { $0.id == selectedPrintColour }) { selectedPrintColour = items.first?.id }
+        bloom.items = items; bloom.tolerance = printFlag; bloom.selected = selectedPrintColour
+        if let detail = bloomDetail {
+            detail.items = items; detail.tolerance = printFlag; detail.selected = selectedPrintColour
+            detail.summary = "Profile Prediction · BPC " + (printBlackPoint ? "On":"Off") + " · No Measured Proof"
+        }
+    }
+    func refreshGrid() { bloomDetail?.needsDisplay = true }
+    private func expandBloom() {
+        let detail = PrintBloomDetail(frame: .zero)
+        let modal = SwissFocusModal(content: detail, size: NSSize(width: 1120, height: 700))
+        bloomDetail = detail
+        detail.chart.onExpand = { [weak modal] in modal?.dismissOverlay() }
+        detail.chart.onSelect = { [weak self] id in self?.selectPrintColour(id) }
+        let palettes = library.library.listedPalettes.filter { !$0.isTypography && $0.claim == nil }
+        let names = palettes.enumerated().map { "\($0.offset + 1). \($0.element.name)" }
+        func picker(_ label: String, _ value: String, _ options: [String], _ change: @escaping (String) -> Void) -> SwissDropdown {
+            let menu = SwissDropdown(label, value: value, options: options, allowsOwn: false, width: 380)
+            menu.onChange = change; return menu
+        }
+        detail.controls = [
+            picker("Palette", palettes.firstIndex(where: { $0.id == printPalette?.id }).map { names[$0] } ?? "Choose Palette", names) { [weak self] value in
+                guard let index = names.firstIndex(of: value) else { return }; self?.selectPrintPalette(palettes[index].id)
+            },
+            picker("Printing Condition", printPress, PressProfiles.all.map(\.name)) { [weak self] value in self?.printPress = value; self?.savePrintSettings() },
+            picker("Rendering Intent", printIntent.name, [RenderingIntent.relative, .absolute, .perceptual].map(\.name)) { [weak self] value in
+                self?.printIntent = [RenderingIntent.relative, .absolute, .perceptual].first { $0.name == value } ?? .relative; self?.savePrintSettings()
+            },
+            picker("Black Point Compensation",printBlackPoint ? "On":"Off",["Off","On"]) { [weak self] value in self?.printBlackPoint=value=="On";self?.savePrintSettings() },
+            picker("ΔE00 Tolerance", Self.toleranceName(printFlag), Self.tolerances.map(Self.toleranceName)) { [weak self] value in
+                self?.printFlag = Self.tolerances.first { Self.toleranceName($0) == value } ?? 2; self?.savePrintSettings()
+            }
+        ]
+        updateBloom(); modal.present(over: self)
+    }
 
     // MARK: Layout model
 
@@ -155,7 +235,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         case .menu: list = Self.routes.map { Section(name: $0.title, rows: $0.need.count + 4) }
         case .verify: list = [Section(name: "Condition", rows: 6), Section(name: "Measure", rows: 8), Section(name: "Result", rows: 12), Section(name: "Label", rows: 15)]
         case .check: list = [Section(name: "Master", rows: 9), Section(name: "Measure", rows: 9), Section(name: "Decide", rows: 10)]
-        case .print: list = [Section(name: "Palette", rows: 9), Section(name: "Result", rows: max(4, held.count + 3)), Section(name: "Note", rows: 7)]
+        case .print: list = [Section(name: "Palette", rows: max(16 + Int(ceil(bloomHeight / u)), held.count + 5)), Section(name: "Note", rows: 7)]
         case .press: list = [Section(name: "Condition", rows: 5), Section(name: "Measure", rows: 6), Section(name: "OK Sheet", rows: 5)]
         }
         var guide = firstGuide
@@ -171,10 +251,18 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     init(library: LibraryController) {
         self.library = library
         super.init(frame: .zero)
+        addSubview(profileSelector)
+        NotificationCenter.default.addObserver(self,selector:#selector(savedProfilesChanged),name:.printProfilesChanged,object:nil)
         for (b, a) in [(importMeasurement, #selector(importMeasurementTapped)), (exportReport, #selector(exportReportTapped)), (saveLabel, #selector(saveLabelTapped)), (backToMenu, #selector(backTapped)),
                        (approve, #selector(approveTapped)), (reject, #selector(rejectTapped)), (importReading, #selector(importReadingTapped)), (copyNote, #selector(copyNoteTapped))] {
             b.target = self; b.action = a; addSubview(b)
         }
+        for (index, button) in startButtons.enumerated() { button.tag = index; button.target = self; button.action = #selector(startWorkflow(_:)); addSubview(button) }
+        for (index, header) in resultHeaders.enumerated() {
+            header.tag = index; header.isBordered = false; header.target = self; header.action = #selector(sortPrintResults(_:)); addSubview(header)
+        }
+        bloom.onSelect = { [weak self] id in self?.selectPrintColour(id) }
+        bloom.onExpand = { [weak self] in self?.expandBloom() }; addSubview(bloom)
         backToMenu.leadingArrow = true
         for f in [sampleL, sampleA, sampleB] {
             f.font = Design.font(17, .regular); f.textColor = Design.ink
@@ -191,17 +279,25 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    func reload() { refreshChoices(); needsLayout = true; needsDisplay = true; onResize?() }
+    private func readPrintSettings() {
+        if let d=try? SavedPrintProfiles.load(){printPress=d.current.press;printIntent=d.current.intent;printBlackPoint=d.current.blackPoint;printFlag=d.current.tolerance;PrintCondition.current=d.current.channel}
+        profileSelector.reload()
+    }
+    @objc private func savedProfilesChanged(){menuSignature="";reload()}
+    private func savePrintSettings(){do{try SavedPrintProfiles.setCurrent(.init(press:printPress,intent:printIntent,blackPoint:printBlackPoint,tolerance:printFlag))}catch{problem=error.localizedDescription;needsDisplay=true}}
+    func reload() { readPrintSettings();if flow == .print {if let id=printPalette?.id{printPalette=library.library.swatch(id)};refreshChoices();recompute()};refreshChoices(); if flow == .print { onPrintPaletteChange?(printPalette?.id) }; needsLayout = true; needsDisplay = true; onResize?() }
     /// Arriving at a flow: the choices are rebuilt for it, the rest put away.
-    private func enter() { problem = ""; refreshChoices(); recompute(); needsLayout = true; needsDisplay = true; onResize?() }
+    private func enter() { problem = ""; readPrintSettings();refreshChoices(); recompute(); needsLayout = true; needsDisplay = true; onResize?() }
+
+    @objc private func startWorkflow(_ button: NSButton) { onNavigate?(Self.routes[button.tag].flow.rawValue) }
 
     // MARK: Controls
 
     private var menuSignature = ""
     /// The dropdowns of the flow showing, remade when the flow or the catalogue's palettes change.
     private func refreshChoices() {
-        let palettes = library.library.listedPalettes.filter { !$0.isTypography }
-        let signature = "\(flow.rawValue)|\(palettes.map { $0.id.uuidString + $0.name + "\($0.entries.count)" }.joined())|\(checkPalette?.id.uuidString ?? "")|\(printPalette?.id.uuidString ?? "")"
+        let palettes = library.library.listedPalettes.filter { !$0.isTypography && $0.claim == nil }
+        let signature = "\(flow.rawValue)|\(printPress)|\(printIntent.rawValue)|\(printBlackPoint)|\(printFlag)|\(palettes.map { $0.id.uuidString + $0.name + "\($0.entries.count)" }.joined())|\(checkPalette?.id.uuidString ?? "")|\(printPalette?.id.uuidString ?? "")"
         guard signature != menuSignature else { return }
         menuSignature = signature
         for m in [conditionMenu].compactMap({ $0 }) + checkMenus + printMenus { m.removeFromSuperview() }
@@ -241,12 +337,13 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
                 menu("Palette", value: printPalette?.name ?? "No palettes yet", options: paletteNames) { [weak self] value in
                     guard let self else { return }; self.printPalette = palettes.first { $0.name == value }; self.menuSignature = ""; self.recompute(); self.reload()
                 },
-                menu("Printing condition", value: printPress, options: PressProfiles.all.map(\.name)) { [weak self] value in self?.printPress = value; self?.recompute(); self?.reload() },
-                menu("Rendering intent · BPC off", value: printIntent.name, options: [RenderingIntent.relative, .absolute, .perceptual].map(\.name)) { [weak self] value in
-                    guard let self, let i = RenderingIntent.allCases.first(where: { $0.name == value }) else { return }; self.printIntent = i; self.recompute(); self.reload()
+                menu("Printing condition", value: printPress, options: PressProfiles.all.map(\.name)) { [weak self] value in self?.printPress = value; self?.savePrintSettings() },
+                menu("Rendering intent", value: printIntent.name, options: [RenderingIntent.relative, .absolute, .perceptual].map(\.name)) { [weak self] value in
+                    guard let self, let i = RenderingIntent.allCases.first(where: { $0.name == value }) else { return }; self.printIntent = i; self.savePrintSettings()
                 },
+                menu("Black point compensation",value:printBlackPoint ? "On":"Off",options:["Off","On"]) { [weak self] value in self?.printBlackPoint=value=="On";self?.savePrintSettings() },
                 menu("Flag a colour further than", value: Self.toleranceName(printFlag), options: Self.tolerances.map { Self.toleranceName($0) }) { [weak self] value in
-                    guard let self, let t = Self.tolerances.first(where: { Self.toleranceName($0) == value }) else { return }; self.printFlag = t; self.recompute(); self.reload()
+                    guard let self, let t = Self.tolerances.first(where: { Self.toleranceName($0) == value }) else { return }; self.printFlag = t; self.savePrintSettings()
                 },
             ]
         default: break
@@ -282,12 +379,13 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             for e in p.entries {
                 guard let d = ColourKeys.definition(of: e.hex) ?? ColourDefinition.of(hex: e.hex) else { continue }
                 let master = d.master.lab
-                let build = PrintBuild.of(d.master, press: printPress, intent: printIntent, blackPoint: false)
+                let build = PrintBuild.of(d.master, press: printPress, intent: printIntent, blackPoint: printBlackPoint)
                 let printed = build?.printed.lab
-                held.append(Held(name: library.library.name(of: e.hex, in: p.id), master: master, printed: printed, ink: build?.totalInk, difference: printed.map { deltaE2000(master, $0) }))
+                held.append(Held(id: e.hex, name: library.library.name(of: e.hex, in: p.id), master: master, printed: printed, ink: build?.totalInk, difference: printed.map { deltaE2000(master, $0) }))
             }
         default: break
         }
+        if flow == .print { updateBloom() }
     }
     private var masterLab: LabD50? { checkHex.flatMap { ColourKeys.definition(of: $0) ?? ColourDefinition.of(hex: $0) }?.master.lab }
 
@@ -296,6 +394,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         let x = contentX, w = bounds.width, available = max(220, w - x)
+        profileSelector.isHidden = flow != .print
         for m in [conditionMenu].compactMap({ $0 }) + checkMenus + printMenus {
             for c in m.constraints where c.firstAttribute == .width { c.constant = available }
         }
@@ -304,12 +403,18 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         for m in checkMenus + printMenus { m.isHidden = true }
         conditionMenu?.isHidden = true
         label.isHidden = true
+        for button in startButtons { button.isHidden = true }
+        bloom.isHidden = flow != .print
+        for header in resultHeaders { header.isHidden = flow != .print }
         let s = sections
         func place(_ b: SwissButton, x bx: CGFloat, baseline: CGFloat) { b.isHidden = false; b.frame = NSRect(x: bx, y: SettingsSheet.buttonTop(baseline: baseline), width: b.intrinsicContentSize.width, height: SwissButton.height) }
         func dropdown(_ m: SwissDropdown, baseline: CGFloat) { m.isHidden = false; m.frame = NSRect(x: x, y: baseline - 11, width: available, height: 56) }
         switch flow {
         case .menu:
-            break
+            for (index, button) in startButtons.enumerated() {
+                let route = Self.routes[index]
+                place(button, x: x, baseline: rowBaseline(index, route.need.count + 3))
+            }
         case .verify:
             if let m = conditionMenu { dropdown(m, baseline: rowBaseline(0, 0)) }
             place(importMeasurement, x: x, baseline: rowBaseline(1, 0))
@@ -328,9 +433,20 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             place(reject, x: approve.frame.maxX + 16, baseline: rowBaseline(2, 7))
             place(backToMenu, x: x, baseline: rowBaseline(2, 9))
         case .print:
-            for (i, m) in printMenus.enumerated() { dropdown(m, baseline: rowBaseline(0, i * 2)) }
-            place(copyNote, x: x, baseline: rowBaseline(2, 5))
-            place(backToMenu, x: copyNote.frame.maxX + 24, baseline: rowBaseline(2, 5))
+            profileSelector.frame=NSRect(x:0,y:rowBaseline(0,2)-11,width:max(140,x-Design.App.areaGutter),height:56)
+
+            bloom.frame = NSRect(x: 0, y: sections[0].guide + 16 * u, width: max(140, x - Design.App.areaGutter), height: bloomHeight)
+            let columns = [x, x + (w - x) * 0.60, x + (w - x) * 0.76, w]
+            for (index, header) in resultHeaders.enumerated() {
+                header.frame = NSRect(x: columns[index], y: rowBaseline(0, 1) - Self.line, width: columns[index + 1] - columns[index] - 6, height: u)
+            }
+            for (i, m) in printMenus.enumerated() {
+                for constraint in m.constraints where constraint.firstAttribute == .width { constraint.constant = max(140, x - Design.App.areaGutter) }
+                m.isHidden = false
+                m.frame = NSRect(x: 0, y: rowBaseline(0, i * 2 + 4) - 11, width: max(140, x - Design.App.areaGutter), height: 56)
+            }
+            place(copyNote, x: x, baseline: rowBaseline(1, 5))
+            place(backToMenu, x: copyNote.frame.maxX + 24, baseline: rowBaseline(1, 5))
         case .press:
             place(backToMenu, x: x, baseline: rowBaseline(2, 3))
         }
@@ -385,20 +501,12 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         else if flow != .menu { text("Every figure on this page is measured or worked out from the catalogue.", x: x, baseline: endGuide + u, style: .caption, colour: Design.quiet) }
     }
 
-    // The menu's Start is a drawn primary button per route: one view each would be four buttons for one job, so the page draws
-    // them from the house button's own numbers and keeps the hit rects.
+    // Workflow controls use the shared native action buttons; this draws their supporting step names.
     private var startRects: [(NSRect, Flow)] = []
     private func drawStart(_ route: Route, baseline b: CGFloat) {
         let title = Design.attributed(route.steps.joined(separator: ", "), .caption, colour: Design.quiet)
         title.draw(x: bounds.width - title.size().width, baseline: b)
-        let action = Design.attributed(route.title, .action, colour: Design.card)
-        let width = ceil(action.size().width) + 28 + 32
-        let rect = NSRect(x: contentX, y: SettingsSheet.buttonTop(baseline: b), width: width, height: SwissButton.height)
-        fill(rect, Design.ink)
-        action.draw(x: rect.minX + 14, baseline: b)
-        fill(NSRect(x: rect.maxX - 32, y: rect.minY, width: 1, height: rect.height), Design.card.withAlphaComponent(0.18))
-        Design.arrow(14, colour: Design.card).draw(in: NSRect(x: rect.maxX - 23, y: rect.midY - 7, width: 14, height: 14), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        startRects.append((rect, route.flow))
+
     }
 
     private func drawVerify(_ s: [Section]) {
@@ -495,21 +603,20 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private func drawPrint(_ s: [Section]) {
         let x = contentX, w = bounds.width
         SettingsSheet.title("Will It Print?")
-        SettingsSheet.introduction("Designer · Before anything is printed", "A prediction through the press profile, not a proof. For the start of a job.", x: x, width: w)
+        SettingsSheet.introduction("Designer · Before anything is printed", "Profile prediction · Not a measured proof.", x: x, width: w)
         SettingsSheet.section(1, "Palette", guide: s[0].guide, contentX: x, width: w)
-        lead("Choose the palette and the press it is going to. The check says which colours that condition can hold and how far the rest will fall.", section: 0)
-        SettingsSheet.section(2, "Result", guide: s[1].guide, contentX: x, width: w)
         let outside = held.filter { ($0.difference ?? .infinity) > printFlag }.count
-        if held.isEmpty { text("No palette chosen, or the press profile is not on this Mac.", x: x, baseline: rowBaseline(1, 0), style: .caption, colour: Design.quiet) }
-        else { text(outside == 0 ? "All \(held.count) hold" : "\(outside) of \(held.count) outside", x: x, baseline: rowBaseline(1, 0), style: .headline) }
-        let inkX = column(at: 0.5), deX = column(at: 0.75)
-        let head = rowBaseline(1, 1)
-        text("Colour · master, then printed", x: x, baseline: head, style: .caption, colour: Design.quiet)
-        text("Total ink", x: inkX, baseline: head, style: .caption, colour: Design.quiet)
-        text("ΔE00 · Holds", x: deX, baseline: head, style: .caption, colour: Design.quiet)
+        if held.isEmpty { text("No palette chosen, or the press profile is not on this Mac.", x: x, baseline: rowBaseline(0, 0), style: .caption, colour: Design.quiet) }
+        else { text(outside == 0 ? "All \(held.count) hold" : "\(outside) of \(held.count) outside", x: x, baseline: rowBaseline(0, 0), style: .headline) }
+        let inkX = x + (w - x) * 0.60, deX = x + (w - x) * 0.76
+        let head = rowBaseline(0, 1)
         hairline(x: x, y: head + u - Self.line - 1, width: w - x, Design.rule)
-        for (i, h) in held.enumerated() {
-            let b = rowBaseline(1, 2 + i)
+        resultHits = []
+        for (i, h) in sortedHeld.enumerated() {
+            let b = rowBaseline(0, 2 + i)
+            let rect = NSRect(x: x, y: b - Self.line, width: w - x, height: u)
+            if h.id == selectedPrintColour { fill(rect, Design.mist) }
+            resultHits.append((rect, h.id))
             let a = NSRect(x: x, y: b - 14, width: 14, height: 18), p = a.offsetBy(dx: 16, dy: 0)
             fill(a, h.master.xyz.display); fill(p, h.printed?.xyz.display ?? Design.mist)
             text(h.name, x: x + 40, baseline: b, width: inkX - x - 56)
@@ -518,9 +625,9 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             text(number(h.difference, 1) + " · " + (holds.map { $0 ? "Yes" : "No" } ?? "No profile"), x: deX, baseline: b, style: holds == false ? .bodyStrong : .body, colour: holds == nil ? Design.quiet : Design.ink, width: w - deX)
             hairline(x: x, y: b + u - Self.line - 1, width: w - x, Design.rule)
         }
-        SettingsSheet.section(3, "Note", guide: s[2].guide, contentX: x, width: w)
-        lead("The palette carries the check: the condition, the date, which colours were flagged and by how much. The decision travels with the colours, not in an email.", section: 2)
-        for (i, line) in noteLines.prefix(4).enumerated() { text(line, x: x, baseline: rowBaseline(2, i), style: i == 0 ? .bodyStrong : .body, colour: Design.ink) }
+        SettingsSheet.section(2, "Note", guide: s[1].guide, contentX: x, width: w)
+        lead("The palette carries the check: the condition, the date, which colours were flagged and by how much. The decision travels with the colours, not in an email.", section: 1)
+        for (i, line) in noteLines.prefix(4).enumerated() { text(line, x: x, baseline: rowBaseline(1, i), style: i == 0 ? .bodyStrong : .body, colour: Design.ink) }
     }
     private var noteLines: [String] {
         guard let p = printPalette else { return ["No palette chosen"] }
@@ -557,6 +664,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if flow == .print, let hit = resultHits.first(where: { $0.0.contains(p) }) { selectPrintColour(hit.1); return }
         if flow == .menu, let hit = startRects.first(where: { $0.0.contains(p) }) { onNavigate?(hit.1.rawValue); return }
         super.mouseDown(with: event)
     }

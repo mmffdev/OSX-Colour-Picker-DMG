@@ -120,8 +120,8 @@ final class StudioColourPicker: NSView, Overlay {
             let radius = sample.2 * scale
             dot.frame = NSRect(x: origin.x + (sample.0 - 29) * scale - radius, y: origin.y + sample.1 * scale - radius, width: radius * 2, height: radius * 2)
         }
-        select.frame = NSRect(x: bounds.width - 168, y: bounds.height - 64, width: 144, height: 32)
-        cancel.frame = NSRect(x: select.frame.minX - 160, y: select.frame.minY, width: 144, height: 32)
+        cancel.frame = NSRect(x: railEdge + 16, y: bounds.height - 64, width: cancel.intrinsicContentSize.width, height: 32)
+        select.frame = NSRect(x: cancel.frame.maxX + 24, y: cancel.frame.minY, width: select.intrinsicContentSize.width, height: 32)
     }
     override func draw(_ dirtyRect: NSRect) {
         let edge = railEdge, top = Design.App.header

@@ -9,9 +9,11 @@ protocol Overlay: AnyObject {
     /// Goes away, letting go of whatever was in it.
     func dismissOverlay()
     func containsOverlayEvent(_ event: NSEvent) -> Bool
+    func handleOverlayEscape() -> Bool
 }
 
 extension Overlay {
+    func handleOverlayEscape() -> Bool { false }
     func containsOverlayEvent(_ event: NSEvent) -> Bool {
         guard let window = event.window else { return false }
         return overlayWindows.contains { $0 === window }
@@ -32,7 +34,10 @@ enum Overlays {
             guard !open.isEmpty else { return e }
             // The monitor pattern window owns its exit; returning must preserve its setup modal.
             if e.window is MonitorPatternWindow { return e }
-            if e.type == .keyDown { return e.keyCode == 53 ? { closeAll(); return nil }() : e }
+            if e.type == .keyDown {
+                if e.keyCode == 53 { if open.last?.handleOverlayEscape() != true { closeAll() }; return nil }
+                return e
+            }
             if open.contains(where: { $0.containsOverlayEvent(e) }) { return e }
             closeAll()
             return e
@@ -75,7 +80,7 @@ final class SwissDropdown: NSView, Overlay {
         value.isBordered = false
         value.drawsBackground = false
         value.focusRingType = .none
-        value.font = Design.font(17, .regular)
+        value.font = Design.Text.body.font()
         value.textColor = Design.ink
         value.isEditable = false
         value.isSelectable = false
@@ -139,7 +144,7 @@ final class SwissDropdown: NSView, Overlay {
         value.isEditable = true
         value.isSelectable = true
         value.stringValue = ""
-        value.placeholderAttributedString = Design.attributed("Your word", .headline, size: 17, colour: Design.soft)
+        value.placeholderAttributedString = Design.attributed("Your word", .body, colour: Design.soft)
         line.layer?.backgroundColor = Design.ink.cgColor
         window?.makeFirstResponder(value)
     }
@@ -156,9 +161,20 @@ final class SwissDropdown: NSView, Overlay {
         static func heading(_ s: String) -> String { "#" + s }
         static func kind(_ s: String) -> Int { s == divider ? 1 : s.hasPrefix("#") ? 2 : 0 }
 
-        init(items: [String], chosen: String, width: CGFloat, preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
+        private var menuRows: [Row] = []
+        var onPreviewIndex: ((Int) -> Void)?
+        func configure(disabled: Set<Int>, submenus: Set<Int> = []) {
+            for (i, row) in menuRows.enumerated() { row.enabled = !disabled.contains(i); row.hasSubmenu = submenus.contains(i); row.setAccessibilityElement(true); row.setAccessibilityRole(.menuItem); row.setAccessibilityLabel(row.accessibleTitle) }
+        }
+        func highlight(_ index: Int) { for (i, row) in menuRows.enumerated() { row.setHover(i == index) }; if menuRows.indices.contains(index) { menuRows[index].scrollToVisible(menuRows[index].bounds) } }
+        func trailingPoint(forRow index: Int) -> NSPoint {
+            guard menuRows.indices.contains(index) else { return NSPoint(x: frame.maxX, y: frame.maxY) }
+            let row = menuRows[index]
+            return convertPoint(toScreen: row.convert(NSPoint(x: row.bounds.maxX, y: row.bounds.maxY), to: nil))
+        }
+        init(items: [String], chosen: String, width: CGFloat, literalItems: Bool = false, preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
             let rowHeight: CGFloat = 30, thin: CGFloat = 12
-            let heights = items.map { MenuPanel.kind($0) == 1 ? thin : rowHeight }
+            let heights = items.map { !literalItems && MenuPanel.kind($0) == 1 ? thin : rowHeight }
             let h = heights.reduce(0, +) + 12
             super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: h), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             isOpaque = false
@@ -173,8 +189,9 @@ final class SwissDropdown: NSView, Overlay {
             for (i, s) in items.enumerated() {
                 y -= heights[i]
                 let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
-                r.preview = { preview?(s) }
-                card.addSubview(r)
+                r.literalTitle = literalItems
+                r.preview = { [weak self] in preview?(s); self?.onPreviewIndex?(i) }
+                card.addSubview(r); menuRows.append(r)
             }
             contentView = card
         }
@@ -199,6 +216,11 @@ final class SwissDropdown: NSView, Overlay {
             private let act: () -> Void
             private let title: String, chosen: Bool
             private var hover = false
+            var literalTitle = false
+            var hasSubmenu = false
+            var enabled = true { didSet { needsDisplay = true } }
+            var accessibleTitle: String { title }
+            func setHover(_ value: Bool) { hover = value && enabled; needsDisplay = true }
             var preview: (() -> Void)?
             init(title: String, chosen: Bool, frame: NSRect, act: @escaping () -> Void) {
                 self.title = title; self.chosen = chosen; self.act = act
@@ -206,10 +228,10 @@ final class SwissDropdown: NSView, Overlay {
                 addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
             }
             required init?(coder: NSCoder) { fatalError() }
-            private var kind: Int { MenuPanel.kind(title) }
-            override func mouseEntered(with event: NSEvent) { if kind == 0 { hover = true; needsDisplay = true; preview?() } }
+            private var kind: Int { literalTitle ? 0 : MenuPanel.kind(title) }
+            override func mouseEntered(with event: NSEvent) { if kind == 0 && enabled { hover = true; needsDisplay = true; preview?() } }
             override func mouseExited(with event: NSEvent) { hover = false; needsDisplay = true }
-            override func mouseUp(with event: NSEvent) { if kind == 0 { act() } }
+            override func mouseUp(with event: NSEvent) { if kind == 0 && enabled { act() } }
             override func draw(_ dirtyRect: NSRect) {
                 if kind == 1 { Design.rule.setFill(); NSRect(x: 14, y: bounds.midY, width: bounds.width - 28, height: 1).fill(); return }
                 if kind == 2 {
@@ -218,8 +240,12 @@ final class SwissDropdown: NSView, Overlay {
                     return
                 }
                 if hover { Design.mist.setFill(); bounds.fill() }
-                let t = Design.attributed(title, .body)
-                t.draw(at: NSPoint(x: 14, y: (bounds.height - t.size().height) / 2))
+                let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
+                t.draw(x: 14, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender, width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
+                if hasSubmenu {
+                    let arrow = Design.attributed("›", .bodyStrong, colour: enabled ? Design.ink : Design.soft)
+                    arrow.draw(at: NSPoint(x: bounds.width - 24, y: (bounds.height - arrow.size().height) / 2))
+                }
                 if chosen {
                     let tick = Design.attributed("\u{2713}", .caption)
                     tick.draw(at: NSPoint(x: bounds.width - 14 - tick.size().width, y: (bounds.height - tick.size().height) / 2))
@@ -597,7 +623,7 @@ enum SwissConfirm {
                 Design.attributed(label, .label, colour: Design.quiet).draw(x: 0, baseline: 12)
                 // The value without the indent a row has in the menu.
                 let value = items.indices.contains(chosen) ? items[chosen].trimmingCharacters(in: .whitespaces) : ""
-                Design.attributed(value, .body, size: 17).draw(x: 0, baseline: 40, width: w - 24)
+                Design.attributed(value, .body).draw(x: 0, baseline: 40, width: w - 24)
                 // The chevron, turned up while the menu is open.
                 Design.quiet.setStroke()
                 let c = NSBezierPath(), up = dropped != nil

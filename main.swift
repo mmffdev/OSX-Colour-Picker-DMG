@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var splash: SplashWindowController?
     private var setupWindow: NSWindowController?
     private var opening = true
-    private var firstOpen = false
+    private var workspaceStartup: WorkspaceStartupController?
+    private var pendingWorkspace: URL?
+    private var didLaunch = false
 
     /// The standard About panel, with the credit the colour name list's licence asks for.
     @objc func showAbout() {
@@ -72,53 +74,133 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
-        let startupMenu = NSMenu()
-        let appItem = NSMenuItem()
-        let appMenu = NSMenu(title: Brand.name)
-        appMenu.addItem(withTitle: "Quit \(Brand.name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = appMenu; startupMenu.addItem(appItem); NSApp.mainMenu = startupMenu
+        installStartupMenu()
         FolderAccess.restoreAll()   // the Store build: folders the user chose before stay reachable
         #if APPSTORE
         Store.start()
         #endif
         _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
-        // Keep the first-open decision: the wizard marks itself complete before the Studio journey starts.
-        firstOpen = !Prefs.assistantDone
-        if firstOpen && !preferences.bool(forKey: "permissionsOffered") {
-            PermissionGate.show([.screenRecording], screenRecording: true) { [weak self] in self?.openUp() }
-        } else if DocumentsAccess.neededAtLaunch || CommandLine.arguments.contains("--gate") {
-            PermissionGate.show([Permission.documents]) { [weak self] in self?.openUp() }
-        } else {
-            openUp()
-        }
-        NSApp.activate(ignoringOtherApps: true)
+        didLaunch=true
+        showWorkspaceChooser(selection:pendingWorkspace)
+        NSApp.activate(ignoringOtherApps:true)
     }
 
-    /// Whether this Mac had no catalogue at all when the app opened, read before the library seeds Main at the root.
-    private var noCatalogueAtLaunch = false
-
-    /// After the wizard: animated artwork, then the Studio setup journey, then the app.
-    private func openUp() {
-        noCatalogueAtLaunch = Catalogues.standard.isEmpty
-        let splash = SplashWindowController()
-        self.splash = splash
-        // With no launch artwork the window must exist before the reveal, which comes straight back.
-        if !Prefs.splash && !firstOpen { prepareMainWindow() }
-        splash.present { [weak self] in
-            guard let self = self else { return }
-            if self.firstOpen { self.showSetupJourney() } else { self.revealMainWindow() }
+    /// Resolve app data and catalogue availability before constructing LibraryController or seeding any catalogue.
+    private func showWorkspaceChooser(selection: URL? = nil) {
+        opening=true
+        installStartupMenu()
+        if let workspaceStartup {
+            workspaceStartup.showWindow(nil)
+            if let selection { workspaceStartup.content.initialSelection=selection;workspaceStartup.content.start() }
+            return
         }
-        // Let the launch artwork reach the screen before loading the library and editor.
-        if Prefs.splash && !firstOpen { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
+        let args=CommandLine.arguments
+        let requested=selection ?? args.firstIndex(of:"--workspace").flatMap { args.indices.contains($0+1) ? URL(fileURLWithPath:args[$0+1]) : nil }
+        let controller=WorkspaceStartupController(root:FolderAccess.held[Catalogues.standard.root.standardizedFileURL.path] ?? Catalogues.standard.root,selection:requested,ready: { [weak self] root,entry in
+            self?.openWorkspace(root:root,name:entry.name,id:entry.id)
+        },create: { [weak self] root,name in
+            guard let self else { return }
+            do {
+                try AppDataStore(root:root).update { manifest in
+                    var settings=manifest["settings"] as? [String:Any] ?? [:]
+                    settings[Catalogues.currentKey]=name
+                    settings["currentCatalogueID"]=WorkspaceInventory.probe(name:name,folder:root.appendingPathComponent("Catalogues").appendingPathComponent(name)).id?.uuidString
+                    settings["assistantDone"]=false;settings["setupDone"]=false
+                    manifest["settings"]=settings
+                }
+            } catch { NSApp.presentError(error);return }
+            self.prepareWorkspace(root:root,name:name)
+            self.showSetupJourney(workspacePrepared:true,createdCatalogue:name)
+            self.workspaceStartup?.finishClosing();self.workspaceStartup=nil
+        },cancel: { [weak self] in
+            guard let self else { return }
+            self.workspaceStartup=nil
+            if let main=self.main {
+                NSApp.mainMenu=self.menus(for:main);Shortcuts.install(on:NSApp.mainMenu!)
+                StudioWindowController.shared?.showWindow(nil);self.opening=false
+            } else if let setup=self.setupWindow { setup.showWindow(nil) }
+            else { NSApp.terminate(nil) }
+        })
+        controller.content.onWorkspaceSelected = { [weak self] root in
+            if self?.main == nil && self?.setupWindow == nil { Catalogues.home=root }
+        }
+        workspaceStartup=controller;controller.start()
+    }
+
+    private func prepareWorkspace(root:URL,name:String) {
+        if main != nil {
+            library.finishWorkspaceSession()
+            StudioWindowController.closeWorkspace();main?.close();main=nil
+            settings?.close();settings=nil
+        }
+        setupWindow?.close();setupWindow=nil
+        Catalogues.home=root
+        library=LibraryController(catalogue:name)
+        library.reload()
+    }
+
+    private func openWorkspace(root:URL,name:String,id:UUID?) {
+        do {
+            try AppDataStore(root:root).update { manifest in
+                var settings=manifest["settings"] as? [String:Any] ?? [:]
+                settings[Catalogues.currentKey]=name
+                settings["currentCatalogueID"]=id?.uuidString
+                settings["assistantDone"]=true;settings["setupDone"]=true
+                manifest["settings"]=settings
+            }
+        } catch { NSApp.presentError(error);return }
+        prepareWorkspace(root:root,name:name)
+        openUp()
+        workspaceStartup?.finishClosing();workspaceStartup=nil
+    }
+
+    private func openUp() {
+        #if APPSTORE
+        AppleMenubar.shared.bind(to: library) {
+            StudioWindowController.shared?.showWindow(nil)
+            StudioWindowController.shared?.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        #endif
+        let splash=SplashWindowController();self.splash=splash
+        if !Prefs.splash { prepareMainWindow() }
+        splash.present { [weak self] in self?.revealMainWindow() }
+        if Prefs.splash { DispatchQueue.main.async { [weak self] in self?.prepareMainWindow() } }
+    }
+
+    func application(_ application:NSApplication,open urls:[URL]) {
+        guard let url=urls.first else { return }
+        pendingWorkspace=url
+        if didLaunch { showWorkspaceChooser(selection:url) }
+    }
+
+    private func installStartupMenu() {
+        let bar=NSMenu(),item=NSMenuItem(),menu=NSMenu(title:Brand.name)
+        let open=NSMenuItem(title:"Open Workspace…",action:#selector(runSetupAssistant),keyEquivalent:"o")
+        open.target=self;menu.addItem(open);menu.addItem(.separator())
+        menu.addItem(withTitle:"Quit \(Brand.name)",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+        item.submenu=menu;bar.addItem(item);bar.addItem(developmentMenu());NSApp.mainMenu=bar
+    }
+
+    private func developmentMenu() -> NSMenuItem {
+        let item=NSMenuItem(title:"Development",action:nil,keyEquivalent:"")
+        let menu=NSMenu(title:"Development")
+        let toggle=NSMenuItem(title:"Resume Workspace Automatically",action:#selector(toggleDevelopment(_:)),keyEquivalent:"")
+        toggle.target=self;toggle.state=DevelopmentLaunch.enabled ? .on : .off
+        toggle.toolTip="Remembered on this Mac. Resume only a completed workspace whose last catalogue validates."
+        menu.addItem(toggle);item.submenu=menu;return item
+    }
+    @objc private func toggleDevelopment(_ sender:NSMenuItem) {
+        DevelopmentLaunch.setEnabled(!DevelopmentLaunch.enabled);sender.state=DevelopmentLaunch.enabled ? .on : .off
     }
 
     /// One setup surface: locations, the existing nested choices, then a final review/build.
-    @objc func runSetupAssistant() { showSetupJourney() }
+    @objc func runSetupAssistant() { showWorkspaceChooser() }
     @objc func learnHalo() { SetupAssistant.show(from: SetupAssistant.Step.halo) { _ in } }
 
-    private func showSetupJourney() {
+    private func showSetupJourney(workspacePrepared:Bool = false,createdCatalogue:String? = nil) {
         if let existing = setupWindow { existing.showWindow(nil); return }
-        let frame = StudioSplash(library: library, startup: true)
+        let frame = StudioSplash(library: library, startup: true,workspacePrepared:workspacePrepared,createdCatalogue:createdCatalogue)
         let window = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
                                   styleMask: [.resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Set Up Colorgain"
@@ -132,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frame.onDone = { [weak self, weak window] in
             guard let self = self else { return }
             window?.orderOut(nil)
-            self.firstOpen = false
+            Catalogues.currentName=self.library.catalogue
             if self.main == nil { self.prepareMainWindow() }
             self.revealMainWindow()
             self.setupWindow = nil
@@ -165,27 +247,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else if !Prefs.setupDone, let w = main.window, w.isVisible { SetupWindowController.show(over: w) }   // the old window only, never dragged into view for a sheet
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
         rehearse(main)
-        // No catalogue on this Mac, the setup skipped or every one removed, and nothing seeded from an earlier
-        // version either: nothing works without one, so it is asked for now.
-        // On a first open the startup splash over the Studio window is what sets the catalogue up, so nothing is asked here.
-        let lib = library.library
-        if Prefs.assistantDone && noCatalogueAtLaunch && lib.colours.isEmpty && lib.swatches.isEmpty && lib.projects.isEmpty {
-            DispatchQueue.main.async { [weak self] in self?.askForCatalogue() }
-        }
-    }
-
-    /// The word that there is no catalogue, with one way on: the assistant from its Catalogue step, which makes one.
-    private func askForCatalogue() {
-        SwissConfirm.require(over: NSApp.keyWindow ?? NSApp.mainWindow, title: "No Catalogue Yet",
-                             note: "Colorgain keeps everything, colours, palettes and members, in a catalogue, and there is none on this Mac. Make one now: its name, where it lives and how it is organised.",
-                             action: "Create Catalogue") { [weak self] in
-            SetupAssistant.show(from: SetupAssistant.Step.catalogue) { name in
-                guard let self = self else { return }
-                if name != self.library.catalogue { self.library.open(catalogue: name) } else { self.library.reload() }
-                // The empty Main the launch seeded at the root is not wanted beside the catalogue just made.
-                if name != Catalogues.mainName { Catalogues.standard.dropEmptyMain() }
-            }
-        }
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
@@ -249,7 +310,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { !opening }
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool) -> Bool {
+        if !hasVisibleWindows {
+            if let studio=StudioWindowController.shared,main != nil { studio.showWindow(nil);studio.window?.makeKeyAndOrderFront(nil) }
+            else { showWorkspaceChooser() }
+        }
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool {
+        #if APPSTORE
+        return false // The menu tools remain available; Quit is explicit.
+        #else
+        return !opening
+        #endif
+    }
 
     private func menus(for main: MainWindowController) -> NSMenu {
         let bar = NSMenu()
@@ -270,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu(Brand.name) { m in
             add(m, "About \(Brand.name)", #selector(showAbout), "", self)
-            add(m, "Set Up A Catalogue\u{2026}", #selector(runSetupAssistant), "", self)
+            add(m, "Open Workspace\u{2026}", #selector(runSetupAssistant), "", self)
             add(m, "Learn The Halo\u{2026}", #selector(learnHalo), "", self)
             #if !APPSTORE
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
@@ -282,6 +357,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Quit \(Brand.name)", #selector(NSApplication.terminate(_:)), "q")
         }
         menu("File") { m in
+            add(m, "Open Workspace\u{2026}", #selector(runSetupAssistant), "o", self)
+            m.addItem(.separator())
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
             add(m, "Sample An Area", #selector(LibraryController.sampleArea), "P", library)
             add(m, "New Colour\u{2026}", #selector(LibraryController.newColour), "k", library, [.command, .shift])
@@ -337,6 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Zoom", #selector(NSWindow.performZoom(_:)))
             NSApp.windowsMenu = m
         }
+        bar.addItem(developmentMenu())
         return bar
     }
 }
@@ -347,11 +425,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // Scheme ▸ Edit Scheme ▸ Run ▸ Arguments; tools/open.sh new passes it to the installed app. A throwaway
 // home and settings of its own, wiped on every such launch, so your own catalogues are never touched.
 // Set before anything reads the preferences, which pick their domain from MMFFDEV_COLOUR3_HOME.
+if !CommandLine.arguments.contains("--self-test") { DevelopmentLaunch.configure(Array(CommandLine.arguments.dropFirst())) }
+
 if CommandLine.arguments.contains("--new-user") {
     let fm = FileManager.default
     let home = fm.temporaryDirectory.appendingPathComponent("colorgain-new-user")
     let trial = UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial")!
-    let resuming = CommandLine.arguments.contains("--resume-new-user") || trial.bool(forKey: "resumeNewUserAfterDebuggerRestart")
+    let resuming = CommandLine.arguments.contains("--resume-new-user") || DevelopmentLaunch.enabled || trial.bool(forKey: "resumeNewUserAfterDebuggerRestart")
     trial.removeObject(forKey: "resumeNewUserAfterDebuggerRestart")
     if !resuming { try? fm.removeItem(at: home) }
     try? fm.createDirectory(at: home, withIntermediateDirectories: true)

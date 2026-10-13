@@ -76,6 +76,6 @@ codesign --verify --strict "$COLORGAIN"
 echo "installed: $COLORGAIN ($(/usr/libexec/PlistBuddy -c 'Print :ColourBuildCommit' "$COLORGAIN/Contents/Info.plist"))"
 
 if [ "${COLORGAIN_OPEN:-1}" = "1" ]; then
-    echo "opening as a new user..."
-    open -n -a "$COLORGAIN" --args --new-user
+    echo "opening the installed workspace..."
+    open -a "$COLORGAIN"
 fi

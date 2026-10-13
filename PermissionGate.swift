@@ -36,10 +36,10 @@ final class PermissionGate: NSWindowController {
     }
 
     private init(_ permissions: [Permission], screenRecording: Bool, then: @escaping () -> Void) {
-        self.permissions = permissions
+        self.permissions = screenRecording && !permissions.contains(where: { $0.title == Permission.camera.title }) ? permissions + [Permission.camera] : permissions
         self.screenRecording = screenRecording
         self.then = then
-        let size = NSSize(width: W.size.width, height: Self.height)
+        let size = NSSize(width: W.size.width, height: Self.height + (self.permissions.contains(where: { $0.title == Permission.camera.title }) ? 140 : 0))
         let win = SetupWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         win.title = Brand.name
         win.isReleasedWhenClosed = false
@@ -72,7 +72,7 @@ final class PermissionGate: NSWindowController {
         let lead = SetupFrame.lead(screenRecording
             ? "Screen Recording lets you sample colours from other apps. You can continue without it. You will choose your catalogue folder during setup."
             : "Allow access to the folder holding your catalogue before it loads.", width: width)
-        let list = PermissionsView(permissions, textWidth: width - PermissionRow.buttonWidth - W.gutter, spacing: Design.beat(3)) { [weak win] error in
+        let list = PermissionsView(self.permissions, textWidth: width - PermissionRow.buttonWidth - W.gutter, spacing: Design.beat(3)) { [weak win] error in
             guard let w = win else { return }
             NSAlert(error: error).beginSheetModal(for: w)
         }

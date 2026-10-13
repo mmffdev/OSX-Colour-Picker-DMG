@@ -327,9 +327,9 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
             templates.isEnabled = !locked
             if locked { say("The project is locked. Unlock it to change these details.", good: true) }
         } else {
-            cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+            cancel = ActionButton(title: "Cancel", target: self, action: #selector(cancelTapped))
             cancel.keyEquivalent = "\u{1b}"
-            save = NSButton(title: mode == .newProject ? "Create Project" : "Save", target: self, action: #selector(saveTapped))
+            save = ActionButton(title: mode == .newProject ? "Create Project" : "Save", target: self, action: #selector(saveTapped))
             save.keyEquivalent = "\r"
         }
         let top = hairline(), bottom = hairline()
@@ -696,12 +696,12 @@ final class ProjectTemplatesController: NSViewController, NSTableViewDataSource,
         details.hasVerticalScroller = true
         details.borderType = .bezelBorder
 
-        let new = NSButton(title: "New\u{2026}", target: self, action: #selector(newTapped))
-        let edit = NSButton(title: "Edit\u{2026}", target: self, action: #selector(editTapped))
-        let duplicate = NSButton(title: "Duplicate", target: self, action: #selector(duplicateTapped))
-        let delete = NSButton(title: "Delete", target: self, action: #selector(deleteTapped))
+        let new = ActionButton(title: "New\u{2026}", target: self, action: #selector(newTapped))
+        let edit = ActionButton(title: "Edit\u{2026}", target: self, action: #selector(editTapped))
+        let duplicate = ActionButton(title: "Duplicate", target: self, action: #selector(duplicateTapped))
+        let delete = ActionButton(title: "Delete", target: self, action: #selector(deleteTapped))
         buttons = [edit, duplicate, delete]
-        let done = NSButton(title: "Done", target: self, action: #selector(doneTapped))
+        let done = ActionButton(title: "Done", target: self, action: #selector(doneTapped))
         done.keyEquivalent = "\r"
         let actions = NSStackView(views: [new, edit, duplicate, delete])
         actions.spacing = 8

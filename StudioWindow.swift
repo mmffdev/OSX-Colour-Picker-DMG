@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import UniformTypeIdentifiers
 
 // ---------- The Studio window: the app itself on Colorgain's own grid ----------
@@ -34,6 +35,7 @@ final class StudioWindowController: NSWindowController {
         frame = StudioFrame(library: library)
         let w = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
                              styleMask: [.closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.acceptsMouseMovedEvents = true
         w.title = Brand.edition
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
@@ -51,6 +53,12 @@ final class StudioWindowController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
 
     private static var gridKey: Any?
+
+    static func closeWorkspace() {
+        Overlays.closeAll()
+        if let gridKey { NSEvent.removeMonitor(gridKey) }
+        gridKey=nil;shared?.close();shared=nil
+    }
 
     static func show(library: LibraryController, setupJourney: Bool = false) {
         let c = shared ?? StudioWindowController(library: library)
@@ -73,7 +81,7 @@ final class StudioWindowController: NSWindowController {
         // building anything. --splash-loop for one run, or `defaults write ~/Library/Preferences/com.mmffdev.mmffdevcolour3 splashLoop -bool YES` until it is deleted
         // (by path: the Store edition's container answers to the bare domain once it has run).
         // The wizard has just completed on a first open; its completion must not skip the journey.
-        if setupJourney || args.contains("--splash") || StudioSplash.looping || (!Prefs.assistantDone && !args.contains("--no-splash") && !args.contains("--snap")) { c.frame.showSplash() }
+        if setupJourney || args.contains("--splash") || args.contains("--splash-loop") { c.frame.showSplash() }
         // --snap <file> writes the page that is showing, whole, as a PNG and quits: for measuring a screen below the fold without scrolling it.
         if let i = args.firstIndex(of: "--snap"), args.indices.contains(i + 1) {
             let to = URL(fileURLWithPath: args[i + 1])
@@ -162,14 +170,6 @@ private func when(_ d: Date) -> String {
 
 /// Shared square register selection and colour strips.
 private enum RailTile {
-    static func ground(_ rect: NSRect, selected: Bool, alternate: Bool = false) {
-        fill(rect, selected ? (Prefs.sidebarSelectionBackground.flatMap(colorFromHex) ?? Design.houseYellow.withAlphaComponent(0.22)) : alternate ? Design.mist.withAlphaComponent(0.45) : Design.card)
-        if selected {
-            Design.houseYellow.setStroke()
-            let edge = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
-            edge.lineWidth = 1; edge.stroke()
-        }
-    }
     static func spectrum(_ colours: [NSColor], in rect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
@@ -193,8 +193,51 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, tags, lab, proofing, prepress(Int), contrast, share, appbridge, appbridgeSettings }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
+    private var paletteSelection = PaletteSelection()
+    private var selectionHalo: HaloMenu?
+    private func selectPalette(_ id: UUID, order: [UUID], modifiers: NSEvent.ModifierFlags) {
+        guard library.library.swatch(id) != nil else {
+            if place == .appbridge { appbridge.selected = id; reload() }; return
+        }
+        paletteSelection.click(id, order: order, extend: modifiers.contains(.shift), toggle: modifiers.contains(.command))
+        if modifiers.intersection([.shift, .command]).isEmpty {
+            if place == .contrast, contrastPage.pick(.palette(id)) { reload(); return }
+            go(.palette(id))
+        } else { reload() }
+    }
+    private func batchActions() -> [HaloAction] {
+        let ids = paletteSelection.ids, lib = library.library
+        let palettes = lib.swatches.filter { ids.contains($0.id) }
+        guard palettes.count > 1 else { return [] }
+        let star = !palettes.allSatisfy { $0.favourite }
+        let locked = ids.contains { library.isLocked(palette: $0) }
+        var actions = [
+            HaloAction(id: "copy-colours", label: "Copy Colours", symbol: "doc.on.doc") { [weak self] in
+                guard let self else { return }; self.library.copy(Array(Set(palettes.flatMap { $0.entries.map { $0.hex } })).sorted())
+            },
+            HaloAction(id: "favourites", label: star ? "Add To Favourites" : "Remove From Favourites", symbol: "star", disabled: locked) { [weak self] in
+                self?.library.apply(star ? "Star Selected Palettes" : "Unstar Selected Palettes") { lib in for id in ids { lib.setFavourite(id, star) } }
+            },
+            HaloAction(id: "copy-project", label: "Copy To Project", symbol: "folder.badge.plus", children: { [weak self] in
+                guard let self else { return [] }
+                return self.library.library.orderedProjects.map { project in
+                    HaloAction(id: project.id.uuidString, label: project.name, symbol: "folder", disabled: project.isLocked) { [weak self] in self?.library.copy(palettes: ids, to: project.id) }
+                }
+            }),
+            HaloAction(id: "delete", label: "Delete Selected Palettes", symbol: "trash", disabled: locked,
+                confirmation: ("Slide to delete", "Hold the arrow key")) { [weak self] in self?.library.delete(palettes: ids, confirmed: true) }
+        ]
+        actions[actions.count - 1].onMenuSelect = { [weak self] in self?.library.delete(palettes: ids) }
+        return actions
+    }
+    private func openSelectionHalo(from view: NSView, rect: NSRect) {
+        let actions = batchActions(); guard !actions.isEmpty else { return }
+        let halo = selectionHalo ?? HaloMenu(label: "Selected Palettes", hint: "Actions for this selection", actions: [])
+        selectionHalo = halo; halo.label = "\(paletteSelection.ids.count) Palettes Selected"; halo.actions = actions
+        halo.open(centredOn: rect, in: view)
+    }
     private(set) var chosenHex: String?
 
     let header = StudioHeader()
@@ -218,10 +261,11 @@ final class StudioFrame: NSView {
     let contrastPage: ContrastPage
     /// Export and Import as a wizard in the page (StudioShare.swift), begun from a palette's halo, a page's Export or the catalogue settings.
     let sharePage: SharePage
-    let proofingPage: ProofingPage
     /// PrePress: the four print workflows as routes, each a page of steps (PrePress.swift).
+    private let printPaletteRail = LibraryRail()
+    private var printWorkspace: Bool { place == .prepress(PrePressPage.Flow.print.rawValue) }
     let prePressPage: PrePressPage
-    private var beforeProofingRail: CGFloat = 1
+    private var beforePrePressRail: CGFloat = 1
     let appbridge = AppbridgeStore()
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
     private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
@@ -235,12 +279,11 @@ final class StudioFrame: NSView {
         self.library = library
         contrastPage = ContrastPage(library: library)
         sharePage = SharePage(library: library)
-        proofingPage = ProofingPage(library: library)
         prePressPage = PrePressPage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
-        for v in [header, rail1, rail2, proofingPage.settingsRail, page, history, footer, strip, paletteWheel, overlay] { addSubview(v) }
+        for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
         settingsCurtainClip.wantsLayer = true
         settingsCurtainClip.layer?.masksToBounds = true
         settingsCurtainClip.isHidden = true
@@ -279,7 +322,7 @@ final class StudioFrame: NSView {
             guard let self, self.library.library.swatch(id) != nil else { return }
             self.go(.palette(id))
         }
-        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .proofing, .prepress(0), .contrast, .projects, .appbridge][i]) }
+        header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge, .qrImport][i]) }
         header.onSettings = { [weak self] in self?.openSettings() }
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -312,6 +355,11 @@ final class StudioFrame: NSView {
         }
 
         page.onAcross = { [weak self] n in self?.page.grid.across = n }
+        rail1.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
+        rail2.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
+        rail1.onDeleteSelection = { [weak self] in guard let self else { return }; self.library.delete(palettes: self.paletteSelection.ids) }
+        rail2.onDeleteSelection = rail1.onDeleteSelection
+        rail1.onSelectionHalo = { [weak self] view, rect in self?.openSelectionHalo(from: view, rect: rect) }
         rail1.onPick = { [weak self] p in self?.go(p) }
         rail1.onArrow = { [weak self] in guard let self = self else { return }; self.goal.rail1 = self.goal.rail1 < 1 ? 1 : 0; self.slide() }
         rail2.arrow = .none
@@ -323,14 +371,14 @@ final class StudioFrame: NSView {
             // The page takes the whole width: the history goes, rail2 goes, rail1 shuts; the arrow back gives the rails their width.
             self.expanded.toggle()
             self.page.expanded = self.expanded
-            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (self.place == .proofing ? 0 : 1, self.railTwo, self.goal.history) }
+            if self.expanded { self.goal = (0, 0, 0) } else { self.goal = (1, self.railTwo, self.goal.history) }
             self.slide()
         }
         // Dropping into the tree updates the library without navigating away from the source palette list.
-        rail1.onDrop = { [weak self] palette, member in
+        rail1.onDrop = { [weak self] palette, destination in
             guard let self = self else { return }
-            // Into another member it is a copy, as agreed: the original stays; within its own member it is a move.
-            self.library.move(palette: palette, to: member, index: 0, reveal: false)
+            // The Library policy determines source retention; the exact destination survives the drop.
+            self.library.assignPalette(palette, to: destination.project, bucket: destination.bucket)
             self.reload()
         }
         // A name typed over its words on either rail, written once the typing ends: a palette, a member, or a folder.
@@ -348,6 +396,10 @@ final class StudioFrame: NSView {
         rail2.onRename = { [weak self] p, name in guard self?.place != .appbridge else { return }; rename(p, name) }
         rail1.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
         rail1.onTarget = { [weak self] id in guard let self = self else { return }; self.library.setTarget(self.library.library.activeSwatchID == id ? nil : id) }
+        rail1.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
+        rail2.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
+        page.grid.onContext = { [weak self] hex, point in guard let self else { return }; self.openSwatchContext(hex, in: self.page.grid, at: point) }
+        page.grid.onAssetContext = { [weak self] id, point in guard let self else { return }; self.openContext(.palette(id), in: self.page.grid, at: point) }
         rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
         // A bucket opened or shut on either rail is remembered for this catalogue; rail2 is built from the state, so it is filled again.
         rail1.onShut = { [weak self] key, shut in guard let self = self else { return }; Prefs.setRailShut(key, shut, in: self.library.catalogue) }
@@ -364,6 +416,32 @@ final class StudioFrame: NSView {
         }
         contrastPage.onPaletteChange = { [weak self] in if self?.place == .contrast { self?.fillContextRail() } }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
+        page.grid.canHover = { [weak self] item in item.hex != nil || item.id.flatMap { self?.library.library.swatch($0) } != nil }
+        page.grid.onPaletteHalo = { [weak self] id,rect in guard let self else{return};self.openHalo(for:id,from:self.page.grid,rect:rect) }
+        page.onDeltaToggle = { [weak self] in Prefs.deltaWarningsEnabled.toggle();self?.page.applyDeltaState(Prefs.deltaWarningsEnabled) }
+        NotificationCenter.default.addObserver(self,selector:#selector(printProfilesChanged),name:.printProfilesChanged,object:nil)
+        if let settings=try? SavedPrintProfiles.load().current {PrintCondition.current=settings.channel}
+        page.grid.onCopyPalette = { [weak self] id in
+            guard let self,let palette=self.library.library.swatch(id) else{return}
+            let format=self.page.format
+            copyToClipboard(palette.entries.map{format.text($0.hex,lowercase:Prefs.lowercaseHex)}.joined(separator:format == .hex || format == .hexBare ? ", " : "\n"))
+            playShutter();self.library.flash("Copied \(palette.entries.count) colours from \(palette.name)")
+        }
+        page.grid.onViewPalette = { [weak self] in self?.showPaletteViewer($0) }
+        page.grid.onQR = { [weak self] item in if let id=item.id { self?.shareQR(palette:id) } else if let hex=item.hex { self?.shareQR(hex:hex) } }
+        page.grid.onPrint = { [weak self] item in
+            guard let self,item.sourceCMYK == nil else { return [] }
+            let keys = item.hex.map { [$0] } ?? item.id.flatMap { self.library.library.swatch($0)?.entries.map { $0.hex } } ?? []
+            let channel = PrintCondition.current
+            let result = keys.map { key -> TileGrid.PrintPreview? in
+                guard let definition=ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key),
+                      let build=PrintBuild.of(definition.master,press:channel.press ?? PressProfiles.generic,intent:channel.intent ?? .relative,blackPoint:channel.blackPoint ?? false) else { return nil }
+                return .init(colour:build.printed.display,delta:deltaE2000(definition.master.lab,build.printed.lab))
+            }
+            guard result.allSatisfy({$0 != nil}) else { return [] }
+            return result.compactMap{$0}
+        }
+        page.grid.onPreviewSwatch = { [weak self] in self?.showSwatchViewer($0) }
         page.grid.onCopy = { [weak self] text in self?.library.flash("Copied \(text)") }
         page.grid.onHalo = { [weak self] hex, rect in self?.openColourHalo(hex, rect: rect) }
         page.onPaletteDrop = { [weak self] id in
@@ -373,7 +451,7 @@ final class StudioFrame: NSView {
                 ExportColour(name: $0.name ?? $0.hex, hex: $0.hex)
             }))
         }
-        page.onFormat = { [weak self] in self?.reload() }
+        page.onFormat = { [weak self] in self?.fillPage() }
         header.onPick = { [weak self] in self?.library.togglePicking() }
         header.onSample = { [weak self] in self?.library.sampleArea() }
         page.grid.onOpen = { [weak self] id in
@@ -389,10 +467,36 @@ final class StudioFrame: NSView {
         page.add(ShortcutsSettings(), as: .shortcuts)
         page.add(SoundsSettings(), as: .sounds)
         page.add(HaloSettings(), as: .halo)
+        let general = GeneralSettings()
+        general.onWizard = { [weak self] in self?.showSplash() }
+        general.onReset = { [weak self] in self?.reload() }
+        page.add(general, as: .general)
+        #if APPSTORE
+        page.add(AppleMenubarSettings(), as: .appleMenubar)
+        #endif
+        page.add(SharingSettings(), as: .sharingSettings)
+        let qrImport = QRImportPage()
+        qrImport.onDocument = { [weak self] document in guard let self else { return }; QRSharing.review(document, library:self.library, over:self) }
+        page.add(qrImport, as: .qrImport)
+        page.add(LibrarySettings(), as: .librarySettings)
         // Tags: every tag with its colour, name, scope and what wears it, the one place for all of them (StudioTags.swift).
         page.add(TagsSettings(library: library), as: .tags)
         page.add(LabPage(library: library), as: .lab)
-        page.add(proofingPage, as: .proofing)
+        printPaletteRail.arrow = .none
+        printPaletteRail.heading = "Palettes"
+        printPaletteRail.labels = ("Project & Palette", "Colours")
+        printPaletteRail.onPaletteSelection = { [weak self] id, _, _ in
+            guard let self else { return }
+            self.prePressPage.selectPrintPalette(id)
+            self.printPaletteRail.selectedPalettes = [id]
+        }
+        printPaletteRail.onShut = { [weak self] key, shut in
+            guard let self else { return }
+            Prefs.setRailShut(key, shut, in: self.library.catalogue); self.fillLibraryRail()
+        }
+        printPaletteRail.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
+        printPaletteRail.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
+        prePressPage.onPrintPaletteChange = { [weak self] id in self?.printPaletteRail.selectedPalettes = id.map { [$0] } ?? [] }
         prePressPage.onNavigate = { [weak self] n in self?.go(.prepress(n)) }
         page.add(prePressPage, as: .prepress)
         page.add(contrastPage, as: .contrast)
@@ -421,20 +525,43 @@ final class StudioFrame: NSView {
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .schemaDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(historyChanged), name: .historyDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(pickerStateChanged), name: .appStateDidChange, object: library)
         NotificationCenter.default.addObserver(self, selector: #selector(flashed(_:)), name: .statusMessage, object: nil)
-        library.onReveal = { [weak self] hex in self?.choose(hex) }
+        library.onReveal = { [weak self] hex in
+            guard let self else { return }
+            if self.library.picking { self.chosenHex = hex; self.fillFooter(); self.pendingPickerRefresh = true }
+            else { self.choose(hex) }
+        }
+    }
+    @objc private func printProfilesChanged(){
+        if let settings=try? SavedPrintProfiles.load().current {PrintCondition.current=settings.channel}
+        page.grid.invalidatePrintPreviews();page.refreshPrintProfiles()
     }
     @objc private func flashed(_ n: Notification) { if let t = n.userInfo?["text"] as? String { footer.flash(t) } }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    @objc private func libraryChanged() { reload() }
-    @objc private func historyChanged() { fillHistory() }
+    private var pendingPickerRefresh = false
+    @objc private func libraryChanged() {
+        if library.picking { pendingPickerRefresh = true; return }
+        reload()
+    }
+    @objc private func historyChanged() {
+        if library.picking { pendingPickerRefresh = true; return }
+        fillHistory()
+    }
+    @objc private func pickerStateChanged() {
+        guard !library.picking, pendingPickerRefresh else { return }
+        pendingPickerRefresh = false; reload()
+        page.grid.chosenHex = chosenHex
+    }
 
     /// Slides every panel towards where it is going, a quarter of a second for the whole way, eased; stops when all have arrived.
     private func slide() {
         header.historyOpen = goal.history > 0
+        guard open != goal else { needsLayout = true; return }
         guard slideClock == nil else { return }
+        page.layoutFrozen = true
         lastSlide = Date()
         slideClock = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
@@ -445,7 +572,13 @@ final class StudioFrame: NSView {
             self.needsLayout = true
             self.layoutSubtreeIfNeeded()
             self.needsDisplay = true
-            if self.open == self.goal { t.invalidate(); self.slideClock = nil }
+            if self.open == self.goal {
+                t.invalidate(); self.slideClock = nil
+                let transition = CATransition(); transition.type = .fade; transition.duration = 0.12
+                if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { self.page.layer?.add(transition, forKey: "RailContentReflow") }
+                self.page.layoutFrozen = false; self.page.needsLayout = true
+                self.page.layoutSubtreeIfNeeded()
+            }
         }
         RunLoop.main.add(slideClock!, forMode: .common)
     }
@@ -459,24 +592,30 @@ final class StudioFrame: NSView {
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
         // Rail dividers bisect the gutters after columns 3 and 5.
-        let r1Full = A.column(4, in: w) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
-        let r2Full = place == .proofing ? r1Full - r1Min - 1 : A.column(6, in: w) - A.areaGutter / 2 - r1Full - 1
-        let hFull = w - A.column(11, in: w) + A.gutter / 2
-        let r1W = (r1Min + (r1Full - r1Min) * (isSettings(place) ? 0 : ease(open.rail1))).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
+        let r1Full = A.column(4, in: A.size.width) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
+        let r2Full = A.column(6, in: A.size.width) - A.areaGutter / 2 - r1Full - 1
+        let hFull = A.size.width - A.column(11, in: A.size.width) + A.gutter / 2
+        let r1W = (r1Min + (r1Full - r1Min) * (isSettings(place) || printWorkspace ? 0 : ease(open.rail1))).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
+        rail1.expandedWidth = r1Full; rail2.expandedWidth = r2Full
+        printPaletteRail.expandedWidth = r1Full
         header.railEdge = r1Full
         rail1.frame = NSRect(x: 0, y: top, width: r1W, height: bodyH)
         settingsCurtainClip.frame = rail1.frame
         settingsCurtain.frame = NSRect(x: 0, y: -bodyH * (1 - curtainProgress), width: r1W, height: bodyH)
-        rail1.collapsed = isSettings(place) || open.rail1 < 0.5
+        rail1.isHidden = false
+        rail1.collapsed = isSettings(place) || printWorkspace || (goal.rail1 == 0 && open.rail1 == 0)
         rail1.arrow = goal.rail1 < 1 ? .open : .close
         rail2.frame = NSRect(x: rail1.frame.maxX + 1, y: top, width: r2W, height: bodyH)
-        rail2.isHidden = r2W < 2 || place == .proofing
-        proofingPage.settingsRail.frame = rail2.frame
-        proofingPage.settingsRail.isHidden = r2W < 2 || place != .proofing
+        rail2.isHidden = r2W < 2
         // The history slides in from the right edge, and off it completely, its width never changing.
         history.frame = NSRect(x: w - hW, y: top, width: hFull, height: bodyH)
         history.isHidden = hW < 1
-        page.frame = NSRect(x: rail2.frame.maxX + (r2W < 2 ? 0 : 1), y: top, width: w - hW - (history.isHidden ? 0 : 1) - rail2.frame.maxX - (r2W < 2 ? 0 : 1), height: bodyH)
+        printPaletteRail.isHidden = !printWorkspace
+        printPaletteRail.frame = NSRect(x: rail2.frame.maxX + 1, y: top, width: printWorkspace ? r1Full : 0, height: bodyH)
+        printPaletteRail.inset = A.areaGutter / 2
+        printPaletteRail.insetRight = A.margin
+        let pageLeft = printWorkspace ? printPaletteRail.frame.maxX + 1 : rail2.frame.maxX + (r2W < 2 ? 0 : 1)
+        page.frame = NSRect(x: pageLeft, y: top, width: w - hW - (history.isHidden ? 0 : 1) - pageLeft, height: bodyH)
         header.grid = (A.column(1, in: w), A.columnWidth(in: w))
         footer.grid = (A.column(1, in: w), A.columnWidth(in: w), A.column(5, in: w))
         // Every area's words sit exactly on its columns: the left edge on the first, the right edge at the end of the last; the page's edges
@@ -486,11 +625,15 @@ final class StudioFrame: NSView {
         }
         (rail1.inset, rail1.insetRight) = (A.column(1, in: w), A.areaGutter / 2)
         (rail2.inset, rail2.insetRight) = (A.areaGutter / 2 - 1, A.areaGutter / 2)
-        (proofingPage.settingsRail.inset, proofingPage.settingsRail.insetRight) = (rail2.inset, rail2.insetRight)
         (page.inset, page.insetRight) = (A.areaGutter / 2 - 1, open.history > 0 ? A.gutter / 2 - 1 : A.margin)
         overlay.page = NSRect(x: page.frame.minX + page.inset, y: 0, width: page.frame.width - page.inset - page.insetRight, height: 0)
         (history.inset, history.insetRight) = (A.gutter / 2, A.margin)
         strip.frame = NSRect(x: 0, y: 0, width: w, height: TitleStrip.height)
+        if swatchViewer.superview != nil {
+            swatchViewer.frame = bounds
+            swatchViewer.availableRect = NSRect(x: page.frame.minX + page.inset, y: page.frame.minY + AreaHeader.height,
+                width: max(1, page.frame.width - page.inset - page.insetRight), height: max(1, page.frame.height - AreaHeader.height))
+        }
         paletteWheel.frame = bounds
         paletteWheel.availableRect = NSRect(x: 0, y: top + AreaHeader.rule + 1, width: w, height: max(0, bodyH - AreaHeader.rule - 1))
         paletteWheel.anchor = NSPoint(x: rail1.frame.maxX, y: paletteWheel.availableRect.midY)
@@ -500,7 +643,7 @@ final class StudioFrame: NSView {
     }
 
     /// The backslash key: Master Inner on and off.
-    func toggleGrid() { A.masterGrid.toggle(); overlay.isHidden = !A.masterGrid; overlay.needsDisplay = true }
+    func toggleGrid() { A.masterGrid.toggle(); overlay.isHidden = !A.masterGrid; overlay.needsDisplay = true; prePressPage.refreshGrid() }
 
     /// The splash over the whole window (TH-299): nothing of the app shows but the wordmark until it is done.
     private(set) var splash: StudioSplash?
@@ -531,13 +674,14 @@ final class StudioFrame: NSView {
         var lines = [rail1.frame.maxX]
         if !rail2.isHidden { lines.append(rail2.frame.maxX) }
         if !history.isHidden { lines.append(history.frame.minX - 1) }
+        if printWorkspace { lines.append(printPaletteRail.frame.maxX) }
         for x in lines { fill(NSRect(x: x, y: A.header + 1, width: 1, height: rail1.frame.height), Design.rule) }
     }
 
     // MARK: What is shown
 
     private func isSettings(_ p: Place) -> Bool {
-        switch p { case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .appbridgeSettings: return true; default: return false }
+        switch p { case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .appbridgeSettings: return true; default: return false }
     }
 
     /// The Settings entry point resumes the last section; Catalogues remains an explicit rail destination.
@@ -560,6 +704,9 @@ final class StudioFrame: NSView {
     }
 
     func go(_ p: Place) {
+        if case .palette(let id) = p, library.library.swatch(id) != nil {
+            if !paletteSelection.ids.contains(id) { paletteSelection.ids = [id]; paletteSelection.anchor = id }
+        } else { paletteSelection.ids = []; paletteSelection.anchor = nil }
         if p != place, case .palette = p { header.clearFilter() }
         page.cancelASEName()
         if isSettings(p) { lastSettingsPage = p }
@@ -572,13 +719,13 @@ final class StudioFrame: NSView {
         }
         paletteWheel.dismiss()
         if p == .contrast && place != .contrast { contrastPage.arrive(fromLab: place == .lab) }
-        // Proofing and PrePress close rail1: the page takes its columns, and rail2 holds the route or the settings.
-        func narrows(_ p: Place) -> Bool { if case .prepress = p { return true }; return p == .proofing }
+        // PrePress closes rail1: the page takes its columns, and rail2 holds the route or the settings.
+        func narrows(_ p: Place) -> Bool { if case .prepress = p { return true }; return false }
         if narrows(p) && !narrows(place) {
-            beforeProofingRail = goal.rail1
+            beforePrePressRail = goal.rail1
             goal.rail1 = 0
         } else if narrows(place) && !narrows(p) {
-            goal.rail1 = beforeProofingRail
+            goal.rail1 = beforePrePressRail
         }
         place = p
         slide()
@@ -613,7 +760,7 @@ final class StudioFrame: NSView {
     }
 
     /// The Lab has no rail2: its columns go to the page. Contrast keeps it, as the list of palettes to pick the pair from.
-    private var railTwo: CGFloat { expanded || place == .lab ? 0 : 1 }
+    private var railTwo: CGFloat { expanded || place == .lab || place == .catalogue || place == .qrImport ? 0 : 1 }
 
     private func choose(_ hex: String) {
         chosenHex = hex
@@ -643,12 +790,19 @@ final class StudioFrame: NSView {
             // Before the window is on screen the rail is simply shut; after, it slides.
             if window?.isVisible == true { slide() } else { open.rail2 = railTwo; needsLayout = true }
         }
+        paletteSelection.ids.formIntersection(Set(library.library.swatches.map { $0.id }))
+        rail1.selectedPalettes = paletteSelection.ids
+        rail2.selectedPalettes = paletteSelection.ids
+        rail1.selectionHeight = paletteSelection.ids.contains { library.library.swatch($0)?.claim != nil } ? Design.App.unit * 2 : Design.App.unit
         fillLibraryRail()
         fillContextRail()
         fillPage()
+        if slideClock != nil {
+            page.layoutFrozen = false; page.needsLayout = true; page.layoutSubtreeIfNeeded(); page.layoutFrozen = true
+        }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .proofing: return 3; case .prepress: return 4; case .contrast: return 5; case .projects: return 6; case .appbridge: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -680,16 +834,95 @@ final class StudioFrame: NSView {
 
     // MARK: The palette's halo
 
+    private let swatchViewer = PaletteWheel()
+    private func showSwatchViewer(_ hex: String) {
+        let list = page.grid.items.filter { $0.hex != nil }
+        guard !list.isEmpty else { return }
+        let palette: Swatch? = { if case .palette(let id) = place { return library.library.swatch(id) }; return nil }()
+        let item = PaletteWheel.Item(id: palette?.id ?? UUID(), name: palette?.name ?? "All Colours",
+            colours: list.map { $0.colours.first ?? Design.hex($0.hex!) },
+            details: list.map { .init(name: $0.title.components(separatedBy: " / ").first ?? $0.title, hex: $0.hex!) })
+        swatchViewer.backdropView = self
+        addSubview(swatchViewer, positioned: .above, relativeTo: nil)
+        swatchViewer.frame = bounds
+        swatchViewer.availableRect = NSRect(x: page.frame.minX + page.inset, y: page.frame.minY + AreaHeader.height,
+            width: max(1, page.frame.width - page.inset - page.insetRight), height: max(1, page.frame.height - AreaHeader.height))
+        swatchViewer.onDismiss = { [weak self] in self?.swatchViewer.removeFromSuperview() }
+        swatchViewer.presentSwatch(item, hex: hex)
+    }
+    private func shareQR(hex:String? = nil,palette:UUID? = nil) {
+        let lib=library.library
+        if hex != nil,place == .appbridge,page.grid.items.first(where:{$0.hex==hex})?.sourceCMYK != nil { library.flash("This ASE swatch has no embedded ICC profile. Import it with a defined print condition before sharing its master colour.");return }
+        let origin:UUID? = { if let palette{return palette};if case .palette(let id)=place{return id};return nil }()
+        let name=palette.flatMap { lib.swatch($0)?.name } ?? hex.map { lib.name(of:$0,in:origin) } ?? "Colour"
+        let keys=hex.map { [$0] } ?? palette.flatMap { lib.swatch($0)?.entries.map { $0.hex } } ?? []
+        let entries=keys.compactMap { key -> ColourQR.Entry? in
+            guard let d=ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key) else { return nil }
+            return .init(name:lib.name(of:key,in:origin),source:d.source,master:d.master,kind:d.kind)
+        }
+        guard entries.count==keys.count,!entries.isEmpty else { library.flash("There are no complete colour records to share.");return }
+        QRSharing.show(.init(type:palette == nil ? "swatch" : "palette",name:name,colours:entries),over:self)
+    }
+    private func showPaletteViewer(_ id:UUID) {
+        guard let palette=library.library.swatch(id),!palette.entries.isEmpty else { return }
+        let item=PaletteWheel.Item(id:id,name:palette.name,colours:palette.entries.map{shade[$0.hex] ?? Design.hex($0.hex)},details:palette.entries.map{.init(name:library.library.name(of:$0.hex,in:id),hex:$0.hex)})
+        swatchViewer.backdropView=self;addSubview(swatchViewer,positioned:.above,relativeTo:nil);swatchViewer.frame=bounds
+        swatchViewer.availableRect=NSRect(x:page.frame.minX+page.inset,y:page.frame.minY+AreaHeader.height,width:max(1,page.frame.width-page.inset-page.insetRight),height:max(1,page.frame.height-AreaHeader.height))
+        swatchViewer.onDismiss={ [weak self] in self?.swatchViewer.removeFromSuperview() }
+        swatchViewer.presentPalette(item)
+    }
+    private let contextMenu = SwissContextMenu()
+    private func openContext(_ place: Place, in view: NSView, at point: NSPoint) {
+        let actions: [HaloAction]
+        switch place {
+        case .palette(let id):
+            if library.library.swatch(id) != nil {
+                if paletteSelection.ids.contains(id), paletteSelection.ids.count > 1 { actions = batchActions() }
+                else { paletteSelection.ids = [id]; paletteSelection.anchor = id; reload(); actions = paletteActions(for: id) }
+            }
+            else if let file = appbridge.files.first(where: { $0.id == id }) {
+                actions = [
+                    HaloAction(id: "open", label: "Open", symbol: "arrow.up.right", onSelect: { [weak self] in self?.appbridge.selected = id; self?.go(.appbridge) }),
+                    HaloAction(id: "duplicate", label: "Duplicate", symbol: "doc.on.doc", disabled: file.problem != nil) { [weak self] in self?.appbridge.duplicate(file) },
+                    HaloAction(id: "locate", label: "Locate File…", symbol: "folder") { [weak self] in self?.appbridge.locate(file) { self?.reload() } },
+                    HaloAction(id: "detach", label: "Detach", symbol: "minus.circle") { [weak self] in self?.appbridge.detach(file) },
+                    HaloAction(id: "delete", label: "Move File To Trash…", symbol: "trash") { [weak self] in self?.appbridge.confirmDelete(file, over: view) }
+                ]
+            } else { return }
+        case .project(let id), .overview(let id, _), .group(let id, _):
+            actions = [
+                HaloAction(id: "open", label: "Open", symbol: "arrow.up.right") { [weak self] in self?.go(place) },
+                HaloAction(id: "rename", label: "Rename Project…", symbol: "pencil") { [weak self] in self?.library.renameProject(id) },
+                HaloAction(id: "export", label: "Export Project…", symbol: "square.and.arrow.up") { [weak self] in self?.startExport(.workGroup, subject: id, name: self?.library.library.project(id)?.name ?? "Project") },
+                HaloAction(id: "delete", label: "Delete Project…", symbol: "trash") { [weak self] in self?.library.delete(project: id) }
+            ]
+        default: return
+        }
+        contextMenu.open(actions, at: point, in: view)
+    }
+    private func openSwatchContext(_ hex: String, in view: NSView, at point: NSPoint) {
+        let palette: UUID? = { if case .palette(let id) = place { return id }; return nil }()
+        var actions = place == .appbridge ? StudioPage.models.map { format in
+            HaloAction(id: format.rawValue, label: "Copy " + format.label, symbol: "doc.on.doc", onSelect: { [weak self] in
+                let source = self?.page.grid.items.first { $0.hex == hex }?.sourceCMYK
+                ColourCopies.copy(hex, text: format == .cmyk ? (source ?? format.text(hex)) : format.text(hex, lowercase: Prefs.lowercaseHex), sourceCMYK: source)
+            })
+        } : SwatchMenu.ring(for: hex, in: palette, library: library, editTags: { [weak self] in self?.tag(swatches: $0) })
+        actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
+        contextMenu.open(actions, at: point, in: view)
+    }
+
     private var halo: HaloMenu?
 
     /// The old window's palette menu as a halo over the gear: rename, favourite, picks here, duplicate, copy to a member or a new one, move to a
     /// collection's member on a second ring, copy all, export, delete.
-    private func openHalo(for id: UUID, from view: NSView, rect: NSRect) {
+    private func paletteActions(for id: UUID) -> [HaloAction] {
         let lib = library.library
-        guard let s = lib.swatch(id) else { return }
+        guard let s = lib.swatch(id) else { return [] }
         let library = self.library
         func group(_ id: String, _ label: String, _ symbol: String, _ inner: @escaping () -> [HaloAction]) -> HaloAction { HaloAction(id: id, label: label, symbol: symbol, children: inner) }
         var actions: [HaloAction] = [
+            HaloAction(id: "qr", label: "Share Palette QR", symbol: "qrcode", onSelect: { [weak self] in self?.shareQR(palette:id) }),
             HaloAction(id: "rename", label: "Rename", symbol: "pencil", edit: (s.name, "Palette name", "Return keeps it", { library.rename(id, to: $0) })),
             HaloAction(id: "fav", label: s.favourite ? "Remove From Favourites" : "Add To Favourites", symbol: "star", checked: s.favourite) { library.toggleFavourite(id) },
             HaloAction(id: "target", label: lib.activeSwatchID == id ? "Stop Sending Picks Here" : "Send Picks Here", symbol: "scope", checked: lib.activeSwatchID == id) { library.setTarget(lib.activeSwatchID == id ? nil : id) },
@@ -713,9 +946,15 @@ final class StudioFrame: NSView {
             },
             HaloAction(id: "copy-all", label: "Copy All", symbol: "doc.on.doc") { library.copy(lib.hexes(inSwatch: id, by: .oldest), from: s.name) },
             HaloAction(id: "export", label: "Export Palette\u{2026}", symbol: "square.and.arrow.up", onSelect: { [weak self] in self?.startExport(.palette, subject: id, name: s.name) }),
-            HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id) },
+            HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id, confirmed: true) },
         ]
         if s.projectID != nil { actions.insert(HaloAction(id: "open", label: "Open Member", symbol: "arrow.up.right", onSelect: { [weak self] in if let p = s.projectID { self?.go(.project(p)) } }), at: 0) }
+        if let i = actions.firstIndex(where: { $0.id == "delete" }) { actions[i].onMenuSelect = { library.delete(palette: id) } }
+        return actions
+    }
+    private func openHalo(for id: UUID, from view: NSView, rect: NSRect) {
+        guard let s = library.library.swatch(id) else { return }
+        let actions = paletteActions(for: id)
         let h = halo ?? HaloMenu(label: "Palette", hint: "Scroll to turn, click to choose", actions: [])
         halo = h
         h.label = s.name
@@ -741,6 +980,7 @@ final class StudioFrame: NSView {
         } else {
             h.actions = SwatchMenu.ring(for: hex, in: inPalette, library: library, editTags: { [weak self] hexes in self?.tag(swatches: hexes) })
         }
+        h.actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
         h.open(centredOn: rect, in: page.grid)
     }
     /// Tags typed on the window's own panel, separated by commas, with the scope a new one takes (StudioTags.swift).
@@ -791,8 +1031,8 @@ final class StudioFrame: NSView {
         let lib = library.library
         var rows: [LibraryRail.Row] = [.group("Catalogue", key: "catalogue"), .row("All Colours", lib.colours.count, .catalogue, 0)]
         func two(_ s: Swatch, in project: UUID? = nil, indent: Int = 0) -> LibraryRail.Row {
-            .palette(LibraryRail.PaletteRow(id: s.id, name: s.name, count: s.entries.count, colours: s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) },
-                                            favourite: s.favourite, target: lib.activeSwatchID == s.id, project: project, indent: indent))
+            .palette(LibraryRail.PaletteRow(id: s.id, name: s.claim.map { $0.prefix + " · " + s.name } ?? s.name, count: s.entries.count, colours: s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) },
+                                            favourite: s.favourite, target: lib.activeSwatchID == s.id, project: project, indent: indent, bucket: s.bucketID))
         }
         /// A member, then its stack as the schema lays it out, each group one step in with what it holds: the palettes
         /// under the Palettes group and the typography palettes under Typography, each with its icons, so picks can be
@@ -806,8 +1046,9 @@ final class StudioFrame: NSView {
                 let at = indent + level - 1
                 switch SchemaTrial.role(of: node) {
                 case .palettes?:
-                    out.append(.node(node.name, colours.count, p.id, at, true, node.id))
-                    out += colours.map { two($0, in: p.id, indent: at + 1) }
+                    let scoped = palettes(lib.palettes(in: p.id, bucket: node.id, buckets: stack.filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id }))
+                    out.append(.node(node.name, scoped.count, p.id, at, true, node.id))
+                    out += scoped.map { two($0, in: p.id, indent: at + 1) }
                 case .typography?:
                     out.append(.node(node.name, type.count, p.id, at, false, node.id))
                     out += type.map { two($0, in: p.id, indent: at + 1) }
@@ -817,7 +1058,10 @@ final class StudioFrame: NSView {
                     out.append(.node(node.name, own.count, p.id, at, false, node.id))
                     out += own.map { t in .tag(t, lib.colours.filter { $0.tags?.contains(t) == true }.count, p.id, at + 1) }
                     out.append(.tag("Edit Tags", -1, p.id, at + 1))
-                case .information?, nil:
+                case nil:
+                    let canDrop = SchemaTrial.rows(of: node).contains { SchemaTrial.role(of: $0.node) == .palettes }
+                    out.append(.node(node.name, 0, p.id, at, canDrop, node.id))
+                case .information?:
                     out.append(.node(node.name, 0, p.id, at, false, node.id))
                 }
             }
@@ -846,7 +1090,12 @@ final class StudioFrame: NSView {
             // collection and not to the last folder above it, and shutting that folder leaves it showing.
             rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: 0) }
         }
-        let loose = palettes(lib.palettes(in: nil))
+        let loose = palettes(lib.palettes(in: nil)).filter { $0.claim == nil }
+        let claimed = palettes(lib.palettes(in: nil)).filter { $0.claim != nil }
+        if !claimed.isEmpty {
+            rows.append(.group("Claimed Palettes", key: "claimed"))
+            rows += claimed.map { two($0, in: nil, indent: 0) }
+        }
         rows.append(.group("Palettes", key: "palettes"))
         rows += loose.map { two($0) }
         rows.append(.row("All Palettes", palettes(lib.swatches).count, .palettes, 0))
@@ -854,6 +1103,25 @@ final class StudioFrame: NSView {
         let treeSelection: Place
         if case .overview(let id, _) = place { treeSelection = .project(id) } else { treeSelection = place }
         rail1.set(rows: rows, chosen: treeSelection)
+        if printWorkspace {
+            var allowedGroup = false
+            let printRows = rows.filter { row in
+                switch row {
+                case .group(let name, let key):
+                    allowedGroup = key != "catalogue" && key != "favourites" && key != "claimed"
+                    return allowedGroup && name != "Claimed Palettes"
+                case .palette(let p): return allowedGroup && lib.swatch(p.id)?.isTypography == false && lib.swatch(p.id)?.claim == nil
+                case .node(_, _, let project, _, _, let node):
+                    guard allowedGroup, let n = SchemaTrial.rows(of: SchemaTrial.schema(for: project)).first(where: { $0.node.id == node })?.node else { return false }
+                    return SchemaTrial.role(of: n) == .palettes || (SchemaTrial.role(of: n) == nil && SchemaTrial.rows(of: n).contains { SchemaTrial.role(of: $0.node) == .palettes })
+                case .tag: return false
+                case .row(_, _, let destination, _): return allowedGroup && destination != .palettes
+                }
+            }
+            printPaletteRail.shut = Prefs.railShut(in: library.catalogue)
+            printPaletteRail.selectedPalettes = prePressPage.selectedPrintPaletteID.map { [$0] } ?? []
+            printPaletteRail.set(rows: printRows, chosen: prePressPage.selectedPrintPaletteID.map { .palette($0) } ?? .prepress(3))
+        }
     }
 
     /// rail2 follows the place: the palettes of the catalogue or a project's level, or, for a member, its
@@ -887,11 +1155,18 @@ final class StudioFrame: NSView {
         }
         var heading = "Palettes", labels = ("Palette", "Count"), rows: [PaletteTable.Row] = []
         switch place {
-        case .catalogue, .palettes:
-            rows = palettes(lib.listedPalettes).map { paletteRow($0) }
+        case .qrImport: break
+        case .catalogue:
+            break // No context until a Library item is selected.
+        case .palettes:
+            heading = "Unclaimed Palettes"
+            rows = palettes(lib.libraryPalettes).filter { $0.claim == nil }.map { paletteRow($0) }
         case .palette(let id):
-            if let p = lib.swatch(id)?.projectID, let project = lib.project(p) { return fillStack(of: project, in: lib) }
-            rows = palettes(lib.palettes(in: nil)).map { paletteRow($0) }
+            if let palette = lib.swatch(id), let p = palette.projectID, let project = lib.project(p) {
+                return fillStack(of: project, in: lib, node: palette.bucketID)
+            }
+            heading = "Unclaimed Palettes"
+            rows = palettes(lib.libraryPalettes).filter { $0.claim == nil }.map { paletteRow($0) }
         case .collection(let id):
             guard let c = SchemaTrial.collections.first(where: { $0.id == id }) else { return }
             heading = c.name; labels = (SchemaTrial.memberName(of: c), "Palettes")
@@ -900,9 +1175,12 @@ final class StudioFrame: NSView {
             guard let c = SchemaTrial.collections.first(where: { $0.id == cid }), let f = c.folders.first(where: { $0.id == fid }) else { return }
             heading = f.name; labels = (SchemaTrial.memberName(of: c), "Palettes")
             rows = memberRows(members(of: c, folder: .some(fid)))
-        case .project(let id), .overview(let id, _), .group(let id, _):
+        case .project(let id):
             guard let project = lib.project(id) else { return }
             return fillStack(of: project, in: lib)
+        case .overview(let id, let node), .group(let id, let node):
+            guard let project = lib.project(id) else { return }
+            return fillStack(of: project, in: lib, node: node)
         case .appbridge:
             heading = "Appbridge"; labels = ("ASE File", "Swatches")
             rows.append(.item("Create New ASE", nil, 0, .appbridge, false))
@@ -915,11 +1193,16 @@ final class StudioFrame: NSView {
                 }
             }
             rows.append(.item("Appbridge Settings", nil, 0, .appbridgeSettings, false))
-        case .settings, .schema, .shortcuts, .halo, .sounds, .tags, .share, .appbridgeSettings:
+        case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings:
             heading = "Settings"; labels = ("Section", "")
-            rows = [.item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
+            rows = [.item("General", nil, 0, .general, place == .general), .item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
                     .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Sounds", nil, 0, .sounds, place == .sounds), .item("Tags", nil, 0, .tags, place == .tags),
+                    .item("Sharing", nil, 0, .sharingSettings, place == .sharingSettings),
+                    .item("Library", nil, 0, .librarySettings, place == .librarySettings),
                     .item("Appbridge", nil, 0, .appbridgeSettings, place == .appbridgeSettings)]
+            #if APPSTORE
+            rows.insert(.item("Apple Menubar", nil, 0, .appleMenubar, place == .appleMenubar), at: 1)
+            #endif
         case .prepress(let n):
             heading = "PrePress"; labels = ("Workflow", "Steps")
             rows.append(.item("Which job is it?", nil, 0, .prepress(0), n == 0))
@@ -927,7 +1210,7 @@ final class StudioFrame: NSView {
             for route in PrePressPage.routes {
                 rows.append(.item(route.title, route.later ? "Later" : "\(route.steps.count)", 0, .prepress(route.flow.rawValue), n == route.flow.rawValue))
             }
-        case .lab, .proofing:
+        case .lab:
             return   // no rail2: the page has its columns
         case .contrast:
             // The palettes the pair is picked from: the Lab's wheel when it is on offer, Favourites, each member's, then every palette; colours only.
@@ -945,7 +1228,8 @@ final class StudioFrame: NSView {
             }
             group("Favourites", key: "favourites", library.favourites)
             for p in lib.orderedProjects { group(p.name, key: "project.\(p.id.uuidString)", lib.palettes(in: p.id)) }
-            group("Palettes", key: "palettes", lib.listedPalettes)
+            group("Palettes", key: "palettes", lib.libraryPalettes.filter { $0.claim == nil })
+            group("Claimed Palettes", key: "claimed", lib.libraryPalettes.filter { $0.claim != nil })
         case .projects:
             heading = "Members"; labels = ("Collection", "Palettes")
             for c in SchemaTrial.collections {
@@ -959,7 +1243,7 @@ final class StudioFrame: NSView {
 
     /// A member's stack in rail2: each group of the schema in its order, the app's own four holding
     /// what they always have, any other a label with its own groups inside it.
-    private func fillStack(of project: Project, in lib: Library) {
+    private func fillStack(of project: Project, in lib: Library, node: UUID? = nil) {
         let schema = SchemaTrial.schema(for: project.id)
         let firstOverview = SchemaTrial.rows(of: schema).first { SchemaTrial.role(of: $0.node) == .information }?.node.id
         let held = lib.palettes(in: project.id)
@@ -978,7 +1262,7 @@ final class StudioFrame: NSView {
                 inner.append(.item("Overview", nil, indent, overview, place == overview || (place == .project(project.id) && group.id == firstOverview)))
             case .palettes?:
                 if name.isEmpty { name = "Palettes" }
-                let colours = held.filter { !$0.isTypography }
+                let colours = lib.palettes(in: project.id, bucket: group.id, buckets: SchemaTrial.rows(of: schema).filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id }).filter { !$0.isTypography }
                 func row(_ s: Swatch) -> PaletteTable.Row { .palette(s.id, s.name, s.entries.count, s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) }, place == .palette(s.id), indent) }
                 // This week's arrivals first, parted from the rest by a word on a hairline, when there are both.
                 let week = Date().addingTimeInterval(-7 * 24 * 3600)
@@ -1007,9 +1291,10 @@ final class StudioFrame: NSView {
             rows += inner
             for child in group.children { walk(child, indent + 1) }
         }
-        for group in schema.children { walk(group, 0) }
+        let focused = node.flatMap { id in SchemaTrial.rows(of: schema).first { $0.node.id == id }?.node }
+        for group in focused.map({ [$0] }) ?? schema.children { walk(group, 0) }
         let c = SchemaTrial.collection(of: project.id)
-        rail2.set(heading: project.name, labels: (SchemaTrial.memberName(of: c), "Items"), rows: rows)
+        rail2.set(heading: focused.map { project.name + " / " + $0.name } ?? project.name, labels: (SchemaTrial.memberName(of: c), "Items"), rows: rows)
     }
 
     private func fillPage() {
@@ -1021,7 +1306,7 @@ final class StudioFrame: NSView {
         func tiles(_ hexes: [String], in palette: UUID?) -> [TileGrid.Item] {
             hexes.compactMap { hex in
                 let name = lib.name(of: hex, in: palette)
-                return keep(name, hex) ? TileGrid.Item(title: name + " / " + ColourFormat.hex.text(hex), caption: "CMYK " + ColourFormat.cmyk.text(hex), colours: [shade[hex] ?? Design.hex(hex)], hex: hex, id: nil) : nil
+                return keep(name, hex) ? TileGrid.Item(title: name + " / " + ColourFormat.hex.text(hex), caption: page.format.caption(hex), colours: [shade[hex] ?? Design.hex(hex)], hex: hex, id: nil) : nil
             }
         }
         func cards(_ list: [Swatch]) -> [TileGrid.Item] {
@@ -1060,7 +1345,7 @@ final class StudioFrame: NSView {
                 else if file.swatches.isEmpty { page.grid.note = "Drop a palette from Rail 1 here to add its swatches." }
                 items = file.swatches.map { swatch in
                     TileGrid.Item(title: (swatch.group.isEmpty ? swatch.name : swatch.group) + " / " + (hexOf(swatch.preview) ?? "—"),
-                        caption: "CMYK " + swatch.cmykText, colours: [swatch.preview], hex: hexOf(swatch.preview), id: nil, sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil)
+                        caption: page.format.caption(hexOf(swatch.preview) ?? "#000000", sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil), colours: [swatch.preview], hex: hexOf(swatch.preview), id: nil, sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil)
                 }
             } else { page.grid.note = appbridge.files.isEmpty ? "Import an ASE file in Appbridge Settings to begin." : "Select an ASE file from Rail 2 to open its swatches." }
         case .projects:
@@ -1078,6 +1363,25 @@ final class StudioFrame: NSView {
         case .shortcuts:
             title = "Shortcuts"; meta = ("\(QuickKeys.commands.count) quick keys", plural(Shortcuts.commands.count, "command"))
             page.show(.shortcuts)
+        case .appleMenubar:
+            title = "Apple Menubar"; meta = ("Colour Tools", "App Store")
+            #if APPSTORE
+            page.show(.appleMenubar)
+            #else
+            page.show(.general)
+            #endif
+        case .sharingSettings:
+            title = "Sharing"; meta = ("QR Generation Settings", "Offline Colour Exchange")
+            page.show(.sharingSettings)
+        case .qrImport:
+            title = "Import"; meta = ("QR Colour Exchange", "Camera · Image · Clipboard")
+            page.show(.qrImport)
+        case .general:
+            title = "General"; meta = ("Setup & Preferences", "")
+            page.show(.general)
+        case .librarySettings:
+            title = "Library"; meta = ("Palette Settings", "")
+            page.show(.librarySettings)
         case .sounds:
             title = "Sounds"; meta = ("Audio feedback", "Copy and pick")
             page.show(.sounds)
@@ -1090,9 +1394,6 @@ final class StudioFrame: NSView {
         case .share:
             title = sharePage.pageTitle; meta = (sharePage.pageTitle, "One catalogue file")
             page.show(.share)
-        case .proofing:
-            title = "Proofing"; meta = ("Reference & Output", "D50 · 2° Observer")
-            page.show(.proofing)
         case .prepress(let n):
             let flow = PrePressPage.Flow(rawValue: n) ?? .menu
             prePressPage.flow = flow
@@ -1127,7 +1428,7 @@ final class StudioFrame: NSView {
             title = node?.name ?? "Group"
             switch node.flatMap({ SchemaTrial.role(of: $0) }) {
             case .palettes?:
-                let list = palettes(held); items = cards(list)
+                let list = palettes(lib.palettes(in: id, bucket: nid, buckets: SchemaTrial.rows(of: tree).filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id })); items = cards(list)
                 meta = (plural(list.count, "palette"), member)
             case .typography?:
                 // A typography palette holds styles, not colours: its card says how many, and the button makes another in this member.
@@ -1146,8 +1447,10 @@ final class StudioFrame: NSView {
                 meta = (notes.isEmpty ? "No notes yet" : "Notes", member)
                 page.grid.note = notes.isEmpty ? "No notes yet. Describe this member under Settings, Schema." : notes
             case nil:
-                // A group of the member's own holds its palettes for now.
-                let list = palettes(held); items = cards(list)
+                // A heading such as Web aggregates its own descendant buckets only.
+                let allBuckets = SchemaTrial.rows(of: tree).filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id }
+                let inside = node.map { SchemaTrial.rows(of: $0).filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id } } ?? []
+                let list = palettes(inside.flatMap { lib.palettes(in: id, bucket: $0, buckets: allBuckets) }); items = cards(list)
                 meta = (plural(list.count, "palette"), member)
             }
         case .collection(let id):
@@ -1163,7 +1466,7 @@ final class StudioFrame: NSView {
             items = made; title = f.name
             meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
         case .palettes:
-            let list = palettes(lib.listedPalettes)
+            let list = palettes(lib.libraryPalettes)
             items = cards(list)
             title = "All Palettes"; meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
         case .settings:
@@ -1259,7 +1562,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         let point = convert(event.locationInWindow, from: nil)
         return field.frame.insetBy(dx: -6, dy: -10).contains(point) || searchRect.contains(point)
     }
-    var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { needsLayout = true; needsDisplay = true } }
+    var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { if grid != oldValue { needsLayout = true; needsDisplay = true } } }
     var live: Int? = 0 { didSet { needsLayout = true; needsDisplay = true } }
     private var settingsRect = NSRect.zero, searchRect = NSRect.zero
     struct SavedSearch: Codable { var query: String; var date: Date; var favourite: Bool }
@@ -1283,7 +1586,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var onPaletteWheel: (() -> Void)?
     private let paletteHalo = PaletteHaloButton(frame: .zero)
     /// The picker and the rectangle picker, two clean marks after the wordmark, standing inside rail1's edge.
-    var railEdge: CGFloat = 248 { didSet { needsLayout = true; needsDisplay = true } }
+    var railEdge: CGFloat = 248 { didSet { if railEdge != oldValue { needsLayout = true; needsDisplay = true } } }
     private var navigationStart: CGFloat { max(248, railEdge) + Design.App.areaGutter / 2 }
     private var copyRect = NSRect.zero
     var onPick: (() -> Void)?
@@ -1301,7 +1604,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
     func clearFilter() { hideSearch() }
-    private let tabs = ["Library", "Palettes", "Lab", "Proofing", "PrePress", "Contrast", "Projects", "Appbridge"]
+    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import"]
     private var tabRects: [NSRect] = []
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
@@ -1338,7 +1641,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
         let tabWidth = tabs.enumerated().reduce(CGFloat(0)) { width, item in
-            width + Design.attributed(item.element, item.offset == live ? .bodyStrong : .body).size().width + 24
+            width + Design.attributed(item.element, item.offset == live ? .bodyStrong : .body).size().width + 32
         }
         let font = Design.Text.body.font()
         let textCentre = Self.baseline - (font.ascender + font.descender) / 2
@@ -1352,6 +1655,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        hairline(x:0, y:Design.App.header - 1, width:bounds.width, Design.rule)
         let g = Design.App.gutter, b = Self.baseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
@@ -1368,11 +1672,12 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         tabRects = []
         for (i, t) in tabs.enumerated() {
             let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
-            a.draw(x: x, baseline: b)
-            let w = a.size().width
+            RowMark.draw(["books.vertical", "square.stack", "flask", "printer", "circle.lefthalf.filled", "folder", "arrow.triangle.branch", "square.and.arrow.down"][i], x:x, baseline:b, colour:i == live ? Design.ink : Design.quiet)
+            a.draw(x: x + 20, baseline: b)
+            let w = a.size().width + 20
             tabRects.append(NSRect(x: x - 8, y: 0, width: w + 16, height: bounds.height))
-            if i == live { fill(NSRect(x: x, y: b + 7, width: w, height: 1), Design.ink) }
-            x += w + 24
+            if i == live { fill(NSRect(x: x + 20, y: b + 7, width: w - 20, height: 1), Design.ink) }
+            x += w + 12
         }
         let right = bounds.width - Design.App.margin + 5
         let font = Design.Text.body.font()
@@ -1687,8 +1992,8 @@ final class MiniSlider: NSView {
 /// A Card with 22 top padding and a heading row with the arrow; rows below are drawn by the subclass.
 /// The rail scrolls when its rows pass its height, the scroller hidden until the wheel moves.
 class StudioRail: NSView {
-    var inset: CGFloat = 24 { didSet { needsLayout = true } }
-    var insetRight: CGFloat = 24 { didSet { needsLayout = true } }
+    var inset: CGFloat = 24 { didSet { if inset != oldValue { needsLayout = true } } }
+    var insetRight: CGFloat = 24 { didSet { if insetRight != oldValue { needsLayout = true } } }
     /// The arrow in the header, and what a press on it does.
     var arrow = AreaHeader.Arrow.open { didSet { needsDisplay = true } }
     var onArrow: (() -> Void)?
@@ -1698,6 +2003,8 @@ class StudioRail: NSView {
         super.mouseDown(with: event)
     }
     static let top: CGFloat = 22
+    var expandedWidth: CGFloat? { didSet { if expandedWidth != oldValue { needsLayout = true; needsDisplay = true } } }
+    var contentWidth: CGFloat { expandedWidth ?? bounds.width }
     var contentOffset: CGFloat = 0
     let scroll = FittedScrollView()
     let body: RailBody
@@ -1710,6 +2017,7 @@ class StudioRail: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Design.card.cgColor
+        layer?.masksToBounds = true
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -1722,16 +2030,18 @@ class StudioRail: NSView {
     /// The header stays put; only the rows scroll, under the Rule.
     override func layout() {
         super.layout()
-        scroll.frame = NSRect(x: 0, y: AreaHeader.height + contentOffset, width: bounds.width, height: bounds.height - AreaHeader.height - contentOffset)
-        body.inset = inset
-        body.insetRight = max(0, insetRight - QuietScroller.lane)
-        body.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.frame.height, body.height))
-        // Rows that fit do not scroll at all; only a longer list moves under the header.
+        let scrollFrame = NSRect(x: 0, y: AreaHeader.height + contentOffset, width: contentWidth, height: bounds.height - AreaHeader.height - contentOffset)
+        if scroll.frame != scrollFrame { scroll.frame = scrollFrame }
+        let insetsChanged = body.inset != inset || body.insetRight != max(0, insetRight - QuietScroller.lane)
+        body.inset = inset; body.insetRight = max(0, insetRight - QuietScroller.lane)
+        let bodyFrame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.frame.height, body.height))
+        let resized = body.frame != bodyFrame
+        if resized { body.frame = bodyFrame }
         scroll.verticalScrollElasticity = body.height > scroll.frame.height ? .allowed : .none
-        body.needsDisplay = true
+        if resized || insetsChanged { body.needsDisplay = true }
     }
     override func draw(_ dirtyRect: NSRect) {
-        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: bounds, inset: inset, insetRight: insetRight, arrow: arrow)
+        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: NSRect(x: 0, y: 0, width: contentWidth, height: bounds.height), inset: inset, insetRight: insetRight, arrow: arrow)
     }
 
     class RailBody: NSView {
@@ -1772,14 +2082,32 @@ enum AreaHeader {
 
 /// The library rail: groups of rows, the name left and a tabular count right; a row one step in sits
 /// inside the row above it, as a member sits in its folder.
+private final class RailSelectionBar: NSView {
+    var count = 0 { didSet { needsDisplay = true } }
+    var haloRight: CGFloat = 0 { didSet { needsDisplay = true } }
+    var onHalo: ((NSView, NSRect) -> Void)?
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        fill(bounds, Design.card); hairline(x: 0, y: 0, width: bounds.width)
+        Design.attributed("\(count) Palettes Selected", .bodyStrong).draw(x: Design.App.margin, baseline: bounds.midY + 5, width: max(0, haloRight - Design.App.margin - 28))
+        Design.haloMark(in: NSRect(x: haloRight - 8, y: bounds.midY - 8, width: 16, height: 16), colour: Design.ink)
+    }
+    override func resetCursorRects() { addCursorRect(NSRect(x: haloRight - 14, y: 0, width: 28, height: bounds.height), cursor: .pointingHand) }
+    override func mouseDown(with event: NSEvent) { let p = convert(event.locationInWindow, from: nil); if abs(p.x - haloRight) < 18 { onHalo?(self, NSRect(x: haloRight - 8, y: bounds.midY - 8, width: 16, height: 16)) } }
+}
+
 final class LibraryRail: StudioRail {
     /// A group label; a row with its count; a palette on two lines, its name over its colours with the count on the second line.
     /// A palette row: its name, count, colours, whether it is a favourite and the picks' target, and the member it sits in, at an indent.
-    struct PaletteRow { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let favourite: Bool; let target: Bool; let project: UUID?; let indent: Int }
+    struct DropDestination: Equatable { let project: UUID; let bucket: UUID? }
+    struct PaletteRow { let id: UUID; let name: String; let count: Int; let colours: [NSColor]; let favourite: Bool; let target: Bool; let project: UUID?; let indent: Int; var bucket: UUID? = nil }
     /// A group of a member's stack: its name, what it holds, the member, its indent, and whether a palette can be dropped on it.
     /// A tag of a member, under its Tags group: the tag, how many colours wear it, the member, the indent; or the link to edit them.
     /// A group's key is what its open or shut state is kept under; nil keys it by its title.
     enum Row { case group(String, key: String? = nil), row(String, Int, StudioFrame.Place, Int), palette(PaletteRow), node(String, Int, UUID, Int, Bool, UUID), tag(String, Int, UUID, Int) }
+    var onPaletteSelection: ((UUID, [UUID], NSEvent.ModifierFlags) -> Void)?
+    var onDeleteSelection: (() -> Void)?
+    var onContext: ((StudioFrame.Place, NSView, NSPoint) -> Void)?
     var onPick: ((StudioFrame.Place) -> Void)?
     /// The buckets shut, by key, and a bucket opened or shut by its caret: its key, and whether it is now shut.
     var shut: Set<String> { get { list.shut } set { list.shut = newValue; needsLayout = true } }
@@ -1787,18 +2115,35 @@ final class LibraryRail: StudioRail {
     /// A name typed over where it is drawn: the place renamed, and the new name.
     var onRename: ((StudioFrame.Place, String) -> Void)?
     /// A palette dropped on a member: the palette, then the member it lands in.
-    var onDrop: ((UUID, UUID) -> Void)?
+    var onDrop: ((UUID, DropDestination) -> Void)?
     /// The three icons on a palette row: the star, the picks' target, and the gear, which opens the halo over the icon's rect in the body's coordinates.
     var onFavourite: ((UUID) -> Void)?
     var onTarget: ((UUID) -> Void)?
     var onGear: ((UUID, NSView, NSRect) -> Void)?
+    var selectedPalettes: Set<UUID> { get { list.selectedPalettes } set { list.selectedPalettes = newValue; selectionBar.count = newValue.count; needsLayout = true } }
+    var selectionHeight = Design.App.unit { didSet { needsLayout = true } }
+    var onSelectionHalo: ((NSView, NSRect) -> Void)?
+    private let selectionBar = RailSelectionBar()
     private var list: Body { body as! Body }
+    override func layout() {
+        super.layout()
+        let show = !collapsed && selectedPalettes.count > 1
+        selectionBar.isHidden = !show
+        if show { scroll.frame.size.height = max(0, scroll.frame.height - selectionHeight) }
+        selectionBar.frame = NSRect(x: 0, y: bounds.height - selectionHeight, width: bounds.width, height: selectionHeight)
+        selectionBar.haloRight = bounds.width - insetRight - 12
+    }
     /// Shut to a narrow strip: the arrow to open it, then a mark for each of its groups, the chosen one's filled.
-    var collapsed = false { didSet { scroll.isHidden = collapsed; needsDisplay = true } }
+    var collapsed = false { didSet { if collapsed != oldValue { scroll.isHidden = collapsed; needsDisplay = true } } }
     static let collapsedWidth: CGFloat = 48
     private var markHits: [(NSRect, StudioFrame.Place)] = []
     init() {
-        super.init(body: Body()); heading = "Library"; labels = ("Name", "Count")
+        super.init(body: Body()); addSubview(selectionBar)
+        selectionBar.onHalo = { [weak self] view, rect in self?.onSelectionHalo?(view, rect) }
+        list.onPaletteSelection = { [weak self] id, order, modifiers in self?.onPaletteSelection?(id, order, modifiers) }
+        list.onDeleteSelection = { [weak self] in self?.onDeleteSelection?() }
+        heading = "Library"; labels = ("Name", "Count")
+        list.onContext = { [weak self] place, view, point in self?.onContext?(place, view, point) }
         list.onPick = { [weak self] p in self?.onPick?(p) }
         list.onRename = { [weak self] p, n in self?.onRename?(p, n) }
         list.onDrop = { [weak self] s, m in self?.onDrop?(s, m) }
@@ -1875,10 +2220,14 @@ final class LibraryRail: StudioRail {
         var rows: [Row] = [] { didSet { rebuild() } }
         /// The buckets shut, by key: what is inside them is not shown.
         var shut: Set<String> = [] { didSet { rebuild() } }
-        var chosen: StudioFrame.Place = .catalogue
-        var onPick: ((StudioFrame.Place) -> Void)?
+        var selectedPalettes: Set<UUID> = [] { didSet { rollover.settle(); needsDisplay = true } }
+        var chosen: StudioFrame.Place = .catalogue { didSet { rollover.settle(); needsDisplay = true } }
+        var onPaletteSelection: ((UUID, [UUID], NSEvent.ModifierFlags) -> Void)?
+    var onDeleteSelection: (() -> Void)?
+    var onContext: ((StudioFrame.Place, NSView, NSPoint) -> Void)?
+    var onPick: ((StudioFrame.Place) -> Void)?
         var onRename: ((StudioFrame.Place, String) -> Void)?
-        var onDrop: ((UUID, UUID) -> Void)?
+        var onDrop: ((UUID, DropDestination) -> Void)?
         var onFavourite: ((UUID) -> Void)?
         var onTarget: ((UUID) -> Void)?
         var onGear: ((UUID, NSView, NSRect) -> Void)?
@@ -1910,9 +2259,34 @@ final class LibraryRail: StudioRail {
         private var pendingPaletteClick: (NSRect, StudioFrame.Place)?
         /// Where and when the mouse went down, so a drag starts only once the pointer has clearly left the press.
         private var pressedAt: (NSPoint, TimeInterval) = (.zero, 0)
-        private var target: UUID?
+        private var target: DropDestination?
 
-        override init(frame: NSRect) { super.init(frame: frame); registerForDraggedTypes([PaletteDrag.type]) }
+        private let rollover = Rollover<String>()
+        private var rowHits: [(NSRect, String)] = []
+        override init(frame: NSRect) {
+            super.init(frame: frame); registerForDraggedTypes([PaletteDrag.type])
+            rollover.barberPole = true
+            rollover.keys = { [weak self] in self?.shown.map { Self.key(of: $0.row) } ?? [] }
+            rollover.locked = { [weak self] key in
+                guard let self else { return false }
+                return self.shown.contains { Self.key(of: $0.row) == key && self.selected($0.row) }
+            }
+            rollover.redraw = { [weak self] in self?.needsDisplay = true }
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.inVisibleRect, .mouseMoved, .mouseEnteredAndExited, .activeInActiveApp], owner: self))
+        }
+        private func selected(_ row: Row) -> Bool {
+            switch row {
+            case .row(_, _, let place, _): return place == chosen
+            case .node(_, _, let project, _, _, let node): return chosen == .group(project, node)
+            case .palette(let palette): return selectedPalettes.contains(palette.id)
+            default: return false
+            }
+        }
+        override func mouseMoved(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            rollover.moved(rowHits.first { $0.0.contains(point) }?.1)
+        }
+        override func mouseExited(with event: NSEvent) { rollover.moved(nil) }
         required init?(coder: NSCoder) { fatalError() }
 
         // MARK: Open and shut
@@ -1955,7 +2329,7 @@ final class LibraryRail: StudioRail {
                 if holds && shut.contains(key) { hideBelow = level }
             }
             shown = out
-            needsDisplay = true
+            rollover.settle(); needsDisplay = true
         }
         private func toggle(_ key: String) {
             let shutNow = !shut.contains(key)
@@ -2018,32 +2392,42 @@ final class LibraryRail: StudioRail {
                 let e = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)); e.lineWidth = 1; e.stroke()
             }
             // The grounds first, then the tree's lines over them, then every row's mark and words.
-            var grounds: [(NSRect, NSColor)] = [], tree: [TreeLines.Row] = []
+            var tree: [TreeLines.Row] = []
+            rowHits = []
             var yy: CGFloat = 0
             for (i, s) in shown.enumerated() {
                 switch s.row {
                 case .group:
                     if i > 0 { yy += Self.groupAbove }
+                    let box = NSRect(x: 0, y: yy, width: bounds.width, height: Self.row)
+                    rowHits.append((box, Self.key(of: s.row)))
+                    rollover.pane(Self.key(of: s.row), box: box, reach: bounds.width, stripWidth: min(24, inset))
                     tree.append(TreeLines.Row(top: yy, height: Self.row, level: 0, anchor: inset + 5, markLeft: inset, baseline: Self.line))
                     yy += Self.row
                 case .row(_, _, let place, let indent):
-                    if place == chosen { grounds.append((NSRect(x: 0, y: yy, width: bounds.width, height: Self.row), Design.mist)) }
                     let mx = inset + 12 + CGFloat(indent) * Self.step
+                    let box = NSRect(x: 0, y: yy, width: bounds.width, height: Self.row)
+                    rowHits.append((box, Self.key(of: s.row)))
+                    rollover.pane(Self.key(of: s.row), box: box, reach: bounds.width, stripWidth: min(24, inset))
                     tree.append(TreeLines.Row(top: yy, height: Self.row, level: s.level, anchor: mx + 7, markLeft: mx, baseline: Self.line))
                     yy += Self.row
                 case .node(_, _, _, let indent, _, _), .tag(_, _, _, let indent):
                     let mx = inset + 12 + CGFloat(indent) * Self.step
+                    let box = NSRect(x: 0, y: yy, width: bounds.width, height: Self.row)
+                    rowHits.append((box, Self.key(of: s.row)))
+                    rollover.pane(Self.key(of: s.row), box: box, reach: bounds.width, stripWidth: min(24, inset))
                     tree.append(TreeLines.Row(top: yy, height: Self.row, level: s.level, anchor: mx + 7, markLeft: mx, baseline: Self.line))
                     yy += Self.row
                 case .palette(let pr):
                     let mx = inset + 12 + CGFloat(pr.indent) * Self.step
+                    let box = NSRect(x: 0, y: yy, width: bounds.width, height: Self.two)
+                    rowHits.append((box, Self.key(of: s.row)))
+                    rollover.pane(Self.key(of: s.row), box: box, reach: bounds.width, stripWidth: min(24, inset))
                     tree.append(TreeLines.Row(top: yy, height: Self.two, level: s.level, anchor: mx + 7, markLeft: mx, baseline: Self.line))
                     yy += Self.two
                 }
             }
-            for (box, _) in grounds {
-                RailTile.ground(NSRect(x: inset, y: box.minY, width: max(1, right - inset), height: box.height), selected: true)
-            }
+
             if Self.showsTreeConnectors { TreeLines.draw(tree, colour: Design.rule) }
             for (i, s) in shown.enumerated() {
                 switch s.row {
@@ -2084,14 +2468,13 @@ final class LibraryRail: StudioRail {
                     default: break
                     }
                     countText.draw(right: right, baseline: b)
-                    if case .project(let id) = place, id == target { edge(box) }
+                    if case .project(let id) = place, target == DropDestination(project: id, bucket: nil) { edge(box) }
                     hits.append((box, place))
                     y += Self.row
                 case .node(let name, let count, let pid, let indent, let drop, let nid):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.row)
                     let b = y + Self.line, mx = inset + 12 + CGFloat(indent) * Self.step, x = mx + Self.words
                     let on = chosen == .group(pid, nid)
-                    if on { RailTile.ground(NSRect(x: inset, y: y, width: max(1, right - inset), height: Self.row), selected: true) }
                     // The old sidebar's marks for a member's groups: palettes, information, typography, tags, and a dashed square for one of your own.
                     let role = SchemaTrial.role(of: SchemaNode(name: name))
                     let mark = role == .palettes ? "swatchpalette" : role == .information ? "info.circle" : role == .typography ? "textformat" : role == .tags ? "tag" : "square.dashed"
@@ -2100,7 +2483,7 @@ final class LibraryRail: StudioRail {
                     let countText = Design.attributed(count > 0 ? String(count) : "", .caption, colour: Design.quiet)
                     Design.attributed(name, on ? .bodyStrong : .body).draw(x: x, baseline: b, width: right - x - countText.size().width - 12)
                     countText.draw(right: right, baseline: b)
-                    if drop, pid == target { edge(box) }
+                    if drop, target == DropDestination(project: pid, bucket: nid) { edge(box) }
                     hits.append((box, .group(pid, nid)))
                     y += Self.row
                 case .tag(let name, let count, let pid, let indent):
@@ -2117,12 +2500,11 @@ final class LibraryRail: StudioRail {
                     y += Self.row
                 case .palette(let pr):
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: Self.two)
-                    let place = StudioFrame.Place.palette(pr.id), on = place == chosen
+                    let place = StudioFrame.Place.palette(pr.id), on = selectedPalettes.contains(pr.id)
                     let mx = inset + 12 + CGFloat(pr.indent) * Self.step
                     let x = mx + 28, tileRight = right - 4
-                    RailTile.ground(NSRect(x: mx, y: y, width: max(1, right - mx), height: Self.two), selected: on)
                     let nameW = max(1, tileRight - x)
-                    if renaming != place { Design.attributed(pr.name, on ? .bodyStrong : .body, colour: on ? (Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? Design.ink) : Design.ink).draw(x: x, baseline: y + Self.line, width: nameW) }
+                    if renaming != place { Design.attributed(pr.name, on ? .bodyStrong : .body, colour: Design.ink).draw(x: x, baseline: y + Self.line, width: nameW) }
                     nameHits.append((NSRect(x: x, y: y, width: nameW, height: Self.row), place, pr.name, .body))
                     RailTile.spectrum(pr.colours, in: NSRect(x: x, y: y + Self.unit + 7, width: max(1, tileRight - x - 28), height: 10))
                     for which in [0, 1, 2] {
@@ -2151,7 +2533,26 @@ final class LibraryRail: StudioRail {
             return nil
         }
 
+        private var focusedPalette: UUID?
+        override var acceptsFirstResponder: Bool { true }
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 125 || event.keyCode == 126 {
+                let order: [UUID] = shown.compactMap { if case .palette(let p) = $0.row { return p.id }; return nil }
+                if let focus = focusedPalette ?? order.first(where: { selectedPalettes.contains($0) }), let i = order.firstIndex(of: focus), !order.isEmpty {
+                    let next = order[min(order.count - 1, max(0, i + (event.keyCode == 125 ? 1 : -1)))]
+                    focusedPalette = next; onPaletteSelection?(next, order, event.modifierFlags); return
+                }
+            }
+            if event.keyCode == 51 || event.keyCode == 117 { onDeleteSelection?(); return }
+            super.keyDown(with: event)
+        }
+        override func rightMouseDown(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            guard let hit = hits.first(where: { $0.0.contains(point) }) else { return }
+            onContext?(hit.1, self, point)
+        }
         override func mouseDown(with event: NSEvent) {
+            window?.makeFirstResponder(self)
             let p = convert(event.locationInWindow, from: nil)
             pressed = nil; pendingPaletteClick = nil; pressedIcon = nil
             // An icon acts on the release, not the press: the halo opens under the pointer, and a press that opened it must not be the click that chooses on it.
@@ -2164,7 +2565,12 @@ final class LibraryRail: StudioRail {
             if let l = tagLinks.first(where: { $0.0.contains(p) }) { TagsSettings.pendingScope = .member(l.1) }
             if let h = hits.first(where: { $0.0.contains(p) }) {
                 if pressed != nil { pendingPaletteClick = h }
-                else { onPick?(h.1) }
+                else {
+                if case .palette(let id) = h.1 {
+                    focusedPalette = id
+                    onPaletteSelection?(id, shown.compactMap { if case .palette(let p) = $0.row { return p.id }; return nil }, event.modifierFlags)
+                } else { onPick?(h.1) }
+            }
             }
         }
         /// A double-click on a name: the cursor goes into the words where they are, and the name is written when the typing ends.
@@ -2186,7 +2592,10 @@ final class LibraryRail: StudioRail {
             pendingPaletteClick = nil; pressed = nil
             if let pending, pending.0.contains(convert(event.locationInWindow, from: nil)),
                hypot(event.locationInWindow.x - pressedAt.0.x, event.locationInWindow.y - pressedAt.0.y) < PaletteDrag.threshold {
-                onPick?(pending.1)
+                if case .palette(let id) = pending.1 {
+                    focusedPalette = id
+                    onPaletteSelection?(id, shown.compactMap { if case .palette(let p) = $0.row { return p.id }; return nil }, event.modifierFlags)
+                } else { onPick?(pending.1) }
             }
         }
         override func mouseUp(with event: NSEvent) {
@@ -2206,20 +2615,20 @@ final class LibraryRail: StudioRail {
 
         // MARK: A palette dropped on a member, or on one of the member's own palettes
 
-        private func member(at p: NSPoint) -> UUID? {
+        private func member(at p: NSPoint) -> DropDestination? {
             var y: CGFloat = 0
             for (i, s) in shown.enumerated() {
                 switch s.row {
                 case .group: y += (i == 0 ? 0 : Self.groupAbove) + Self.row
                 case .row(_, _, let place, _):
-                    if case .project(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return id }
+                    if case .project(let id) = place, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return DropDestination(project: id, bucket: nil) }
                     y += Self.row
-                case .node(_, _, let pid, _, let drop, _):
-                    if drop, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return pid }
+                case .node(_, _, let pid, _, let drop, let nid):
+                    if drop, NSRect(x: 0, y: y, width: bounds.width, height: Self.row).contains(p) { return DropDestination(project: pid, bucket: nid) }
                     y += Self.row
                 case .tag: y += Self.row
                 case .palette(let pr):
-                    if let m = pr.project, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return m }
+                    if let m = pr.project, NSRect(x: 0, y: y, width: bounds.width, height: Self.two).contains(p) { return DropDestination(project: m, bucket: pr.bucket) }
                     y += Self.two
                 }
             }
@@ -2229,7 +2638,7 @@ final class LibraryRail: StudioRail {
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
             let over = member(at: convert(sender.draggingLocation, from: nil))
             if over != target { target = over; needsDisplay = true }
-            return over == nil ? [] : .move
+            return over == nil ? [] : .copy
         }
         override func draggingExited(_ sender: NSDraggingInfo?) { target = nil; needsDisplay = true }
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -2245,11 +2654,11 @@ final class LibraryRail: StudioRail {
 enum PaletteDrag {
     static let type = NSPasteboard.PasteboardType("com.mmffdev.colorgain.palette")
 
-    /// A drag begins only once the pointer is a clear distance from where the mouse went down and a beat has passed,
-    /// so a click, or the small wobble in one, never lifts a palette.
-    static let threshold: CGFloat = 8, beat: TimeInterval = 0.12
+    /// Use the normal distance threshold: quick drags must work without a hold delay.
+    /// A click or a small pointer wobble still cannot lift a palette.
+    static let threshold: CGFloat = 8
     static func counts(_ event: NSEvent, from press: (NSPoint, TimeInterval)) -> Bool {
-        hypot(event.locationInWindow.x - press.0.x, event.locationInWindow.y - press.0.y) >= threshold && event.timestamp - press.1 >= beat
+        hypot(event.locationInWindow.x - press.0.x, event.locationInWindow.y - press.0.y) >= threshold
     }
 
     static func palette(on board: NSPasteboard) -> UUID? {
@@ -2286,7 +2695,7 @@ enum PaletteDrag {
 /// name with a detail at the right, going somewhere when it has a place.
 final class PaletteTable: StudioRail {
     var onDesignPalette: (() -> Void)?
-    private let designPalette = NSButton(title: "", target: nil, action: nil)
+    private let designPalette = ActionButton(title: "Design Palette", target: nil, action: nil)
     @objc private func createPalette() { onDesignPalette?() }
 
     var warningIDs = Set<UUID>()
@@ -2298,7 +2707,7 @@ final class PaletteTable: StudioRail {
         warnings.forEach { $0.removeFromSuperview() }; warnings = []
         var y: CGFloat = 0
         for row in table.rows {
-            if case .palette(let id, _, _, _, _, _) = row, warningIDs.contains(id) {
+            if case .palette(let id, _, _, _, _, _, _) = row, warningIDs.contains(id) {
                 let button = AppbridgeListButton("Missing ASE files — Locate or Remove", symbol: "exclamationmark.triangle") { [weak self] in self?.onWarning?() }
                 button.frame = NSRect(x: table.bounds.width - table.insetRight - 24, y: y, width: 24, height: Body.row)
                 table.addSubview(button); warnings.append(button)
@@ -2311,27 +2720,34 @@ final class PaletteTable: StudioRail {
         /// A group's heading, with the place its page is and whether that page is showing; `fold`, when it holds rows, the key
         /// its open or shut state is kept under and whether it is open. A shut group's rows are left out by whoever fills the rail.
         case group(String, Int, StudioFrame.Place? = nil, Bool = false, fold: (key: String, open: Bool)? = nil)
-        case palette(UUID, String, Int, [NSColor], Bool, Int)
+        case palette(UUID, String, Int, [NSColor], Bool, Int, prefix: String? = nil)
         case item(String, String?, Int, StudioFrame.Place?, Bool)
         /// A word on a hairline between runs of rows, as "Just Added" parts this week's palettes from the rest.
         case divider(String)
     }
     var readOnlyRows = false { didSet { table.readOnlyRows = readOnlyRows } }
+    var onPaletteSelection: ((UUID, [UUID], NSEvent.ModifierFlags) -> Void)?
+    var onDeleteSelection: (() -> Void)?
+    var onContext: ((StudioFrame.Place, NSView, NSPoint) -> Void)?
     var onPick: ((StudioFrame.Place) -> Void)?
     var onRename: ((StudioFrame.Place, String) -> Void)?
     /// A group's caret pressed: its key, and whether it is now shut.
     var onShut: ((String, Bool) -> Void)?
+    var selectedPalettes: Set<UUID> { get { table.selectedPalettes } set { table.selectedPalettes = newValue } }
     private var table: Body { body as! Body }
     init() {
         super.init(body: Body()); labels = ("Palette", "Count")
         designPalette.isBordered = false
         designPalette.alignment = .left
-        designPalette.attributedTitle = Design.attributed("⊕  Design Palette", .body)
+        designPalette.title = "Design Palette"
         designPalette.target = self; designPalette.action = #selector(createPalette)
         designPalette.setAccessibilityLabel("Design Palette")
         designPalette.toolTip = "Create a new palette"
         designPalette.isHidden = true
         addSubview(designPalette)
+        table.onPaletteSelection = { [weak self] id, order, modifiers in self?.onPaletteSelection?(id, order, modifiers) }
+        table.onDeleteSelection = { [weak self] in self?.onDeleteSelection?() }
+        table.onContext = { [weak self] place, view, point in self?.onContext?(place, view, point) }
         table.onPick = { [weak self] p in self?.onPick?(p) }
         table.onRename = { [weak self] p, n in self?.onRename?(p, n) }
         table.onShut = { [weak self] k, s in self?.onShut?(k, s) }
@@ -2344,11 +2760,12 @@ final class PaletteTable: StudioRail {
         self.heading = heading; self.labels = labels; table.rows = rows; needsLayout = true
         // The chosen row is brought into view when it is out of it, which the eye expects when it was chosen elsewhere;
         // a row already in view, clicked here, leaves the list exactly where it is.
+        if selectedPalettes.count > 1 { return }
         var y: CGFloat = 0
         for r in rows {
             let h = Body.height(of: r)
             switch r {
-            case .palette(_, _, _, _, true, _), .item(_, _, _, _, true):
+            case .palette(_, _, _, _, true, _, _), .item(_, _, _, _, true):
                 layoutSubtreeIfNeeded()
                 let row = NSRect(x: 0, y: y, width: 1, height: h)
                 if !body.visibleRect.contains(row) { body.scrollToVisible(NSRect(x: 0, y: max(0, y - h), width: 1, height: h * 3)) }
@@ -2359,9 +2776,13 @@ final class PaletteTable: StudioRail {
     }
 
     final class Body: RailBody, NSDraggingSource {
+        var selectedPalettes: Set<UUID> = [] { didSet { rollover.settle(); needsDisplay = true } }
         var readOnlyRows = false
         var rows: [Row] = [] { didSet { rollover.settle() } }
-        var onPick: ((StudioFrame.Place) -> Void)?
+        var onPaletteSelection: ((UUID, [UUID], NSEvent.ModifierFlags) -> Void)?
+    var onDeleteSelection: (() -> Void)?
+    var onContext: ((StudioFrame.Place, NSView, NSPoint) -> Void)?
+    var onPick: ((StudioFrame.Place) -> Void)?
         var onRename: ((StudioFrame.Place, String) -> Void)?
         var onShut: ((String, Bool) -> Void)?
         static var row: CGFloat { unit }
@@ -2381,15 +2802,23 @@ final class PaletteTable: StudioRail {
         /// The schema page's rollover: the pane flies out under the pointer and stays out on the chosen row, over its Mist ground.
         private let rollover = Rollover<StudioFrame.Place>()
         static func height(of r: Row) -> CGFloat {
-            switch r { case .group: return group; case .divider: return divider; case .palette: return row; default: return row }
+            switch r { case .group: return group; case .divider: return divider; case .palette(_, _, _, _, _, _, let prefix): return prefix == nil ? row : row * 2; default: return row }
         }
         override var height: CGFloat { rows.reduce(0) { $0 + Self.height(of: $1) } + Self.unit }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
+            rollover.barberPole = true
             addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
             rollover.keys = { [weak self] in self?.rows.compactMap { Self.place(of: $0).map { $0.0 } } ?? [] }
-            rollover.locked = { [weak self] k in self?.rows.contains { Self.place(of: $0).map { $0.0 == k && $0.1 } ?? false } ?? false }
+            rollover.locked = { [weak self] key in
+                guard let self else { return false }
+                return self.rows.contains { row in
+                    guard let (place, chosen) = Self.place(of: row), place == key else { return false }
+                    if case .palette(let id) = place, !self.readOnlyRows { return self.selectedPalettes.contains(id) }
+                    return chosen
+                }
+            }
             rollover.redraw = { [weak self] in self?.needsDisplay = true }
         }
         required init?(coder: NSCoder) { fatalError() }
@@ -2398,7 +2827,7 @@ final class PaletteTable: StudioRail {
         static func place(of r: Row) -> (StudioFrame.Place, Bool)? {
             switch r {
             case .group(_, _, let p?, let chosen, _): return (p, chosen)
-            case .palette(let id, _, _, _, let chosen, _): return (.palette(id), chosen)
+            case .palette(let id, _, _, _, let chosen, _, _): return (.palette(id), chosen)
             case .item(_, _, _, let p?, let chosen): return (p, chosen)
             default: return nil
             }
@@ -2413,9 +2842,9 @@ final class PaletteTable: StudioRail {
                 case .group(let name, let indent, _, let chosen, _):
                     let x = inset + CGFloat(indent) * Self.step + Self.caretSlot
                     return (x, Design.attributed(name, chosen ? .bodyStrong : .body), right - x)
-                case .palette(_, let name, _, _, let chosen, let indent):
+                case .palette(_, let name, _, _, let chosen, let indent, let prefix):
                     let x = inset + CGFloat(indent) * Self.step + 4
-                    return (x, Design.attributed(name, chosen ? .bodyStrong : .body), max(1, right - 4 - x - 28) * 0.52)
+                    return (x, Design.attributed(prefix.map { $0 + " · " + name } ?? name, chosen ? .bodyStrong : .body), prefix == nil ? max(1, right - 4 - x - 28) * 0.52 : right - x)
                 case .item(let name, let detail, let indent, _, let chosen):
                     let x = inset + CGFloat(indent) * Self.step
                     return (x, Design.attributed(name, chosen ? .bodyStrong : .body), right - x - Design.attributed(detail ?? "", .caption).size().width - 12)
@@ -2428,8 +2857,7 @@ final class PaletteTable: StudioRail {
             for r in rows {
                 let h = Self.height(of: r), box = NSRect(x: 0, y: y, width: bounds.width, height: h)
                 if let (p, chosen) = Self.place(of: r) {
-                    if chosen { fill(NSRect(x: 0, y: box.minY, width: bounds.width, height: box.height - 1), Design.mist) }
-                    if let l = lead(r) { rollover.pane(p, box: box, reach: l.x + min(l.words.size().width, l.room) + Self.step) }
+                    if let l = lead(r) { rollover.pane(p, box: box, reach: l.x + min(l.words.size().width, l.room) + Self.step, stripWidth: min(24, inset)) }
                 }
                 y += h
             }
@@ -2448,18 +2876,28 @@ final class PaletteTable: StudioRail {
                     Design.attributed(name, chosen ? .bodyStrong : .body).draw(x: x + Self.caretSlot, baseline: b, width: right - x - Self.caretSlot)
                     if let p = place { hits.append((NSRect(x: 0, y: y, width: bounds.width, height: Self.group), p)) }
                     y += Self.group
-                case .palette(let id, let name, let count, let colours, let chosen, let indent):
+                case .palette(let id, let name, let count, let colours, let rowChosen, let indent, let prefix):
+                    let chosen = readOnlyRows ? rowChosen : selectedPalettes.contains(id)
                     let h = Self.height(of: r)
                     let box = NSRect(x: 0, y: y, width: bounds.width, height: h)
                     let x = inset + CGFloat(indent) * Self.step, nameX = x + 4, tileRight = right - 4
                     let b = y + Self.line, countText = Design.attributed(String(count), .caption, colour: Design.quiet)
+                    if let prefix {
+                        Design.attributed(prefix + " · " + name, chosen ? .bodyStrong : .body).draw(x: nameX, baseline: b, width: tileRight - nameX)
+                        RailTile.spectrum(colours, in: NSRect(x: nameX, y: y + Self.row + 5, width: max(1, tileRight - nameX - countText.size().width - 16), height: 16))
+                        countText.draw(right: tileRight, baseline: b + Self.row)
+                        hairline(x: 0, y: y + h - 1, width: bounds.width, Design.rule)
+                        hits.append((box, .palette(id)))
+                        y += h
+                        continue
+                    }
                     let available = max(1, tileRight - nameX - 28)
                     let nameW = available * 0.52, stripX = nameX + nameW + 8
-                    if renaming != .palette(id) { Design.attributed(name, chosen ? .bodyStrong : .body, colour: chosen ? (Prefs.sidebarSelectionText.flatMap(colorFromHex) ?? Design.ink) : Design.ink).draw(x: nameX, baseline: b, width: nameW) }
+                    if renaming != .palette(id) { Design.attributed(name, chosen ? .bodyStrong : .body, colour: Design.ink).draw(x: nameX, baseline: b, width: nameW) }
                     nameHits.append((NSRect(x: nameX, y: y, width: nameW, height: Self.row), .palette(id), name, .body))
                     if !readOnlyRows || count > 0 { countText.draw(right: tileRight, baseline: b) }
                     RailTile.spectrum(colours, in: NSRect(x: stripX, y: y + (h - 16) / 2, width: max(1, available - nameW - 8), height: 16))
-                    hairline(x: x, y: y + h - 1, width: right - x, Design.rule)
+                    hairline(x: 0, y: y + h - 1, width: bounds.width, Design.rule)
                     hits.append((box, .palette(id)))
                     y += h
                 case .item(let name, let detail, let indent, let place, let chosen):
@@ -2494,12 +2932,31 @@ final class PaletteTable: StudioRail {
         private func palette(at p: NSPoint) -> (UUID, String, [NSColor])? {
             var y: CGFloat = 0
             for r in rows {
-                if case .palette(let id, let name, _, let colours, _, _) = r, NSRect(x: 0, y: y, width: bounds.width, height: Self.height(of: r)).contains(p) { return (id, name, colours) }
+                if case .palette(let id, let name, _, let colours, _, _, _) = r, NSRect(x: 0, y: y, width: bounds.width, height: Self.height(of: r)).contains(p) { return (id, name, colours) }
                 y += Self.height(of: r)
             }
             return nil
         }
+        private var focusedPalette: UUID?
+        override var acceptsFirstResponder: Bool { true }
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 125 || event.keyCode == 126 {
+                let order: [UUID] = rows.compactMap { if case .palette(let id, _, _, _, _, _, _) = $0 { return id }; return nil }
+                if let focus = focusedPalette ?? order.first(where: { selectedPalettes.contains($0) }), let i = order.firstIndex(of: focus), !order.isEmpty {
+                    let next = order[min(order.count - 1, max(0, i + (event.keyCode == 125 ? 1 : -1)))]
+                    focusedPalette = next; onPaletteSelection?(next, order, event.modifierFlags); return
+                }
+            }
+            if !readOnlyRows && (event.keyCode == 51 || event.keyCode == 117) { onDeleteSelection?(); return }
+            super.keyDown(with: event)
+        }
+        override func rightMouseDown(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            guard let hit = hits.first(where: { $0.0.contains(point) }) else { return }
+            onContext?(hit.1, self, point)
+        }
         override func mouseDown(with event: NSEvent) {
+            window?.makeFirstResponder(self)
             let p = convert(event.locationInWindow, from: nil)
             pressed = nil; pendingPaletteClick = nil
             // A caret opens or shuts its group and goes nowhere; the group's words still open its page.
@@ -2528,7 +2985,10 @@ final class PaletteTable: StudioRail {
             pendingPaletteClick = nil; pressed = nil
             if let pending, pending.0.contains(convert(event.locationInWindow, from: nil)),
                hypot(event.locationInWindow.x - pressedAt.0.x, event.locationInWindow.y - pressedAt.0.y) < PaletteDrag.threshold {
-                onPick?(pending.1)
+                if case .palette(let id) = pending.1 {
+                    focusedPalette = id
+                    onPaletteSelection?(id, rows.compactMap { if case .palette(let id, _, _, _, _, _, _) = $0 { return id }; return nil }, event.modifierFlags)
+                } else { onPick?(pending.1) }
             }
         }
         func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [.copy, .move] }
@@ -2600,10 +3060,18 @@ final class HistoryRail: StudioRail {
 
 /// The page: 34 clear, then a Split header on its own six columns, a hairline, 22 clear, and the grid of tiles.
 final class StudioPage: NSView, Overlay {
+    var layoutFrozen = false
     /// Palette content heading shares the first rail-row baseline.
     var paletteCount: String? { didSet { needsLayout = true; needsDisplay = true } }
-    var inset: CGFloat = 8 { didSet { needsLayout = true } }
-    var insetRight: CGFloat = 8 { didSet { needsLayout = true } }
+    var inset: CGFloat = 8 { didSet { if inset != oldValue { needsLayout = true } } }
+    var insetRight: CGFloat = 8 { didSet { if insetRight != oldValue { needsLayout = true } } }
+    private let deltaButton=DeltaWarningButton()
+    private let profileSelector=PrintProfileSelector(compact:true)
+    var onDeltaToggle:(()->Void)?
+    var showsDeltaTools=false {didSet{deltaButton.isHidden = !showsDeltaTools;profileSelector.isHidden = !showsDeltaTools;needsLayout=true;needsDisplay=true}}
+    func applyDeltaState(_ enabled:Bool){deltaButton.enabledWarnings=enabled;grid.deltaEnabled=enabled;needsDisplay=true}
+    func refreshPrintProfiles(){profileSelector.reload();needsDisplay=true}
+    @objc private func toggleDelta(){onDeltaToggle?()}
     let grid = TileGrid()
     let settings = CatalogueSettings()
     let schema = SchemaSettings()
@@ -2659,7 +3127,7 @@ final class StudioPage: NSView, Overlay {
         guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
         return onPaletteDrop?(id) ?? false
     }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, tags, lab, proofing, prepress, contrast, share, appbridge }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, librarySettings, tags, lab, prepress, contrast, share, appbridge }
     private var section = Section.tiles
     private let sectionTabs = NSScrollView()
     private let tabBody = NSView()
@@ -2684,13 +3152,13 @@ final class StudioPage: NSView, Overlay {
             for (i,item) in items.enumerated() {
                 let b = SectionAnchorButton(title:item.0,target:self,action:#selector(jumpSection(_:)))
                 b.tag=i; b.isBordered=false; b.alignment = .left; b.toolTip="Go to " + item.0
-                let width = Design.attributed(item.0,.body).size().width + 24
-                b.frame=NSRect(x:x,y:0,width:width,height:28); x += width
+                let width = Design.attributed(item.0,.body).size().width + 44
+                b.frame=NSRect(x:x,y:0,width:width,height:32); x += width
                 tabBody.addSubview(b); tabButtons.append(b)
             }
-            tabBody.frame=NSRect(x:0,y:0,width:x,height:28)
+            tabBody.frame=NSRect(x:0,y:0,width:x,height:32)
         }
-        sectionTabs.frame=NSRect(x:inset,y:AreaHeader.labelBaseline-17,width:max(0,bounds.width-inset-insetRight),height:28)
+        sectionTabs.frame=NSRect(x:inset,y:AreaHeader.labelBaseline-17,width:max(0,bounds.width-inset-insetRight),height:32)
         updateActiveTab()
     }
     private func updateActiveTab() {
@@ -2769,6 +3237,9 @@ final class StudioPage: NSView, Overlay {
 
     init() {
         super.init(frame: .zero)
+        addSubview(deltaButton);addSubview(profileSelector);deltaButton.target=self;deltaButton.action=#selector(toggleDelta)
+        deltaButton.isHidden=true;profileSelector.isHidden=true
+
         registerForDraggedTypes([PaletteDrag.type])
         wantsLayer = true
         layer?.backgroundColor = Design.card.cgColor
@@ -2857,14 +3328,23 @@ final class StudioPage: NSView, Overlay {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
+    private func canShowDelta(_ item:TileGrid.Item)->Bool { grid.canHover?(item) ?? (item.hex != nil || item.id != nil) }
     func set(title: String, meta: (String, String), items: [TileGrid.Item]) {
         self.title = title; self.meta = meta
+        showsDeltaTools = items.contains{canShowDelta($0)}
+        applyDeltaState(Prefs.deltaWarningsEnabled)
+        grid.copyFormat=format
         grid.items = items
         needsDisplay = true
         needsLayout = true
     }
 
     override func layout() {
+        guard !layoutFrozen else { return }
+        let profileWidth=min(240,max(120,(bounds.width-inset-insetRight)*0.32))
+        profileSelector.frame=NSRect(x:bounds.width-insetRight-profileWidth,y:AreaHeader.labelBaseline-17,width:profileWidth,height:28)
+        deltaButton.frame=NSRect(x:profileSelector.frame.minX-116,y:AreaHeader.labelBaseline-17,width:100,height:28)
+
         super.layout()
         var top = Self.headerHeight
         let u = Design.App.unit
@@ -2922,7 +3402,8 @@ final class StudioPage: NSView, Overlay {
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty ? meta.0 : "", right: anchors.isEmpty ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
+        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty && !showsDeltaTools ? meta.0 : "", right: anchors.isEmpty && !showsDeltaTools ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
+        if showsDeltaTools {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:max(0,deltaButton.frame.minX-inset-16))}
         if let paletteCount {
             Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)
         }
@@ -2948,12 +3429,63 @@ final class StudioPage: NSView, Overlay {
 /// and its count, and opens the palette.
 final class TileGrid: NSView {
     struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil }
-    var items: [Item] = [] { didSet { onResize?() } }
+    var items: [Item] = [] { didSet { hoverHalo?.dismiss(); hoverIndex=nil; suppressedIndex=nil; printPreviews=[:]; splitOverrides=[:]; onResize?() } }
     /// Words shown in place of tiles when there are none, as a member's notes on its Information page; nil says Nothing Found.
     var note: String? { didSet { needsDisplay = true } }
     var across = 6 { didSet { onResize?() } }
     var width: CGFloat = 600
     var chosenHex: String? { didSet { needsDisplay = true } }
+    struct PrintPreview { let colour:NSColor; let delta:Double }
+    var onViewPalette:((UUID)->Void)?
+    var onQR:((Item)->Void)?
+    var canHover:((Item)->Bool)?
+    var onPrint:((Item)->[PrintPreview])?
+    private var printPreviews:[String:[PrintPreview]] = [:]
+    private var splitOverrides:[String:Bool]=[:]
+    var deltaEnabled=false {didSet{if deltaEnabled != oldValue{splitOverrides=[:];needsDisplay=true}}}
+    func invalidatePrintPreviews(){printPreviews=[:];needsDisplay=true}
+    var onPaletteHalo:((UUID,NSRect)->Void)?
+    private var hoverHalo:TileHoverHalo?
+    private var hoverIndex:Int?
+    private var suppressedIndex:Int?
+    private var scrollGate=HoverScrollGate()
+    private func identity(_ item:Item)->String { item.hex ?? item.id?.uuidString ?? item.title }
+    private func rollover(_ p:NSPoint) {
+        let index=items.indices.first { i in let r=rect(i);return NSRect(x:r.minX,y:r.minY,width:r.width,height:Self.block).contains(p) }
+        if index != suppressedIndex { suppressedIndex=nil }
+        guard index != hoverIndex else { return }
+        hoverHalo?.dismiss(); hoverHalo=nil; hoverIndex=nil
+        guard let i=index,i != suppressedIndex,(canHover?(items[i]) ?? true),items[i].hex != nil || items[i].id != nil else { return }
+        let item=items[i],r=rect(i)
+        let actions:[TileHoverHalo.Action] = [
+            .init(title:"View",symbol:"eye",run:{ [weak self] in if let id=item.id{self?.onViewPalette?(id)}else if let key=item.hex{self?.onPreviewSwatch?(key)} }),
+            .init(title:"Print",symbol:"exclamationmark.triangle",run:{ [weak self] in guard let self else{return};let key=self.identity(item);self.splitOverrides[key] = !(self.splitOverrides[key] ?? self.deltaEnabled);self.needsDisplay=true }),
+            .init(title:"QR",symbol:"qrcode",run:{ [weak self] in self?.onQR?(item) }),
+            .init(title:"Copy",symbol:"doc.on.doc",run:{ [weak self] in self?.copy(item) })
+        ]
+        let halo=TileHoverHalo(colours:item.colours,actions:actions,palette:item.id.map { id in { [weak self] in self?.onOpen?(id) } })
+        halo.frame=NSRect(x:r.minX,y:r.minY,width:r.width,height:Self.block)
+        halo.onScroll={ [weak self] event in self?.pageScroll(event) }
+        halo.onDismiss={ [weak self,weak halo] in guard let self,self.hoverHalo === halo else{return};self.suppressedIndex=i;self.hoverHalo=nil;self.hoverIndex=nil }
+        hoverHalo=halo;hoverIndex=i;addSubview(halo)
+    }
+    private func pageScroll(_ event:NSEvent) {
+        scrollGate.suppress(at:event.locationInWindow)
+        hoverHalo?.dismissForScrolling();hoverHalo=nil;hoverIndex=nil;suppressedIndex=nil
+        enclosingScrollView?.scrollWheel(with:event)
+    }
+    override func scrollWheel(with event:NSEvent){pageScroll(event)}
+    private func copy(_ item:Item) {
+        if let hex=item.hex {let value=copyFormat == .cmyk ? item.sourceCMYK ?? copyFormat.text(hex,lowercase:Prefs.lowercaseHex) : copyFormat.text(hex,lowercase:Prefs.lowercaseHex);ColourCopies.copy(hex,text:value,sourceCMYK:item.sourceCMYK);onCopy?(value)}
+        else if let id=item.id {onCopyPalette?(id)}
+    }
+    var copyFormat:ColourFormat = .hex
+    var onCopyPalette:((UUID)->Void)?
+    override func mouseExited(with event:NSEvent){hoverHalo?.dismiss();hoverIndex=nil;suppressedIndex=nil}
+    override func mouseEntered(with event:NSEvent){guard scrollGate.allows(at:event.locationInWindow) else{return};rollover(convert(event.locationInWindow,from:nil))}
+    var onPreviewSwatch: ((String) -> Void)?
+    var onContext: ((String, NSPoint) -> Void)?
+    var onAssetContext: ((UUID, NSPoint) -> Void)?
     var onPick: ((String) -> Void)?
     var onOpen: ((UUID) -> Void)?
     var onResize: (() -> Void)?
@@ -2968,6 +3500,7 @@ final class TileGrid: NSView {
     static var rowGap: CGFloat { Design.App.unit }
     static let gap: CGFloat = 16
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
 
     /// How many tiles a row holds: the slider's count, or fewer when there are fewer tiles, so one row always fills the block.
     private var columns: Int { max(1, min(across, max(items.count, 1))) }
@@ -2990,7 +3523,7 @@ final class TileGrid: NSView {
         markHits = []
         for (i, it) in items.enumerated() {
             let r = rect(i)
-            if showsHalo, let hex = it.hex, hex != "" {
+            if showsHalo, (it.hex != nil || it.id != nil), (canHover?(it) ?? true) {
                 // The halo mark on the caption's line, at the right, for the value beside it.
                 let capB = r.minY + Self.block + Design.App.unit + Design.App.textBaseline
                 let g = NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16)
@@ -3005,10 +3538,25 @@ final class TileGrid: NSView {
                 let bw = block.width / CGFloat(it.colours.count)
                 for (k, c) in it.colours.enumerated() { fill(NSRect(x: block.minX + CGFloat(k) * bw, y: block.minY, width: k == it.colours.count - 1 ? block.width - CGFloat(k) * bw : bw + 0.5, height: block.height), c) }
             }
+            let key=identity(it)
+            let eligible=canHover?(it) ?? (it.hex != nil || it.id != nil)
+            if eligible,printPreviews[key] == nil {printPreviews[key]=onPrint?(it) ?? []}
+            let prediction=printPreviews[key] ?? []
+            if (splitOverrides[key] ?? deltaEnabled),prediction.count==it.colours.count,!prediction.isEmpty {
+                let bw=block.width/CGFloat(prediction.count)
+                for (k,p) in prediction.enumerated(){fill(NSRect(x:block.minX+CGFloat(k)*bw,y:block.midY,width:bw+0.5,height:block.height/2),p.colour)}
+                Design.card.setStroke();let divider=NSBezierPath();divider.move(to:NSPoint(x:block.minX,y:block.midY));divider.line(to:NSPoint(x:block.maxX,y:block.midY));divider.lineWidth=1;divider.stroke()
+            }
             Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 6, baseline: block.maxY + Design.App.textBaseline, width: r.width - 12)
             let capB = block.maxY + Design.App.unit + Design.App.textBaseline
-            Design.attributed(it.caption, .caption, colour: Design.quiet).draw(x: r.minX + 6, baseline: capB, width: r.width - 12 - (!showsHalo || it.hex == nil ? 0 : 24))
-            if showsHalo, it.hex != nil { Design.haloMark(in: NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16), colour: Design.quiet) }
+            let hasHalo=showsHalo && eligible
+            let delta=eligible ? (prediction.map{$0.delta}.max().map{String(format:it.hex == nil ? "Δmax %.1f":"Δ %.1f",$0)} ?? "Δ —") : ""
+            let deltaText=Design.attributed(delta,.caption,colour:Design.quiet)
+            let right=r.maxX-6-(hasHalo ? 24:0)
+            let deltaX=max(r.minX+6,right-deltaText.size().width)
+            Design.attributed(it.caption,.caption,colour:Design.quiet).draw(x:r.minX+6,baseline:capB,width:max(0,deltaX-r.minX-14))
+            if eligible{deltaText.draw(x:deltaX,baseline:capB)}
+            if hasHalo {Design.haloMark(in:NSRect(x:r.maxX-6-16,y:capB-13,width:16,height:16),colour:Design.quiet)}
             if let h = it.hex, h == chosenHex {
                 // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
                 Design.rule.setStroke()
@@ -3028,22 +3576,32 @@ final class TileGrid: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        guard scrollGate.allows(at:event.locationInWindow) else{return}
+        rollover(p)
         if let i = items.indices.first(where: { rect($0).contains(p) }), items[i].hex != nil {
-            toolTip = items[i].caption + " · " + (items[i].sourceCMYK == nil ? PrintCondition.name() : "ASE source · No embedded ICC profile")
+            toolTip = items[i].caption + " · " + (items[i].sourceCMYK == nil ? PrintCondition.name() : "ASE source · No embedded ICC profile") + " · Δ = CIEDE2000 (ΔE00)"
         } else { toolTip = nil }
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let index = items.indices.first(where: { rect($0).contains(point) }) else { return }
+        if let hex = items[index].hex { onContext?(hex, point) }
+        else if let id = items[index].id { onAssetContext?(id, point) }
+    }
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
-        if let m = markHits.first(where: { $0.0.contains(p) }), let h = items[m.1].hex { onPick?(h); onHalo?(h, m.0); return }
+        if let m = markHits.first(where: { $0.0.contains(p) }) {if let h=items[m.1].hex{onPick?(h);onHalo?(h,m.0)}else if let id=items[m.1].id{onPaletteHalo?(id,m.0)};return}
         guard let i = items.indices.first(where: { rect($0).contains(p) }) else { return }
         if let h = items[i].hex {
             onPick?(h)
+            if let onPreviewSwatch { onPreviewSwatch(h); return }
             // The colour block itself copies its value; the words beneath only choose.
             let block = NSRect(x: rect(i).minX, y: rect(i).minY, width: rect(i).width, height: Self.block)
             if block.contains(p) {
@@ -3900,7 +4458,7 @@ final class GridOverlay: NSView {
 
 /// Left: a 10 square of the current colour, its name, its hex. Centre: three text actions. Right: the release line.
 final class StudioFooter: NSView {
-    var grid: (x: CGFloat, column: CGFloat, centre: CGFloat) = (24, 96, 480) { didSet { needsDisplay = true } }
+    var grid: (x: CGFloat, column: CGFloat, centre: CGFloat) = (24, 96, 480) { didSet { if grid != oldValue { needsDisplay = true } } }
     private(set) var hex = Brand.masterHex
     private(set) var name = Brand.masterName
     var onAct: ((Int) -> Void)?
@@ -3930,7 +4488,7 @@ final class StudioFooter: NSView {
         let b = Self.baseline
         swatchHits = []
         let size = min(24, max(12, (grid.centre - grid.x - 32 - 9 * 8) / 10))
-        for (index, entry) in ColourCopies.recent.enumerated() {
+        for (index, entry) in Array(ColourCopies.recent.suffix(10)).enumerated() {
             let rect = NSRect(x: grid.x + CGFloat(index) * (size + 8), y: (bounds.height - size) / 2, width: size, height: size)
             fill(rect, Design.hex(entry.key)); swatchHits.append(rect)
         }
@@ -3943,7 +4501,7 @@ final class StudioFooter: NSView {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if let index = swatchHits.firstIndex(where: { $0.contains(p) }) {
-            let entry = ColourCopies.recent[index]
+            let entry = Array(ColourCopies.recent.suffix(10))[index]
             ColourCopies.copy(entry.key, sourceCMYK: entry.sourceCMYK, record: false)
             return
         }

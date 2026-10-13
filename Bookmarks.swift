@@ -27,11 +27,12 @@ enum FolderAccess {
     }
 
     /// Setup must report a bookmark failure before promising access will survive a restart.
-    static func authorize(_ url: URL) throws {
+    static func authorize(_ url: URL, renew: Bool = false) throws {
         #if APPSTORE
         let path = url.standardizedFileURL.path
-        guard held[path] == nil else { return }
+        guard renew || held[path] == nil else { return }
         let data = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        if scoped.remove(path) != nil { held[path]?.stopAccessingSecurityScopedResource() }
         var all = stored
         all[path] = data
         stored = all

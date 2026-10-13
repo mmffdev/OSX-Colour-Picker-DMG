@@ -60,6 +60,9 @@ final class LibraryController: NSObject {
     /// The pair the Contrast tool is checking, kept up to date by the tool for the same reason.
     var contrastPalette: ExportPalette?
 
+    private let colourSampler = NSColorSampler()
+    private static let extractionQueue = DispatchQueue(label: "Colorgain.RectangleColourExtraction", qos: .userInitiated)
+    private var pickerSoundOverride: Bool?
     private(set) var picking = false
     private(set) var syncStatus = "Not synced yet."
     private var syncAsking = false
@@ -182,14 +185,15 @@ final class LibraryController: NSObject {
     private(set) var globalHistory = StepHistory()
     private var globalHistoryIndex: URL { Catalogues.standard.root.appendingPathComponent("Global.colcat") }
     private var historyTimer: Timer?
+    private let globalHistoryCache = HistoryFileCache()
 
     var historyEnabled: Bool { Prefs.historyEnabled(for: catalogue) }
 
     private func recordStep(_ title: String, before: Library?) {
         if historyEnabled { history.record(title, library: library, before: before, limit: Prefs.historySteps) }
-        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
+        globalHistory = globalHistoryCache.read(beside: globalHistoryIndex)
         globalHistory.record("\(catalogue): \(title)", library: library, before: before, limit: Prefs.historySteps)
-        do { try HistoryStore.save(globalHistory, beside: globalHistoryIndex) } catch { flash("Could not save global history: \(error.localizedDescription)") }
+        do { try globalHistoryCache.save(globalHistory, beside: globalHistoryIndex) } catch { flash("Could not save global history: \(error.localizedDescription)") }
         historyChanged()
     }
 
@@ -204,8 +208,14 @@ final class LibraryController: NSObject {
         do { try HistoryStore.save(history, beside: store.url) } catch { flash("Could not save the history: \(error.localizedDescription)") }
     }
 
+    /// Flush the old catalogue before its app-data root changes; pending callbacks must not write into the new home.
+    func finishWorkspaceSession() {
+        stopPicking(); historyTimer?.invalidate(); historyTimer=nil; saveHistory()
+        onShow=nil; onPrompt=nil; onAsk=nil
+    }
+
     func loadHistory() {
-        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
+        globalHistory = globalHistoryCache.read(beside: globalHistoryIndex)
         history = historyEnabled ? HistoryStore.load(beside: store.url) : StepHistory()
         if globalHistory.isEmpty, !history.isEmpty {
             globalHistory = StepHistory(steps: history.steps.map { HistoryStep(id: $0.id, date: $0.date, title: "\(catalogue): " + $0.title, project: $0.project, delta: $0.delta) }, current: history.current)
@@ -213,7 +223,7 @@ final class LibraryController: NSObject {
         if history.isEmpty, historyEnabled { history.record("Opened", library: GlobalAssets.split(library).local, before: nil, limit: Prefs.historySteps) }
         do {
             if historyEnabled { try HistoryStore.save(history, beside: store.url) }
-            try HistoryStore.save(globalHistory, beside: globalHistoryIndex)
+            try globalHistoryCache.save(globalHistory, beside: globalHistoryIndex)
         } catch { flash("Could not initialise history: \(error.localizedDescription)") }
         NotificationCenter.default.post(name: .historyDidChange, object: self)
     }
@@ -304,9 +314,9 @@ final class LibraryController: NSObject {
         guard let before = n.userInfo?["before"] as? SchemaTrial.SchemaFile, let after = n.userInfo?["after"] as? SchemaTrial.SchemaFile, before != after else { return }
         loadedStamp = store.modificationDate
         if historyEnabled { history.record("Change Schema", library: library, before: library, schema: (before, after), limit: Prefs.historySteps); historyChanged() }
-        globalHistory = HistoryStore.load(beside: globalHistoryIndex)
+        globalHistory = globalHistoryCache.read(beside: globalHistoryIndex)
         globalHistory.record("\(catalogue): Change Schema", library: library, before: library, schema: (before, after), limit: Prefs.historySteps)
-        do { try HistoryStore.save(globalHistory, beside: globalHistoryIndex) } catch { show(error) }
+        do { try globalHistoryCache.save(globalHistory, beside: globalHistoryIndex) } catch { show(error) }
     }
 
     private func stateChanged() { NotificationCenter.default.post(name: .appStateDidChange, object: self) }
@@ -352,6 +362,10 @@ final class LibraryController: NSObject {
 
     /// Starts picking, or stops if already picking. The loupe returns after each pick until Esc
     /// or a click on the app's own window, unless that is switched off in Settings.
+    func startMenubarPicking(sound: Bool) {
+        if !picking { pickerSoundOverride = sound }
+        togglePicking()
+    }
     @objc func togglePicking() {
         if picking { stopPicking(); return }
         picking = true
@@ -362,20 +376,21 @@ final class LibraryController: NSObject {
     func stopPicking() {
         guard picking else { return }
         picking = false
+        pickerSoundOverride = nil
         stateChanged()
         sync() // held back while the loupe was up
     }
 
     private func sampleNext() {
         guard picking else { return }
-        NSColorSampler().show { [weak self] color in
+        colourSampler.show { [weak self] color in
             guard let self = self, self.picking else { return }
             // Esc gives no colour; a click on our own window means "I'm done".
             guard let color = color, let picked = ColourDefinition.picked(color), !self.clickLandedOnThisWindow() else {
                 self.stopPicking()
                 return
             }
-            playShutter()
+            if self.pickerSoundOverride != false { playShutter() }
             // A colour sRGB can show is kept as its hex, as ever; one it cannot is kept whole, under a key of its own.
             var key: String?
             self.apply("Pick Colour") { key = $0.addPick(picked) }
@@ -390,7 +405,9 @@ final class LibraryController: NSObject {
     }
 
     /// Sample: a rectangle dragged over the screen becomes a palette of the colours under it.
-    @objc func sampleArea() {
+    @objc func sampleArea() { sampleArea(sound: true, rememberSamples: false) }
+    func sampleAreaFromMenubar(sound: Bool, target: UUID? = nil) { sampleArea(sound: sound, rememberSamples: true, target: target ?? library.activeSwatchID) }
+    private func sampleArea(sound: Bool, rememberSamples: Bool, target: UUID? = nil) {
         stopPicking()
         guard CGPreflightScreenCaptureAccess() else {
             // macOS asks once; the toolbar button works the next time, after the app is allowed.
@@ -401,12 +418,22 @@ final class LibraryController: NSObject {
         ScreenSampler.begin { [weak self] image in
             guard let self = self else { return }
             guard let image = image else { return }
-            let hexes = extractPalette(from: image, count: Prefs.imagePaletteSize)
-            guard !hexes.isEmpty else { self.flash("No colours found in that area"); return }
-            playShutter()
-            let id = self.createPalette(named: "Sampled", hexes: hexes)
-            let name = id.flatMap { self.library.swatch($0)?.name } ?? "palette"
-            self.flash("Sampled \(plural(hexes.count, "swatch", "swatches")) into \(name)")
+            let count = Prefs.imagePaletteSize, root = self.store.root
+            Self.extractionQueue.async { [weak self] in
+                let hexes = extractPalette(from: image, count: count)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.store.root.standardizedFileURL == root.standardizedFileURL else { return }
+                    guard !hexes.isEmpty else { self.flash("No colours found in that area"); return }
+                    if sound { playShutter() }
+                    if rememberSamples { for hex in hexes { ColourCopies.remember(hex) } }
+                    let id: UUID?
+                    if let target, self.library.swatch(target) != nil, rememberSamples {
+                        self.add(hexes, to: target); id = target
+                    } else { id = self.createPalette(named: "Sampled", hexes: hexes, reveal: !rememberSamples) }
+                    let name = id.flatMap { self.library.swatch($0)?.name } ?? "palette"
+                    self.flash("Sampled \(plural(hexes.count, "swatch", "swatches")) into \(name)")
+                }
+            }
         }
     }
 
@@ -421,6 +448,12 @@ final class LibraryController: NSObject {
     // MARK: Palettes
 
     @objc func newPalette() { addPalette(to: nil) }
+    /// Menu creation saves the target without navigating or restoring the main window.
+    func createMenubarPalette() -> UUID? {
+        var id: UUID?
+        apply("New Palette From Menubar") { id = $0.createSwatch() }
+        return id.flatMap { library.swatch($0) == nil ? nil : $0 }
+    }
 
     func addPalette(to project: UUID?) {
         var id: UUID?
@@ -633,7 +666,10 @@ final class LibraryController: NSObject {
         guard count > 0 else { apply("Delete Project") { $0.deleteProject(id) }; return }
         SwissConfirm.ask(over: window, title: "Delete \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))",
                          note: "You are about to delete \(p.name). Its \(plural(count, "palette")) move to the Palettes list; nothing leaves the catalogue. Slide across to go on.",
-                         commit: "Delete") { [weak self] in self?.apply("Delete Project") { $0.deleteProject(id) } }
+                         commit: "Delete") { [weak self] in self?.apply("Delete Project") { lib in
+                             if Prefs.libraryRemoveClaimed { lib.removeClaimedCopies(assignedTo: Set(lib.palettes(in: id).map { $0.id }), catalogue: self?.catalogue) }
+                             lib.deleteProject(id)
+                         } }
     }
 
     /// Asks a question in the middle of the page; set by the window. Title, message, answers (the last is the way out).
@@ -652,7 +688,13 @@ final class LibraryController: NSObject {
         let place: (Bool) -> Void = { [weak self] notes in
             guard let self = self else { return }
             var copy: UUID?
-            self.apply("Copy Palette") { copy = $0.copyPalette(id, to: project, index: index, withNotes: notes) }
+            let buckets = project.map { self.paletteBuckets(in: $0) } ?? []
+            self.apply("Copy Palette") {
+                if let project { copy = $0.assignPalette(id, to: project, bucket: nil, buckets: buckets, catalogue: self.catalogue,
+                    allBuckets: Prefs.libraryCopyAllBuckets, keepOriginal: Prefs.libraryKeepOriginal,
+                    keepClaimed: Prefs.libraryKeepClaimed, withNotes: notes).first }
+                else { copy = $0.copyPalette(id, to: nil, index: index, withNotes: notes) }
+            }
             guard let made = copy, self.library.swatch(made) != nil else { return }   // refused: the project is locked
             let home = project.flatMap { self.library.project($0)?.name }
             self.flash(home.map { "Copied \(s.name) Into \($0)" + (notes ? ", With Its Notes" : "") } ?? "Copied \(s.name) To Palettes")
@@ -666,6 +708,68 @@ final class LibraryController: NSObject {
             "\(s.name) has notes written on its colours. The copy going into \(to) can take them with it or start clean. The notes on the original in \(from) stay as they are either way.",
             [ModalChoice(title: "Copy With Notes", symbol: "doc.on.doc.fill") { place(true) },
              ModalChoice(title: "Copy Without Notes", symbol: "doc.on.doc") { place(false) },
+             ModalChoice(title: "Cancel", symbol: "xmark") {}])
+    }
+
+    private func paletteBuckets(in project: UUID) -> [(UUID, String)] {
+        var buckets: [(UUID, String)] = []
+        func walk(_ node: SchemaNode, path: String) {
+            let next = path.isEmpty ? node.name : path + " / " + node.name
+            if SchemaTrial.role(of: node) == .palettes { buckets.append((node.id, next)) }
+            for child in node.children { walk(child, path: next) }
+        }
+        for child in SchemaTrial.schema(for: project).children { walk(child, path: "") }
+        return buckets
+    }
+    func copy(palettes ids: Set<UUID>, to project: UUID) {
+        let buckets = paletteBuckets(in: project)
+        let ordered = library.projectOrder.filter { ids.contains($0.id) }.map { $0.id }
+        let place: (Bool) -> Void = { [weak self] notes in
+            guard let self else { return }
+            self.apply("Copy Selected Palettes") { lib in
+                for id in ordered { lib.assignPalette(id, to: project, bucket: nil, buckets: buckets, catalogue: self.catalogue,
+                    allBuckets: Prefs.libraryCopyAllBuckets, keepOriginal: Prefs.libraryKeepOriginal,
+                    keepClaimed: Prefs.libraryKeepClaimed, withNotes: notes) }
+            }
+        }
+        guard ids.contains(where: { library.hasNotes($0) }), let ask = onAsk else { place(false); return }
+        ask("Include Colour Notes?", "Choose whether the project copies include their original colour notes.",
+            [ModalChoice(title: "Include Notes", symbol: "doc.on.doc") { place(true) },
+             ModalChoice(title: "Copy Without Notes", symbol: "doc") { place(false) },
+             ModalChoice(title: "Cancel", symbol: "xmark") {}])
+    }
+
+    /// Tree drops retain the exact schema node and never change navigation.
+    func assignPalette(_ id: UUID, to project: UUID, bucket: UUID?) {
+        guard let source = library.swatch(id) else { return }
+        let tree = SchemaTrial.schema(for: project)
+        var buckets: [(UUID, String)] = []
+        func walk(_ node: SchemaNode, path: String) {
+            let next = path.isEmpty ? node.name : path + " / " + node.name
+            if SchemaTrial.role(of: node) == .palettes { buckets.append((node.id, next)) }
+            for child in node.children { walk(child, path: next) }
+        }
+        for child in tree.children { walk(child, path: "") }
+        // Dropping on Web/Print's heading chooses its first palette bucket, never a sibling's.
+        let resolved: UUID? = bucket.flatMap { id in
+            guard let node = SchemaTrial.rows(of: tree).first(where: { $0.node.id == id })?.node else { return nil }
+            return SchemaTrial.rows(of: node).first { SchemaTrial.role(of: $0.node) == .palettes }?.node.id
+        }
+        if bucket != nil && resolved == nil { return }
+        let place: (Bool) -> Void = { [weak self] notes in
+            guard let self else { return }
+            var made: [UUID] = []
+            self.apply("Assign Palette To Bucket") {
+                made = $0.assignPalette(id, to: project, bucket: resolved, buckets: buckets,
+                    catalogue: self.catalogue, allBuckets: Prefs.libraryCopyAllBuckets,
+                    keepOriginal: Prefs.libraryKeepOriginal, keepClaimed: Prefs.libraryKeepClaimed, withNotes: notes)
+            }
+            if !made.isEmpty { self.flash("Copied " + source.name + " To " + (self.library.project(project)?.name ?? "Project")) }
+        }
+        guard library.hasNotes(id), let ask = onAsk else { place(false); return }
+        ask("Include Colour Notes?", "Choose whether the project copy includes the original palette’s colour notes.",
+            [ModalChoice(title: "Include Notes", symbol: "doc.on.doc") { place(true) },
+             ModalChoice(title: "Copy Without Notes", symbol: "doc") { place(false) },
              ModalChoice(title: "Cancel", symbol: "xmark") {}])
     }
 
@@ -741,14 +845,14 @@ final class LibraryController: NSObject {
 
     /// Creates a palette holding `hexes` and opens it.
     @discardableResult
-    func createPalette(named name: String, hexes: [String], custom: Bool = false, rename: Bool = false) -> UUID? {
+    func createPalette(named name: String, hexes: [String], custom: Bool = false, rename: Bool = false, reveal: Bool = true) -> UUID? {
         var id: UUID?
         apply("Create Palette") { lib in
             let target = lib.activeSwatchID
             id = lib.createSwatch(named: name, hexes: hexes, custom: custom)
             if custom { lib.activeSwatchID = target } // building a palette doesn't redirect picks
         }
-        if let id = id { onShow?(.palette(id), rename) }
+        if reveal, let id = id { onShow?(.palette(id), rename) }
         return id
     }
 
@@ -812,12 +916,22 @@ final class LibraryController: NSObject {
     /// A copy of the palette in another project (or loose), independent from then on. The original stays.
     func copy(palette id: UUID, to project: UUID?) { move(palette: id, to: project, index: Int.max) }
 
-    func delete(palette id: UUID) {
-        guard let s = library.swatch(id) else { return }
-        guard !s.entries.isEmpty else { apply("Delete Palette") { $0.deleteSwatch(id) }; return }
-        SwissConfirm.ask(over: window, title: "Delete Palette",
-                         note: "You are about to delete \(s.name). Its \(plural(s.entries.count, "colour")) stay in the catalogue. Slide across to go on.",
-                         commit: "Delete") { [weak self] in self?.apply("Delete Palette") { $0.deleteSwatch(id) } }
+    func delete(palette id: UUID, confirmed: Bool = false) { delete(palettes: [id], confirmed: confirmed) }
+
+    /// Halo sliders have already confirmed; keyboard/context/other routes use this one modal.
+    func delete(palettes ids: Set<UUID>, confirmed: Bool = false) {
+        let palettes = library.swatches.filter { ids.contains($0.id) }
+        guard !palettes.isEmpty else { return }
+        let commit: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.apply(palettes.count == 1 ? "Delete Palette" : "Delete Palettes") {
+                $0.deleteAssignedPalettes(ids, removeClaimed: Prefs.libraryRemoveClaimed, catalogue: self.catalogue)
+            }
+        }
+        if confirmed { commit(); return }
+        let names = palettes.prefix(6).map { $0.name }.joined(separator: ", ") + (palettes.count > 6 ? "…" : "")
+        let note = names + ". Their colours stay in the catalogue." + (Prefs.libraryRemoveClaimed ? " Associated claimed copies will also be removed." : " Claimed copies will be retained.")
+        SwissConfirm.ask(over: window, title: palettes.count == 1 ? "Delete Palette" : "Delete \(palettes.count) Palettes", note: note, commit: "Delete") { commit() }
     }
 
     func add(_ hexes: [String], to id: UUID) {

@@ -546,7 +546,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
         }
         small(goal, "The Ratio A Fix Should Reach", #selector(goalChosen))
         func smallButton(_ title: String, _ tip: String, _ action: Selector) -> NSButton {
-            let b = NSButton(title: title, target: self, action: action)
+            let b = ActionButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
             b.font = NSFont.systemFont(ofSize: TextSize.body)

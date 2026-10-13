@@ -42,7 +42,7 @@ final class TagBar: NSView, NSTokenFieldDelegate {
         field.delegate = self
         field.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let done = NSButton(title: "Done", target: self, action: #selector(doneTapped))
+        let done = ActionButton(title: "Done", target: self, action: #selector(doneTapped))
         done.bezelStyle = .rounded
         done.controlSize = .small
         let row = NSStackView(views: [icon, title, field, done])
@@ -251,23 +251,23 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
 
     override func loadView() {
         let root = NSView()
-        let add = NSButton(title: "New Tag", target: self, action: #selector(newTapped))
+        let add = ActionButton(title: "New Tag", target: self, action: #selector(newTapped))
         add.bezelStyle = .rounded
         add.controlSize = .small
         add.image = symbol("plus", "New tag", size: 10)
         add.imagePosition = .imageLeading
-        let done = NSButton(title: "Done", target: self, action: #selector(doneTapped))
+        let done = ActionButton(title: "Done", target: self, action: #selector(doneTapped))
         done.bezelStyle = .rounded
         done.controlSize = .small
         done.keyEquivalent = "\u{1b}"
         // With two or more tags ticked, these take the place of New Tag and Done.
-        let remove = NSButton(title: "Remove All", target: self, action: #selector(removeTicked))
+        let remove = ActionButton(title: "Remove All", target: self, action: #selector(removeTicked))
         remove.bezelStyle = .rounded
         remove.controlSize = .small
         remove.image = symbol("trash", "Remove", size: 10)
         remove.imagePosition = .imageLeading
         remove.toolTip = "Delete every ticked tag"
-        let clear = NSButton(title: "Deselect", target: self, action: #selector(clearTicked))
+        let clear = ActionButton(title: "Deselect", target: self, action: #selector(clearTicked))
         clear.bezelStyle = .rounded
         clear.controlSize = .small
         browsing = [add, done]

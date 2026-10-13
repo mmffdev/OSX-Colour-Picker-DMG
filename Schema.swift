@@ -618,10 +618,10 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     /// Over each column, a few lines on where the user is and what can be done there.
     private let leftHelp = NSTextField(wrappingLabelWithString: "")
     private let rightHelp = NSTextField(wrappingLabelWithString: "")
-    private let resetButton = NSButton(title: "Use Default", target: nil, action: nil)
+    private let resetButton = ActionButton(title: "Use Default", target: nil, action: nil)
     private let newName = NSTextField()
-    private let createButton = NSButton(title: "Create", target: nil, action: nil)
-    private let cancelCreate = NSButton(title: "Cancel", target: nil, action: nil)
+    private let createButton = ActionButton(title: "Create", target: nil, action: nil)
+    private let cancelCreate = ActionButton(title: "Cancel", target: nil, action: nil)
     private let newRow = NSStackView()
     private var makingRows: [NSGridRow] = []
     private let map = NSStackView()
@@ -658,7 +658,7 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
         return l
     }
     private func push(_ title: String, _ action: Selector) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
+        let b = ActionButton(title: title, target: self, action: action)
         b.bezelStyle = .rounded
         return b
     }

@@ -29,6 +29,13 @@
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colorgain.print-profile</string>
+            <key>UTTypeDescription</key><string>Colorgain Print Profile</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colpro</string></array><key>public.mime-type</key><string>application/vnd.colorgain.print-profile+json</string></dict>
+        </dict>
+
+        <dict>
             <key>UTTypeIdentifier</key><string>com.mmffdev.colour.calibration</string>
             <key>UTTypeDescription</key><string>Colorgain Proof Configuration</string>
             <key>UTTypeConformsTo</key><array><string>public.json</string></array>
@@ -712,5 +719,7 @@
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Scan Colorgain colour QR codes shown on a phone or printed on paper. Camera images are processed locally and are not saved.</string>
 </dict>
 </plist>

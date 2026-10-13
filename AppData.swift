@@ -36,10 +36,25 @@ func failure(_ message: String) -> NSError { NSError(domain: "Colorgain", code: 
 /// Portable app preferences. UserDefaults supplies the one-time legacy values and bootstrap location only.
 final class AppPreferences {
     static let shared = AppPreferences()
+    private let settingsCache = AppSettingsCache()
+    /// Reset portable preferences while retaining workspace identity and completed setup.
+    /// Tombstones prevent legacy defaults from being imported again on another machine.
+    func resetUserPreferences() throws {
+        let store = AppDataStore.current
+        var manifest = try store.read()
+        var settings = manifest["settings"] as? [String: Any] ?? [:]
+        let retained: Set<String> = ["assistantDone", "setupDone", Catalogues.currentKey, "currentCatalogueID"]
+        for key in settings.keys where !retained.contains(key) { settings[key] = NSNull() }
+        manifest["settings"] = settings
+        try store.write(manifest)
+        settingsCache.invalidate()
+        for key in settings.keys where !retained.contains(key) { preferences.removeObject(forKey: key) }
+        NotificationCenter.default.post(name: .prefsDidChange, object: nil)
+    }
     func object(forKey key: String) -> Any? {
         if CommandLine.arguments.contains("--self-test") { return preferences.object(forKey: key) }
         do {
-            let settings = try AppDataStore.current.read()["settings"] as? [String: Any] ?? [:]
+            let settings = try settingsCache.read(AppDataStore.current)
             if let value = settings[key] {
                 if value is NSNull { return nil }
                 if let blob = value as? [String: String], let b64 = blob["$data"] { return Data(base64Encoded: b64) }
@@ -76,6 +91,7 @@ final class AppPreferences {
                 }
                 throw error
             }
+            settingsCache.invalidate()
             preferences.set(value, forKey: key)
         } catch { NSApp.presentError(error) }
     }

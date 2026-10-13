@@ -420,7 +420,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private var tagging = false
     /// What the swatch menus and the halo call to tag swatches: the page's own tag bar.
     private lazy var onEditTags: ([String]) -> Void = { [weak self] hexes in self?.editTags(of: hexes) }
-    private let wcag = NSButton(title: "WCAG", target: nil, action: nil)
+    private let wcag = ActionButton(title: "WCAG", target: nil, action: nil)
     private let labels = PopoverButton(title: "Labels")
     private var labelsPopover = NSPopover()
     private var labelChecks: [NSButton] = []
@@ -500,7 +500,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         addTo.addItem(withTitle: "Add to Palette")
         addTo.menu?.delegate = self
         func small(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
-            let b = NSButton(title: title, target: self, action: action)
+            let b = ActionButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
             b.toolTip = tip

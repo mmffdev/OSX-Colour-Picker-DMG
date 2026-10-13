@@ -649,6 +649,24 @@ enum Sharing {
             guard included(s.id) else { return }
             var p = s
             p.projectID = home
+            // Match portable bucket paths when importing into an existing project/template.
+            func buckets(_ project: UUID, _ file: SchemaTrial.SchemaFile) -> [(UUID, String)] {
+                let collection = file.collections.first { $0.id == file.places[project.uuidString]?.collection }
+                let tree = file.stacks?[project.uuidString] ?? collection?.stack ?? SchemaTrial.start
+                var result: [(UUID, String)] = []
+                func walk(_ node: SchemaNode, path: String) {
+                    let next = path + "/" + node.name
+                    if SchemaTrial.role(of: node) == .palettes { result.append((node.id, next)) }
+                    for child in node.children { walk(child, path: next) }
+                }
+                for child in tree.children { walk(child, path: "") }
+                return result
+            }
+            if let home, let origin = s.projectID, let bucket = s.bucketID {
+                let source = buckets(origin, staged.schema), destination = buckets(home, schema)
+                let path = source.first { $0.0 == bucket }?.1
+                p.bucketID = destination.first { $0.0 == bucket || (path != nil && $0.1 == path) }?.0 ?? destination.first?.0
+            } else if home == nil { p.bucketID = nil }
             switch answer(s.id) {
             case .skip?: out.skipped += 1; return
             case .replace?:
@@ -795,6 +813,7 @@ extension Sharing {
     private static func renamedCopy(_ s: Swatch, date: Date) -> Swatch {
         var p = Swatch(id: UUID(), name: s.name, createdAt: s.createdAt, entries: s.entries)
         p.nameChangedAt = s.nameChangedAt; p.isFavourite = s.isFavourite; p.favouriteChangedAt = s.favouriteChangedAt; p.isCustom = s.isCustom
+        p.bucketID = s.bucketID; p.claim = s.claim
         p.projectID = s.projectID; p.position = s.position; p.placedAt = s.placedAt; p.tags = s.tags; p.tagsChangedAt = s.tagsChangedAt
         p.styles = s.styles?.map { TypeStyle(id: UUID(), name: $0.name, ink: $0.ink, paper: $0.paper, heading: $0.heading, body: $0.body, headingFont: $0.headingFont, bodyFont: $0.bodyFont) }
         p.stylesChangedAt = s.stylesChangedAt; p.copiedFrom = s.id; p.profile = s.profile; p.profileChangedAt = s.profileChangedAt

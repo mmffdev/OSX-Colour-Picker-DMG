@@ -103,6 +103,32 @@ struct TypeStyle: Codable, Equatable {
 }
 
 /// A named collection of colours. Colours always live in the catalogue too.
+/// Portable provenance for an independent Library copy of a project assignment.
+/// Finder-style selection shared between both Library rails.
+struct PaletteSelection {
+    var ids: Set<UUID> = []
+    var anchor: UUID?
+    mutating func click(_ id: UUID, order: [UUID], extend: Bool, toggle: Bool) {
+        if extend, let start = anchor.flatMap({ order.firstIndex(of: $0) }), let end = order.firstIndex(of: id) {
+            let range = Set(order[min(start, end)...max(start, end)])
+            ids = toggle ? ids.union(range) : range
+        } else if toggle {
+            if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
+            anchor = id
+        } else { ids = [id]; anchor = id }
+    }
+}
+
+struct PaletteClaim: Codable, Equatable {
+    var catalogue: String
+    var project: UUID
+    var bucket: UUID?
+    var projectName: String
+    var bucketName: String
+    var assignedPalette: UUID
+    var prefix: String { projectName + " / " + bucketName }
+}
+
 struct Swatch: Codable, Equatable {
     let id: UUID
     var name: String
@@ -135,6 +161,10 @@ struct Swatch: Codable, Equatable {
     var stylesChangedAt: Date? = nil
     /// The palette this one was copied from, when it was taken into a project or out of one.
     var copiedFrom: UUID? = nil
+    /// Exact schema destination; absent in older catalogues (shown in the first palette bucket).
+    var bucketID: UUID? = nil
+    /// Only independent app-wide claimed copies carry this provenance.
+    var claim: PaletteClaim? = nil
     /// The colour profile this palette works to; nil uses its project's, or the house default.
     var profile: UUID? = nil
     var profileChangedAt: Date? = nil
@@ -408,6 +438,8 @@ extension Library {
 
     /// The Palettes list: every palette, in the list's own order.
     var listedPalettes: [Swatch] { arranged(projectOrder) { $0.listPosition } }
+    /// Main Library never relists project-owned copies.
+    var libraryPalettes: [Swatch] { listedPalettes.filter { $0.projectID == nil } }
     /// Favourites, in their own order.
     var orderedFavourites: [Swatch] { arranged(projectOrder.filter { $0.favourite }) { $0.favouritePosition } }
 
@@ -561,6 +593,7 @@ extension Library {
         var order = palettes(in: project).map { $0.id }.filter { $0 != paletteID }
         order.insert(paletteID, at: min(max(0, index), order.count))
         swatches[s].projectID = project
+        if from != project { swatches[s].bucketID = nil; swatches[s].claim = nil }
         place(order, at: date)
         if from != project { place(palettes(in: from).map { $0.id }, at: date) }
     }
@@ -595,6 +628,42 @@ extension Library {
         // The copy works to the same profile as the original, unless its new home says otherwise later.
         if let own = source.profile, let i = swatches.firstIndex(where: { $0.id == copy.id }) { swatches[i].profile = own; swatches[i].profileChangedAt = date }
         return copy.id
+    }
+
+    /// Old project-wide palettes appear in one default bucket, never in every sibling.
+    func palettes(in project: UUID, bucket: UUID, buckets: [UUID]) -> [Swatch] {
+        palettes(in: project).filter { palette in
+            if let assigned = palette.bucketID, buckets.contains(assigned) { return assigned == bucket }
+            return buckets.first == bucket
+        }
+    }
+
+    /// One transaction owns the copy, optional source removal and claimed Library copies.
+    @discardableResult
+    mutating func assignPalette(_ id: UUID, to project: UUID, bucket: UUID?, buckets: [(UUID, String)],
+                                catalogue: String, allBuckets: Bool, keepOriginal: Bool, keepClaimed: Bool,
+                                withNotes: Bool, at date: Date = Date()) -> [UUID] {
+        guard let source = swatch(id), let member = self.project(project), !member.isLocked else { return [] }
+        if let bucket, !buckets.contains(where: { $0.0 == bucket }) { return [] }
+        let targets: [(UUID?, String)] = allBuckets && !buckets.isEmpty
+            ? buckets.map { (Optional($0.0), $0.1) }
+            : [(bucket ?? buckets.first?.0, buckets.first(where: { $0.0 == bucket })?.1 ?? buckets.first?.1 ?? "Palettes")]
+        var result: [UUID] = []
+        for (target, name) in targets {
+            guard let copied = copyPalette(id, to: project, index: 0, withNotes: withNotes, at: date),
+                  let i = swatches.firstIndex(where: { $0.id == copied }) else { continue }
+            swatches[i].bucketID = target
+            result.append(copied)
+            if keepOriginal && keepClaimed,
+               let claimed = copyPalette(copied, to: nil, withNotes: withNotes, at: date),
+               let ci = swatches.firstIndex(where: { $0.id == claimed }) {
+                swatches[ci].claim = PaletteClaim(catalogue: catalogue, project: project, bucket: target,
+                    projectName: member.name, bucketName: name, assignedPalette: copied)
+            }
+        }
+        // A project-owned source is never removed by a Library retention preference.
+        if !result.isEmpty && !keepOriginal && source.projectID == nil { deleteSwatch(id, at: date) }
+        return result
     }
 
     /// Gives an ordered set of palettes positions 0, 1, 2 …
@@ -821,6 +890,25 @@ extension Library {
         if swatches.contains(where: { $0.id == id }) { bury(.swatch, id.uuidString, at: date) }
         swatches.removeAll { $0.id == id }
         if activeSwatchID == id { activeSwatchID = nil }
+    }
+
+    mutating func removeClaimedCopies(assignedTo ids: Set<UUID>, catalogue: String?, at date: Date = Date()) {
+        let claimed = swatches.filter { palette in
+            guard palette.projectID == nil, let claim = palette.claim else { return false }
+            return ids.contains(claim.assignedPalette) && (catalogue == nil || claim.catalogue == catalogue)
+        }.map { $0.id }
+        for id in claimed { deleteSwatch(id, at: date) }
+    }
+
+    /// A project assignment and its independent claimed Library copies are removed together.
+    /// A copy belonging to another catalogue is never swept up by this catalogue's deletion.
+    mutating func deleteAssignedPalettes(_ ids: Set<UUID>, removeClaimed: Bool, catalogue: String?, at date: Date = Date()) {
+        let owned = Set(swatches.filter { ids.contains($0.id) && $0.projectID != nil }.map { $0.id })
+        let claims = removeClaimed ? swatches.filter { palette in
+            guard palette.projectID == nil, let claim = palette.claim else { return false }
+            return owned.contains(claim.assignedPalette) && (catalogue == nil || claim.catalogue == catalogue)
+        }.map { $0.id } : []
+        for id in ids.union(claims) { deleteSwatch(id, at: date) }
     }
 
     /// Adds to the catalogue if new, without touching the date of an existing colour.

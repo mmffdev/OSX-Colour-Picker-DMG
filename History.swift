@@ -356,7 +356,10 @@ enum HistoryStore {
         return StepHistory(steps: f.steps, current: min(f.current, f.steps.count - 1))
     }
 
+    static func encoded(_ history: StepHistory) throws -> Data {
+        try ColourFiles.encoder().encode(File(steps: history.steps, current: history.current))
+    }
     static func save(_ history: StepHistory, beside index: URL) throws {
-        try ColourFiles.encoder().encode(File(steps: history.steps, current: history.current)).write(to: url(beside: index), options: .atomic)
+        try encoded(history).write(to: url(beside: index), options: .atomic)
     }
 }

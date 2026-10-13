@@ -12,6 +12,11 @@ func runSelfTest() -> Never {
         else { failed += 1; print("  FAIL  \(what)") }
     }
 
+    runPickerCacheTests(check: check)
+    runWorkspaceStartupTests(check: check)
+    runLibraryAssignmentTests(check: check)
+    runPaletteSelectionAndClaimDeletionTests(check: check)
+
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent("mmffdev-colour3-selftest-\(UUID().uuidString)")
     let v1Dir = root.appendingPathComponent("v1")
@@ -322,6 +327,14 @@ func runSelfTest() -> Never {
     runAppDataTests(check: check)
     runGlobalAssetsTests(check: check)
     runAppbridgeTests(check: check)
+    runColourQRTests(check: check)
+    runPrintProfileTests(check: check)
+    var hoverScroll=HoverScrollGate()
+    hoverScroll.suppress(at:NSPoint(x:200,y:300))
+    check(!hoverScroll.allows(at:NSPoint(x:200,y:300)), "scrolling content beneath a stationary pointer cannot reopen tile halos")
+    check(!hoverScroll.allows(at:NSPoint(x:200.2,y:300)), "minor coordinate noise during scrolling does not rearm tile halos")
+    check(hoverScroll.allows(at:NSPoint(x:203,y:300)), "moving the pointer after scrolling rearms hover actions")
+
     runProjectTests(check: check)
     runImportTests(check: check)
     runColourSpaceTests(check: check)
@@ -3090,6 +3103,15 @@ private func runAppbridgeTests(check: (Bool, String) -> Void) {
     print("Appbridge Adobe ASE")
     let saved = AppbridgeStore(previewSources: [.init(path: "/tmp/fixture.ase", folder: false), .init(path: "/tmp/fixture", folder: true)])
     check(saved.containsInBucket(URL(fileURLWithPath: "/tmp/fixture/Own.ase")) && !saved.containsInBucket(URL(fileURLWithPath: "/tmp/fixture-other/Own.ase")), "ASE buckets include descendants without matching adjacent folders")
+    let folder = AppbridgeStore.Source(path: "/tmp/watched", folder: true)
+    let missing = AppbridgeStore.Source(path: "/tmp/watched/Missing.ase", folder: false)
+    let other = AppbridgeStore.Source(path: "/tmp/watched/Keep.ase", folder: false)
+    let file = AppbridgeStore.File(id: UUID(), source: missing.id, url: missing.url, swatches: [], problem: "Missing", digest: "unavailable")
+    let detached = AppbridgeStore.detaching(file, from: [folder, missing, missing, other])
+    check(detached.count == 2 && detached.contains { $0.id == other.id }, "removing an offline ASE reference removes duplicates and preserves unrelated files")
+    check(detached.first { $0.id == folder.id }?.excluded == [missing.path], "detached ASE files stay excluded from watched folder discovery")
+    let absentFolder = AppbridgeStore.File(id: UUID(), source: folder.id, url: folder.url, swatches: [], problem: "Missing", digest: "unavailable")
+    check(AppbridgeStore.detaching(absentFolder, from: [folder, other]).map { $0.id } == [other.id], "unavailable folder reference can be removed without removing separate file links")
     let page = AppbridgePage(store: saved)
     page.frame = NSRect(x: 0, y: 0, width: 600, height: 900)
     page.layout()
@@ -3125,4 +3147,159 @@ private func runAppbridgeTests(check: (Bool, String) -> Void) {
         check(try backup.map { try Data(contentsOf: $0) } == data, "ASE append keeps exact original backup")
     } catch { check(false, "ASE append: \(error)") }
     check((try? AdobeASE.read(AdobeASE.empty).isEmpty) == true, "new ASE file is a valid empty library")
+}
+
+
+private func runWorkspaceStartupTests(check: (Bool, String) -> Void) {
+    print("workspace-first startup and development resume")
+    let fm=FileManager.default,root=fm.temporaryDirectory.appendingPathComponent("workspace-startup-"+UUID().uuidString)
+    defer { try? fm.removeItem(at:root) }
+    do {
+        check((try? WorkspaceInventory.read(root:root)) == nil && !fm.fileExists(atPath:root.path), "Reading absent app data does not create a workspace or Main catalogue")
+        try AppHomeSeed.ensure(at:root)
+        let empty=try WorkspaceInventory.read(root:root)
+        check(empty.genuinelyEmpty && fm.fileExists(atPath:root.appendingPathComponent("Assets/Assets.colcat").path), "App-wide Assets.colcat is excluded from an empty user catalogue list")
+        let internalEntry=WorkspaceInventory.probe(name:"Assets",folder:root.appendingPathComponent("Assets"))
+        check(internalEntry.state == .ready, "Catalogue parsing does not reject a valid index solely because its name is Assets")
+        let first=try CatalogueSetup.createBlank("First",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
+        let second=try CatalogueSetup.createBlank("Second",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
+        var inventory=try WorkspaceInventory.read(root:root)
+        check(inventory.catalogues.count == 2 && inventory.catalogues.allSatisfy { $0.state == .ready }, "Existing app data discovers multiple saved catalogues without creating another")
+        let secondID=inventory.catalogues.first { $0.name == second }!.id!
+        try AppDataStore(root:root).update { manifest in
+            manifest["customFutureField"]="Retain this"
+            manifest["settings"]=["assistantDone":true,"currentCatalogue":second,"currentCatalogueID":secondID.uuidString]
+        }
+        inventory=try WorkspaceInventory.read(root:root)
+        check(inventory.lastUsed?.name == second, "Last catalogue is preselected by stable identity")
+        check(DevelopmentLaunch.canResume(inventory,enabled:true) && !DevelopmentLaunch.canResume(inventory,enabled:false), "Development resume skips selection only when explicitly enabled and setup is complete")
+        try AppDataStore(root:root).update { $0["settings"]=["assistantDone":false,"currentCatalogue":second] }
+        check(!DevelopmentLaunch.canResume(try WorkspaceInventory.read(root:root),enabled:true), "Development mode cannot bypass incomplete setup")
+        try Catalogues(root:root,legacyURL:nil).registerChecked("Disconnected",at:root.appendingPathComponent("Offline/Disconnected"))
+        inventory=try WorkspaceInventory.read(root:root)
+        check(!inventory.genuinelyEmpty && inventory.catalogues.contains { $0.name == "Disconnected" && $0.state == .missing }, "Missing registered catalogues stay visible for Locate rather than becoming a first-run workspace")
+        check(try AppDataStore(root:root).read()["customFutureField"] as? String == "Retain this", "Opening and registering catalogues preserves unknown app-data fields")
+        check(try WorkspaceInventory.root(for:root.appendingPathComponent("colorgain.coldata")).resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path, "The picker accepts the app-data file as well as its folder")
+        let original=try Data(contentsOf:root.appendingPathComponent("colorgain.coldata"))
+        try Data("{\"version\":999,\"catalogues\":[]}".utf8).write(to:root.appendingPathComponent("colorgain.coldata"))
+        let invalid=try Data(contentsOf:root.appendingPathComponent("colorgain.coldata"))
+        let unchanged=try Data(contentsOf:root.appendingPathComponent("colorgain.coldata"))
+        check((try? WorkspaceInventory.read(root:root)) == nil && unchanged == invalid, "Unsupported app data cannot be interpreted as empty or overwritten")
+        try Data("{\"version\":1,\"catalogues\":{}}".utf8).write(to:root.appendingPathComponent("colorgain.coldata"))
+        check((try? WorkspaceInventory.read(root:root)) == nil, "Invalid registry data is reported instead of silently returning no catalogues")
+        try original.write(to:root.appendingPathComponent("colorgain.coldata"))
+        let firstFolder=root.appendingPathComponent("Catalogues/"+first)
+        let firstIndex=firstFolder.appendingPathComponent(first+".colcat")
+        var future=try JSONSerialization.jsonObject(with:Data(contentsOf:firstIndex)) as! [String:Any];future["version"]=999
+        try JSONSerialization.data(withJSONObject:future).write(to:firstIndex)
+        check(WorkspaceInventory.probe(name:first,folder:firstFolder).state == .invalid, "A newer catalogue cannot be offered as ready or migrated blindly")
+        let isolated=WorkspaceInventory(root:root,catalogues:[WorkspaceCatalogue(name:"Blocked",folder:firstFolder,state:.access)],lastName:"Blocked",lastID:nil,setupComplete:true)
+        check(!isolated.genuinelyEmpty && !DevelopmentLaunch.canResume(isolated,enabled:true), "Access recovery remains mandatory in development mode")
+        let suite="colorgain-dev-toggle-test-"+UUID().uuidString,defaults=UserDefaults(suiteName:suite)!
+        defer { defaults.removePersistentDomain(forName:suite) }
+        check(!defaults.bool(forKey:DevelopmentLaunch.key), "Development resume is off on the first clean run")
+        DevelopmentLaunch.configure(["--dev-on"],in:defaults)
+        check(UserDefaults(suiteName:suite)!.bool(forKey:DevelopmentLaunch.key), "Dev-on persists across new preference instances")
+        DevelopmentLaunch.configure([],in:defaults)
+        check(defaults.bool(forKey:DevelopmentLaunch.key), "Normal later sessions retain development resume until turned off")
+        check(Relaunch.arguments(for:["--dev-on","--prepress"]) == ["--prepress"], "Automatic restarts do not replay a dev-on command after the user turns the toggle off")
+        DevelopmentLaunch.configure(["--dev-off"],in:defaults)
+        check(!UserDefaults(suiteName:suite)!.bool(forKey:DevelopmentLaunch.key), "Dev-off remains off across later sessions")
+    } catch { check(false,"Workspace startup: \(error)") }
+}
+
+
+private func runLibraryAssignmentTests(check: (Bool, String) -> Void) {
+    let quick = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 20, y: 0), modifierFlags: [], timestamp: 1.01, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+    let wobble = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 4, y: 0), modifierFlags: [], timestamp: 2, windowNumber: 0, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
+    check(PaletteDrag.counts(quick, from: (.zero, 1)) && !PaletteDrag.counts(wobble, from: (.zero, 1)),
+        "quick palette drags work while click wobbles remain below the drag threshold")
+    let date = Date(timeIntervalSince1970: 1_800_000_000)
+    var lib = Library()
+    let source = lib.createSwatch(named: "Assignment Test", hexes: ["#123456"], at: date)
+    let project = lib.createProject(named: "Studio", at: date)
+    let web = SchemaNode(name: "Web", role: .palettes)
+    let printBucket = SchemaNode(name: "Print", role: .palettes)
+    let buckets = [(web.id, web.name), (printBucket.id, printBucket.name)]
+    let made = lib.assignPalette(source, to: project, bucket: web.id, buckets: buckets, catalogue: "Test",
+        allBuckets: false, keepOriginal: true, keepClaimed: false, withNotes: false, at: date)
+    check(made.count == 1 && lib.swatch(made[0])?.bucketID == web.id, "tree assignment creates one independent copy in the exact bucket")
+    check(lib.palettes(in: project, bucket: printBucket.id, buckets: buckets.map { $0.0 }).isEmpty,
+        "Web assignment does not appear in Print")
+    check(lib.libraryPalettes.map { $0.id } == [source], "project copy is excluded from the main Library; original remains")
+    let all = lib.assignPalette(source, to: project, bucket: web.id, buckets: buckets, catalogue: "Test",
+        allBuckets: true, keepOriginal: true, keepClaimed: true, withNotes: false, at: date.addingTimeInterval(1))
+    let claims = lib.libraryPalettes.filter { $0.claim != nil }
+    check(all.count == 2 && Set(all).count == 2 && claims.count == 2 && Set(claims.compactMap { $0.claim?.bucketName }) == ["Web", "Print"],
+        "all-bucket mode creates independent destination and labelled claimed copies")
+    let decoded = try? ColourFiles.decoder().decode(Library.self, from: ColourFiles.encoder().encode(lib))
+    check(decoded?.swatch(made[0])?.bucketID == web.id && decoded?.swatch(claims[0].id)?.claim == claims[0].claim,
+        "bucket assignment and claimed provenance survive serialization")
+    check(mergeLibraries(local: lib, remote: lib).swatch(made[0])?.bucketID == web.id,
+        "sync preserves exact bucket ownership")
+    let moved = lib.assignPalette(source, to: project, bucket: printBucket.id, buckets: buckets, catalogue: "Test",
+        allBuckets: false, keepOriginal: false, keepClaimed: true, withNotes: false, at: date.addingTimeInterval(2))
+    check(moved.count == 1 && lib.swatch(source) == nil && lib.libraryPalettes.filter { $0.claim != nil }.count == 2,
+        "retention off removes only the Library original and cannot create claimed copies")
+    lib.setProjectLocked(project, true)
+    let count = lib.swatches.count
+    check(lib.assignPalette(claims[0].id, to: project, bucket: web.id, buckets: buckets, catalogue: "Test",
+        allBuckets: false, keepOriginal: false, keepClaimed: false, withNotes: false).isEmpty && lib.swatches.count == count,
+        "locked destination refuses assignment without removing the source")
+    lib.setProjectLocked(project, false)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("library-assignment-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var schema = SchemaTrial.SchemaFile.fresh
+    schema.places[project.uuidString] = SchemaPlace(collection: schema.collections[0].id)
+    schema.stacks = [project.uuidString: SchemaNode(name: "Project", children: [web, printBucket])]
+    do {
+        let index = root.appendingPathComponent("Test.colcat")
+        try CatalogueTree.write(lib, schema: schema, index: index, name: "Test")
+        let read = try CatalogueTree.read(root: root)
+        check(read.library.swatch(made[0])?.bucketID == web.id && read.library.swatch(moved[0])?.bucketID == printBucket.id,
+            "catalogue save/load preserves Web and Print as separate destinations")
+        let staged = Sharing.Staged(level: .catalogue, root: root, library: read.library, schema: read.schema, palette: nil)
+        var imported = Library(), importedSchema = SchemaTrial.SchemaFile.fresh
+        _ = Sharing.commit(staged, choices: .init(ticked: nil, placement: .catalogue), into: &imported, schema: &importedSchema)
+        check(imported.swatch(made[0])?.bucketID == web.id && imported.swatch(moved[0])?.bucketID == printBucket.id
+            && imported.swatch(claims[0].id)?.claim == claims[0].claim,
+            "catalogue import retains exact assignments and claimed-copy provenance")
+        let global = GlobalAssets.split(lib).global
+        check(global.swatches.allSatisfy { $0.projectID == nil } && global.swatch(made[0]) == nil && global.swatch(claims[0].id)?.claim != nil,
+            "app-data global asset split keeps only originals and claimed Library copies")
+        let cat = try ColourFiles.decoder().decode(CatalogueFile.self, from: Data(contentsOf: index))
+        let links = cat.collections.flatMap { $0.allMembers.map { $0.member } }.flatMap { $0.assets }
+        check(links.first { $0.id == made[0] }?.file.contains("/Web/") == true && links.first { $0.id == moved[0] }?.file.contains("/Print/") == true,
+            "catalogue writes each palette file into its assigned bucket folder")
+    } catch { check(false, "catalogue bucket roundtrip: \(error)") }
+}
+
+
+private func runPaletteSelectionAndClaimDeletionTests(check: (Bool, String) -> Void) {
+    let order = (0..<5).map { _ in UUID() }
+    var selected = PaletteSelection()
+    selected.click(order[0], order: order, extend: false, toggle: false)
+    selected.click(order[2], order: order, extend: true, toggle: false)
+    check(selected.ids == Set(order[0...2]), "Shift selection includes the complete visible palette range")
+    selected.click(order[4], order: order, extend: false, toggle: true)
+    check(selected.ids == Set([order[0], order[1], order[2], order[4]]), "Command selection adds a palette outside the range")
+    selected.click(order[1], order: order, extend: false, toggle: true)
+    check(!selected.ids.contains(order[1]) && selected.ids.count == 3, "Command selection deselects one palette without losing the others")
+    selected.click(order[3], order: order, extend: false, toggle: false)
+    check(selected.ids == [order[3]], "plain palette selection resets the group")
+    var lib = Library()
+    let source = lib.createSwatch(named: "Claim Cleanup", hexes: ["#123456"])
+    let project = lib.createProject(named: "Project")
+    let node = SchemaNode(name: "Web", role: .palettes)
+    let copied = lib.assignPalette(source, to: project, bucket: node.id, buckets: [(node.id, node.name)], catalogue: "A", allBuckets: false, keepOriginal: true, keepClaimed: true, withNotes: false)[0]
+    let claim = lib.swatches.first { $0.claim?.assignedPalette == copied }!.id
+    var kept = lib
+    kept.deleteAssignedPalettes([copied], removeClaimed: false, catalogue: "A")
+    check(kept.swatch(copied) == nil && kept.swatch(claim) != nil, "claim cleanup preference off retains the independent claimed copy")
+    var foreign = lib
+    foreign.deleteAssignedPalettes([copied], removeClaimed: true, catalogue: "B")
+    check(foreign.swatch(claim) != nil, "deleting an imported assignment does not remove another catalogue's claimed copy")
+    lib.deleteAssignedPalettes([copied], removeClaimed: true, catalogue: "A")
+    check(lib.swatch(copied) == nil && lib.swatch(claim) == nil && lib.swatch(source) != nil && lib.colours.contains { $0.hex == "#123456" },
+        "project palette deletion removes only its associated claimed copy and preserves the original and colours")
 }

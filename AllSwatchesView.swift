@@ -286,7 +286,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         addTo.addItem(withTitle: "Add to Palette")
         addTo.menu?.delegate = self
 
-        buildButton = NSButton(title: "Build Palette\u{2026}", target: self, action: #selector(startBuilding))
+        buildButton = ActionButton(title: "Build Palette\u{2026}", target: self, action: #selector(startBuilding))
         buildButton.bezelStyle = .rounded
         buildButton.controlSize = .small
         buildButton.image = symbol("rectangle.stack.badge.plus", "Build palette", size: 11)
@@ -296,7 +296,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         // The shared header: the title on its own row, then the count on the left and the
         // controls on the right. With several swatches selected, the controls give way to actions.
         func small(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
-            let b = NSButton(title: title, target: self, action: action)
+            let b = ActionButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
             b.toolTip = tip
@@ -330,10 +330,10 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         nameField.target = self
         nameField.action = #selector(savePalette)
         nameField.widthAnchor.constraint(equalToConstant: 240).isActive = true
-        saveButton = NSButton(title: "Save Palette", target: self, action: #selector(savePalette))
+        saveButton = ActionButton(title: "Save Palette", target: self, action: #selector(savePalette))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(stopBuilding))
+        let cancel = ActionButton(title: "Cancel", target: self, action: #selector(stopBuilding))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
         let heading = NSTextField(labelWithString: "New palette")
@@ -815,10 +815,10 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
         hint.textColor = .tertiaryLabelColor
         hint.font = NSFont.systemFont(ofSize: TextSize.body)
 
-        save = NSButton(title: "Save Palette", target: self, action: #selector(saveTapped))
+        save = ActionButton(title: "Save Palette", target: self, action: #selector(saveTapped))
         save.bezelStyle = .rounded
         save.controlSize = .large
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        let cancel = ActionButton(title: "Cancel", target: self, action: #selector(cancelTapped))
         cancel.bezelStyle = .rounded
         cancel.controlSize = .large
         let buttons = NSStackView(views: [cancel, save])

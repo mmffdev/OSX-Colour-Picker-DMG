@@ -38,6 +38,7 @@ final class StudioSplash: NSView {
     private let session: CatalogueSetupSession?
     private let offset: Int
     private let startup: Bool
+    private let workspacePrepared: Bool
     private let reviewIndex: Int
     private var building = false
     private let lighthouse = LighthouseView()
@@ -58,13 +59,23 @@ final class StudioSplash: NSView {
     /// The design loop: the splash opens on every launch and Set starts it again, writing nothing. --splash-loop, or the splashLoop default.
     static var looping: Bool { CommandLine.arguments.contains("--splash-loop") || preferences.bool(forKey: "splashLoop") }
 
-    init(library: LibraryController, startup: Bool = false) {
+    init(library: LibraryController, startup: Bool = false, workspacePrepared: Bool = false, createdCatalogue: String? = nil) {
         self.library = library
         self.startup = startup
+        self.workspacePrepared = workspacePrepared
         let saved = startup ? CatalogueSetupSession.load() : nil
+        if workspacePrepared, let saved, let createdCatalogue {
+            let folder=Catalogues.standard.directory(for:createdCatalogue)
+            if saved.createdName != createdCatalogue || saved.createdFolder?.standardizedFileURL != folder.standardizedFileURL {
+                saved.draft=SplashDraft();saved.step=1
+            }
+            saved.home=Catalogues.standard.root;saved.parent=Catalogues.standard.folder
+            saved.name=createdCatalogue;saved.createdName=createdCatalogue;saved.createdFolder=folder
+            saved.draft.catalogueName=createdCatalogue;saved.save()
+        }
         session = saved
-        offset = startup ? 1 : 0
-        reviewIndex = startup ? 7 : 6
+        offset = startup && !workspacePrepared ? 1 : 0
+        reviewIndex = 6 + offset
         let d = saved?.draft ?? SplashDraft()
         draft = d
         let name: () -> String = { [weak library, weak saved] in
@@ -116,10 +127,10 @@ final class StudioSplash: NSView {
                          ready: { d.everyLeafGrouped })
         ]
         if let session = session {
-            let catalogue = SplashCatalogueLocation(index: 1, session: session)
+            let catalogue = SplashCatalogueLocation(index: offset, session: session)
             catalogue.onExisting = { [weak self] url in self?.openExisting(url) }
             sections[0] = catalogue
-            sections.insert(SplashAppData(index: 0, session: session), at: 0)
+            if !workspacePrepared { sections.insert(SplashAppData(index: 0, session: session), at: 0) }
         }
         sections.append(SplashReview(index: reviewIndex, draft: d) { [weak library, weak session] in
             (session?.createdName ?? library?.catalogue ?? "", session?.createdFolder ?? library?.store.root ?? Catalogues.standard.root, session?.home ?? Catalogues.standard.root)
@@ -207,7 +218,7 @@ final class StudioSplash: NSView {
 
     func settleButtons() {
         back.isEnabled = at > 0
-        next.title = at == reviewIndex ? "Build Catalogue" : (startup && at == 1 && session?.createdName == nil ? "Create Catalogue" : "Continue")
+        next.title = at == reviewIndex ? "Build Catalogue" : (startup && at == offset && session?.createdName == nil ? "Create Catalogue" : "Continue")
         next.isEnabled = !building && sections[at].canContinue
         next.invalidateIntrinsicContentSize()
         needsLayout = true
@@ -305,11 +316,11 @@ final class StudioSplash: NSView {
             sections[at].commit()
             if let session = session {
                 do {
-                    if at == 0 && session.home != Catalogues.standard.root {
+                    if !workspacePrepared && at == 0 && session.home != Catalogues.standard.root {
                         try Catalogues.moveHome(to: session.home)
                         session.parent = Catalogues.standard.folder
                     }
-                    if at == 1 {
+                    if at == offset {
                         if session.createdName == nil {
                             let name = try CatalogueSetup.createBlank(session.name, under: session.parent)
                             session.createdName = name

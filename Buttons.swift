@@ -58,6 +58,62 @@ func watchTheme(_ view: NSView) {
     }
 }
 
+/// Shared text-action treatment: leading diagonal arrow, left-aligned label and text-only rule.
+/// Intrinsic width includes the complete label; wider layout slots retain the same left origin.
+enum ActionButtonSkin {
+    static let height: CGFloat = 32
+    static let arrowSize: CGFloat = 14
+    static let gap: CGFloat = 6
+    static let textX: CGFloat = arrowSize + gap
+    static func size(_ title: String, height: CGFloat = ActionButtonSkin.height) -> NSSize {
+        NSSize(width: max(24, textX + ceil(Design.attributed(title, .action).size().width)), height: height)
+    }
+    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor = Design.ink) {
+        let active = enabled && pressed, hovered = enabled && hover
+        let background = (active ? Prefs.buttonActiveBackground : hovered ? Prefs.buttonHoverBackground : nil).flatMap(colorFromHex) ?? Design.mist
+        let customInk = (active ? Prefs.buttonActiveText : hovered ? Prefs.buttonHoverText : nil).flatMap(colorFromHex)
+        let ink = !enabled ? baseInk.withAlphaComponent(0.35) : (active || hovered ? customInk ?? ThemedButton.readable(on: background) : baseInk)
+        let label = Design.attributed(title, .action, colour: ink)
+        let width = max(0, bounds.width - textX)
+        if enabled && (hover || pressed) {
+            fill(NSRect(x: bounds.minX, y: bounds.minY, width: min(bounds.width, size(title).width), height: bounds.height), background)
+        }
+        let y = bounds.minY + (bounds.height - label.size().height) / 2
+        Design.arrow(arrowSize, colour: ink).draw(in: NSRect(x: bounds.minX, y: bounds.midY - arrowSize / 2, width: arrowSize, height: arrowSize), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        label.draw(x: bounds.minX + textX, baseline: y + label.baselineFont.ascender, width: width)
+        let ruleY = min(bounds.maxY - 1, y + label.size().height + 1.5)
+        fill(NSRect(x: bounds.minX + textX, y: ruleY, width: min(width, label.size().width), height: pressed || focus ? 2 : 1), ink)
+    }
+}
+
+/// The shared action appearance for older AppKit forms that still construct native push buttons.
+class ActionButton: NSButton {
+    override init(frame: NSRect) { super.init(frame: frame); configure() }
+    convenience init(title: String, target: AnyObject?, action: Selector?) {
+        self.init(frame: .zero); self.title = title; self.target = target; self.action = action
+    }
+    required init?(coder: NSCoder) { super.init(coder: coder); configure() }
+    private func configure() { isBordered = false; alignment = .left; font = Design.Text.action.font(); setButtonType(.momentaryChange) }
+    override var isFlipped: Bool { true }
+    override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    override var isEnabled: Bool { didSet { needsDisplay = true } }
+    override var intrinsicContentSize: NSSize { ActionButtonSkin.size(title) }
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.inVisibleRect, .mouseEnteredAndExited, .activeInActiveApp], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        let hover = window.map { bounds.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hover, pressed: isHighlighted || state == .on,
+            focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled)
+    }
+}
+
 /// A push button in the theme's greys: an optional symbol, then its title.
 final class ThemedButton: NSButton {
     private var hovering = false
@@ -72,6 +128,7 @@ final class ThemedButton: NSButton {
         self.image = image
         self.target = target
         self.action = action
+        alignment = .left
         isBordered = false
         font = NSFont.systemFont(ofSize: TextSize.body)
         setButtonType(.momentaryChange)
@@ -101,6 +158,7 @@ final class ThemedButton: NSButton {
     }
 
     override var intrinsicContentSize: NSSize {
+        if !title.isEmpty { return ActionButtonSkin.size(title, height: ButtonStyle.height) }
         let text = title.isEmpty ? 0 : ceil(label.size().width)
         let icon = image?.size.width ?? 0
         let between = (text > 0 && icon > 0) ? ButtonStyle.gap : 0
@@ -123,29 +181,15 @@ final class ThemedButton: NSButton {
     /// activating the app and the button does nothing, which is what a gate shown before the app opens meets.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        let active = isHighlighted || state == .on
-        var fill = !isEnabled ? Theme.buttonRest : active ? Theme.buttonActiveBackground : hovering ? Theme.buttonHoverBackground : Theme.buttonRest
-        var ink = active ? Theme.buttonActiveText : hovering ? Theme.buttonHoverText : Theme.text
-        if !isEnabled { ink = Theme.text.withAlphaComponent(0.35) }
-        if let lead = prominent?.usingColorSpace(.sRGB), isEnabled {
-            fill = isHighlighted ? lead.blended(withFraction: 0.2, of: .black) ?? lead : hovering ? lead.blended(withFraction: 0.12, of: .white) ?? lead : lead
-            ink = ThemedButton.readable(on: lead)
+        if !title.isEmpty {
+            ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted || state == .on,
+                focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled, baseInk: Theme.text)
+        } else if let image {
+            if isEnabled && (hovering || isHighlighted) { fill(bounds, Design.mist) }
+            tinted(image, isEnabled ? Design.ink : Design.soft).draw(in: NSRect(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2, width: image.size.width, height: image.size.height))
         }
-        fill.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: ButtonStyle.radius, yRadius: ButtonStyle.radius).fill()
-
-        let text = NSMutableAttributedString(attributedString: label)
-        text.addAttribute(.foregroundColor, value: ink, range: NSRange(location: 0, length: text.length))
-        let textSize = title.isEmpty ? .zero : text.size()
-        let iconSize = image?.size ?? .zero
-        let between: CGFloat = (textSize.width > 0 && iconSize.width > 0) ? ButtonStyle.gap : 0
-        var x = bounds.midX - (iconSize.width + between + textSize.width) / 2
-        if let image = image {
-            tinted(image, ink).draw(in: NSRect(x: x, y: bounds.midY - iconSize.height / 2, width: iconSize.width, height: iconSize.height))
-            x += iconSize.width + between
-        }
-        if textSize.width > 0 { text.draw(at: NSPoint(x: x, y: bounds.midY - textSize.height / 2)) }
     }
 }
 
@@ -160,7 +204,7 @@ extension ThemedButton {
 }
 
 /// The bar every page lays its controls out on: one row, as tall as a button, with a group at the
-/// left and a group at the right and the spare width between them. A label for a group is made
+/// left and the spare width after them. A label for a group is made
 /// with `ActionBar.label`. Pages put their buttons and toggles in one of these; nothing lays a
 /// row of controls out by hand.
 final class ActionBar: NSView {
@@ -172,7 +216,7 @@ final class ActionBar: NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        row.setViews(leading + [spacer] + trailing, in: .leading)
+        row.setViews(leading + trailing + [spacer], in: .leading)
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = PageStyle.barSpacing
@@ -306,7 +350,7 @@ final class SwissButton: NSButton {
     /// A button that turns into another, as Keep It becomes Remove once the slide is home.
     func setKind(_ k: Kind) { kind = k; invalidateIntrinsicContentSize(); needsDisplay = true }
     enum Trailing { case none, arrow, tick, cross }
-    /// What sits in the cell at the right end, behind a hairline: the arrow for "go on", a tick or a cross for a state.
+    /// Existing call sites may supply a tick/cross status; it follows the label without an arrow cell.
     var trailing = Trailing.none { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var arrow: Bool { get { trailing == .arrow } set { trailing = newValue ? .arrow : .none } }
     /// A set width, so two buttons on different rows line up; nil takes the title's width.
@@ -321,11 +365,12 @@ final class SwissButton: NSButton {
     init(_ title: String, _ kind: Kind, target: AnyObject? = nil, action: Selector? = nil) {
         self.kind = kind
         super.init(frame: .zero)
-        // Every boxed button carries the arrow cell unless given a state instead; a quiet one is text alone.
+        // Kind remains semantic for callers; every text action shares the leading-arrow treatment.
         if kind != .quiet { trailing = .arrow }
         self.title = title
         self.target = target
         self.action = action
+        alignment = .left
         isBordered = false
         font = Design.Text.action.font()
         setButtonType(.momentaryChange)
@@ -342,24 +387,16 @@ final class SwissButton: NSButton {
     override var fittingSize: NSSize { intrinsicContentSize }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
-    private var label: NSAttributedString { Design.attributed(title, .action, colour: ink) }
-    private var ink: NSColor {
-        if !isEnabled { return Design.ink.withAlphaComponent(0.35) }
-        if isHighlighted, let colour = Prefs.buttonActiveText.flatMap(colorFromHex) { return colour }
-        if hovering, let colour = Prefs.buttonHoverText.flatMap(colorFromHex) { return colour }
-        return kind == .primary || reversed ? Design.card : Design.ink
-    }
+    private var displayTitle: String { title + (trailing == .tick ? " ✓" : trailing == .cross ? " ✕" : "") }
+    private var label: NSAttributedString { Design.attributed(displayTitle, .action, colour: Design.ink) }
+    override var isFlipped: Bool { true }
     /// The baseline sits where the text's does, so a row of these aligns with text beside it.
     override var firstBaselineOffsetFromTop: CGFloat { (Self.height - label.size().height) / 2 + Design.Text.action.font().ascender + 1 }
     override var lastBaselineOffsetFromBottom: CGFloat { Self.height - firstBaselineOffsetFromTop }
 
     override var intrinsicContentSize: NSSize {
-        let text = ceil(label.size().width)
-        switch kind {
-        case .quiet: return NSSize(width: text + (leadingArrow ? Self.arrowSize + Self.arrowGap : 0), height: Self.height)
-        case .secondary, .primary:
-            return NSSize(width: fixedWidth ?? (text + 28 + (trailing != .none ? 22 + 10 : 0)), height: Self.height)
-        }
+        let size = ActionButtonSkin.size(displayTitle)
+        return NSSize(width: fixedWidth ?? size.width, height: Self.height)
     }
 
     override func updateTrackingAreas() {
@@ -371,50 +408,8 @@ final class SwissButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
-    /// An outlined button under the pointer turns to ink with paper text, the reverse of itself: the one hover every drawn choice shares.
-    private var reversed: Bool { kind == .secondary && hovering && isEnabled }
-
     override func draw(_ dirtyRect: NSRect) {
-        let r = bounds
-        let box = NSBezierPath(rect: r)
-        switch kind {
-        case .primary:
-            let fill = !isEnabled ? Design.ink.withAlphaComponent(0.35) : isHighlighted ? NSColor.black : hovering ? Design.hex("#2C2C2C") : Design.ink
-            fill.setFill(); box.fill()
-        case .secondary:
-            if reversed { Design.ink.setFill(); box.fill() }
-            Design.ink.withAlphaComponent(isEnabled ? 1 : 0.35).setStroke(); box.lineWidth = 1
-            NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)).stroke()
-        case .quiet: break
-        }
-        if isEnabled, isHighlighted, let colour = Prefs.buttonActiveBackground.flatMap(colorFromHex) { colour.setFill(); box.fill() }
-        else if isEnabled, hovering, let colour = Prefs.buttonHoverBackground.flatMap(colorFromHex) { colour.setFill(); box.fill() }
-        let text = label
-        let size = text.size()
-        let y = (r.height - size.height) / 2
-        let lead: CGFloat = kind == .quiet && leadingArrow ? Self.arrowSize + Self.arrowGap : 0
-        let x: CGFloat = (kind == .quiet ? 0 : 14) + lead
-        text.draw(at: NSPoint(x: x, y: y))
-        if kind == .quiet {
-            if leadingArrow {
-                Design.arrow(Self.arrowSize, colour: ink).draw(in: NSRect(x: 0, y: (r.height - Self.arrowSize) / 2, width: Self.arrowSize, height: Self.arrowSize),
-                                                              from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            }
-            ink.setStroke()
-            let u = NSBezierPath(); u.move(to: NSPoint(x: lead, y: y + size.height + 1.5)); u.line(to: NSPoint(x: lead + size.width, y: y + size.height + 1.5)); u.lineWidth = 1; u.stroke()
-        }
-        if kind != .quiet && trailing != .none {
-            let cell = NSRect(x: r.maxX - 22, y: 0, width: 22, height: r.height)
-            (kind == .primary || reversed ? Design.paper.withAlphaComponent(0.18) : Design.ink.withAlphaComponent(0.18)).setStroke()
-            let l = NSBezierPath(); l.move(to: NSPoint(x: cell.minX, y: 8)); l.line(to: NSPoint(x: cell.minX, y: r.height - 8)); l.lineWidth = 1; l.stroke()
-            let glyph = trailing == .arrow ? "\u{2192}" : trailing == .tick ? "\u{2713}" : "\u{2715}"
-            let a = Design.attributed(glyph, .action, colour: ink)
-            let s = a.size()
-            a.draw(at: NSPoint(x: cell.midX - s.width / 2, y: (r.height - s.height) / 2))
-        }
-        if window?.firstResponder === self, NSApp.isFullKeyboardAccessEnabled {
-            Design.orange.setStroke()
-            let f = NSBezierPath(rect: r.insetBy(dx: -2, dy: -2)); f.lineWidth = 2; f.stroke()
-        }
+        ActionButtonSkin.draw(displayTitle, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted || state == .on,
+            focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled)
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 
 // ---------- Permissions: what macOS has to allow, shown once at first open and always in Settings ----------
 //
@@ -20,7 +21,16 @@ struct Permission {
     /// What the setup asks up front: Screen Recording alone, since it needs a restart. Documents is
     /// asked where it belongs, on the catalogue step; the Adobe helper is leaving both editions
     /// (Rick, 2026-10-07) and its row went with it.
-    static var all: [Permission] { [screenRecording] }
+    static var all: [Permission] { [screenRecording, camera] }
+
+    static let camera = Permission(title: "Camera For QR Import", state: {
+        SharingCamera.allowed ? .on : .off
+    }, detail: {
+        SharingCamera.allowed ? "On. Scan a colour QR from your phone. The camera runs only while the scanner is open." : "Optional: scan colour QR codes with your Mac’s camera. Images stay on this Mac. Image import works without camera access."
+    }, button: { SharingCamera.allowed ? "Turn Off" : "Allow…" }, act: {
+        if Prefs.sharingCameraAllowed { Prefs.sharingCameraAllowed = false }
+        else { SharingCamera.enable { _ in } }
+    })
 
     /// Sample reads the screen through ScreenCaptureKit. macOS asks once, and only applies the
     /// answer to a fresh copy of the app, so a grant made now needs a restart.
@@ -326,7 +336,7 @@ final class SetupWindowController: NSWindowController {
             guard let w = self?.window else { return }
             NSAlert(error: error).beginSheetModal(for: w)
         }
-        let done = NSButton(title: "Done", target: self, action: #selector(finish))
+        let done = ActionButton(title: "Done", target: self, action: #selector(finish))
         done.bezelStyle = .rounded
         done.keyEquivalent = "\r"
         let buttons = NSStackView(views: [done])

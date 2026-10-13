@@ -307,10 +307,13 @@ enum SetupDraft {
 enum Relaunch {
     /// A permission restart resumes the test's draft instead of resetting its throwaway home.
     static func arguments(for arguments: [String]) -> [String] {
-        if arguments.contains("--new-user"), !arguments.contains("--resume-new-user") {
-            return arguments + ["--resume-new-user"]
+        // Dev-on/off are one-time state commands. Carrying them through an automatic restart
+        // could undo a later menu toggle; the dedicated stored preference already survives.
+        let resumed=arguments.filter { !["--dev-on","--dev-off"].contains($0) }
+        if resumed.contains("--new-user"), !resumed.contains("--resume-new-user") {
+            return resumed + ["--resume-new-user"]
         }
-        return arguments
+        return resumed
     }
 
     /// Whether a debugger (Xcode) is attached: a relaunch would end its session, which reads as the app dying.

@@ -333,8 +333,39 @@ enum SelectionRibbon {
     }
 }
 
+/// A neutral row with a diagonal grey strip occupying only the rail's existing leading gutter.
+/// The strip slides in from the left and stays fixed once its row is selected.
+enum RailBarberPole {
+    static let stripe = Design.hex("#D4D4D2")
+    static var ground: NSColor { Design.card.blended(withFraction: 0.25, of: Design.mist) ?? Design.card }
+    static func draw(in box: NSRect, stripWidth: CGFloat, age: TimeInterval) {
+        guard box.width > 0, box.height > 0 else { return }
+        let width = max(0, min(stripWidth, box.width))
+        let progress = CGFloat(1 - pow(1 - max(0, min(1, age / SelectionRibbon.slide)), 3))
+        fill(NSRect(x: box.minX, y: box.minY, width: box.width, height: max(0, box.height - 1)), ground)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: box.minX, y: box.minY, width: width, height: max(0, box.height - 1))).addClip()
+        let left = box.minX - width * (1 - progress)
+        NSBezierPath(rect: NSRect(x: left, y: box.minY, width: width, height: box.height)).addClip()
+        stripe.setFill()
+        let band: CGFloat = 12, period: CGFloat = 24
+        var x = left - period
+        while x < left + width + box.height + period {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: x, y: box.minY))
+            path.line(to: NSPoint(x: x + band, y: box.minY))
+            path.line(to: NSPoint(x: x + band - box.height, y: box.maxY))
+            path.line(to: NSPoint(x: x - box.height, y: box.maxY))
+            path.close(); path.fill()
+            x += period
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 /// One ribbon clock for a set of row keys, with selected rows held open.
 final class Rollover<Key: Hashable> {
+    var barberPole = false
     private(set) var hover: Key?
     private var reveal: [Key: CGFloat] = [:]
     private var clock: Timer?
@@ -349,7 +380,7 @@ final class Rollover<Key: Hashable> {
     /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
     func settle() {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            reveal = Dictionary(uniqueKeysWithValues: keys().map { ($0, goal($0)) })
+            reveal = Dictionary(uniqueKeysWithValues: Set(keys()).map { ($0, goal($0)) })
             redraw(); return
         }
         let moving = keys().contains { (reveal[$0] ?? 0) != goal($0) }
@@ -360,7 +391,7 @@ final class Rollover<Key: Hashable> {
             let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick))
             self.lastTick = now
             var done = true
-            for k in self.keys() {
+            for k in Set(self.keys()) {
                 let g = self.goal(k), v = self.reveal[k] ?? 0
                 if v == g { continue }
                 let next = v < g ? min(g, v + step) : max(g, v - step * CGFloat(SelectionRibbon.duration / SelectionRibbon.slide))
@@ -376,8 +407,12 @@ final class Rollover<Key: Hashable> {
     /// The pointer is over another key, or over none.
     func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
     /// Draws a key's pane, as far out as it has flown: from the left edge to `reach`, inside the row, leaving its bottom divider visible.
-    func pane(_ k: Key, box: NSRect, reach: CGFloat) {
+    func pane(_ k: Key, box: NSRect, reach: CGFloat, stripWidth: CGFloat = 24) {
         guard let v = reveal[k], v > 0 else { return }
+        if barberPole {
+            RailBarberPole.draw(in: box, stripWidth: stripWidth, age: TimeInterval(v))
+            return
+        }
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: NSRect(x: 0, y: box.minY, width: box.maxX, height: box.height)).addClip()
         SelectionRibbon.draw(top: box.minY, height: max(0, box.height - 1), reach: min(reach, box.maxX), age: TimeInterval(v), colour: Design.houseYellow)

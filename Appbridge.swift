@@ -320,6 +320,7 @@ final class AppbridgeStore: NSObject, UNUserNotificationCenterDelegate {
         guard let root else { throw failure("Open a catalogue first.") }
         try ASERegistry.write(proposed, root: root)
         sources = proposed
+        generation += 1 // Invalidate scans captured before this registry mutation.
     }
     func add(_ url: URL, folder: Bool) {
         do {
@@ -341,20 +342,36 @@ final class AppbridgeStore: NSObject, UNUserNotificationCenterDelegate {
     }
     func detach(_ file: File) {
         do {
-            var updated = sources.filter { $0.folder || $0.url.standardizedFileURL != file.url.standardizedFileURL }
-            for i in updated.indices where updated[i].folder && file.url.path.hasPrefix(updated[i].url.path + "/") {
-                updated[i].excluded = Array(Set((updated[i].excluded ?? []) + [file.url.standardizedFileURL.path])).sorted()
-            }
+            let updated = Self.detaching(file, from: sources)
             try save(updated)
-            files.removeAll { $0.id == file.id }
+            files.removeAll { $0.url.standardizedFileURL == file.url.standardizedFileURL }
             if selected == file.id { selected = nil }
             onChange?(); restartWatches(); scan()
         } catch { report(error.localizedDescription) }
+    }
+    /// Remove the link even when the file is offline; exclude descendants from watched folders.
+    static func detaching(_ file: File, from sources: [Source]) -> [Source] {
+        let path = file.url.standardizedFileURL.path
+        var result = sources.filter { $0.url.standardizedFileURL.path != path }
+        for i in result.indices where result[i].folder && path.hasPrefix(result[i].url.standardizedFileURL.path + "/") {
+            result[i].excluded = Array(Set((result[i].excluded ?? []) + [path])).sorted()
+        }
+        return result
+    }
+    private func isMissing(_ file: File) -> Bool {
+        do { _ = try file.url.resourceValues(forKeys: [.isRegularFileKey]); return false }
+        catch { return (error as NSError).code == NSFileReadNoSuchFileError || (error as NSError).code == NSFileNoSuchFileError }
     }
     func duplicate(_ file: File) {
         copyASE(from: file.url, intoBucket: false, suggestedName: file.url.deletingPathExtension().lastPathComponent + " Copy.ase", attach: true)
     }
     func confirmDelete(_ file: File, over view: NSView) {
+        if isMissing(file) {
+            let modal = SwissFocusModal(title: "Remove Missing ASE Reference?", message: "This file is no longer at its saved location. Remove its Appbridge reference without changing files on disk.")
+            modal.button("Cancel") { [weak modal] in modal?.dismissOverlay() }
+            modal.button("Remove Reference", primary: true) { [weak self, weak modal] in modal?.dismissOverlay(); self?.detach(file) }
+            modal.present(over: view); return
+        }
         let modal = SwissFocusModal(title: "Move ASE File To Trash?", message: "This deletes the actual file from its folder—not just its Appbridge link. Other apps and catalogues using this file will lose access to it.")
         let details = Design.text(file.url.lastPathComponent + "\n" + file.url.deletingLastPathComponent().path + "\n\nYou can restore it from macOS Trash until Trash is emptied. To keep the file on disk, cancel and use Detach instead.", .body)
         details.maximumNumberOfLines = 0; details.lineBreakMode = .byWordWrapping
@@ -365,9 +382,46 @@ final class AppbridgeStore: NSObject, UNUserNotificationCenterDelegate {
         }
         modal.present(over: view)
     }
-    private func delete(_ file: File) {
-        do { try FileManager.default.trashItem(at: file.url, resultingItemURL: nil); detach(file) }
-        catch { report("Could not move the file to Trash: " + error.localizedDescription) }
+    private func delete(_ file: File, canRequestAccess: Bool = true) {
+        guard let catalogue = root else { return }
+        if isMissing(file) { detach(file); return }
+        do {
+            let values = try file.url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { report("This reference does not identify an ASE file. Use Remove Reference to disconnect it."); return }
+        } catch { report("Could not access the ASE file: " + error.localizedDescription); return }
+        NSWorkspace.shared.recycle([file.url]) { [weak self] moved, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if moved[file.url] != nil {
+                    FolderAccess.forget(file.url)
+                    if self.root == catalogue { self.detach(file) }
+                    else {
+                        do { try ASERegistry.write(Self.detaching(file, from: ASERegistry.resolved(catalogue)), root: catalogue) }
+                        catch { self.report("The file was moved to Trash, but its saved reference could not be removed: " + error.localizedDescription) }
+                    }
+                } else if self.root == catalogue && self.isMissing(file) { self.detach(file) }
+                else {
+                    #if APPSTORE
+                    let code = (error as NSError?)?.code
+                    if canRequestAccess && (code == NSFileWriteNoPermissionError || code == NSFileReadNoPermissionError) {
+                        let parent = file.url.deletingLastPathComponent()
+                        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+                        panel.allowsMultipleSelection = false; panel.directoryURL = parent
+                        panel.message = "Allow access to the containing folder to move this ASE file to Trash. Select " + parent.lastPathComponent + "."
+                        panel.prompt = "Allow And Move To Trash"
+                        panel.begin { [weak self] result in
+                            guard result == .OK, let chosen = panel.url, let self else { return }
+                            guard chosen.standardizedFileURL == parent.standardizedFileURL else { self.report("Select the file’s containing folder to grant access."); return }
+                            do { try FolderAccess.authorize(chosen, renew: true); self.delete(file, canRequestAccess: false) }
+                            catch { self.report(error.localizedDescription) }
+                        }
+                        return
+                    }
+                    #endif
+                    self.report("Could not move the file to Trash: " + (error?.localizedDescription ?? "macOS did not move this file.") + " Use Remove Reference to keep the file and remove its Appbridge link.")
+                }
+            }
+        }
     }
     func toggle(_ id: UUID, notifications: Bool = false) {
         guard let i = sources.firstIndex(where: { $0.id == id }) else { return }
@@ -762,7 +816,7 @@ private final class AppbridgeFileList: NSView {
 
 final class AppbridgeListButton: NSButton {
     var trailingSymbol: String?
-    var outlined = false
+    var outlined = false { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     private let symbol: String?
     private let run: () -> Void
     private var hovering = false
@@ -775,6 +829,10 @@ final class AppbridgeListButton: NSButton {
         setButtonType(.momentaryChange)
     }
     required init?(coder: NSCoder) { fatalError() }
+    override var intrinsicContentSize: NSSize {
+        if outlined || symbol == nil { return ActionButtonSkin.size(title) }
+        return super.intrinsicContentSize
+    }
     override var isFlipped: Bool { true }
     override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
     override func updateTrackingAreas() {
@@ -785,16 +843,9 @@ final class AppbridgeListButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        if outlined { fill(bounds.insetBy(dx: 1, dy: 1), Design.card); Design.ink.setStroke(); NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)).stroke() }
-        if symbol != "colorgain.ase" && isEnabled && (hovering || isHighlighted) { fill(bounds.insetBy(dx: 2, dy: 2), Design.mist) }
         if outlined {
-            let label = Design.attributed(title, .action)
-            label.draw(at: NSPoint(x: 14, y: (bounds.height - label.size().height) / 2))
-            if let trailingSymbol {
-                let x = bounds.width - 28
-                fill(NSRect(x: x, y: 8, width: 1, height: bounds.height - 16), Design.rule)
-                NSImage(systemSymbolName: trailingSymbol, accessibilityDescription: nil)?.draw(in: NSRect(x: x + 7, y: (bounds.height - 14) / 2, width: 14, height: 14), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            }
+            ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted,
+                focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled)
         } else if symbol == "colorgain.ase" {
             ASEIcon.image.draw(in: NSRect(x: 0, y: 3, width: 16, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             Design.attributed(title, .body).draw(x: 24, baseline: Design.App.textBaseline, width: max(0, bounds.width - 32))
@@ -802,9 +853,9 @@ final class AppbridgeListButton: NSButton {
             let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
             image?.draw(in: NSRect(x: (bounds.width - 14) / 2, y: Design.App.textBaseline - 12, width: 14, height: 14), from: .zero, operation: .sourceOver, fraction: isEnabled ? 1 : 0.35, respectFlipped: true, hints: nil)
         } else {
-            Design.attributed(title, .body, colour: isEnabled ? Design.ink : Design.quiet).draw(x: outlined ? 12 : 4, baseline: outlined ? Design.App.textBaseline - 2 : Design.App.textBaseline, width: max(0, bounds.width - (outlined ? 24 : 8)))
+            ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted)
         }
-        if window?.firstResponder === self { Design.ink.setStroke(); NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)).stroke() }
+        if !outlined && window?.firstResponder === self { Design.ink.setStroke(); NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)).stroke() }
     }
     @objc private func pressed() { run() }
 }

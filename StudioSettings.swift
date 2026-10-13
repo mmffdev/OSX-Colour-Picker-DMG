@@ -279,6 +279,21 @@ enum SettingsSheet {
         let first = layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil).minY + layout.location(forGlyphAt: 0).y
         layout.drawGlyphs(forGlyphRange: range, at: NSPoint(x: x, y: firstBaseline - first))
     }
+    /// Snap wrapped descriptions to the grid, retaining one clear row before the next setting.
+    static func settingAdvance(_ text: String, width: CGFloat, paragraphOffset: CGFloat = 2) -> CGFloat {
+        let storage = NSTextStorage(attributedString: Design.attributed(text, .caption, lineHeight: true))
+        let layout = NSLayoutManager(), container = NSTextContainer(containerSize: NSSize(width: max(1, width), height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0; storage.addLayoutManager(layout); layout.addTextContainer(container)
+        let range = layout.glyphRange(for: container)
+        guard range.length > 0 else { return paragraphOffset + 1 }
+        func baseline(_ glyph: Int) -> CGFloat { layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + layout.location(forGlyphAt: glyph).y }
+        return paragraphOffset + ceil(max(0, baseline(range.length - 1) - baseline(0)) / Design.App.unit) + 1
+    }
+    static func settingGroups(_ descriptions: [String], width: CGFloat) -> (rows: [CGFloat], end: CGFloat) {
+        var cursor: CGFloat = 5, rows: [CGFloat] = []
+        for text in descriptions { rows.append(cursor); cursor += settingAdvance(text, width: width) }
+        return (rows, cursor)
+    }
     static func columns(width: CGFloat, window: CGFloat) -> [CGFloat] {
         Design.App.pageColumns(width: width, in: window).x
     }
@@ -619,15 +634,16 @@ final class SoundsSettings: NSView, PageSection {
     }
 }
 
-/// Quiet header tabs retain the house underline and expose native button keyboard access.
+/// Tabs share a leading direction glyph and a marker below their owning divider.
 final class SectionAnchorButton: NSButton {
     var active = false
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         let hover = window.map { bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil)) } ?? false
         if hover { Design.mist.setFill(); bounds.fill() }
-        attributedTitle.draw(x:0,baseline:17,width:bounds.width-12)
-        if active { Design.ink.setFill(); NSRect(x:0,y:bounds.height-3,width:max(0,bounds.width-24),height:1).fill() }
+        RowMark.draw("arrow.down.right", x:0, baseline:17, colour: active ? Design.ink : Design.quiet)
+        attributedTitle.draw(x:20,baseline:17,width:bounds.width-32)
+        if active { Design.ink.setFill(); NSRect(x:20,y:28,width:min(attributedTitle.size().width,max(0,bounds.width-32)),height:2).fill() }
         if window?.firstResponder === self { Design.ink.setStroke(); NSBezierPath(rect:bounds.insetBy(dx:1,dy:1)).stroke() }
     }
     override func resetCursorRects() { addCursorRect(bounds,cursor:.pointingHand) }
@@ -637,4 +653,116 @@ final class SectionAnchorButton: NSButton {
     }
     override func mouseEntered(with event:NSEvent) { needsDisplay=true }
     override func mouseExited(with event:NSEvent) { needsDisplay=true }
+}
+
+/// Portable Library policies use the same numbered sheet and controls as Halo.
+final class LibrarySettings: NSView, PageSection {
+    var onResize: (() -> Void)?
+    var sectionAnchors: [(String, CGFloat)] { [("Palette Settings", SettingsSheet.headerGuide + 1)] }
+    private let toggles = [SwissButton("", .secondary), SwissButton("", .secondary), SwissButton("", .secondary), SwissButton("", .secondary)]
+    private let names = ["Copy To Every Palette Bucket", "Retain Original In Library", "Create Claimed Library Copies", "Remove Associated Claimed Copies"]
+    private let descriptions = [
+        "Off: copy into the selected project bucket only. On: create a separate copy in every palette bucket of that project. Each copy can be edited independently.",
+        "On: keep the original palette in the main Library. Off: remove the Library original after the project copy is saved. Palettes copied from another project remain in their original project.",
+        "Keep an additional independent copy in Claimed Palettes, labelled with its project and bucket. Editing a claimed copy does not change the project copy. Available only while retaining the original.",
+        "On: deleting a project palette also removes its associated copies from Claimed Palettes. Off: retain those independent Library copies. Other projects and unrelated Library palettes are unaffected."
+    ]
+    private var contentX: CGFloat { SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
+    init() {
+        super.init(frame: .zero)
+        for (i, toggle) in toggles.enumerated() {
+            toggle.tag = i; toggle.target = self; toggle.action = #selector(changed(_:))
+            toggle.setAccessibilityLabel(names[i]); toggle.toolTip = descriptions[i]; addSubview(toggle)
+        }
+        reload()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    func reload() {
+        let states = [Prefs.libraryCopyAllBuckets, Prefs.libraryKeepOriginal, Prefs.libraryKeepClaimed, Prefs.libraryRemoveClaimed]
+        for i in toggles.indices { toggles[i].title = names[i] + ": " + (states[i] ? "On" : "Off") }
+        toggles[2].isHidden = !Prefs.libraryKeepOriginal
+        needsLayout = true; needsDisplay = true; onResize?()
+    }
+    @objc private func changed(_ sender: NSButton) {
+        switch sender.tag {
+        case 0: Prefs.libraryCopyAllBuckets.toggle()
+        case 1: Prefs.libraryKeepOriginal.toggle()
+        case 2: Prefs.libraryKeepClaimed.toggle()
+        default: Prefs.libraryRemoveClaimed.toggle()
+        }
+        reload()
+    }
+    private var visibleIndices: [Int] { toggles.indices.filter { $0 != 2 || Prefs.libraryKeepOriginal } }
+    private func geometry(_ width: CGFloat) -> (rows: [CGFloat], end: CGFloat) {
+        let x = SettingsSheet.contentColumn(width: width, window: window?.frame.width ?? Design.App.size.width)
+        return SettingsSheet.settingGroups(visibleIndices.map { descriptions[$0] }, width: max(140, width - x))
+    }
+    private func row(_ index: Int) -> CGFloat { visibleIndices.firstIndex(of: index).map { geometry(bounds.width).rows[$0] } ?? 5 }
+    func height(forWidth width: CGFloat) -> CGFloat { SettingsSheet.baseline(geometry(width).end + 2) }
+    override func layout() {
+        super.layout()
+        let width = max(140, bounds.width - contentX)
+        for i in toggles.indices {
+            let baseline = SettingsSheet.baseline(CGFloat(row(i)))
+            toggles[i].frame = NSRect(x: contentX, y: SettingsSheet.buttonTop(baseline: baseline),
+                width: min(width, max(200, toggles[i].intrinsicContentSize.width)), height: SwissButton.height)
+        }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        SettingsSheet.title("Library.")
+        SettingsSheet.introduction("Project palette copies", "Choose how Library palettes are assigned to project buckets.", x: contentX, width: bounds.width)
+        SettingsSheet.section(1, "Palette Settings", guide: SettingsSheet.headerGuide, contentX: contentX, width: bounds.width)
+        for i in toggles.indices where !toggles[i].isHidden {
+            SettingsSheet.paragraph(descriptions[i], x: contentX,
+                firstBaseline: SettingsSheet.baseline(CGFloat(row(i) + 2)), width: max(140, bounds.width - contentX), height: SettingsSheet.settingAdvance(descriptions[i], width: max(140, bounds.width - contentX)) * Design.App.unit)
+        }
+        SettingsSheet.divider(above: SettingsSheet.baseline(geometry(bounds.width).end), width: bounds.width)
+    }
+}
+
+final class GeneralSettings: NSView, PageSection {
+    var onResize: (() -> Void)?
+    var onWizard: (() -> Void)?
+    var onReset: (() -> Void)?
+    var sectionAnchors: [(String, CGFloat)] { [("Setup & Preferences", SettingsSheet.headerGuide + 1)] }
+    private let descriptions = ["Restore default app preferences. Your catalogues, palettes, colours, saved key profiles and folder access remain available. Completed setup stays complete.","Reopen the workspace setup wizard to review your catalogue structure. The wizard opens only when you request it; a completed workspace opens directly into the app."]
+    private let reset = SwissButton("Reset App Preferences", .secondary)
+    private let wizard = SwissButton("Open Setup Wizard", .secondary)
+    private var contentX: CGFloat { SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
+    init() {
+        super.init(frame: .zero)
+        reset.target = self; reset.action = #selector(resetPreferences)
+        wizard.target = self; wizard.action = #selector(openWizard)
+        for button in [reset, wizard] { addSubview(button) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    func reload() { needsLayout = true; needsDisplay = true }
+    private func geometry(_ width: CGFloat) -> (rows: [CGFloat], end: CGFloat) {
+        let x = SettingsSheet.contentColumn(width: width, window: window?.frame.width ?? Design.App.size.width)
+        return SettingsSheet.settingGroups(descriptions, width: max(140, width - x))
+    }
+    func height(forWidth width: CGFloat) -> CGFloat { SettingsSheet.baseline(geometry(width).end + 2) }
+    override func layout() {
+        super.layout()
+        for (button, row) in zip([reset, wizard], geometry(bounds.width).rows) {
+            button.frame = NSRect(x: contentX, y: SettingsSheet.buttonTop(baseline: SettingsSheet.baseline(CGFloat(row))), width: min(bounds.width - contentX, button.intrinsicContentSize.width), height: SwissButton.height)
+        }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        SettingsSheet.title("General.")
+        SettingsSheet.introduction("Your workspace", "Manage app preferences and revisit the setup wizard.", x: contentX, width: bounds.width)
+        SettingsSheet.section(1, "Setup & Preferences", guide: SettingsSheet.headerGuide, contentX: contentX, width: bounds.width)
+        SettingsSheet.paragraph(descriptions[0], x: contentX, firstBaseline: SettingsSheet.baseline(geometry(bounds.width).rows[0] + 2), width: bounds.width - contentX, height: SettingsSheet.settingAdvance(descriptions[0], width: max(140, bounds.width - contentX)) * Design.App.unit)
+        SettingsSheet.paragraph(descriptions[1], x: contentX, firstBaseline: SettingsSheet.baseline(geometry(bounds.width).rows[1] + 2), width: bounds.width - contentX, height: SettingsSheet.settingAdvance(descriptions[1], width: max(140, bounds.width - contentX)) * Design.App.unit)
+        SettingsSheet.divider(above: SettingsSheet.baseline(geometry(bounds.width).end), width: bounds.width)
+    }
+    @objc private func resetPreferences() {
+        SwissConfirm.ask(over: window, title: "Reset App Preferences", note: "Restore default app preferences while keeping your catalogues, assets and completed setup. Slide across to reset.", commit: "Reset") { [weak self] in
+            do { try AppPreferences.shared.resetUserPreferences(); self?.reload(); self?.onReset?() }
+            catch { NSApp.presentError(error) }
+        }
+    }
+    @objc private func openWizard() { onWizard?() }
 }

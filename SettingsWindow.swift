@@ -171,7 +171,7 @@ class SettingsPanel: NSViewController {
     }
 
     func button(_ title: String, _ action: Selector) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
+        let b = ActionButton(title: title, target: self, action: action)
         b.bezelStyle = .rounded
         return b
     }

@@ -158,7 +158,7 @@ final class PageHeader: NSView {
 
 }
 
-final class PillButton: NSButton {
+final class PillButton: ActionButton {
     private let onClick: () -> Void
 
     init(title: String, symbol name: String, action: @escaping () -> Void) {

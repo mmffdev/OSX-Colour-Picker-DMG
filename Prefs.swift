@@ -38,6 +38,50 @@ enum Prefs {
     private static func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
     private static func int(_ key: String, _ fallback: Int) -> Int { d.object(forKey: key) as? Int ?? fallback }
 
+    static var deltaWarningsEnabled:Bool {
+        get {bool("prepress.deltaWarnings",false)}
+        set {d.set(newValue,forKey:"prepress.deltaWarnings");changed()}
+    }
+    static var sharingCameraAllowed: Bool {
+        get { preferences.bool(forKey: "sharing.cameraAllowed") }
+        set { preferences.set(newValue, forKey: "sharing.cameraAllowed"); changed() }
+    }
+
+    static var appleMenubarSwatches: Bool {
+        get { bool("appleMenubar.swatches", true) }
+        set { d.set(newValue, forKey: "appleMenubar.swatches"); changed() }
+    }
+    static var appleMenubarCount: Int {
+        get { min(20, max(1, int("appleMenubar.count", 10))) }
+        set { d.set(min(20, max(1, newValue)), forKey: "appleMenubar.count"); changed() }
+    }
+    static var appleMenubarSound: Bool {
+        get { bool("appleMenubar.sound", true) }
+        set { d.set(newValue, forKey: "appleMenubar.sound"); changed() }
+    }
+
+    static var libraryRemoveClaimed: Bool {
+        get { bool("library.removeClaimedWithProject", true) }
+        set { d.set(newValue, forKey: "library.removeClaimedWithProject"); changed() }
+    }
+
+    static var libraryCopyAllBuckets: Bool {
+        get { bool("library.copyAllBuckets", false) }
+        set { d.set(newValue, forKey: "library.copyAllBuckets"); changed() }
+    }
+    static var libraryKeepOriginal: Bool {
+        get { bool("library.keepOriginal", true) }
+        set {
+            d.set(newValue, forKey: "library.keepOriginal")
+            if !newValue { d.set(false, forKey: "library.keepClaimed") }
+            changed()
+        }
+    }
+    static var libraryKeepClaimed: Bool {
+        get { libraryKeepOriginal && bool("library.keepClaimed", false) }
+        set { d.set(libraryKeepOriginal && newValue, forKey: "library.keepClaimed"); changed() }
+    }
+
     /// What a click on a swatch puts on the clipboard.
     static var copyFormat: ColourFormat {
         get { ColourFormat(rawValue: d.string(forKey: "copyFormat") ?? "") ?? .hex }
@@ -139,7 +183,7 @@ enum Prefs {
 
     /// The launch artwork before the window. New-user testing always includes this stage.
     static var splash: Bool {
-        get { CommandLine.arguments.contains("--new-user") || bool("splash", true) }
+        get { !CommandLine.arguments.contains("--no-splash") && !DevelopmentLaunch.enabled && (CommandLine.arguments.contains("--new-user") || bool("splash", true)) }
         set { d.set(newValue, forKey: "splash") }
     }
 

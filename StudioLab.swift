@@ -292,16 +292,15 @@ final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
         let g = geometry(width: bounds.width), u = Self.u, line = Self.line
         // A boxed or quiet button's words sit 22 below its top: its frame is set so they sit on the row's line.
         func place(_ b: SwissButton, x: CGFloat, row: CGFloat) { b.frame = NSRect(x: x, y: row * u + line - 22, width: b.intrinsicContentSize.width, height: SwissButton.height) }
-        func placeRight(_ b: SwissButton, right: CGFloat, top: CGFloat) { b.frame = NSRect(x: right - b.intrinsicContentSize.width, y: top + line - 22, width: b.intrinsicContentSize.width, height: SwissButton.height) }
         // The actions under the slider, from the side's left edge, a step apart.
         var x = g.rx
         for b in [random, addOne, undo, redo] { place(b, x: x, row: 15); x += b.intrinsicContentSize.width + 24 }
         // Contrast leaves the page: the arrow at the top right of the side.
-        placeRight(contrast, right: g.w, top: 0)
+        contrast.frame = NSRect(x: g.rx + Design.attributed("Harmony", .header).size().width + 24, y: line - 22, width: contrast.intrinsicContentSize.width, height: SwissButton.height)
         // Both save buttons end on the proof numeral's baseline.
         let saveButtonTop = g.proof.maxY - SwissButton.height - line + 22
-        placeRight(toPalette, right: g.w, top: saveButtonTop)
-        placeRight(toProject, right: toPalette.frame.minX - Design.App.gutter, top: saveButtonTop)
+        toProject.frame = NSRect(x: g.rx, y: saveButtonTop + line - 22, width: toProject.intrinsicContentSize.width, height: SwissButton.height)
+        toPalette.frame = NSRect(x: toProject.frame.maxX + Design.App.gutter, y: toProject.frame.minY, width: toPalette.intrinsicContentSize.width, height: SwissButton.height)
         // The name on its hairline, from the left side's second column; a 13 field's words sit twelve below its top.
         let fx = g.x(1)
         nameField.frame = NSRect(x: fx - 2, y: g.saveTop + line - 12, width: g.lw - fx + 2, height: 20)

@@ -29,6 +29,8 @@ struct HaloAction {
     /// Set to make the action grow a ring of its own outside the one it sits on, holding these. Declared
     /// after onSelect so a trailing closure on either initialiser is the action, never the ring.
     var children: (() -> [HaloAction])? = nil
+    /// Conventional menus may need their own confirmation route instead of the halo’s slider.
+    var onMenuSelect: (() -> Void)? = nil
 }
 
 extension HaloAction {

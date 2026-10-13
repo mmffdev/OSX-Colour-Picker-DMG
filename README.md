@@ -103,3 +103,9 @@ Every Swift file in the root is compiled into the app, so scripts and other Swif
 ## History
 
 This repository began with two earlier, smaller apps (MMFFDev Colour and MMFFDev Colour 2). Their source was removed once this one replaced them and remains in the git history. The app can still bring in a library left behind by either.
+
+## Workspace startup and development resume
+
+Open existing `colorgain.coldata` (or its folder) first, then select a validated catalogue. An empty workspace offers first-catalogue creation; unavailable catalogue locations offer recovery. File → Open Workspace can switch to another existing workspace without moving its data.
+
+The Development menu’s Resume Workspace Automatically toggle starts off. Launch once with `--dev-on` to keep it enabled across development sessions, and `--dev-off` to keep it disabled again. It never skips incomplete setup or missing/invalid catalogue access. `--workspace <path>` selects a specific app-data file/folder. Details: [.codex/c_workspace_startup.md](.codex/c_workspace_startup.md).

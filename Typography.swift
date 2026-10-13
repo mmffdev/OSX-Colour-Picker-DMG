@@ -118,7 +118,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
         fonts.stringValue = "Heading: \(style.headingFont ?? "System Font")\nText: \(style.bodyFont ?? "System Font")"
 
         func small(_ title: String, _ tip: String, _ action: Selector) -> NSButton {
-            let b = NSButton(title: title, target: self, action: action)
+            let b = ActionButton(title: title, target: self, action: action)
             b.bezelStyle = .rounded
             b.controlSize = .small
             b.font = NSFont.systemFont(ofSize: TextSize.body)
