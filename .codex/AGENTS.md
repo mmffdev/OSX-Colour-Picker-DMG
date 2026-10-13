@@ -137,3 +137,5 @@ App Store Apple Menubar uses one native status item, shared picker controllers, 
 Page colour hover halos dismiss immediately on scrolling, forward the gesture to their owning page scroll view, and remain suppressed until a real pointer move. Shared QR exchange details live in [c_qr_sharing.md](c_qr_sharing.md).
 
 Saved print settings, palette Delta controls and .colpro exchange use the shared [.coldata profile workflow](c_print_profiles.md). Dropdown values and menu rows use the 13-point body style.
+
+Header background presses use native window dragging after control hit tests. Tab hit areas cover only the icon/label band, leaving space above and below draggable. Header utility glyphs share the 18-point `HeaderUtilityIcon` square and optical centre. Help sits immediately before Settings; entry collapses Rail 1 and closes the other rails, restoring preceding rail goals on exit. Initial help content is bundled Markdown in `HelpResources`, rendered by `StudioHelpPage`; both build targets must include these resources.

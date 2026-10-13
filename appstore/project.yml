@@ -32,6 +32,9 @@ targets:
       - path: ../ProofingResources
         name: Proofing Reference Data
         buildPhase: resources
+      - path: ../HelpResources
+        name: Help Articles
+        buildPhase: resources
       - path: ../AppIcon.icns
         buildPhase: resources
       - path: ../icons

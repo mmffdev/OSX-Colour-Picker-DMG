@@ -193,7 +193,7 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
     private var paletteSelection = PaletteSelection()
     private var selectionHalo: HaloMenu?
@@ -266,6 +266,7 @@ final class StudioFrame: NSView {
     private var printWorkspace: Bool { place == .prepress(PrePressPage.Flow.print.rawValue) }
     let prePressPage: PrePressPage
     private var beforePrePressRail: CGFloat = 1
+    private var beforeHelp: (rail1: CGFloat, rail2: CGFloat, history: CGFloat)?
     let appbridge = AppbridgeStore()
     /// How open each panel is, 0 to 1, and where each is going: the frame is laid out from these, and the clock slides them.
     private var open = (rail1: CGFloat(1), rail2: CGFloat(1), history: CGFloat(0))
@@ -324,6 +325,8 @@ final class StudioFrame: NSView {
         }
         header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge, .qrImport][i]) }
         header.onSettings = { [weak self] in self?.openSettings() }
+        header.onHelp = { [weak self] in self?.go(.help) }
+        page.add(StudioHelpPage(), as: .help)
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
         header.onSearchCommitted = { [weak self] in self?.fillHistory() }
@@ -704,6 +707,9 @@ final class StudioFrame: NSView {
     }
 
     func go(_ p: Place) {
+        if place == .help, p != .help, let previous = beforeHelp {
+            goal = previous; beforeHelp = nil
+        }
         if case .palette(let id) = p, library.library.swatch(id) != nil {
             if !paletteSelection.ids.contains(id) { paletteSelection.ids = [id]; paletteSelection.anchor = id }
         } else { paletteSelection.ids = []; paletteSelection.anchor = nil }
@@ -726,6 +732,10 @@ final class StudioFrame: NSView {
             goal.rail1 = 0
         } else if narrows(place) && !narrows(p) {
             goal.rail1 = beforePrePressRail
+        }
+        if p == .help {
+            if place != .help { beforeHelp = goal }
+            goal = (0, 0, 0)
         }
         place = p
         slide()
@@ -760,7 +770,7 @@ final class StudioFrame: NSView {
     }
 
     /// The Lab has no rail2: its columns go to the page. Contrast keeps it, as the list of palettes to pick the pair from.
-    private var railTwo: CGFloat { expanded || place == .lab || place == .catalogue || place == .qrImport ? 0 : 1 }
+    private var railTwo: CGFloat { expanded || place == .lab || place == .catalogue || place == .qrImport || place == .help ? 0 : 1 }
 
     private func choose(_ hex: String) {
         chosenHex = hex
@@ -802,7 +812,7 @@ final class StudioFrame: NSView {
         }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -1155,7 +1165,7 @@ final class StudioFrame: NSView {
         }
         var heading = "Palettes", labels = ("Palette", "Count"), rows: [PaletteTable.Row] = []
         switch place {
-        case .qrImport: break
+        case .qrImport, .help: break
         case .catalogue:
             break // No context until a Library item is selected.
         case .palettes:
@@ -1373,6 +1383,10 @@ final class StudioFrame: NSView {
         case .sharingSettings:
             title = "Sharing"; meta = ("QR Generation Settings", "Offline Colour Exchange")
             page.show(.sharingSettings)
+        case .help:
+            title = "Help"; meta = ("Colorgain", "Getting Started")
+            page.showsFormat = false
+            page.show(.help)
         case .qrImport:
             title = "Import"; meta = ("QR Colour Exchange", "Camera · Image · Clipboard")
             page.show(.qrImport)
@@ -1553,6 +1567,65 @@ private final class PaletteHaloButton: NSButton {
     }
 }
 
+/// One square drawing box and centre for every header utility glyph.
+private enum HeaderUtilityIcon {
+    static let size: CGFloat = 18
+    private static var images: [String: NSImage] = [:]
+    static func rect(in bounds: NSRect) -> NSRect {
+        NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
+    }
+    static func draw(_ name: String, in bounds: NSRect) {
+        if let image = images[name] {
+            image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: name)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [Design.ink]))),
+              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 72, pixelsHigh: 72,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+        // SF Symbols include differing optical margins. Trim once, then cache;
+        // all utility glyphs occupy the same visible square at every redraw.
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        symbol.draw(in: NSRect(x: 0, y: 0, width: 72, height: 72))
+        NSGraphicsContext.restoreGraphicsState()
+        var minX = 72, minY = 72, maxX = -1, maxY = -1
+        for y in 0..<72 { for x in 0..<72 where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.04 {
+            minX = min(minX, x); minY = min(minY, y); maxX = max(maxX, x); maxY = max(maxY, y)
+        } }
+        guard maxX >= minX, maxY >= minY,
+              let pixels = bitmap.cgImage?.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)) else { return }
+        let image = NSImage(cgImage: pixels, size: NSSize(width: size, height: size))
+        images[name] = image
+        image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+}
+
+private final class HeaderHelpButton: NSButton {
+    private var hovered = false
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        isBordered = false; title = ""; setButtonType(.momentaryChange)
+        toolTip = "Help"; setAccessibilityLabel("Help")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func draw(_ dirtyRect: NSRect) {
+        if hovered || isHighlighted { fill(bounds, Design.rule.withAlphaComponent(0.25)) }
+        HeaderUtilityIcon.draw("questionmark.circle", in: bounds)
+    }
+}
+
 final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     var overlayWindows: [NSWindow] { (dropped.map { [$0] } ?? []) + (searchPanel.map { [$0] } ?? []) }
     func dismissOverlay() { closeMenu(); hideSearch() }
@@ -1564,7 +1637,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
     var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { if grid != oldValue { needsLayout = true; needsDisplay = true } } }
     var live: Int? = 0 { didSet { needsLayout = true; needsDisplay = true } }
-    private var settingsRect = NSRect.zero, searchRect = NSRect.zero
+    private var settingsRect = NSRect.zero, searchRect = NSRect.zero, helpRect = NSRect.zero
     struct SavedSearch: Codable { var query: String; var date: Date; var favourite: Bool }
     var searchStorageKey = "Studio.Searches"
     var savedSearches: [SavedSearch] {
@@ -1599,6 +1672,8 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     private var markRects: [NSRect] = []
     private var markHover: Int?
     private var dropped: SwissDropdown.MenuPanel?
+    private let helpButton = HeaderHelpButton(frame: .zero)
+    var onHelp: (() -> Void)?
     var onSettings: (() -> Void)?
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
@@ -1629,9 +1704,12 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         paletteHalo.setAccessibilityLabel("Open palette wheel")
         paletteHalo.toolTip = "Palette wheel · Tab"
         addSubview(paletteHalo)
+        helpButton.target = self; helpButton.action = #selector(openHelp)
+        addSubview(helpButton)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
+    @objc private func openHelp() { onHelp?() }
     @objc private func openPaletteWheel() { onPaletteWheel?() }
     override var isFlipped: Bool { true }
 
@@ -1646,6 +1724,8 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         let font = Design.Text.body.font()
         let textCentre = Self.baseline - (font.ascender + font.descender) / 2
         paletteHalo.frame = NSRect(x: navigationStart + tabWidth - 6, y: textCentre - 14, width: 28, height: 28)
+        let helpRight = bounds.width - Design.App.margin + 5
+        helpButton.frame = NSRect(x: helpRight - 168, y: textCentre - 12, width: 24, height: 24)
         // Law 1: the field's text on the baseline.
         let right = bounds.width - Design.App.margin
         let end = right - 220
@@ -1675,7 +1755,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
             RowMark.draw(["books.vertical", "square.stack", "flask", "printer", "circle.lefthalf.filled", "folder", "arrow.triangle.branch", "square.and.arrow.down"][i], x:x, baseline:b, colour:i == live ? Design.ink : Design.quiet)
             a.draw(x: x + 20, baseline: b)
             let w = a.size().width + 20
-            tabRects.append(NSRect(x: x - 8, y: 0, width: w + 16, height: bounds.height))
+            tabRects.append(NSRect(x: x - 8, y: b - 20, width: w + 16, height: 28))
             if i == live { fill(NSRect(x: x + 20, y: b + 7, width: w - 20, height: 1), Design.ink) }
             x += w + 12
         }
@@ -1683,6 +1763,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         let font = Design.Text.body.font()
         let centreY = b - (font.ascender + font.descender) / 2
         searchRect = NSRect(x: right - 228, y: centreY - 12, width: 24, height: 24)
+        helpRect = NSRect(x: right - 168, y: centreY - 12, width: 24, height: 24)
         settingsRect = NSRect(x: right - 132, y: centreY - 12, width: 24, height: 24)
         copyRect = .zero
         if !searchExpanded {
@@ -1693,8 +1774,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         }
 
         for (name, rect) in [("magnifyingglass", searchRect), ("gearshape", settingsRect)] {
-            let image = NSImage(systemSymbolName: name, accessibilityDescription: name)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(NSImage.SymbolConfiguration(paletteColors: [Design.ink])))
-            image?.draw(in: rect.insetBy(dx: 4, dy: 4), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            HeaderUtilityIcon.draw(name, in: rect)
         }
         if searchProgress > 0 { hairline(x: field.frame.minX, y: b + 7, width: field.frame.width, Design.rule) }
         markRects = []
@@ -1703,7 +1783,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
             let c = Design.ink
             c.setStroke()
             let p = NSBezierPath(); p.lineWidth = 1.3; p.lineCapStyle = .butt
-            let g = r.insetBy(dx: 5, dy: 5)
+            let g = HeaderUtilityIcon.rect(in: r)
             switch i {
             case 3: p.move(to: NSPoint(x: g.minX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY)); p.move(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.minX, y: g.maxY))
             case 2: p.move(to: NSPoint(x: g.minX, y: g.midY)); p.line(to: NSPoint(x: g.maxX, y: g.midY))
@@ -1782,8 +1862,12 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         }
         if let i = tabRects.firstIndex(where: { $0.contains(p) }) { onTab?(i); return }
         if let i = pickRects.firstIndex(where: { $0.contains(p) }) { if i == 0 { onPick?() } else { onSample?() }; return }
+        if helpRect.contains(p) { onHelp?(); return }
         if settingsRect.contains(p) { onSettings?(); return }
-        super.mouseDown(with: event)
+        // Custom-drawn controls above retain their clicks; the rest of the header
+        // behaves like a native title bar. Child buttons and the search field
+        // receive their own events before this view does.
+        window?.performDrag(with: event)
     }
     @objc private func searched() { if !visibleResults.isEmpty { selectResult(0) } }
     func controlTextDidChange(_ obj: Notification) { showSearchDropdown() }
@@ -3127,7 +3211,7 @@ final class StudioPage: NSView, Overlay {
         guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
         return onPaletteDrop?(id) ?? false
     }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, librarySettings, tags, lab, prepress, contrast, share, appbridge }
+    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
     private var section = Section.tiles
     private let sectionTabs = NSScrollView()
     private let tabBody = NSView()

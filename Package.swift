@@ -21,7 +21,7 @@ let package = Package(
             path: ".",
             exclude: [
                 "Package.swift",
-                "reference-data", "ProofingResources", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release",
+                "reference-data", "ProofingResources", "HelpResources", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release",
                 "Claude outputs", ".build", ".swiftpm", ".idea", ".vscode", ".claude",
                 "appstore", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html",
                 "AppIcon.icns", "Info.plist",
