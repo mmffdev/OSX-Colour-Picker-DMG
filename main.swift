@@ -414,6 +414,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Zoom", #selector(NSWindow.performZoom(_:)))
             NSApp.windowsMenu = m
         }
+        menu("Help") { m in
+            NSApp.helpMenu = m
+            let guide = NSMenuItem(title: "Colorgain Help", action: nil, keyEquivalent: "")
+            guide.isEnabled = false
+            guide.toolTip = "The macOS Help book is being prepared."
+            m.addItem(guide)
+        }
         bar.addItem(developmentMenu())
         return bar
     }

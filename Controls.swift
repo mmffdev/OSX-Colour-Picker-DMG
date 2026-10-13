@@ -218,10 +218,17 @@ final class SwissDropdown: NSView, Overlay {
             }
             contentView = card
         }
-        func place(below p: NSPoint) {
-            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else { setFrameTopLeftPoint(p); return }
-            let visible = screen.visibleFrame, fullHeight = frame.height
-            let available = max(150, p.y - visible.minY - 8)
+        /// Footer menus grow upward, retaining scrolling when the available space is limited.
+        func place(above p: NSPoint) {
+            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else {
+                setFrameOrigin(p); return
+            }
+            let visible = screen.visibleFrame
+            fitHeight(max(1, visible.maxY - p.y - 8))
+            setFrameOrigin(NSPoint(x: max(visible.minX, min(p.x, visible.maxX - frame.width)), y: p.y))
+        }
+        private func fitHeight(_ available: CGFloat) {
+            let fullHeight = frame.height
             if fullHeight > available, let card = contentView {
                 let scroll = FittedScrollView(frame: NSRect(x: 0, y: 0, width: frame.width, height: available))
                 scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
@@ -232,6 +239,12 @@ final class SwissDropdown: NSView, Overlay {
                 setContentSize(NSSize(width: frame.width, height: available))
                 scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, fullHeight - available)))
             }
+        }
+        func place(below p: NSPoint) {
+            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else { setFrameTopLeftPoint(p); return }
+            let visible = screen.visibleFrame
+            let available = max(150, p.y - visible.minY - 8)
+            fitHeight(available)
             setFrameTopLeftPoint(NSPoint(x: min(p.x, visible.maxX - frame.width), y: min(visible.maxY, max(p.y, visible.minY + frame.height))))
         }
 

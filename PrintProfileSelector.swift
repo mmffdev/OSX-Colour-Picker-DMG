@@ -9,6 +9,7 @@ final class PrintProfileSelector:NSView,Overlay {
         if event.window === dropped{return true}
         return event.window === window && bounds.contains(convert(event.locationInWindow,from:nil))
     }
+    var opensUpward=false { didSet { button.opensUpward=opensUpward;button.needsDisplay=true } }
     let compact:Bool
     private let button=PrintProfileValueButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -42,7 +43,7 @@ final class PrintProfileSelector:NSView,Overlay {
             }}catch{NSApp.presentError(error)};self.reload()
         }
         panel.configure(disabled:document.selected == nil ? [1,2,3,6]:[6])
-        let screen=window.convertToScreen(convert(button.frame,to:nil));panel.place(below:NSPoint(x:screen.minX,y:screen.minY-4));window.addChildWindow(panel,ordered:.above);dropped=panel;Overlays.opened(self)
+        let screen=window.convertToScreen(convert(button.frame,to:nil));if opensUpward { panel.place(above:NSPoint(x:screen.maxX-panel.frame.width,y:screen.maxY+4)) } else { panel.place(below:NSPoint(x:screen.minX,y:screen.minY-4)) };window.addChildWindow(panel,ordered:.above);dropped=panel;Overlays.opened(self)
     }
     private var selected:SavedPrintProfile?{document.profiles.first{$0.id==document.selected}}
     private func editor(_ original:SavedPrintProfile?,settings:PrintProfileSettings){
@@ -66,10 +67,11 @@ final class PrintProfileSelector:NSView,Overlay {
 }
 private final class PrintProfileValueButton:NSButton {
     var compact=false
+    var opensUpward=false
     override init(frame:NSRect){super.init(frame:frame);isBordered=false;alignment = .left}
     required init?(coder:NSCoder){fatalError()}
     override var isFlipped:Bool{true}
-    override func draw(_ dirtyRect:NSRect){let hover=window.map{bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil))} ?? false;if hover || isHighlighted{Design.mist.setFill();bounds.fill()};let text=Design.attributed(title,.body,colour:Design.ink);text.draw(x:0,baseline:compact ? 17:15,width:max(0,bounds.width-22));RowMark.draw("chevron.down",x:min(bounds.width-14,text.size().width+8),baseline:compact ? 17:15,colour:Design.quiet)}
+    override func draw(_ dirtyRect:NSRect){let hover=window.map{bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil))} ?? false;if hover || isHighlighted{Design.mist.setFill();bounds.fill()};let text=Design.attributed(title,.body,colour:Design.ink);text.draw(x:0,baseline:compact ? 17:15,width:max(0,bounds.width-22));RowMark.draw(opensUpward ? "chevron.up":"chevron.down",x:min(bounds.width-14,text.size().width+8),baseline:compact ? 17:15,colour:Design.quiet)}
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
     override func mouseEntered(with event:NSEvent){needsDisplay=true}

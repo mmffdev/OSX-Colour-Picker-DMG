@@ -34,20 +34,20 @@ final class StudioWindowController: NSWindowController {
     init(library: LibraryController) {
         frame = StudioFrame(library: library)
         let w = StudioWindow(contentRect: NSRect(origin: .zero, size: Design.App.size),
-                             styleMask: [.closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.acceptsMouseMovedEvents = true
         w.title = Brand.edition
-        w.titleVisibility = .hidden
-        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .visible
+        w.titlebarAppearsTransparent = false
         w.isMovableByWindowBackground = false   // a press on the page is a press on the page, never a drag of the window
         w.collectionBehavior = [.fullScreenPrimary, .managed]   // a borderless window goes full screen only when told it may
         w.backgroundColor = Design.paper
-        w.minSize = Design.App.least
+        w.minSize = NSSize(width: 1200, height: 800)
         // A resize moves by whole units, so the rows always end on the beat above the footer.
-        w.resizeIncrements = NSSize(width: 1, height: Design.App.unit)
+        w.resizeIncrements = NSSize(width: 1, height: 1)
         w.contentView = frame
         w.center()
-        w.setFrameAutosaveName("StudioWindow")
+        if let screen = NSScreen.screens.min(by: { $0.frame.minX < $1.frame.minX }) { w.setFrame(screen.visibleFrame, display: false) }
         super.init(window: w)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -253,6 +253,25 @@ final class StudioFrame: NSView {
     let page = StudioPage()
     let history = HistoryRail()
     let footer = StudioFooter()
+    private let cataloguePane = WorkspaceCatalogues()
+    private let inspectorPane = WorkspaceInspector()
+    private let filmstrip = WorkspaceFilmstrip()
+    private let leftPanelRail = WorkspaceRail()
+    private let rightPanelRail = WorkspaceRail()
+    private let workspaceDragShade=WorkspaceDragShade()
+    private let viewportHeader = WorkspaceViewportBar(footer: false)
+    private let viewportFooter = WorkspaceViewportBar(footer: true)
+    private var inspectedPalette: UUID?
+    private var workspaceFilter: String?
+    private var canvasWorkspace: Bool {
+        switch place { case .catalogue, .palettes, .palette, .collection, .folder, .project, .overview, .group: return true; default: return false }
+    }
+    private func inspectPalette(_ id: UUID) {
+        inspectedPalette = id
+        inspectorPane.palette = library.library.swatch(id)
+        page.grid.selectedPalette = id
+        filmstrip.update(palettes(library.library.swatches), selected: id, colours: shade)
+    }
     /// Master Inner over everything: the columns and the beat, in the grid's orange, when it is on.
     let overlay = GridOverlay()
     /// The invisible strip across the top, around the window's three buttons: a press on it drags the window, and the pointer says so.
@@ -285,6 +304,31 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
+        for view in [leftPanelRail, rightPanelRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
+        leftPanelRail.add(WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640))
+        rightPanelRail.add(WorkspacePanel(id: "inspector", title: "Inspector", content: inspectorPane, height: 520))
+        if CommandLine.arguments.contains("--ui-test-panels") {
+            WorkspacePanelUITest.load(into:[leftPanelRail,rightPanelRail])
+        }
+        addSubview(workspaceDragShade);workspaceDragShade.isHidden=true
+        for rail in [leftPanelRail,rightPanelRail] {
+            rail.onDragging = { [weak self] dragging in self?.workspaceDragShade.isHidden = !dragging }
+        }
+        page.workspaceToolbar = viewportFooter
+        viewportFooter.onMode = { [weak self] list in self?.page.grid.listView = list; self?.page.needsLayout = true }
+        cataloguePane.onPick = { [weak self] in self?.go($0) }
+        cataloguePane.onFilter = { [weak self] key in
+            guard let self else { return }; self.workspaceFilter=key; self.place = .palettes; self.reload(); self.needsLayout=true
+        }
+        cataloguePane.onCatalogue = { [weak self] name in self?.library.open(catalogue: name); self?.go(.catalogue) }
+        filmstrip.onPick = { [weak self] id in
+            guard let self else { return }
+            if !self.page.grid.items.contains(where: {$0.id == id}) { self.go(.catalogue) }
+            self.inspectPalette(id); self.page.grid.revealPalette(id)
+        }
+        inspectorPane.onOpen = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.go(.palette(id)) }
+        inspectorPane.onTarget = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.library.setTarget(id) }
+        inspectorPane.onBackground = { [weak self] colour in self?.page.grid.wantsLayer = true; self?.page.grid.layer?.backgroundColor = colour.cgColor }
         settingsCurtainClip.wantsLayer = true
         settingsCurtainClip.layer?.masksToBounds = true
         settingsCurtainClip.isHidden = true
@@ -325,7 +369,6 @@ final class StudioFrame: NSView {
         }
         header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge, .qrImport][i]) }
         header.onSettings = { [weak self] in self?.openSettings() }
-        header.onHelp = { [weak self] in self?.go(.help) }
         page.add(StudioHelpPage(), as: .help)
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -459,7 +502,8 @@ final class StudioFrame: NSView {
         header.onSample = { [weak self] in self?.library.sampleArea() }
         page.grid.onOpen = { [weak self] id in
             guard let self = self else { return }
-            self.go(self.library.library.project(id) != nil ? .project(id) : .palette(id))
+            if self.canvasWorkspace, self.library.library.swatch(id) != nil { self.inspectPalette(id) }
+            else { self.go(self.library.library.project(id) != nil ? .project(id) : .palette(id)) }
         }
         page.settings.library = library
         page.settings.onChange = { [weak self] in self?.reload() }
@@ -590,6 +634,35 @@ final class StudioFrame: NSView {
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
+        leftPanelRail.isHidden = !canvasWorkspace
+        rightPanelRail.isHidden = !canvasWorkspace
+        filmstrip.isHidden = !canvasWorkspace
+        viewportHeader.isHidden = !canvasWorkspace
+        viewportFooter.isHidden = !canvasWorkspace
+        footer.isHidden = canvasWorkspace
+        if canvasWorkspace {
+            let top = A.header + 1, bottom: CGFloat = 120
+            let left: CGFloat = 260, right: CGFloat = 280
+            header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
+            header.grid = (16, A.columnWidth(in: w)); header.railEdge = 248
+            leftPanelRail.frame = NSRect(x: 0, y: top, width: left, height: h-top-bottom)
+            rightPanelRail.frame = NSRect(x: w-right, y: top, width: right, height: h-top-bottom)
+            page.frame = NSRect(x: left+1, y: top, width: w-left-right-2, height: h-top-bottom-32)
+            viewportHeader.frame=NSRect(x:left+1,y:top+AreaHeader.rule+1,width:w-left-right-2,height:24)
+            viewportFooter.frame=NSRect(x:left+1,y:h-bottom-32,width:w-left-right-2,height:32)
+            workspaceDragShade.frame=NSRect(x:left+1,y:top,width:w-left-right-2,height:h-top-bottom)
+            page.inset=16;page.insetRight=16
+            page.compactWorkspace=true
+            filmstrip.frame=NSRect(x:0,y:h-bottom,width:w,height:bottom)
+            [rail1,rail2,history,printPaletteRail].forEach{$0.isHidden=true}
+            settingsCurtainClip.isHidden=true
+            strip.frame=NSRect(x:0,y:0,width:w,height:TitleStrip.height)
+            paletteWheel.frame=bounds;paletteWheel.availableRect=page.frame;paletteWheel.anchor=NSPoint(x:left,y:page.frame.midY)
+            if swatchViewer.superview != nil {swatchViewer.frame=bounds;swatchViewer.availableRect=page.frame}
+            overlay.frame=bounds;overlay.isHidden=true
+            return
+        }
+        page.compactWorkspace=false
         header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
@@ -672,6 +745,12 @@ final class StudioFrame: NSView {
     override func draw(_ dirtyRect: NSRect) {
         // The hairlines that edge the regions: under the header, over the footer, beside each rail.
         let w = bounds.width
+        if canvasWorkspace {
+            hairline(x:0,y:A.header,width:w)
+            fill(NSRect(x:leftPanelRail.frame.maxX,y:A.header,width:1,height:leftPanelRail.frame.height),Design.rule)
+            fill(NSRect(x:rightPanelRail.frame.minX-1,y:A.header,width:1,height:rightPanelRail.frame.height),Design.rule)
+            return
+        }
         hairline(x: 0, y: A.header, width: w)
         hairline(x: 0, y: bounds.height - A.footer - 1, width: w)
         var lines = [rail1.frame.maxX]
@@ -707,6 +786,7 @@ final class StudioFrame: NSView {
     }
 
     func go(_ p: Place) {
+        workspaceFilter=nil
         if place == .help, p != .help, let previous = beforeHelp {
             goal = previous; beforeHelp = nil
         }
@@ -1039,7 +1119,7 @@ final class StudioFrame: NSView {
 
     private func fillLibraryRail() {
         let lib = library.library
-        var rows: [LibraryRail.Row] = [.group("Catalogue", key: "catalogue"), .row("All Colours", lib.colours.count, .catalogue, 0)]
+        var rows: [LibraryRail.Row] = [.group("Library", key: "catalogue"), .row("All Palettes", palettes(lib.swatches).count, .catalogue, 0)]
         func two(_ s: Swatch, in project: UUID? = nil, indent: Int = 0) -> LibraryRail.Row {
             .palette(LibraryRail.PaletteRow(id: s.id, name: s.claim.map { $0.prefix + " · " + s.name } ?? s.name, count: s.entries.count, colours: s.entries.map { shade[$0.hex] ?? Design.hex($0.hex) },
                                             favourite: s.favourite, target: lib.activeSwatchID == s.id, project: project, indent: indent, bucket: s.bucketID))
@@ -1113,6 +1193,7 @@ final class StudioFrame: NSView {
         let treeSelection: Place
         if case .overview(let id, _) = place { treeSelection = .project(id) } else { treeSelection = place }
         rail1.set(rows: rows, chosen: treeSelection)
+        cataloguePane.update(names: library.availableCatalogues(), active: library.catalogue, rows: rows, selected: treeSelection, selectedKey: workspaceFilter)
         if printWorkspace {
             var allowedGroup = false
             let printRows = rows.filter { row in
@@ -1421,8 +1502,8 @@ final class StudioFrame: NSView {
             title = "Contrast"; meta = ("Check a pair", "WCAG 2 \u{00B7} APCA")
             page.show(.contrast)
         case .catalogue:
-            items = tiles(lib.catalogueHexes(by: library.paletteSort), in: nil)
-            title = "All Colours"; meta = ("\(items.count) colours", library.paletteSort.title)
+            items = cards(palettes(lib.swatches))
+            title = "All Palettes"; meta = ("\(items.count) palettes", library.catalogue)
         case .palette(let id):
             let s = lib.swatch(id)
             items = tiles(lib.hexes(inSwatch: id, by: library.paletteSort), in: id)
@@ -1480,9 +1561,15 @@ final class StudioFrame: NSView {
             items = made; title = f.name
             meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
         case .palettes:
-            let list = palettes(lib.libraryPalettes)
+            let list: [Swatch]
+            switch workspaceFilter {
+            case "favourites": list=palettes(lib.orderedFavourites); title="Favourites"
+            case "claimed": list=palettes(lib.swatches.filter{$0.claim != nil}); title="Claimed Palettes"
+            case "palettes": list=palettes(lib.libraryPalettes); title="Unassigned Palettes"
+            default: list=palettes(lib.swatches); title="All Palettes"
+            }
             items = cards(list)
-            title = "All Palettes"; meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
+            meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
         case .settings:
             let n = library.availableCatalogues().count
             title = "Catalogues"; meta = (library.catalogue, "\(n) " + (n == 1 ? "catalogue" : "catalogues"))
@@ -1497,6 +1584,12 @@ final class StudioFrame: NSView {
         page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
+        inspectorPane.catalogue=library.catalogue;inspectorPane.total=palettes(lib.swatches).count
+        inspectorPane.displayColours=shade
+        if case .palette(let id)=place{inspectedPalette=id}
+        inspectorPane.palette=inspectedPalette.flatMap{lib.swatch($0)}
+        page.grid.selectedPalette=inspectedPalette
+        filmstrip.update(palettes(lib.swatches),selected:inspectedPalette,colours:shade)
     }
 
     /// Every step the catalogue took, newest first, each with what it did: the colours that came or went, by name, and the
@@ -1637,7 +1730,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
     var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { if grid != oldValue { needsLayout = true; needsDisplay = true } } }
     var live: Int? = 0 { didSet { needsLayout = true; needsDisplay = true } }
-    private var settingsRect = NSRect.zero, searchRect = NSRect.zero, helpRect = NSRect.zero
+    private var settingsRect = NSRect.zero, searchRect = NSRect.zero
     struct SavedSearch: Codable { var query: String; var date: Date; var favourite: Bool }
     var searchStorageKey = "Studio.Searches"
     var savedSearches: [SavedSearch] {
@@ -1660,6 +1753,7 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     private let paletteHalo = PaletteHaloButton(frame: .zero)
     /// The picker and the rectangle picker, two clean marks after the wordmark, standing inside rail1's edge.
     var railEdge: CGFloat = 248 { didSet { if railEdge != oldValue { needsLayout = true; needsDisplay = true } } }
+    private var compactNavigation: Bool { bounds.width < 1500 }
     private var navigationStart: CGFloat { max(248, railEdge) + Design.App.areaGutter / 2 }
     private var copyRect = NSRect.zero
     var onPick: (() -> Void)?
@@ -1672,8 +1766,6 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     private var markRects: [NSRect] = []
     private var markHover: Int?
     private var dropped: SwissDropdown.MenuPanel?
-    private let helpButton = HeaderHelpButton(frame: .zero)
-    var onHelp: (() -> Void)?
     var onSettings: (() -> Void)?
     var onSearch: ((String) -> Void)?
     var onAcross: ((Int) -> Void)?
@@ -1704,12 +1796,9 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         paletteHalo.setAccessibilityLabel("Open palette wheel")
         paletteHalo.toolTip = "Palette wheel · Tab"
         addSubview(paletteHalo)
-        helpButton.target = self; helpButton.action = #selector(openHelp)
-        addSubview(helpButton)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
-    @objc private func openHelp() { onHelp?() }
     @objc private func openPaletteWheel() { onPaletteWheel?() }
     override var isFlipped: Bool { true }
 
@@ -1719,16 +1808,14 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
         let tabWidth = tabs.enumerated().reduce(CGFloat(0)) { width, item in
-            width + Design.attributed(item.element, item.offset == live ? .bodyStrong : .body).size().width + 32
+            width + (compactNavigation ? 36 : Design.attributed(item.element, item.offset == live ? .bodyStrong : .body).size().width + 32)
         }
         let font = Design.Text.body.font()
         let textCentre = Self.baseline - (font.ascender + font.descender) / 2
         paletteHalo.frame = NSRect(x: navigationStart + tabWidth - 6, y: textCentre - 14, width: 28, height: 28)
-        let helpRight = bounds.width - Design.App.margin + 5
-        helpButton.frame = NSRect(x: helpRight - 168, y: textCentre - 12, width: 24, height: 24)
         // Law 1: the field's text on the baseline.
         let right = bounds.width - Design.App.margin
-        let end = right - 220
+        let end = right - 112
         let width = max(80, end - max(col(8), paletteHalo.frame.maxX + 24)) * searchProgress
         field.frame = NSRect(x: end - width, y: textCentre - 10, width: width, height: 20)
         positionSearchPanel()
@@ -1753,18 +1840,17 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         for (i, t) in tabs.enumerated() {
             let a = Design.attributed(t, i == live ? .bodyStrong : .body, colour: i == live ? Design.ink : Design.quiet)
             RowMark.draw(["books.vertical", "square.stack", "flask", "printer", "circle.lefthalf.filled", "folder", "arrow.triangle.branch", "square.and.arrow.down"][i], x:x, baseline:b, colour:i == live ? Design.ink : Design.quiet)
-            a.draw(x: x + 20, baseline: b)
-            let w = a.size().width + 20
+            if !compactNavigation { a.draw(x: x + 20, baseline: b) }
+            let w: CGFloat = compactNavigation ? 24 : a.size().width + 20
             tabRects.append(NSRect(x: x - 8, y: b - 20, width: w + 16, height: 28))
-            if i == live { fill(NSRect(x: x + 20, y: b + 7, width: w - 20, height: 1), Design.ink) }
+            if i == live { fill(NSRect(x: x + (compactNavigation ? 0 : 20), y: b + 7, width: compactNavigation ? 16 : w - 20, height: 1), Design.ink) }
             x += w + 12
         }
         let right = bounds.width - Design.App.margin + 5
         let font = Design.Text.body.font()
         let centreY = b - (font.ascender + font.descender) / 2
-        searchRect = NSRect(x: right - 228, y: centreY - 12, width: 24, height: 24)
-        helpRect = NSRect(x: right - 168, y: centreY - 12, width: 24, height: 24)
-        settingsRect = NSRect(x: right - 132, y: centreY - 12, width: 24, height: 24)
+        searchRect = NSRect(x: right - 96, y: centreY - 12, width: 24, height: 24)
+        settingsRect = NSRect(x: right - 24, y: centreY - 12, width: 24, height: 24)
         copyRect = .zero
         if !searchExpanded {
             let label = Design.attributed("Copy " + Prefs.copyFormat.label + " ▾", .body, colour: Design.quiet)
@@ -1778,23 +1864,9 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
         }
         if searchProgress > 0 { hairline(x: field.frame.minX, y: b + 7, width: field.frame.width, Design.rule) }
         markRects = []
-        for i in 0..<4 {
-            let r = NSRect(x: i == 0 ? right - 192 : right - 24 - CGFloat(3 - i) * 36, y: centreY - 12, width: 24, height: 24)
-            let c = Design.ink
-            c.setStroke()
-            let p = NSBezierPath(); p.lineWidth = 1.3; p.lineCapStyle = .butt
-            let g = HeaderUtilityIcon.rect(in: r)
-            switch i {
-            case 3: p.move(to: NSPoint(x: g.minX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY)); p.move(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.minX, y: g.maxY))
-            case 2: p.move(to: NSPoint(x: g.minX, y: g.midY)); p.line(to: NSPoint(x: g.maxX, y: g.midY))
-            case 1: p.move(to: NSPoint(x: g.minX, y: g.maxY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.move(to: NSPoint(x: g.minX + 4, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.minY)); p.line(to: NSPoint(x: g.maxX, y: g.maxY - 4))
-            default:
-                p.appendOval(in: g)
-                p.move(to: NSPoint(x: g.midX, y: g.minY + 3)); p.line(to: NSPoint(x: g.midX, y: g.midY)); p.line(to: NSPoint(x: g.midX + 3.5, y: g.midY + 2))
-            }
-            p.stroke()
-            markRects.append(r.insetBy(dx: -6, dy: -6))
-        }
+        let historyRect = NSRect(x:right-60,y:centreY-12,width:24,height:24)
+        HeaderUtilityIcon.draw("clock", in:historyRect)
+        markRects.append(historyRect.insetBy(dx:-6,dy:-6))
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -1804,31 +1876,6 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
     }
     override func mouseExited(with event: NSEvent) { if markHover != nil { markHover = nil; needsDisplay = true } }
 
-    /// The arrange menu: the window to the left or right half, centred, full screen, or on another display.
-    private func arrange() {
-        guard let win = window else { return }
-        var items = ["Left Half", "Right Half", "Centre", "Full Screen"]
-        let others = NSScreen.screens.filter { $0 != win.screen }
-        items += others.map { "Move To \($0.localizedName)" }
-        let panel = SwissDropdown.MenuPanel(items: items, chosen: "", width: 220) { [weak self] i in
-            self?.closeMenu()
-            guard let v = win.screen?.visibleFrame else { return }
-            switch i {
-            case 0: win.setFrame(NSRect(x: v.minX, y: v.minY, width: v.width / 2, height: v.height), display: true, animate: true)
-            case 1: win.setFrame(NSRect(x: v.midX, y: v.minY, width: v.width / 2, height: v.height), display: true, animate: true)
-            case 2: win.center()
-            case 3: win.toggleFullScreen(nil)
-            default:
-                let s = others[i - 4].visibleFrame, f = win.frame
-                win.setFrame(NSRect(x: s.midX - f.width / 2, y: s.midY - f.height / 2, width: min(f.width, s.width), height: min(f.height, s.height)), display: true, animate: true)
-            }
-        }
-        let origin = win.convertToScreen(convert(NSRect(x: markRects[1].maxX - 220, y: markRects[1].maxY, width: 1, height: 1), to: nil)).origin
-        panel.place(below: NSPoint(x: origin.x, y: origin.y - 2))
-        win.addChildWindow(panel, ordered: .above)
-        dropped = panel
-        Overlays.opened(self)
-    }
     private func closeMenu() {
         if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
         dropped = nil
@@ -1851,23 +1898,11 @@ final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
             return
         }
         if searchRect.contains(p) { if searchExpanded { hideSearch() } else { showSearch(focus: true) }; return }
-        if let i = markRects.firstIndex(where: { $0.contains(p) }) {
-            switch i {
-            case 3: window?.performClose(nil)
-            case 2: window?.miniaturize(nil)
-            case 1: arrange()
-            default: onHistory?()
-            }
-            return
-        }
+        if markRects.contains(where: { $0.contains(p) }) { onHistory?(); return }
         if let i = tabRects.firstIndex(where: { $0.contains(p) }) { onTab?(i); return }
         if let i = pickRects.firstIndex(where: { $0.contains(p) }) { if i == 0 { onPick?() } else { onSample?() }; return }
-        if helpRect.contains(p) { onHelp?(); return }
         if settingsRect.contains(p) { onSettings?(); return }
-        // Custom-drawn controls above retain their clicks; the rest of the header
-        // behaves like a native title bar. Child buttons and the search field
-        // receive their own events before this view does.
-        window?.performDrag(with: event)
+        // Window movement belongs to the native macOS title bar.
     }
     @objc private func searched() { if !visibleResults.isEmpty { selectResult(0) } }
     func controlTextDidChange(_ obj: Notification) { showSearchDropdown() }
@@ -3144,6 +3179,9 @@ final class HistoryRail: StudioRail {
 
 /// The page: 34 clear, then a Split header on its own six columns, a hairline, 22 clear, and the grid of tiles.
 final class StudioPage: NSView, Overlay {
+    var compactWorkspace = false
+    weak var workspaceToolbar: WorkspaceViewportBar?
+    private let workspaceFormat = NSButton()
     var layoutFrozen = false
     /// Palette content heading shares the first rail-row baseline.
     var paletteCount: String? { didSet { needsLayout = true; needsDisplay = true } }
@@ -3172,7 +3210,7 @@ final class StudioPage: NSView, Overlay {
     private let slider = MiniSlider()
     var onAcross: ((Int) -> Void)?
     /// The colour model the tiles' captions are in, chosen on the menu before the slider.
-    var format: ColourFormat = .hex { didSet { needsDisplay = true } }
+    var format: ColourFormat = .hex { didSet { workspaceFormat.title = format.label + " ▴"; needsDisplay = true } }
     var onFormat: (() -> Void)?
     var showsFormat = true
     private var formatRect = NSRect.zero
@@ -3185,7 +3223,7 @@ final class StudioPage: NSView, Overlay {
         dropped = nil
         Overlays.closed(self)
     }
-    private func openFormats() {
+    @objc private func openFormats() {
         guard let win = window else { return }
         closeFormats()
         let items = Self.models.map { $0.label }
@@ -3195,8 +3233,10 @@ final class StudioPage: NSView, Overlay {
             self.format = Self.models[i]
             self.onFormat?()
         }
-        let s = win.convertToScreen(convert(formatRect, to: nil))
-        panel.place(below: NSPoint(x: s.maxX - 160, y: s.minY - 4))
+        let anchor = compactWorkspace ? workspaceFormat.convert(workspaceFormat.bounds,to:nil) : convert(formatRect,to:nil)
+        let s = win.convertToScreen(anchor)
+        if compactWorkspace { panel.place(above: NSPoint(x: s.minX, y: s.maxY + 4)) }
+        else { panel.place(below: NSPoint(x: s.maxX - 160, y: s.minY - 4)) }
         win.addChildWindow(panel, ordered: .above)
         dropped = panel
         Overlays.opened(self)
@@ -3282,8 +3322,8 @@ final class StudioPage: NSView, Overlay {
     var onArrow: (() -> Void)?
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
-        if showsFormat, !slider.isHidden, formatRect.contains(p) { openFormats(); return }
+        if !compactWorkspace, AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
+        if !compactWorkspace, showsFormat, !slider.isHidden, formatRect.contains(p) { openFormats(); return }
         super.mouseDown(with: event)
     }
     private var aseName: ASENameEditor?
@@ -3321,6 +3361,10 @@ final class StudioPage: NSView, Overlay {
 
     init() {
         super.init(frame: .zero)
+        workspaceFormat.title=format.label + " ▴";workspaceFormat.font=Design.Text.body.font()
+        workspaceFormat.isBordered=false;workspaceFormat.alignment = .left;workspaceFormat.contentTintColor=Design.quiet
+        workspaceFormat.target=self;workspaceFormat.action=#selector(openFormats);workspaceFormat.setAccessibilityLabel("Colour Format")
+        addSubview(workspaceFormat);workspaceFormat.isHidden=true
         addSubview(deltaButton);addSubview(profileSelector);deltaButton.target=self;deltaButton.action=#selector(toggleDelta)
         deltaButton.isHidden=true;profileSelector.isHidden=true
 
@@ -3444,7 +3488,7 @@ final class StudioPage: NSView, Overlay {
             if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
             top += 2 * u
         }
-        let tilesTop = top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
+        let tilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + 36 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
         let canvasWidth = bounds.width - inset - insetRight
         scroll.frame = NSRect(x: inset, y: tilesTop, width: canvasWidth + min(insetRight, QuietScroller.lane), height: bounds.height - tilesTop)
         settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: bounds.height - top)
@@ -3473,6 +3517,20 @@ final class StudioPage: NSView, Overlay {
             }
             e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
         }
+        let controlParent: NSView = compactWorkspace ? (workspaceToolbar ?? self) : self
+        for control in [slider,deltaButton,profileSelector] where control.superview !== controlParent { controlParent.addSubview(control) }
+        profileSelector.opensUpward = compactWorkspace
+        workspaceFormat.isHidden = !compactWorkspace || !showsFormat || section != .tiles
+        if compactWorkspace,let toolbar=workspaceToolbar {
+            if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
+            let profileWidth=min(240,max(140,toolbar.bounds.width-424))
+            let start=max(88,toolbar.bounds.width-16-profileWidth-320)
+            workspaceFormat.frame=NSRect(x:start,y:2,width:80,height:28)
+            slider.frame=NSRect(x:start+92,y:8,width:96,height:16)
+            slider.alphaValue = grid.listView ? 0.4 : 1
+            deltaButton.frame=NSRect(x:start+204,y:2,width:100,height:28)
+            profileSelector.frame=NSRect(x:start+320,y:2,width:profileWidth,height:28)
+        } else { slider.alphaValue=1 }
         grid.width = canvasWidth
         grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
@@ -3486,14 +3544,14 @@ final class StudioPage: NSView, Overlay {
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty && !showsDeltaTools ? meta.0 : "", right: anchors.isEmpty && !showsDeltaTools ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: expanded ? .close : .open)
-        if showsDeltaTools {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:max(0,deltaButton.frame.minX-inset-16))}
-        if let paletteCount {
+        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty && !showsDeltaTools ? meta.0 : "", right: anchors.isEmpty && !showsDeltaTools ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open))
+        if showsDeltaTools {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:compactWorkspace ? bounds.width-inset-insetRight : max(0,deltaButton.frame.minX-inset-16))}
+        if let paletteCount, !compactWorkspace {
             Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)
         }
         // The colour model before the slider, a quiet word with its chevron, on the heading's line.
         formatRect = .zero
-        if showsFormat, !slider.isHidden {
+        if showsFormat, !slider.isHidden, !compactWorkspace {
             let b = AreaHeader.headingBaseline
             let t = Design.attributed(format.label, .caption, colour: Design.quiet)
             let right = slider.frame.minX - 24
@@ -3516,7 +3574,14 @@ final class TileGrid: NSView {
     var items: [Item] = [] { didSet { hoverHalo?.dismiss(); hoverIndex=nil; suppressedIndex=nil; printPreviews=[:]; splitOverrides=[:]; onResize?() } }
     /// Words shown in place of tiles when there are none, as a member's notes on its Information page; nil says Nothing Found.
     var note: String? { didSet { needsDisplay = true } }
-    var across = 6 { didSet { onResize?() } }
+    var across = 8 { didSet { onResize?() } }
+    var listView=false { didSet {
+        guard listView != oldValue else{return}
+        hoverHalo?.dismiss();hoverHalo=nil;hoverIndex=nil;suppressedIndex=nil
+        enclosingScrollView?.contentView.scroll(to:.zero)
+        onResize?();needsDisplay=true
+    } }
+    var selectedPalette: UUID? { didSet { needsDisplay = true } }
     var width: CGFloat = 600
     var chosenHex: String? { didSet { needsDisplay = true } }
     struct PrintPreview { let colour:NSColor; let delta:Double }
@@ -3535,6 +3600,7 @@ final class TileGrid: NSView {
     private var scrollGate=HoverScrollGate()
     private func identity(_ item:Item)->String { item.hex ?? item.id?.uuidString ?? item.title }
     private func rollover(_ p:NSPoint) {
+        guard !listView else{return}
         let index=items.indices.first { i in let r=rect(i);return NSRect(x:r.minX,y:r.minY,width:r.width,height:Self.block).contains(p) }
         if index != suppressedIndex { suppressedIndex=nil }
         guard index != hoverIndex else { return }
@@ -3587,18 +3653,24 @@ final class TileGrid: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     /// How many tiles a row holds: the slider's count, or fewer when there are fewer tiles, so one row always fills the block.
-    private var columns: Int { max(1, min(across, max(items.count, 1))) }
+    private var columns: Int { max(1, min(across, max(1, Int((width + Self.gap) / 176)), max(items.count, 1))) }
     /// A column's left edge: the row justified to the block, every edge on a whole point, the last tile's right edge on the block's.
     private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (width + Self.gap) / CGFloat(columns)).rounded() }
     var height: CGFloat {
+        if listView { return CGFloat(items.count)*64 }
         let rows = (items.count + columns - 1) / columns
         return CGFloat(rows) * (Self.block + Self.words + Self.rowGap)
+    }
+    func revealPalette(_ id: UUID) {
+        guard let index = items.firstIndex(where: {$0.id == id}) else { return }
+        scrollToVisible(rect(index))
     }
     func reveal(_ hex: String) {
         guard let index = items.firstIndex(where: { $0.hex == hex }) else { return }
         scrollToVisible(rect(index))
     }
     private func rect(_ i: Int) -> NSRect {
+        if listView { return NSRect(x:0,y:CGFloat(i)*64,width:width,height:64) }
         let c = i % columns, x = left(c)
         return NSRect(x: x, y: CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
     }
@@ -3609,13 +3681,14 @@ final class TileGrid: NSView {
             let r = rect(i)
             if showsHalo, (it.hex != nil || it.id != nil), (canHover?(it) ?? true) {
                 // The halo mark on the caption's line, at the right, for the value beside it.
-                let capB = r.minY + Self.block + Design.App.unit + Design.App.textBaseline
+                let capB = listView ? r.minY+45 : r.minY + Self.block + Design.App.unit + Design.App.textBaseline
                 let g = NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16)
                 markHits.append((g.insetBy(dx: -4, dy: -4), i))
             }
             guard r.intersects(dirtyRect) else { continue }
             // No box: the colour block, the words on the ground beneath it, and nothing drawn around them.
-            let block = NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block)
+            if it.id != nil && it.id == selectedPalette { fill(r.insetBy(dx: -4, dy: -4), Design.mist) }
+            let block = listView ? NSRect(x:r.minX+8,y:r.minY+8,width:min(120,r.width*0.25),height:48) : NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block)
             if it.colours.isEmpty { fill(block, Design.mist) }
             else {
                 // A palette's colours share the block as equal bands, a single colour takes it whole.
@@ -3631,14 +3704,16 @@ final class TileGrid: NSView {
                 for (k,p) in prediction.enumerated(){fill(NSRect(x:block.minX+CGFloat(k)*bw,y:block.midY,width:bw+0.5,height:block.height/2),p.colour)}
                 Design.card.setStroke();let divider=NSBezierPath();divider.move(to:NSPoint(x:block.minX,y:block.midY));divider.line(to:NSPoint(x:block.maxX,y:block.midY));divider.lineWidth=1;divider.stroke()
             }
-            Design.attributed(it.title, .bodyStrong).draw(x: r.minX + 6, baseline: block.maxY + Design.App.textBaseline, width: r.width - 12)
-            let capB = block.maxY + Design.App.unit + Design.App.textBaseline
+            let textX = listView ? block.maxX+16 : r.minX+6
+            Design.attributed(it.title, .bodyStrong).draw(x:textX,baseline:listView ? r.minY+25 : block.maxY+Design.App.textBaseline,width:listView ? max(0,r.maxX-textX-120) : r.width-12)
+            let capB = listView ? r.minY+45 : block.maxY + Design.App.unit + Design.App.textBaseline
+            if listView { hairline(x:0,y:r.maxY-1,width:r.width) }
             let hasHalo=showsHalo && eligible
             let delta=eligible ? (prediction.map{$0.delta}.max().map{String(format:it.hex == nil ? "Δmax %.1f":"Δ %.1f",$0)} ?? "Δ —") : ""
             let deltaText=Design.attributed(delta,.caption,colour:Design.quiet)
             let right=r.maxX-6-(hasHalo ? 24:0)
             let deltaX=max(r.minX+6,right-deltaText.size().width)
-            Design.attributed(it.caption,.caption,colour:Design.quiet).draw(x:r.minX+6,baseline:capB,width:max(0,deltaX-r.minX-14))
+            Design.attributed(it.caption,.caption,colour:Design.quiet).draw(x:textX,baseline:capB,width:max(0,deltaX-textX-8))
             if eligible{deltaText.draw(x:deltaX,baseline:capB)}
             if hasHalo {Design.haloMark(in:NSRect(x:r.maxX-6-16,y:capB-13,width:16,height:16),colour:Design.quiet)}
             if let h = it.hex, h == chosenHex {
