@@ -163,32 +163,48 @@ private final class PanelResizeGrip: NSView {
     }
 }
 
+/// Keeps the stack scrollbar outside the panel border, on the outer edge of its rail.
+private final class WorkspaceRailScroll:FittedScrollView {
+    var onLeft=false {didSet{needsLayout=true}}
+    override func tile() {
+        super.tile()
+        let gutter=QuietScroller.lane
+        contentView.frame=NSRect(x:onLeft ? gutter+1:0,y:0,width:max(0,bounds.width-gutter-1),height:bounds.height)
+        verticalScroller?.frame=NSRect(x:onLeft ? 0:bounds.width-gutter,y:0,width:gutter,height:bounds.height)
+        if let document=documentView {document.setFrameSize(NSSize(width:contentView.bounds.width,height:document.frame.height))}
+    }
+}
+
 /// Each rail independently scrolls its stack; drops use the same ordering in either rail.
 final class WorkspaceRail: NSView {
     private final class Stack:NSView { override var isFlipped:Bool { true } }
-    private let scroll=NSScrollView(), stack=Stack()
+    private let scroll=WorkspaceRailScroll(), stack=Stack()
     private(set) var panels:[WorkspacePanel]=[]
     private var insertion:Int? { didSet { for (i,target) in targets.enumerated(){target.active=i == insertion} } }
     private var targets:[PanelDropTarget]=[]
     private var dragging=false
-    private let bottomTarget=PanelDropTarget()
+    private var targetRects:[NSRect]=[]
     var onDragging:((Bool)->Void)?
     func setDragging(_ value:Bool) {
         dragging=value;insertion=nil
         targets.forEach{$0.removeFromSuperview()};targets=[]
-        if value { for _ in 0...panels.count { let target=PanelDropTarget();targets.append(target);stack.addSubview(target) } }
-        bottomTarget.isHidden = !value
+        if value { for _ in 0...panels.count { let target=PanelDropTarget();targets.append(target);addSubview(target) } }
         arrange();onDragging?(value)
     }
     override var isFlipped:Bool { true }
     override init(frame:NSRect) {
         super.init(frame:frame)
         wantsLayer=true; layer?.backgroundColor=Design.card.cgColor
-        scroll.drawsBackground=false; scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;scroll.documentView=stack
+        scroll.drawsBackground=false; scroll.hasVerticalScroller=true;scroll.autohidesScrollers=false;scroll.documentView=stack
+        scroll.verticalScrollElasticity = .none;QuietScroller.install(in:scroll)
         addSubview(scroll)
-        bottomTarget.edge = .bottom;bottomTarget.isHidden=true;addSubview(bottomTarget)
     }
+    convenience init(scrollbarOnLeft:Bool) {self.init(frame:.zero);scroll.onLeft=scrollbarOnLeft}
     required init?(coder:NSCoder){fatalError()}
+    override func draw(_ dirtyRect:NSRect) {
+        Design.rule.setFill()
+        NSRect(x:scroll.onLeft ? QuietScroller.lane:bounds.width-QuietScroller.lane-1,y:0,width:1,height:bounds.height).fill()
+    }
     func add(_ panel:WorkspacePanel,at index:Int? = nil) {
         if let old=panel.rail { old.panels.removeAll{$0 === panel};old.arrange() }
         panel.removeFromSuperview();panels.insert(panel,at:min(index ?? panels.count,panels.count));panel.rail=self;stack.addSubview(panel);arrange()
@@ -196,34 +212,37 @@ final class WorkspaceRail: NSView {
     override func layout(){super.layout();scroll.frame=bounds;arrange()}
     func arrange() {
         var y:CGFloat=0
+        targetRects=[]
         let width=scroll.contentSize.width
         for (i,panel) in panels.enumerated() {
-            if dragging,targets.indices.contains(i) { targets[i].edge = i == 0 ? .top:.middle;targets[i].frame=NSRect(x:0,y:y,width:width,height:22);y += 22 }
+            if dragging,targets.indices.contains(i) { targetRects.append(NSRect(x:0,y:y,width:width,height:22));y += 22 }
             panel.frame=NSRect(x:0,y:y,width:width,height:panel.panelHeight);panel.needsLayout=true
             // Headers meet the preceding footer directly; only active drop slots add space.
             y += panel.panelHeight
         }
-        if dragging,let last=targets.last { last.frame=NSRect(x:0,y:y,width:width,height:22);y += 22 }
+        if dragging { targetRects.append(NSRect(x:0,y:y,width:width,height:22));y += 22 }
         stack.frame=NSRect(x:0,y:0,width:width,height:max(scroll.contentSize.height,y))
-        bottomTarget.frame=NSRect(x:0,y:max(0,bounds.height-22),width:bounds.width,height:22)
-        targets.last?.edge = y >= scroll.contentSize.height ? .bottom : (panels.isEmpty ? .top:.middle)
         updateDropPresentation()
         needsDisplay=true
     }
-    private func updateDropPresentation(edgeHovered:Bool=false) {
-        targets.forEach{$0.isHidden=false}
-        // Hand the edge over to the real final slot as soon as it is fully visible.
-        let finalVisible=targets.last.map{$0.frame.maxY <= scroll.contentView.bounds.maxY+0.5} ?? true
-        bottomTarget.isHidden = !dragging || finalVisible
-        bottomTarget.active=false
-        if !bottomTarget.isHidden {
-            for (index,target) in targets.enumerated() {
-                if convert(target.frame,from:stack).intersects(bottomTarget.frame) {
-                    target.isHidden=true
-                    if insertion == index {bottomTarget.active=true}
-                }
+    private func updateDropPresentation() {
+        // One view per insertion slot. Edge slots are repositioned, never duplicated.
+        for (index,target) in targets.enumerated() {
+            guard targetRects.indices.contains(index) else {target.isHidden=true;continue}
+            var rect=convert(targetRects[index],from:stack)
+            if index == 0 { rect.origin.y=0;target.edge = .top }
+            else if index == targets.count-1 {
+                rect.origin.y=min(max(0,bounds.height-22),max(0,rect.minY))
+                target.edge = .bottom
+            } else {target.edge = .middle}
+            target.frame=rect
+            target.isHidden = !dragging || !bounds.intersects(rect)
+        }
+        // Edge targets own their entire band, including while the stack scrolls behind them.
+        if let first=targets.first,let last=targets.last {
+            for target in targets.dropFirst().dropLast() {
+                if target.frame.intersects(first.frame) || target.frame.intersects(last.frame) {target.isHidden=true}
             }
-            bottomTarget.active = bottomTarget.active || edgeHovered
         }
     }
     func previewDrop(at location:NSPoint) {
@@ -232,9 +251,10 @@ final class WorkspaceRail: NSView {
         if railPoint.y < 30 { scroll.contentView.scroll(to:NSPoint(x:0,y:max(0,scroll.contentView.bounds.minY-14))) }
         else if railPoint.y > bounds.height-30 { scroll.contentView.scroll(to:NSPoint(x:0,y:min(max(0,stack.bounds.height-scroll.contentSize.height),scroll.contentView.bounds.minY+14))) }
         scroll.reflectScrolledClipView(scroll.contentView)
-        let point=stack.convert(location,from:nil)
-        insertion=targets.indices.min{abs(targets[$0].frame.midY-point.y)<abs(targets[$1].frame.midY-point.y)}
-        updateDropPresentation(edgeHovered:railPoint.y >= bounds.height-22)
+        updateDropPresentation()
+        insertion=targets.indices.filter{!targets[$0].isHidden}.min{
+            abs(targets[$0].frame.midY-railPoint.y)<abs(targets[$1].frame.midY-railPoint.y)
+        }
     }
     func clearDrop(){insertion=nil;updateDropPresentation()}
     func finishDrop(_ panel:WorkspacePanel) {
