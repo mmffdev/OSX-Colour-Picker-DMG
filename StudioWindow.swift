@@ -397,6 +397,13 @@ final class StudioFrame: NSView {
         intakeImageLoading = !intakeScanComplete || intakePendingBatches > 0
         fillPage()
     }
+    /// Selection is independent of the preview dataset and its current order/scroll position.
+    private func updateIntakeSelection(){
+        page.grid.selectedImagePaths=intakeSelectedPaths
+        for bar in [viewportHeader,viewportFooter] {
+            bar.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        }
+    }
     private func isRawImage(_ name:String)->Bool { UTType(filenameExtension:URL(fileURLWithPath:name).pathExtension)?.conforms(to:.rawImage) == true }
     private static func flattenMetadata(_ value:Any,prefix:String="")->[String:String]{
         var result:[String:String]=[:]
@@ -480,13 +487,15 @@ final class StudioFrame: NSView {
         let cataloguesPanel=WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640)
         cataloguesPanel.setHeaderAction(symbol:"plus",title:"Open Catalogue…") { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
-        rightPanelRail.add(WorkspacePanel(id:"histograms",title:"Histograms",content:histogramPane,height:392))
+        rightPanelRail.add(WorkspacePanel(id:"histograms",title:"Histograms",content:histogramPane,height:448))
         let bloomPanel=WorkspacePanel(id:"bloom",title:"Delta Bloom",content:bloomPane,height:720)
 
         rightPanelRail.add(bloomPanel)
         let inspectorPanel=WorkspacePanel(id:"inspector",title:"Inspector",content:inspectorPane,height:520)
         inspectorPanel.collapsed=true;rightPanelRail.add(inspectorPanel)
-        intakeSourceRail.add(WorkspacePanel(id:"image-source",title:"From",content:intakeSourcePane,height:500))
+        let sourcePanel=WorkspacePanel(id:"image-source",title:"From",content:intakeSourcePane,height:500)
+        sourcePanel.setHeaderAction(symbol:"plus",title:"Choose Folder…") { [weak self] in self?.intakeSourcePane.chooseFolder() }
+        intakeSourceRail.add(sourcePanel)
         intakeTargetRail.add(WorkspacePanel(id:"image-target",title:"To",content:intakeTargetPane,height:500))
         intakeSourcePane.onImageFiles = { [weak self] folder, files, event in
             guard let self,self.imageIntakeWorkspace else{return}
@@ -511,7 +520,7 @@ final class StudioFrame: NSView {
         viewportHeader.onSelectAllImages = { [weak self] select in
             guard let self else{return};self.intakeSelectAll=select
             if select { self.intakeSelectedPaths.formUnion(self.intakePreviewOrder) } else { self.intakeSelectedPaths=[] }
-            self.refreshIntakeImages()
+            self.updateIntakeSelection()
         }
         viewportHeader.onImageFilter = { [weak self] newOnly in self?.intakeNewOnly=newOnly;self?.refreshIntakeImages() }
         viewportHeader.onImageSort = { [weak self] sort in self?.intakeSort=sort;self?.refreshIntakeImages() }
@@ -631,7 +640,7 @@ final class StudioFrame: NSView {
             guard let self else{return}
             if self.intakeSelectedPaths.contains(path){self.intakeSelectedPaths.remove(path)}else{self.intakeSelectedPaths.insert(path)}
             self.intakeSelectAll = !self.intakePreviewOrder.isEmpty && self.intakePreviewOrder.allSatisfy(self.intakeSelectedPaths.contains)
-            self.refreshIntakeImages()
+            self.updateIntakeSelection()
         }
         page.grid.onImageContextAction = { [weak self] path, action in
             guard let self else{return}
@@ -639,7 +648,7 @@ final class StudioFrame: NSView {
             case 0:
                 self.intakeSelectedPaths.insert(path)
                 self.intakeSelectAll = !self.intakePreviewOrder.isEmpty && self.intakePreviewOrder.allSatisfy(self.intakeSelectedPaths.contains)
-                self.refreshIntakeImages()
+                self.updateIntakeSelection()
             case 1:
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)])
             case 2:
@@ -888,13 +897,15 @@ final class StudioFrame: NSView {
         viewportHeader.isHidden = !canvasWorkspace
         viewportFooter.isHidden = !canvasWorkspace
         bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil
-        footer.isHidden = canvasWorkspace
+        footer.isHidden = false
         if canvasWorkspace {
-            let top = A.header + 1, bottom: CGFloat = 120
+            let top = A.header + 1, bottom: CGFloat = A.footer + (imageIntakeWorkspace ? 0 : 120)
             // The Finder source tree needs room for real volume and folder names; keep its
             // import width wider than the general workspace rail.
             let left: CGFloat = imageIntakeWorkspace ? 360 : 280, right: CGFloat = 340
-            let workspaceFooterY=imageIntakeWorkspace ? h-32 : h-bottom-32
+            let workspaceFooterY=h-bottom-32
+            footer.frame=NSRect(x:0,y:h-A.footer,width:w,height:A.footer)
+            footer.grid=(A.column(1,in:w),A.columnWidth(in:w),A.column(5,in:w))
             header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
             header.grid = (16, A.columnWidth(in: w)); header.railEdge = 248
             leftPanelRail.frame = NSRect(x: 0, y: top, width: left, height: h-top-bottom)
@@ -909,7 +920,7 @@ final class StudioFrame: NSView {
             expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
             page.inset=16;page.insetRight=16
             page.compactWorkspace=true
-            filmstrip.frame=NSRect(x:0,y:h-bottom,width:w,height:bottom)
+            filmstrip.frame=NSRect(x:0,y:h-bottom,width:w,height:120)
             [rail1,rail2,history,printPaletteRail].forEach{$0.isHidden=true}
             settingsCurtainClip.isHidden=true
             strip.frame=NSRect(x:0,y:0,width:w,height:TitleStrip.height)
@@ -1004,6 +1015,7 @@ final class StudioFrame: NSView {
         let w = bounds.width
         if canvasWorkspace {
             hairline(x:0,y:A.header,width:w)
+            hairline(x:0,y:bounds.height-A.footer-1,width:w)
             fill(NSRect(x:leftPanelRail.frame.maxX,y:A.header,width:1,height:leftPanelRail.frame.height),Design.rule)
             fill(NSRect(x:rightPanelRail.frame.minX-1,y:A.header,width:1,height:rightPanelRail.frame.height),Design.rule)
             return
@@ -3998,9 +4010,18 @@ final class TileGrid: NSView {
     var note: String? { didSet { needsDisplay = true } }
     var across = 8 { didSet { onResize?() } }
     var imageIntake=false {didSet{needsDisplay=true}}
-    var imageFullView=false {didSet{enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true;onResize?()}}
+    var imageFullView=false {didSet{guard oldValue != imageFullView else{return};enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true;onResize?()}}
     var fullImageViewportHeight:CGFloat=0 {didSet{needsDisplay=true}}
-    var selectedImagePaths=Set<String>() {didSet{needsDisplay=true}}
+    var selectedImagePaths=Set<String>() {didSet{
+        let changed=oldValue.symmetricDifference(selectedImagePaths)
+        guard !changed.isEmpty else{return}
+        for (i,item) in items.enumerated() where item.imagePath.map(changed.contains) == true {
+            if imageFullView && i != currentImageIndex {continue}
+            let r=rect(i)
+            let inset:CGFloat = imageFullView ? 16 : 8
+            setNeedsDisplay(NSRect(x:r.minX+inset,y:r.minY+inset,width:16,height:16))
+        }
+    }}
     var onImageSelectionToggle:((String)->Void)?
     private(set) var currentImageIndex=0
     private var focusedImagePath:String?
@@ -4185,6 +4206,7 @@ final class TileGrid: NSView {
             let it=items[i]
             if imageIntake && imageFullView && i != currentImageIndex { continue }
             let r = rect(i)
+            guard r.intersects(dirtyRect) else { continue }
             if showsHalo, (it.hex != nil || it.id != nil), (canHover?(it) ?? true) {
                 // The halo mark on the caption's line, at the right, for the value beside it.
                 let capB = listView ? r.minY+45 : r.minY + Self.block + Design.App.unit + Design.App.textBaseline

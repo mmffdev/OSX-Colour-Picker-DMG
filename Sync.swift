@@ -343,6 +343,9 @@ struct Catalogues {
     /// The catalogue last opened on this Mac.
     static var currentName: String {
         get {
+            if CommandLine.arguments.contains("--self-test") {
+                return AppPreferences.shared.string(forKey: currentKey) ?? mainName
+            }
             let names = standard.names()
             let manifest = try? AppDataStore.current.read()
             let saved = ((manifest?["defaultCatalogue"] as? [String: Any])?["name"] as? String)
@@ -350,6 +353,10 @@ struct Catalogues {
             return names.contains(saved) ? saved : (names.first ?? mainName)
         }
         set {
+            if CommandLine.arguments.contains("--self-test") {
+                AppPreferences.shared.rememberDefaultCatalogue(newValue, id: nil)
+                return
+            }
             let id = WorkspaceInventory.probe(name: newValue, folder: standard.directory(for: newValue)).id?.uuidString
             AppPreferences.shared.rememberDefaultCatalogue(newValue, id: id)
         }
@@ -801,7 +808,11 @@ final class SyncEngine {
 /// never pick up — or sync into — the real sync folder. The bare binary Xcode runs from the build
 /// folder has no bundle identifier, so .standard would be an empty domain of its own and the app would
 /// forget its catalogue and its projects folder; it reads the installed app's domain instead.
+let selfTestPreferencesDomain = "com.mmffdev.mmffdevcolour3.selftest." + UUID().uuidString
 let preferences: UserDefaults = {
+    if CommandLine.arguments.contains("--self-test") {
+        return UserDefaults(suiteName: selfTestPreferencesDomain)!
+    }
     if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_HOME"] != nil {
         return UserDefaults(suiteName: "com.mmffdev.mmffdevcolour3.trial") ?? .standard
     }

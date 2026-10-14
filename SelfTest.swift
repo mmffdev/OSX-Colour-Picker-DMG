@@ -12,6 +12,17 @@ func runSelfTest() -> Never {
         else { failed += 1; print("  FAIL  \(what)") }
     }
 
+    let savedCatalogue = preferences.string(forKey: Catalogues.currentKey)
+    let savedCatalogueID = preferences.string(forKey: "currentCatalogueID")
+    AppPreferences.shared.rememberDefaultCatalogue("Isolated Test Catalogue", id: "test-id")
+    check(Catalogues.currentName == "Isolated Test Catalogue" && preferences.string(forKey: "currentCatalogueID") == "test-id",
+          "self-test catalogue preference stays isolated from the real workspace and AppKit")
+    Catalogues.currentName = "Renamed Test Catalogue"
+    check(Catalogues.currentName == "Renamed Test Catalogue" && preferences.string(forKey: "currentCatalogueID") == nil,
+          "self-test catalogue rename updates isolated preferences without probing the real workspace")
+    preferences.set(savedCatalogue, forKey: Catalogues.currentKey)
+    preferences.set(savedCatalogueID, forKey: "currentCatalogueID")
+
     runPickerCacheTests(check: check)
     runWorkspaceStartupTests(check: check)
     runLibraryAssignmentTests(check: check)
@@ -350,6 +361,7 @@ func runSelfTest() -> Never {
     runPaletteWheelTests(check: check)
 
     print("\n\(passed) passed, \(failed) failed")
+    preferences.removePersistentDomain(forName: selfTestPreferencesDomain)
     exit(failed == 0 ? 0 : 1)
 }
 

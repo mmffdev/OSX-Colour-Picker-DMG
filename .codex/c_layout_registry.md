@@ -39,7 +39,9 @@ Rail1, Viewport and Rail2 are siblings. The native macOS title bar and menu bar 
 | Viewport-Footer | Fixed view controls: Grid/List left; format, size, Delta and profile right | [StudioWorkspace.swift](../StudioWorkspace.swift): `WorkspaceViewportBar(footer: true)`, `StudioFrame.viewportFooter`. Controls are arranged by `StudioPage.layout()` through `workspaceToolbar`; profile control in [PrintProfileSelector.swift](../PrintProfileSelector.swift). Menus open upward |
 | Rail2 | Right dock; independently scrolling panel stack, scrollbar in outer right gutter | [WorkspacePanels.swift](../WorkspacePanels.swift): `WorkspaceRail`; instance `StudioFrame.rightPanelRail` |
 | Carousel | App-wide horizontal palette filmstrip; wheel scrolls without looping | [StudioWorkspace.swift](../StudioWorkspace.swift): `WorkspaceFilmstrip`, nested `CarouselScroll` / `Strip`; instance `StudioFrame.filmstrip` |
-| Footer | App-wide status / release information, separate from viewport controls | **Not yet an independent region in the new shell.** Status currently drawn in `WorkspaceFilmstrip.draw()` above its thumbnails. [StudioWindow.swift](../StudioWindow.swift): legacy `StudioFooter` / `StudioFrame.footer` is hidden during canvas routes. Keep this name reserved for the eventual standalone bottom status row |
+| Footer | App-wide status / release information, separate from viewport controls | [StudioWindow.swift](../StudioWindow.swift): `StudioFooter` / `StudioFrame.footer`, visible on all routes beneath the Carousel (or directly beneath the workspace during image import). Owns release/status and copied-colour history. |
+
+Image import source browsing shows the real user Home, startup disk and mounted volumes. Selecting or expanding an ungranted folder opens the macOS folder chooser; the From panel’s Choose Folder action also grants access. Persist grants through `FolderAccess`, never path-only permissions. Enumeration errors remain errors, not cached empty folders. Rails reserve their viewport-facing one-point border and extend to the app Footer when the Carousel is hidden.
 
 ## Panel primitive and contents
 

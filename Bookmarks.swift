@@ -77,7 +77,7 @@ enum FolderAccess {
     /// Whether a path is one the user has granted, or lies inside one.
     static func covers(_ url: URL) -> Bool {
         let path = url.standardizedFileURL.path
-        return held.keys.contains { path == $0 || path.hasPrefix($0 + "/") }
+        return held.keys.contains { path == $0 || $0 == "/" || path.hasPrefix($0 + "/") }
     }
 
     private static var stored: [String: Data] {

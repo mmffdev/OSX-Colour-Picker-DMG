@@ -108,6 +108,12 @@ final class AppPreferences {
         } catch { NSApp.presentError(error) }
     }
     func rememberDefaultCatalogue(_ name: String, id: String?) {
+        // Like ordinary preferences, self-tests must never reach the user's app manifest.
+        if CommandLine.arguments.contains("--self-test") {
+            preferences.set(name, forKey: Catalogues.currentKey)
+            preferences.set(id, forKey: "currentCatalogueID")
+            return
+        }
         do {
             try AppDataStore.current.rememberDefaultCatalogue(name, id: id)
             settingsCache.invalidate()

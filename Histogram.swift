@@ -155,7 +155,7 @@ enum Histogram {
 /// The plot itself: merged into one, or a strip per channel.
 final class HistogramView: NSView {
     static let mergedHeight: CGFloat = 72
-    static let stripHeight: CGFloat = 34
+    static let stripHeight: CGFloat = 72
     static let stripGap: CGFloat = 4
 
     var type = HistogramType.rgb { didSet { changed() } }
@@ -242,14 +242,29 @@ final class HistogramView: NSView {
             if counts.indices.contains(channel) {
                 colour.withAlphaComponent(0.38).setFill()
                 for (offset, count) in counts[channel].enumerated() where count > 0 {
-                    let h = max(3, inner.height * 0.6 * CGFloat(count) / tallest)
+                    let available = guide == nil ? inner.height : max(4, inner.maxY - (rect.minY + 44))
+                    let h = max(3, min(inner.height * 0.6, available) * CGFloat(count) / tallest)
                     NSRect(x: x(offset + type.ranges[channel].lowerBound, channel) - 1.5, y: inner.maxY - h, width: 3, height: h).fill()
                 }
             }
             if let value = own?[safe: channel] {
                 colour.setFill()
-                NSRect(x: x(value, channel) - 1.5, y: inner.minY, width: 3, height: inner.height).fill()
+                let top = guide == nil ? inner.minY : min(inner.maxY - 4, rect.minY + 44)
+                NSRect(x: x(value, channel) - 1.5, y: top, width: 3, height: inner.maxY - top).fill()
             }
+        }
+        // Overlay shared glyphs after the spikes so neither additive blending nor data obscures them.
+        context.compositingOperation = .sourceOver
+        for (isLow, zone) in [(true, low), (false, high)] where guide != nil {
+            let occupied = channels.contains { channel in
+                func outside(_ value: Int) -> Bool { isLow ? value < safe.lowerBound : value > safe.upperBound }
+                if let value = own?[safe: channel], outside(value) { return true }
+                guard counts.indices.contains(channel) else { return false }
+                return counts[channel].enumerated().contains { $0.element > 0 && outside($0.offset + type.ranges[channel].lowerBound) }
+            }
+            let size = min(24, zone.width - 4, zone.height - 28)
+            guard occupied, size >= 6 else { continue }
+            ResultGlyph.warning.draw(in: NSRect(x: zone.midX - size / 2, y: zone.minY + 20, width: size, height: size))
         }
         context.restoreGraphicsState()
     }

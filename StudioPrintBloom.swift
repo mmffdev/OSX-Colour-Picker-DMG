@@ -114,9 +114,9 @@ final class PrintBloomView: NSView {
     private var hovered: String?
     private var tracking: NSTrackingArea?
     private var expandRect = NSRect.zero
-    private var plotTop: CGFloat { compact ? 24 : 150 }
-    private var diameter: CGFloat { max(20, min(bounds.width - (compact ? 72 : 112), bounds.height - (compact ? 96 : 316))) }
-    var captionGuide: CGFloat { if compact { return plotTop + diameter + 20 }; return SettingsSheet.baseline(ceil((150 + diameter + 56 - Design.App.textBaseline) / Design.App.unit)) }
+    private var plotTop: CGFloat { compact ? 64 : 186 }
+    private var diameter: CGFloat { max(20, min(bounds.width - (compact ? 128 : 216), bounds.height - (compact ? 176 : 404))) }
+    var captionGuide: CGFloat { if compact { return plotTop + diameter + 64 }; return SettingsSheet.baseline(ceil((plotTop + diameter + 88 - Design.App.textBaseline) / Design.App.unit)) }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func updateTrackingAreas() {
@@ -202,6 +202,19 @@ final class PrintBloomView: NSView {
                 let position = point(radius + (compact ? 16 : 24), (start + end) / 2)
                 let label = Design.attributed(String(format: "%.1f", delta), .caption, colour: Design.ink)
                 label.draw(x: position.x - label.size().width / 2, baseline: position.y + 4)
+            }
+            if petalScale > 0.75 {
+                let glyphRadius = radius + (compact ? 54 : 84)
+                let position = point(glyphRadius, (start + end) / 2)
+                // Keep dense palettes legible without letting adjacent result marks overlap.
+                let size = min(compact ? 20.0 : 34.0, max(8, glyphRadius * step * 0.65))
+                let rect = NSRect(x: position.x - size / 2, y: position.y - size / 2, width: size, height: size)
+                if let delta = item.delta, delta.isFinite {
+                    (delta <= tolerance ? ResultGlyph.pass : ResultGlyph.warning).draw(in: rect)
+                } else {
+                    let unknown = Design.attributed("?", .caption, colour: Design.quiet)
+                    unknown.draw(x: rect.midX - unknown.size().width / 2, baseline: rect.midY + 4)
+                }
             }
         }
         let ring = NSBezierPath(ovalIn: NSRect(x: centre.x - toleranceRadius, y: centre.y - toleranceRadius, width: toleranceRadius * 2, height: toleranceRadius * 2))

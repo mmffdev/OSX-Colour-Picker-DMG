@@ -176,7 +176,7 @@ final class WorkspaceFilmstrip:NSView {
     required init?(coder:NSCoder){fatalError()}
     func update(_ palettes:[Swatch],selected:UUID?, colours:[String:NSColor] = [:]){strip.displayColours=colours;strip.palettes=palettes;strip.selected=selected;needsLayout=true}
     override func layout(){super.layout();scroll.frame=NSRect(x:8,y:24,width:bounds.width-16,height:bounds.height-24);strip.frame=NSRect(x:0,y:0,width:max(scroll.contentSize.width,CGFloat(strip.palettes.count)*112+8),height:84)}
-    override func draw(_ dirtyRect:NSRect){hairline(x:0,y:0,width:bounds.width);Design.attributed("All Palettes · \(strip.palettes.count)",.body,colour:Design.quiet).draw(x:16,baseline:19);Design.attributed(ContentViewController.releaseLine,.body,colour:Design.quiet).draw(right:bounds.width-16,baseline:19)}
+    override func draw(_ dirtyRect:NSRect){hairline(x:0,y:0,width:bounds.width);Design.attributed("All Palettes · \(strip.palettes.count)",.body,colour:Design.quiet).draw(x:16,baseline:19)}
 }
 
 enum WorkspaceImageSort: String, CaseIterable {
@@ -417,7 +417,12 @@ final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineV
         var children:[Node]?
         var loading=false
         init(url:URL,isDirectory:Bool,isRoot:Bool=false){self.url=url;self.isDirectory=isDirectory;self.isRoot=isRoot}
-        var title:String { isRoot && url.path == NSHomeDirectory() ? "Home — \(url.lastPathComponent)" : url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
+        var title:String {
+            if isRoot && url == WorkspaceImageIntakePane.userHome { return "Home — \(url.lastPathComponent)" }
+            if isRoot, let name = try? url.resourceValues(forKeys:[.volumeNameKey]).volumeName,
+               url.path == "/" || url.deletingLastPathComponent().path == "/Volumes" { return name }
+            return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+        }
     }
     var scrollbarOnLeft=false {didSet{scroll.onLeft=scrollbarOnLeft}}
     var onImageFiles:((URL?,[URL],WorkspaceImageScanEvent)->Void)?
@@ -461,18 +466,46 @@ final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineV
         scroll.hasVerticalScroller=CGFloat(outline.numberOfRows)*outline.rowHeight > scroll.bounds.height
         scroll.tile();outline.tableColumns.first?.width=scroll.contentSize.width
     }
-    private func reloadRoots(){
-        let home=Node(url:URL(fileURLWithPath:NSHomeDirectory(),isDirectory:true),isDirectory:true,isRoot:true)
-        let volumeRoot=URL(fileURLWithPath:"/Volumes",isDirectory:true)
-        var volumes:[Node]=[]
-        if let urls=try? FileManager.default.contentsOfDirectory(at:volumeRoot,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles]) {
-            volumes=urls.compactMap{url in
-                guard (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true else{return nil}
-                return Node(url:url,isDirectory:true,isRoot:true)
-            }.sorted{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
+    static var userHome: URL {
+        // NSHomeDirectory is the app container in a sandboxed process.
+        if let entry = getpwuid(getuid()), let path = entry.pointee.pw_dir {
+            return URL(fileURLWithPath:String(cString:path),isDirectory:true)
         }
-        roots=[home]+volumes
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+    private var requestingAccess=false
+    private func reloadRoots(){
+        let disk=URL(fileURLWithPath:"/",isDirectory:true)
+        let volumes=FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys:[.volumeNameKey],options:[.skipHiddenVolumes]) ?? []
+        var seen=Set<String>()
+        roots=([Self.userHome,disk]+volumes).filter{seen.insert($0.standardizedFileURL.path).inserted}
+            .map{Node(url:$0,isDirectory:true,isRoot:true)}
         outline.reloadData();needsLayout=true
+    }
+    func chooseFolder(){ requestAccess(nil) }
+    private func requestAccess(_ node:Node?){
+        guard !requestingAccess,let window else{return}
+        requestingAccess=true
+        let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false
+        panel.allowsMultipleSelection=false;panel.directoryURL=node?.url ?? Self.userHome
+        panel.prompt="Allow Access";panel.message="Choose the folder or disk to browse. Colorgain remembers access to the location you select."
+        panel.beginSheetModal(for:window){[weak self] response in
+            guard let self else{return};self.requestingAccess=false
+            guard response == .OK,let url=panel.url else{return}
+            do {try FolderAccess.authorize(url,renew:true)}
+            catch {NSApp.presentError(error);return}
+            let chosen:Node
+            let requested=node?.url.standardizedFileURL.path ?? ""
+            let granted=url.standardizedFileURL.path
+            if let node,requested == granted || granted == "/" || requested.hasPrefix(granted+"/") {chosen=node}
+            else if let existing=self.roots.first(where:{$0.url.standardizedFileURL.path == granted}) {chosen=existing}
+            else {chosen=Node(url:url,isDirectory:true,isRoot:true);self.roots.append(chosen);self.outline.reloadData()}
+            chosen.children=nil;self.selectedFolder=chosen
+            self.load(chosen)
+            let row=self.outline.row(forItem:chosen)
+            if row>=0 {self.outline.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}
+            self.outline.expandItem(chosen)
+        }
     }
     private func imageFile(_ url:URL)->Bool {
         let ext=url.pathExtension.lowercased()
@@ -481,10 +514,18 @@ final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineV
     }
     private func load(_ node:Node){
         guard node.isDirectory,node.children == nil,!node.loading else{return}
+        #if APPSTORE
+        guard FolderAccess.covers(node.url) else {requestAccess(node);return}
+        #endif
         node.loading=true
         let url=node.url
         DispatchQueue.global(qos:.userInitiated).async { [weak self,weak node] in
-            let urls=(try? FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles,.skipsPackageDescendants])) ?? []
+            let urls:[URL]
+            do {urls=try FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles,.skipsPackageDescendants])}
+            catch {
+                DispatchQueue.main.async { [weak node] in node?.loading=false;NSApp.presentError(error) }
+                return
+            }
             let found=urls.compactMap{child -> Node? in
                 guard let values=try? child.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey]),values.isSymbolicLink != true else{return nil}
                 if values.isDirectory == true {return Node(url:child,isDirectory:true)}
@@ -495,7 +536,7 @@ final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineV
             }
             DispatchQueue.main.async { [weak self,weak node] in
                 guard let self,let node else{return};node.children=found;node.loading=false
-                self.outline.reloadItem(node,reloadChildren:true);self.needsLayout=true
+                self.outline.reloadItem(node,reloadChildren:true);self.outline.expandItem(node);self.needsLayout=true
                 if self.selectedFolder === node {
                     self.publishSelection()
                 }
@@ -527,13 +568,15 @@ final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineV
         let nodes=outline.selectedRowIndexes.compactMap{outline.item(atRow:$0) as? Node}
         if let folder=nodes.last(where:\.isDirectory){
             selectedFolder=folder;load(folder)
+            // Permission and enumeration must finish before scanning the selection.
+            guard folder.children != nil,!folder.loading else{return}
         }
         let files=nodes.filter{ !$0.isDirectory }.map(\.url)
         if !files.isEmpty {scanGeneration+=1;scanCancellation?.cancel();onImageFiles?(selectedFolder?.url,[],.began);onImageFiles?(selectedFolder?.url,files,.batch);onImageFiles?(selectedFolder?.url,[],.completed)}
         else if let folder=selectedFolder {scan(folder.url)}
         else {scanGeneration+=1;scanCancellation?.cancel();onImageFiles?(nil,[],.began);onImageFiles?(nil,[],.completed)}
     }
-    @objc private func nestedFoldersChanged(){includeNested=nestedFolders.state == .on;if let folder=selectedFolder{scan(folder.url)}}
+    @objc private func nestedFoldersChanged(){includeNested=nestedFolders.state == .on;if let folder=selectedFolder,folder.children != nil{scan(folder.url)}}
     private func scan(_ folder:URL){
         scanGeneration+=1;let generation=scanGeneration,recursive=includeNested
         scanCancellation?.cancel();let cancellation=ScanCancellation();scanCancellation=cancellation

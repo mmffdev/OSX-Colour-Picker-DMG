@@ -43,6 +43,7 @@
 		37641B2EF362CCC7E1B73295 /* SetupAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5BED1BBCF2341487CB82A1E /* SetupAssistant.swift */; };
 		389FA02DB90337EFFB11AD5B /* StudioLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49836A680E25C74716A1A5AA /* StudioLab.swift */; };
 		3B8111512911867F65919021 /* FOGRA51_MW3_Subset.txt in Resources */ = {isa = PBXBuildFile; fileRef = 12261A59FE2326D6AD0F5EAF /* FOGRA51_MW3_Subset.txt */; };
+		3CB21AFED1B4CB27218694A7 /* MetadataFilters.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC97802B2ADD08E741E0BDA1 /* MetadataFilters.swift */; };
 		42AEAD0331A3A69666C4C7D9 /* Catalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D04FF49E321ABEC88D19A13 /* Catalogue.swift */; };
 		451789CD68F8194DB18EB131 /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97088A7B77A529EA78D0F1BC /* SettingsWindow.swift */; };
 		4584A1BF834D7D1A0819E561 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 4C00FF1D8467FD3E60361012 /* AppIcon.icns */; };
@@ -235,6 +236,7 @@
 		A87514F33C98513F82B40D77 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
 		A90B9D5EFB67D3F8729486C0 /* colsyncproject.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colsyncproject.icns; sourceTree = "<group>"; };
 		AB4EC46D28A2EDEF03355716 /* NewColour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewColour.swift; sourceTree = "<group>"; };
+		AC97802B2ADD08E741E0BDA1 /* MetadataFilters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataFilters.swift; sourceTree = "<group>"; };
 		ADB0056B89982DD8394CCBF4 /* ColourProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourProfiles.swift; sourceTree = "<group>"; };
 		AE00BECDB1FCDFBE1EC6539A /* AdobeHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelper.swift; sourceTree = "<group>"; };
 		AE7347A1D885A19F020F5D88 /* ColourQRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourQRTests.swift; sourceTree = "<group>"; };
@@ -393,6 +395,7 @@
 				C46F1F4C6C41052061294C25 /* main.swift */,
 				2F5F86B39BE41109D29DE6FF /* MainWindow.swift */,
 				640C851653EC4127996EFAF5 /* MenubarPaletteNameBar.swift */,
+				AC97802B2ADD08E741E0BDA1 /* MetadataFilters.swift */,
 				06E79C58437A8675901EF69A /* Migration.swift */,
 				1FA010F917A4CD550FD9D105 /* Modal.swift */,
 				6694BB41A62A24511F4F7099 /* Model.swift */,
@@ -639,6 +642,7 @@
 				5E1703FFE8CCB47E5566886A /* Logo.swift in Sources */,
 				137B166C1F93FA6A481E201D /* MainWindow.swift in Sources */,
 				254AAE0331D01DB68534BC99 /* MenubarPaletteNameBar.swift in Sources */,
+				3CB21AFED1B4CB27218694A7 /* MetadataFilters.swift in Sources */,
 				F19B22FE195C552B3F15BA8E /* Migration.swift in Sources */,
 				FF7EC8A1BBE81E4B78909988 /* Modal.swift in Sources */,
 				68CA492915916D33E639007C /* Model.swift in Sources */,

@@ -499,3 +499,45 @@ final class DropdownButton:NSButton {
         Design.attributed(title,.body,colour:isEnabled ? Design.ink:Design.quiet).draw(x:8,baseline:bounds.midY+4,width:max(0,bounds.width-44))
     }
 }
+
+/// Reusable full-colour vector assets; SVG originals live in assets/glyphs.
+enum ResultGlyph: String {
+    case warning = "Glyph-Warning", pass = "Glyph-Pass"
+    /// Fixed vector silhouettes: never substitute platform-dependent emoji artwork.
+    func draw(in rect: NSRect) {
+        func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+            NSPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        let path = NSBezierPath()
+        if self == .pass {
+            // Broad, curved green tick with a tapered rising arm, matching the supplied glyph.
+            path.move(to: p(0.04, 0.55))
+            path.curve(to: p(0.25, 0.49), controlPoint1: p(0.13, 0.43), controlPoint2: p(0.17, 0.43))
+            path.line(to: p(0.35, 0.60))
+            path.curve(to: p(0.96, 0.06), controlPoint1: p(0.53, 0.31), controlPoint2: p(0.79, 0.13))
+            path.curve(to: p(0.97, 0.10), controlPoint1: p(1.00, 0.04), controlPoint2: p(1.00, 0.07))
+            path.curve(to: p(0.43, 0.94), controlPoint1: p(0.71, 0.34), controlPoint2: p(0.54, 0.67))
+            path.curve(to: p(0.30, 0.96), controlPoint1: p(0.40, 0.98), controlPoint2: p(0.33, 0.99))
+            path.curve(to: p(0.04, 0.55), controlPoint1: p(0.22, 0.76), controlPoint2: p(0.14, 0.63))
+            path.close()
+            NSColor(srgbRed: 0.47, green: 0.68, blue: 0.17, alpha: 1).setFill(); path.fill()
+        } else {
+            // Rounded amber triangle, dark outline and tapered exclamation (not a text emoji).
+            path.move(to: p(0.46, 0.09))
+            path.curve(to: p(0.54, 0.09), controlPoint1: p(0.48, 0.05), controlPoint2: p(0.52, 0.05))
+            path.line(to: p(0.95, 0.85))
+            path.curve(to: p(0.91, 0.92), controlPoint1: p(0.98, 0.90), controlPoint2: p(0.96, 0.92))
+            path.line(to: p(0.09, 0.92))
+            path.curve(to: p(0.05, 0.85), controlPoint1: p(0.04, 0.92), controlPoint2: p(0.02, 0.90))
+            path.close()
+            NSColor(srgbRed: 1, green: 0.72, blue: 0, alpha: 1).setFill(); path.fill()
+            NSColor(srgbRed: 0.10, green: 0.09, blue: 0.06, alpha: 1).setStroke()
+            path.lineWidth = max(1, rect.width * 0.035); path.lineJoinStyle = .round; path.stroke()
+            let mark = NSBezierPath()
+            mark.move(to: p(0.46, 0.33)); mark.curve(to: p(0.54, 0.33), controlPoint1: p(0.46, 0.29), controlPoint2: p(0.54, 0.29))
+            mark.line(to: p(0.52, 0.68)); mark.line(to: p(0.48, 0.68)); mark.close()
+            NSColor.black.setFill(); mark.fill()
+            NSBezierPath(ovalIn: NSRect(x: p(0.47, 0.74).x, y: p(0.47, 0.74).y, width: rect.width * 0.06, height: rect.height * 0.06)).fill()
+        }
+    }
+}

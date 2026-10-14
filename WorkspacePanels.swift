@@ -280,13 +280,14 @@ final class WorkspaceRail: NSView {
     required init?(coder:NSCoder){fatalError()}
     override func draw(_ dirtyRect:NSRect) {
         Design.rule.setFill()
+        NSRect(x:scroll.onLeft ? bounds.width-1:0,y:0,width:1,height:bounds.height).fill()
         NSRect(x:scroll.onLeft ? QuietScroller.lane:bounds.width-QuietScroller.lane-1,y:0,width:1,height:bounds.height).fill()
     }
     func add(_ panel:WorkspacePanel,at index:Int? = nil) {
         if let old=panel.rail { old.panels.removeAll{$0 === panel};old.arrange() }
         panel.removeFromSuperview();panels.insert(panel,at:min(index ?? panels.count,panels.count));panel.rail=self;stack.addSubview(panel);arrange()
     }
-    override func layout(){super.layout();scroll.frame=bounds;arrange()}
+    override func layout(){super.layout();scroll.frame=NSRect(x:scroll.onLeft ? 0:1,y:0,width:max(0,bounds.width-1),height:bounds.height);arrange()}
     func arrange() {
         var y:CGFloat=0
         targetRects=[]

@@ -4,7 +4,7 @@ Branch: `osx-full-app` (App Store build). Rick authorised a new canvas-centred s
 
 ## Names and layout
 
-The [app layout component registry](c_layout_registry.md) owns region names and source mappings. Rail1 is the 280-point left dock; Rail2 is the 340-point right dock. The flexible Viewport contains its Header, Actionbar, Page and Footer. The Carousel currently occupies a combined 120-point band with app status; the independent app Footer remains to be split out.
+The [app layout component registry](c_layout_registry.md) owns region names and source mappings. Rail1 is the 280-point left dock; Rail2 is the 340-point right dock. The flexible Viewport contains its Header, Actionbar, Page and Footer. The Carousel occupies a 120-point band above the independent app Footer. Image import hides the Carousel, extends the rails to the Footer, and keeps the Viewport-Footer directly above it.
 
 Catalogues uses a native disclosure tree with 28-point rows, 16-point indentation and house type/icons. Roots come from the existing controller. The active catalogue's schema filters Viewport-Page; palettes are not duplicated as tree rows. All Palettes includes project-owned palettes in the active catalogue. Selection updates Inspector; Open Swatches opens the palette. The Carousel shows all active-catalogue palettes, with wheel/trackpad movement clamped at both ends.
 

@@ -38,7 +38,8 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
     private var keys: [String] = []
     private var title = "Select A Palette"
     var onColour: ((String?) -> Void)?
-    var minimumContentHeight: CGFloat { expanded ? 420 : (plot.split ? 372 : 340) }
+    private var panelPlotHeight: CGFloat { plot.split ? plot.intrinsicContentSize.height : 112 }
+    var minimumContentHeight: CGFloat { expanded ? 420 : max(340, panelPlotHeight + 224) }
     override var isFlipped: Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -84,7 +85,7 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
         colours.frame = NSRect(x:12,y:32+offset,width:w,height:24)
         model.frame = NSRect(x:12,y:64+offset,width:w*0.40,height:24)
         channels.frame = NSRect(x:16+w*0.40,y:64+offset,width:w*0.60-4,height:24)
-        plot.frame = NSRect(x:12,y:100+offset,width:w,height:expanded ? max(140,bounds.height-284) : (plot.split ? 148 : 112))
+        plot.frame = NSRect(x:12,y:100+offset,width:w,height:expanded ? max(140,bounds.height-284) : panelPlotHeight)
         if expanded {
             let sw=min(spectrumWidth,max(40,plot.frame.width-24))
             spectrumRect=NSRect(x:plot.frame.midX-sw/2,y:bounds.height-76,width:sw,height:64)
