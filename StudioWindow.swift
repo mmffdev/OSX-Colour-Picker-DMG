@@ -1128,11 +1128,16 @@ final class StudioFrame: NSView {
         panel.message="Choose a catalogue file to open it where it is, or a library.json to import."
         panel.beginSheetModal(for:window) { [weak self] response in
             guard response == .OK,let self,let url=panel.url else{return}
-            do {
-                let name=[ColourFiles.catalogue,ColourFiles.legacyCatalogue].contains(url.pathExtension.lowercased()) ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
-                self.library.open(catalogue:name)
-                self.go(.catalogue)
-            } catch { self.library.show(error) }
+            CatalogueOpen.selected(url, over: window) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success(let name):
+                    guard let name else { return }
+                    self.library.open(catalogue:name)
+                    self.go(.catalogue)
+                case .failure(let error): self.library.show(error)
+                }
+            }
         }
     }
 
@@ -4537,11 +4542,12 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         panel.message = "Choose a catalogue's .colcatalogue file to open it where it is, or a library.json to make a catalogue from it."
         panel.beginSheetModal(for: w) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            do {
-                let name = [ColourFiles.catalogue, ColourFiles.legacyCatalogue].contains(url.pathExtension.lowercased()) ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
-                lib.open(catalogue: name)
-            } catch { lib.show(error) }
-            self?.onChange?()
+            CatalogueOpen.selected(url, over: w) { [weak self] result in
+                switch result {
+                case .success(let name): if let name { lib.open(catalogue: name); self?.onChange?() }
+                case .failure(let error): lib.show(error)
+                }
+            }
         }
     }
 
