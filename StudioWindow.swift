@@ -305,7 +305,9 @@ final class StudioFrame: NSView {
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
         for view in [leftPanelRail, rightPanelRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
-        leftPanelRail.add(WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640))
+        let cataloguesPanel=WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640)
+        cataloguesPanel.setHeaderAction(symbol:"plus",title:"Open Catalogue…") { [weak self] in self?.locateWorkspaceCatalogue() }
+        leftPanelRail.add(cataloguesPanel)
         rightPanelRail.add(WorkspacePanel(id: "inspector", title: "Inspector", content: inspectorPane, height: 520))
         if CommandLine.arguments.contains("--ui-test-panels") {
             WorkspacePanelUITest.load(into:[leftPanelRail,rightPanelRail])
@@ -1114,6 +1116,23 @@ final class StudioFrame: NSView {
             guard SchemaTrial.collection(of: p.id, among: all, places: places).id == c.id else { return false }
             if case .some(let f) = folder { return SchemaTrial.folder(of: p.id, among: all, places: places) == f }
             return true
+        }
+    }
+
+    private func locateWorkspaceCatalogue() {
+        guard let window else { return }
+        let panel=NSOpenPanel()
+        panel.canChooseFiles=true; panel.canChooseDirectories=false; panel.allowsMultipleSelection=false
+        panel.allowedContentTypes=[UTType(filenameExtension:ColourFiles.catalogue),UTType(filenameExtension:ColourFiles.legacyCatalogue),.json].compactMap{$0}
+        panel.prompt="Open"
+        panel.message="Choose a catalogue file to open it where it is, or a library.json to import."
+        panel.beginSheetModal(for:window) { [weak self] response in
+            guard response == .OK,let self,let url=panel.url else{return}
+            do {
+                let name=[ColourFiles.catalogue,ColourFiles.legacyCatalogue].contains(url.pathExtension.lowercased()) ? try Catalogues.standard.adopt(url) : try Catalogues.standard.importFile(url)
+                self.library.open(catalogue:name)
+                self.go(.catalogue)
+            } catch { self.library.show(error) }
         }
     }
 

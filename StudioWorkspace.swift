@@ -18,6 +18,9 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         }
     }
     private let outline = WorkspaceOutline(), scroll = FittedScrollView()
+    private let catalogueList = WorkspaceOutline(), catalogueScroll = FittedScrollView()
+    private var catalogueRoots: [Node] = []
+    private var dividerY: CGFloat = 0
     private var roots: [Node] = [], expanded = Set<String>(), rebuilding = false
     private var current = ""
     var onPick: ((StudioFrame.Place)->Void)?
@@ -27,24 +30,37 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     override init(frame: NSRect) {
         super.init(frame:frame)
         wantsLayer=true; layer?.backgroundColor=Design.card.cgColor
-        let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("catalogue"))
-        outline.addTableColumn(column); outline.outlineTableColumn=column; outline.headerView=nil
-        outline.rowHeight=28; outline.indentationPerLevel=16; outline.intercellSpacing=NSSize(width:0,height:0)
-        outline.backgroundColor=Design.card; outline.appearance=NSAppearance(named: .aqua); outline.style = .plain
-        outline.dataSource=self; outline.delegate=self; outline.focusRingType = .none
-        outline.setAccessibilityLabel("Catalogues library tree")
-        scroll.drawsBackground=false; scroll.hasVerticalScroller=true; scroll.autohidesScrollers=true; scroll.documentView=outline
-        addSubview(scroll)
+        for (tree, container, name) in [(catalogueList, catalogueScroll, "Catalogue List"), (outline, scroll, "Catalogue Library Tree")] {
+            let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(name))
+            tree.addTableColumn(column); tree.outlineTableColumn=column; tree.headerView=nil
+            tree.rowHeight=28; tree.indentationPerLevel=16; tree.intercellSpacing=NSSize(width:0,height:0)
+            tree.backgroundColor=Design.card; tree.appearance=NSAppearance(named:.aqua); tree.style = .plain
+            tree.dataSource=self; tree.delegate=self; tree.focusRingType = .none
+            tree.setAccessibilityLabel(name)
+            container.drawsBackground=false; container.hasVerticalScroller=true; container.autohidesScrollers=true; container.documentView=tree
+            addSubview(container)
+        }
     }
     required init?(coder:NSCoder){fatalError()}
-    override func layout(){super.layout();scroll.frame=NSRect(x:8,y:4,width:bounds.width-16,height:max(0,bounds.height-8));outline.tableColumns.first?.width=scroll.contentSize.width}
+    override func layout() {
+        super.layout()
+        let topHeight=min(CGFloat(catalogueRoots.count)*28+8,max(32,min(176,bounds.height*0.35)))
+        catalogueScroll.frame=NSRect(x:8,y:4,width:max(0,bounds.width-16),height:max(0,topHeight-8))
+        dividerY=topHeight
+        scroll.frame=NSRect(x:8,y:topHeight+5,width:max(0,bounds.width-16),height:max(0,bounds.height-topHeight-9))
+        catalogueList.tableColumns.first?.width=catalogueScroll.contentSize.width
+        outline.tableColumns.first?.width=scroll.contentSize.width
+        needsDisplay=true
+    }
+    override func draw(_ dirtyRect:NSRect) { hairline(x:0,y:dividerY,width:bounds.width) }
     func update(names:[String], active:String, rows:[LibraryRail.Row], selected:StudioFrame.Place, selectedKey:String? = nil) {
         rebuilding=true
         defer{rebuilding=false}
-        if current != active {current=active;expanded.insert("catalogue:"+active)}
-        roots=names.map { Node("catalogue:"+$0,$0,catalogue:$0,symbol:"books.vertical") }
-        if !names.contains(active){roots.insert(Node("catalogue:"+active,active,catalogue:active,symbol:"books.vertical"),at:0)}
-        if let root=roots.first(where:{$0.catalogue==active}) {
+        current=active
+        catalogueRoots=names.map { Node("catalogue:"+$0,$0,catalogue:$0,symbol:"books.vertical") }
+        if !names.contains(active){catalogueRoots.insert(Node("catalogue:"+active,active,catalogue:active,symbol:"books.vertical"),at:0)}
+        let root=Node("content",active)
+        do {
             var stack:[(Int,Node)]=[(-1,root)]
             for row in rows {
                 let node:Node, level:Int
@@ -64,13 +80,17 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                 stack.last?.1.children.append(node);stack.append((level,node))
             }
         }
+        roots=root.children
+        catalogueList.reloadData()
+        if let index=catalogueRoots.firstIndex(where:{$0.catalogue==active}) { catalogueList.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false) }
         outline.reloadData()
+        needsLayout=true
         func restore(_ nodes:[Node]){for node in nodes {if expanded.contains(node.key) || node.catalogue==active || node.key=="catalogue"{outline.expandItem(node)};restore(node.children)}}
         restore(roots)
         for i in 0..<outline.numberOfRows {if let n=outline.item(atRow:i) as? Node,(selectedKey.map{n.key == $0} ?? (n.place==selected)){outline.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);break}}
     }
-    func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int{(item as? Node)?.children.count ?? roots.count}
-    func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any{(item as? Node)?.children[index] ?? roots[index]}
+    func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int{(item as? Node)?.children.count ?? (outlineView === catalogueList ? catalogueRoots.count : roots.count)}
+    func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any{(item as? Node)?.children[index] ?? (outlineView === catalogueList ? catalogueRoots[index] : roots[index])}
     func outlineView(_ outlineView:NSOutlineView,isItemExpandable item:Any)->Bool{!(item as! Node).children.isEmpty}
     func outlineView(_ outlineView:NSOutlineView,viewFor tableColumn:NSTableColumn?,item:Any)->NSView?{
         let node=item as! Node
@@ -81,7 +101,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         cell.addSubview(image);cell.addSubview(label);cell.textField=label;cell.imageView=image
         cell.toolTip=node.title;return cell
     }
-    func outlineViewSelectionDidChange(_ notification:Notification){guard !rebuilding,let node=outline.item(atRow:outline.selectedRow) as? Node else{return};if let cat=node.catalogue{if cat != current{onCatalogue?(cat)}else{onPick?(.catalogue)}}else if ["favourites","claimed","palettes"].contains(node.key){onFilter?(node.key)}else if let place=node.place{onPick?(place)}}
+    func outlineViewSelectionDidChange(_ notification:Notification){guard !rebuilding,let tree=notification.object as? NSOutlineView,let node=tree.item(atRow:tree.selectedRow) as? Node else{return};if let cat=node.catalogue{if cat != current{onCatalogue?(cat)}else{onPick?(.catalogue)}}else if ["favourites","claimed","palettes"].contains(node.key){onFilter?(node.key)}else if let place=node.place{onPick?(place)}}
     func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.insert(node.key)}}
     func outlineViewItemDidCollapse(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.remove(node.key)}}
 }

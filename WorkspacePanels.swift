@@ -50,6 +50,8 @@ final class WorkspacePanel: NSView {
     private let titleButton: NSButton
     private let grip = PanelDragGrip()
     private let resizeGrip = PanelResizeGrip()
+    private let headerActionButton = NSButton()
+    private var headerAction: (() -> Void)?
     var panelHeight: CGFloat { collapsed ? Self.headerHeight : preferredHeight }
     override var isFlipped: Bool { true }
     init(id: String, title: String, content: NSView, height: CGFloat) {
@@ -71,14 +73,30 @@ final class WorkspacePanel: NSView {
             contentScroll.drawsBackground=false;contentScroll.hasVerticalScroller=true;contentScroll.autohidesScrollers=true
             contentScroll.documentView=content;addSubview(contentScroll)
         } else { addSubview(content) }
-        [disclosure, titleButton, grip, resizeGrip].forEach { addSubview($0) }
+        headerActionButton.isHidden=true
+        headerActionButton.isBordered=false
+        headerActionButton.imagePosition = .imageOnly
+        headerActionButton.appearance=NSAppearance(named:.aqua)
+        headerActionButton.contentTintColor=Design.quiet
+        headerActionButton.target=self; headerActionButton.action=#selector(runHeaderAction)
+        [disclosure, titleButton, headerActionButton, grip, resizeGrip].forEach { addSubview($0) }
     }
     required init?(coder: NSCoder) { fatalError() }
+    func setHeaderAction(symbol: String, title: String, action: @escaping () -> Void) {
+        headerAction=action
+        headerActionButton.image=NSImage(systemSymbolName:symbol,accessibilityDescription:title)
+        headerActionButton.toolTip=title
+        headerActionButton.setAccessibilityLabel(title)
+        headerActionButton.isHidden=false
+        needsLayout=true
+    }
+    @objc private func runHeaderAction() { headerAction?() }
     @objc private func toggle() { collapsed.toggle() }
     override func layout() {
         super.layout()
         disclosure.frame = NSRect(x: 8, y: 9, width: 16, height: 16)
-        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-70), height: Self.headerHeight)
+        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-(headerAction == nil ? 70:98)), height: Self.headerHeight)
+        headerActionButton.frame=NSRect(x:bounds.width-64,y:5,width:24,height:24)
         grip.frame = NSRect(x: bounds.width-36, y: 0, width: 28, height: Self.headerHeight)
         content.isHidden = collapsed; contentScroll?.isHidden=collapsed; resizeGrip.isHidden = collapsed
         let viewport=NSRect(x:0,y:Self.headerHeight,width:bounds.width,height:max(0,bounds.height-Self.headerHeight-Self.footerHeight))
