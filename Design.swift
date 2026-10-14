@@ -541,3 +541,55 @@ enum ResultGlyph: String {
         }
     }
 }
+
+/// Theme-aware square checkbox. Native button semantics retain keyboard and VoiceOver access.
+final class SwissCheckbox: NSButton {
+    private var hovering = false
+    override var isFlipped: Bool { true }
+    init(_ label: String) {
+        super.init(frame: .zero)
+        title = label
+        setButtonType(.switch)
+        isBordered = false
+        font = Design.Text.bodyStrong.font()
+        setAccessibilityLabel(label)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshInk), name: .themeDidChange, object: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func refreshInk() { needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        let font = Design.Text.bodyStrong.font()
+        let side = ceil(font.capHeight)
+        let baseline = bounds.midY + 5
+        let square = NSRect(x: 8, y: baseline - side, width: side, height: side)
+        let ink = isEnabled ? Design.ink : Design.quiet
+        if hovering {
+            ink.withAlphaComponent(0.10).setFill()
+            NSBezierPath(rect: square.insetBy(dx: -3, dy: -3)).fill()
+        }
+        if state == .on { fill(square, ink) }
+        else {
+            ink.setStroke()
+            let outline = NSBezierPath(rect: square.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = hovering ? 2 : 1
+            outline.stroke()
+        }
+        Design.attributed(title, .bodyStrong, colour: ink).draw(x: square.maxX + 8, baseline: baseline, width: max(0, bounds.width - square.maxX - 12))
+        if window?.firstResponder === self {
+            ink.setStroke()
+            let focus = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
+            focus.lineWidth = 1
+            focus.setLineDash([2, 2], count: 2, phase: 0)
+            focus.stroke()
+        }
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
+}

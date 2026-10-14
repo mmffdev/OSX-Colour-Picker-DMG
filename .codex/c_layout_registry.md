@@ -101,3 +101,6 @@ Panel body contents use equal horizontal padding against the full available body
 Delta Bloom and Histograms share master-colour spectra: a 20 pt docked strip sits below the palette title, above the controls and chart. The 64 pt expanded spectrum is centred below the chart, uses `TileGrid.paletteTileWidth` (clamped to available width), and bottom-aligns with the selected-colour block under the findings column. Outer status segments use true round stroke caps. The viewport title temporarily shows `Panel Name > Palette Name` while expanded; the normal route title is retained and restored on close.
 
 Dropdown controls use `DropdownSkin`: faint full border, 4 pt corner radius and a 28 pt trailing arrow compartment. Current Settings fills its assigned field width; all carets align at the trailing edge. Preserve menu separators and control spacing. Delta Bloom places petal order directly below the docked spectrum and centred above the expanded chart.
+
+
+Import Viewport-Actionbar uses `SwissCheckbox` (Design.swift): text-cap-height square, filled when selected, theme-aware ink and native checkbox keyboard/accessibility. `WorkspaceToggleChoiceControl` keeps All/New Images and Import/Link mutually exclusive without underlines. Filter by Meta remains a menu.

@@ -211,6 +211,37 @@ final class WorkspaceChoiceControl:NSView {
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
 }
 
+/// Mutually exclusive choices using the shared filled-square checkbox treatment.
+final class WorkspaceToggleChoiceControl: NSView {
+    private let buttons: [SwissCheckbox]
+    var selectedSegment = 0 { didSet { updateSelection() } }
+    var onChange: ((Int) -> Void)?
+    override var isFlipped: Bool { true }
+    init(labels: [String]) {
+        buttons = labels.map { SwissCheckbox($0) }
+        super.init(frame: .zero)
+        for (index, button) in buttons.enumerated() {
+            button.tag = index; button.target = self; button.action = #selector(choose(_:))
+            addSubview(button)
+        }
+        updateSelection()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    private func updateSelection() {
+        for (index, button) in buttons.enumerated() { button.state = index == selectedSegment ? .on : .off; button.needsDisplay = true }
+    }
+    @objc private func choose(_ sender: SwissCheckbox) {
+        let changed = selectedSegment != sender.tag
+        selectedSegment = sender.tag
+        if changed { onChange?(selectedSegment) }
+    }
+    override func layout() {
+        super.layout()
+        let width = bounds.width / CGFloat(max(1, buttons.count))
+        for (index, button) in buttons.enumerated() { button.frame = NSRect(x: CGFloat(index) * width, y: 0, width: width, height: bounds.height) }
+    }
+}
+
 final class WorkspaceMenuControl:NSView {
     var title="Sort: Off"{didSet{needsDisplay=true}}
     var onPress:(()->Void)?
@@ -219,8 +250,7 @@ final class WorkspaceMenuControl:NSView {
     override func draw(_ dirtyRect:NSRect){
         Design.attributed(title,.bodyStrong,colour:Design.ink).draw(x:8,baseline:bounds.midY+5,width:max(0,bounds.width-24))
         let x=bounds.width-9,y=bounds.midY-1
-        let path=NSBezierPath();path.lineWidth=1.5;path.move(to:NSPoint(x:x-3,y:y-2));path.line(to:NSPoint(x:x,y:y+1));path.line(to:NSPoint(x:x+3,y:y-2));Design.ink.setStroke();path.stroke()
-        if hovering{hairline(x:8,y:bounds.maxY-1,width:max(0,bounds.width-20),Design.rule)}
+        let path=NSBezierPath();path.lineWidth=hovering ? 2:1.5;path.move(to:NSPoint(x:x-3,y:y-2));path.line(to:NSPoint(x:x,y:y+1));path.line(to:NSPoint(x:x+3,y:y-2));Design.ink.setStroke();path.stroke()
     }
     override func mouseDown(with event:NSEvent){onPress?()}
     override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
@@ -256,13 +286,13 @@ final class WorkspaceViewportBar:NSView {
     let channels=WorkspaceChannelControls(frame:.zero)
     private let importButton=SwissButton("Import", .secondary)
     private let cancelButton=SwissButton("Cancel", .quiet)
-    private let allImages=NSButton(checkboxWithTitle:"All Images",target:nil,action:nil)
+    private let allImages=SwissCheckbox("All Images")
     private let imageCount=NSTextField(labelWithString:"0 Images")
     private let intakeView=WorkspaceChoiceControl(labels:["Grid","Full"])
     private let sortButton=WorkspaceMenuControl()
-    private let imageFilter=WorkspaceChoiceControl(labels:["All Images","New Images"])
+    private let imageFilter=WorkspaceToggleChoiceControl(labels:["All Images","New Images"])
     private let metadataFilterButton=WorkspaceMenuControl()
-    private let importLinkChoice=WorkspaceChoiceControl(labels:["Import","Link"])
+    private let importLinkChoice=WorkspaceToggleChoiceControl(labels:["Import","Link"])
     private var intakeSort=WorkspaceImageSort.off
     var onImport:(()->Void)?
     var onIntakeMode:((Bool)->Void)?
@@ -368,7 +398,7 @@ final class WorkspaceViewportBar:NSView {
         imageFilter.frame=NSRect(x:leftInset+148,y:2,width:226,height:28)
         imageCount.frame=NSRect(x:bounds.width-rightInset-300,y:6,width:284,height:20)
         importButton.frame=NSRect(x:12,y:2,width:78,height:28)
-        importLinkChoice.frame=NSRect(x:leftInset+550,y:2,width:128,height:28)
+        importLinkChoice.frame=NSRect(x:leftInset+550,y:2,width:160,height:28)
         channels.frame=NSRect(x:100,y:2,width:min(440,max(80,bounds.width-272)),height:28)
         appearancePresets.frame=NSRect(x:bounds.width-156,y:2,width:140,height:28)
         if isFooter {
