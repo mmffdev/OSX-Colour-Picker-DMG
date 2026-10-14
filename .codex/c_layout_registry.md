@@ -31,13 +31,13 @@ Rail1, Viewport and Rail2 are siblings. The native macOS title bar and menu bar 
 |---|---|---|
 | App | Window and root layout; owns all regions | [StudioWindow.swift](../StudioWindow.swift): `StudioWindowController`, `StudioFrame`; geometry in `StudioFrame.layout()` |
 | Header | Logo, navigation, picker and shared utility actions | [StudioWindow.swift](../StudioWindow.swift): `StudioHeader`, `StudioFrame.header` |
-| Rail1 | Left dock; independently scrolling panel stack | [WorkspacePanels.swift](../WorkspacePanels.swift): `WorkspaceRail`; instance `StudioFrame.leftPanelRail` |
+| Rail1 | Left dock; independently scrolling panel stack, scrollbar in outer left gutter | [WorkspacePanels.swift](../WorkspacePanels.swift): `WorkspaceRail`; instance `StudioFrame.leftPanelRail` |
 | Viewport | Flexible centre region between rails | [StudioWindow.swift](../StudioWindow.swift): `StudioFrame.layout()` canvas branch. Logical container; currently composed of sibling views, not a dedicated Viewport class |
 | Viewport-Header | Existing page/palette title and metadata | [StudioWindow.swift](../StudioWindow.swift): `StudioPage.draw()`, `AreaHeader`; viewport expand arrow disabled in the canvas shell |
 | Viewport-Actionbar | Filter/tab/action row below the title header | [StudioWorkspace.swift](../StudioWorkspace.swift): `WorkspaceViewportBar(footer: false)`; instance **`StudioFrame.viewportHeader`** (older code name); currently Library Filter scaffold |
 | Viewport-Page | Scrollable palette/swatch canvas; Grid or List | [StudioWindow.swift](../StudioWindow.swift): `StudioFrame.page`, `StudioPage.scroll`, `StudioPage.grid`, `TileGrid` |
 | Viewport-Footer | Fixed view controls: Grid/List left; format, size, Delta and profile right | [StudioWorkspace.swift](../StudioWorkspace.swift): `WorkspaceViewportBar(footer: true)`, `StudioFrame.viewportFooter`. Controls are arranged by `StudioPage.layout()` through `workspaceToolbar`; profile control in [PrintProfileSelector.swift](../PrintProfileSelector.swift). Menus open upward |
-| Rail2 | Right dock; independently scrolling panel stack | [WorkspacePanels.swift](../WorkspacePanels.swift): `WorkspaceRail`; instance `StudioFrame.rightPanelRail` |
+| Rail2 | Right dock; independently scrolling panel stack, scrollbar in outer right gutter | [WorkspacePanels.swift](../WorkspacePanels.swift): `WorkspaceRail`; instance `StudioFrame.rightPanelRail` |
 | Carousel | App-wide horizontal palette filmstrip; wheel scrolls without looping | [StudioWorkspace.swift](../StudioWorkspace.swift): `WorkspaceFilmstrip`, nested `CarouselScroll` / `Strip`; instance `StudioFrame.filmstrip` |
 | Footer | App-wide status / release information, separate from viewport controls | **Not yet an independent region in the new shell.** Status currently drawn in `WorkspaceFilmstrip.draw()` above its thumbnails. [StudioWindow.swift](../StudioWindow.swift): legacy `StudioFooter` / `StudioFrame.footer` is hidden during canvas routes. Keep this name reserved for the eventual standalone bottom status row |
 
