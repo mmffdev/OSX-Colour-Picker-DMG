@@ -25,7 +25,7 @@ final class StudioColourPicker: NSView, Overlay {
         ]
         return result
     }
-    private let items = StudioColourPicker.targets
+    private let items: [Target]
     private var selected: Int
     private var proposed: String
     private let scroll = FittedScrollView()
@@ -34,18 +34,23 @@ final class StudioColourPicker: NSView, Overlay {
     private var dots: [Dot] = []
     private let select = SwissButton("Select", .primary)
     private let cancel = SwissButton("Cancel", .secondary)
+    private let reset = SwissButton("Clear Colour", .secondary)
+    private var resetAction:(()->Void)?
     private weak var previous: NSResponder?
     var onDismiss: (() -> Void)?
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     private var railEdge: CGFloat { LibraryRail.collapsedWidth + Design.App.column(5, in: bounds.width) - Design.App.column(3, in: bounds.width) }
-    init(target: String) {
-        let index = Self.targets.firstIndex { $0.key == target } ?? 0
-        selected = index; proposed = hexOf(Self.targets[index].read()) ?? "#000000"
+    init(target: String, targets: [Target]? = nil,onReset:(()->Void)? = nil) {
+        let choices=targets ?? Self.targets
+        items=choices
+        resetAction=onReset
+        let index = choices.firstIndex { $0.key == target } ?? 0
+        selected = index; proposed = hexOf(choices[index].read()) ?? "#000000"
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
-        setAccessibilityRole(.group); setAccessibilityLabel("Settings Colour Picker")
+        setAccessibilityRole(.group); setAccessibilityLabel(targets == nil ? "Settings Colour Picker":"Favourite Colour Picker")
         scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
         scroll.documentView = list; addSubview(scroll)
         var y: CGFloat = 0, previousGroup = ""
@@ -72,6 +77,7 @@ final class StudioColourPicker: NSView, Overlay {
         select.target = self; select.action = #selector(commit)
         cancel.target = self; cancel.action = #selector(cancelled)
         addSubview(select); addSubview(cancel)
+        reset.target=self;reset.action=#selector(resetColour);reset.isHidden=onReset == nil;addSubview(reset)
         refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -88,6 +94,7 @@ final class StudioColourPicker: NSView, Overlay {
     }
     @objc private func cancelled() { dismissOverlay() }
     @objc private func commit() { items[selected].write(proposed); dismissOverlay() }
+    @objc private func resetColour() {resetAction?();dismissOverlay()}
     @objc private func targetPicked(_ sender: NSButton) {
         selected = sender.tag; proposed = hexOf(items[selected].read()) ?? "#000000"; refresh()
     }
@@ -122,6 +129,7 @@ final class StudioColourPicker: NSView, Overlay {
         }
         cancel.frame = NSRect(x: railEdge + 16, y: bounds.height - 64, width: cancel.intrinsicContentSize.width, height: 32)
         select.frame = NSRect(x: cancel.frame.maxX + 24, y: cancel.frame.minY, width: select.intrinsicContentSize.width, height: 32)
+        reset.frame=NSRect(x:select.frame.maxX+24,y:cancel.frame.minY,width:reset.intrinsicContentSize.width,height:32)
     }
     override func draw(_ dirtyRect: NSRect) {
         let edge = railEdge, top = Design.App.header

@@ -262,7 +262,7 @@ final class HistogramView: NSView {
                 guard counts.indices.contains(channel) else { return false }
                 return counts[channel].enumerated().contains { $0.element > 0 && outside($0.offset + type.ranges[channel].lowerBound) }
             }
-            let size = min(24, zone.width - 4, zone.height - 28)
+            let size = min(16, zone.width - 8, zone.height - 28)
             guard occupied, size >= 6 else { continue }
             ResultGlyph.warning.draw(in: NSRect(x: zone.midX - size / 2, y: zone.minY + 20, width: size, height: size))
         }

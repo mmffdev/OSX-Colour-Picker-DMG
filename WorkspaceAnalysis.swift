@@ -21,7 +21,28 @@ final class AnalysisMenu: NSPopUpButton {
     }
 }
 
-protocol WorkspaceScrollableContent { var minimumContentHeight: CGFloat { get } }
+/// Guard-band findings use the plotted model, not the separate print ΔE verdict.
+private final class HistogramFindingRow: NSButton {
+    var name="", colour=NSColor.clear, messages:[String]=[]
+    var opened=false
+    var changed:(()->Void)?
+    var rowHeight:CGFloat {28 + (opened ? CGFloat(messages.count)*24 : 0)}
+    override var isFlipped:Bool{true}
+    override init(frame:NSRect){super.init(frame:frame);target=self;action=#selector(toggle);isBordered=false}
+    required init?(coder:NSCoder){fatalError()}
+    @objc private func toggle(){guard !messages.isEmpty else{return};opened.toggle();changed?()}
+    override func resetCursorRects(){if !messages.isEmpty{addCursorRect(bounds,cursor:.pointingHand)}}
+    override func draw(_ dirtyRect:NSRect){
+        if isHighlighted {Design.mist.setFill();bounds.fill()}
+        colour.setFill();NSRect(x:0,y:6,width:16,height:16).fill()
+        Design.rule.setStroke();NSBezierPath(rect:NSRect(x:0.5,y:6.5,width:15,height:15)).stroke()
+        Design.attributed(name,.body).draw(x:24,baseline:20,width:max(0,bounds.width-130))
+        if !messages.isEmpty {Design.attributed(opened ? "▾":"▸",.body).draw(x:bounds.width-94,baseline:20)}
+        Design.attributed(messages.isEmpty ? "Pass":"Warning",.caption).draw(x:bounds.width-78,baseline:20,width:58)
+        (messages.isEmpty ? ResultGlyph.pass:ResultGlyph.warning).draw(in:NSRect(x:bounds.width-16,y:6,width:16,height:16))
+        if opened {for (i,message) in messages.enumerated(){Design.attributed(message,.caption,colour:Design.quiet).draw(x:24,baseline:44+CGFloat(i)*24,width:bounds.width-24)}}
+    }
+}
 
 final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
     let plot = HistogramView()
@@ -36,19 +57,53 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
     private let channels = AnalysisMenu("Histogram Channels", [])
     private let colours = AnalysisMenu("Inspect Colour", [])
     private var keys: [String] = []
+    private var names:[String]=[]
+    private var findingRows:[HistogramFindingRow]=[]
+    private let warningsToggle=AnalysisButton(title:"Warnings",target:nil,action:nil)
+    private var showsAllFindings=false
+    private var findingHeight:CGFloat {28 + findingRows.reduce(0){$0 + $1.rowHeight}}
+    @objc private func toggleWarnings(){showsAllFindings.toggle();refresh()}
+    private func rebuildFindings(){
+        let opened=Set(findingRows.filter(\.opened).map(\.name))
+        findingRows.forEach{$0.removeFromSuperview()};findingRows=[]
+        let channel=channels.indexOfSelectedItem > 1 ? channels.indexOfSelectedItem-2:nil
+        let records=keys.enumerated().map { index,key -> (Int,[String]) in
+            guard let values=type.values(of:key) else{return(index,["Colour Values Unavailable"])}
+            return(index,Self.findings(type:type,values:values,channel:channel))
+        }.sorted{ $0.1.isEmpty == $1.1.isEmpty ? $0.0 < $1.0 : !$0.1.isEmpty }
+        for (index,messages) in records where showsAllFindings || !messages.isEmpty {
+            let row=HistogramFindingRow(frame:.zero)
+            row.name=names[index];row.colour=spectrum.indices.contains(index) ? spectrum[index]:Design.hex(keys[index]);row.messages=messages
+            row.opened=opened.contains(row.name);row.setAccessibilityLabel(row.name+", "+(messages.isEmpty ? "Pass":messages.joined(separator:", ")))
+            row.changed={ [weak self] in self?.refresh() };findingRows.append(row);addSubview(row)
+        }
+        warningsToggle.title=(showsAllFindings ? "▾  ":"▸  ")+"Warnings (\(records.filter{ !$0.1.isEmpty }.count))"
+    }
+    static func findings(type:HistogramType,values:[Int],channel:Int?=nil)->[String]{
+        guard type == .rgb || type == .cmyk || type == .ycbcr else{return []}
+        return values.enumerated().compactMap{index,value in
+            guard type.channels.indices.contains(index),channel == nil || channel == index else{return nil}
+            let range = type == .ycbcr ? (index == 0 ? 64...940:64...960):type.safe!
+            if type == .cmyk && value == 0{return nil}
+            guard !range.contains(value) else{return nil}
+            return "\(type.channels[index]): \(value) · \(value < range.lowerBound ? "Below":"Above") \(range.lowerBound)–\(range.upperBound)"
+        }
+    }
     private var title = "Select A Palette"
     var onColour: ((String?) -> Void)?
     private var panelPlotHeight: CGFloat { plot.split ? plot.intrinsicContentSize.height : 112 }
-    var minimumContentHeight: CGFloat { expanded ? 420 : max(340, panelPlotHeight + 224) }
+    var panelContentPadding:CGFloat {12}
+    var minimumContentHeight: CGFloat { expanded ? 420+findingHeight : panelPlotHeight+214+findingHeight }
     override var isFlipped: Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
-        [plot, model, channels, colours, expandButton].forEach { addSubview($0) }
+        [plot, model, channels, colours, expandButton,warningsToggle].forEach { addSubview($0) }
         model.changed = { [weak self] _ in self?.rebuildChannels(); self?.refresh(); self?.onConfiguration?() }
         channels.changed = { [weak self] _ in self?.refresh();self?.onConfiguration?() }
         colours.changed = { [weak self] i in
             guard let self else { return }; self.refresh(); self.onColour?(i > 0 ? self.keys[i-1] : nil)
         }
+        warningsToggle.showsArrow=false;warningsToggle.target=self;warningsToggle.action=#selector(toggleWarnings)
         rebuildChannels()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -64,7 +119,8 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
     }
     func update(_ palette: Swatch?, library: Library, selected: String?) {
         title = palette?.name ?? "Select A Palette"; keys = palette?.entries.map(\.hex) ?? []
-        spectrum=keys.compactMap{library.definition(of:$0)?.master.display}
+        spectrum=keys.map{library.definition(of:$0)?.master.display ?? Design.hex($0)}
+        names=keys.map{library.name(of:$0,in:palette?.id)}
         colours.options(["All Colours"] + keys.enumerated().map { "\($0.offset+1). \(library.name(of: $0.element, in: palette?.id))" }, selected: selected.flatMap { keys.firstIndex(of: $0) }.map { $0+1 } ?? 0)
         refresh()
     }
@@ -76,7 +132,13 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
         // RGB guard bands are advisory, never a gamut or ΔE diagnosis.
         plot.showsGuides = type == .rgb || type == .cmyk || (type == .ycbcr && (plot.split || plot.selectedChannel != nil))
         plot.guideRanges = type == .ycbcr ? [64...940,64...960,64...960] : nil
+        rebuildFindings()
         needsLayout = true; needsDisplay = true
+        var ancestor=superview
+        while let view=ancestor {
+            if let panel=view as? WorkspacePanel {panel.rail?.arrange();break}
+            ancestor=view.superview
+        }
     }
     override func layout() {
         super.layout(); let w = max(20,bounds.width-24)
@@ -85,7 +147,10 @@ final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
         colours.frame = NSRect(x:12,y:32+offset,width:w,height:24)
         model.frame = NSRect(x:12,y:64+offset,width:w*0.40,height:24)
         channels.frame = NSRect(x:16+w*0.40,y:64+offset,width:w*0.60-4,height:24)
-        plot.frame = NSRect(x:12,y:100+offset,width:w,height:expanded ? max(140,bounds.height-284) : panelPlotHeight)
+        plot.frame = NSRect(x:12,y:100+offset,width:w,height:expanded ? max(140,bounds.height-284-findingHeight) : panelPlotHeight)
+        var fy=plot.frame.maxY+82
+        warningsToggle.frame=NSRect(x:12,y:fy,width:w,height:28);fy += 28
+        for row in findingRows{row.frame=NSRect(x:12,y:fy,width:w,height:row.rowHeight);fy += row.rowHeight}
         if expanded {
             let sw=min(spectrumWidth,max(40,plot.frame.width-24))
             spectrumRect=NSRect(x:plot.frame.midX-sw/2,y:bounds.height-76,width:sw,height:64)
@@ -127,7 +192,8 @@ final class WorkspaceBloomPane: NSView, WorkspaceScrollableContent {
         chart.expanded=expanded;chart.showsCaption = !expanded;expandButton.isHidden=expanded;findingsScroll.isHidden = !expanded
         [profiles,press,intent,tolerance,black].forEach{$0.isHidden=expanded};needsLayout=true
     } }
-    var minimumContentHeight: CGFloat { expanded ? 600 : 668 }
+    var panelContentPadding:CGFloat {12}
+    var minimumContentHeight: CGFloat {600}
     override var isFlipped: Bool { true }
     override init(frame:NSRect) {
         super.init(frame:frame); chart.compact=true;chart.showsExpandControl=false;black.setButtonType(.switch);black.showsCheck=true
@@ -280,9 +346,10 @@ final class WorkspaceChannelControls:NSView {
 
 private final class AnalysisButton:NSButton {
     var showsCheck=false
+    var showsArrow=true
     override var isFlipped:Bool{true}
     override func draw(_ dirtyRect:NSRect){
-        let prefix=showsCheck ? (state == .on ? "☑  ":"☐  "):"↙  "
+        let prefix=showsCheck ? (state == .on ? "☑  ":"☐  "):(showsArrow ? "↙  ":"")
         Design.attributed(prefix+title,.body,colour:isEnabled ? Design.ink:Design.quiet).draw(x:4,baseline:18,width:bounds.width-8)
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}

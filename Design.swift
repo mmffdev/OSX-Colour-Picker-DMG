@@ -214,6 +214,8 @@ enum Design {
         /// The height is chosen so the rows, from under the areas' rule to the footer, come to whole units: 25 at first, 17 at least.
         static let size = NSSize(width: 1440, height: 893)      // 64 + 1 + 80, then 25 units, then 48
         static let least = NSSize(width: 1120, height: 669)     // the same with 17 units
+        /// Shared expanded width for Rail1 and Rail2 across workspaces.
+        static let railWidth:CGFloat = 360
         static let margin: CGFloat = 24
         static let gutter: CGFloat = 16
         /// The gutter between areas, twice the column gutter: between the rails, between rail2 and the page, and at a page's split.

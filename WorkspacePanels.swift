@@ -66,12 +66,23 @@ final class WorkspaceOutline: NSOutlineView {
 /// Inner scrolling consumes a bordered lane only when content actually overflows.
 /// The outer side follows the owning rail, including after a panel is moved.
 protocol WorkspaceRailAwareContent:AnyObject {var scrollbarOnLeft:Bool {get set}}
+/// Content extent excludes the breathing room owned by the panel container.
+protocol WorkspacePanelContentMetrics {
+    var minimumContentHeight:CGFloat {get}
+    var panelContentPadding:CGFloat {get}
+}
+extension WorkspacePanelContentMetrics {
+    var panelContentPadding:CGFloat {WorkspacePanel.contentPadding}
+}
+protocol WorkspaceScrollableContent:WorkspacePanelContentMetrics {}
+
 final class WorkspacePanelScroll:FittedScrollView {
     var onLeft=false {didSet{if oldValue != onLeft {needsLayout=true;needsDisplay=true}}}
+    var reservesScrollerLane=true {didSet{needsLayout=true;needsDisplay=true}}
     override func tile(){
         super.tile()
-        let lane=hasVerticalScroller ? QuietScroller.lane:0
-        let border:CGFloat=hasVerticalScroller ? 1:0
+        let lane=hasVerticalScroller || reservesScrollerLane ? QuietScroller.lane:0
+        let border:CGFloat=lane > 0 ? 1:0
         contentView.frame=NSRect(x:onLeft ? lane+border:0,y:0,width:max(0,bounds.width-lane-border),height:bounds.height)
         verticalScroller?.frame=NSRect(x:onLeft ? 0:bounds.width-lane,y:0,width:lane,height:bounds.height)
         if let document=documentView,abs(document.frame.width-contentView.bounds.width)>0.5 {document.setFrameSize(NSSize(width:contentView.bounds.width,height:document.frame.height))}
@@ -79,31 +90,63 @@ final class WorkspacePanelScroll:FittedScrollView {
     }
     override func draw(_ dirtyRect:NSRect){
         super.draw(dirtyRect)
-        if hasVerticalScroller {Design.rule.setFill();NSRect(x:onLeft ? QuietScroller.lane:bounds.width-QuietScroller.lane-1,y:0,width:1,height:bounds.height).fill()}
+        if hasVerticalScroller || reservesScrollerLane {Design.rule.setFill();NSRect(x:onLeft ? QuietScroller.lane:bounds.width-QuietScroller.lane-1,y:0,width:1,height:bounds.height).fill()}
+    }
+}
+
+/// Optional fixed controls beneath the header of a sole, full-rail panel.
+protocol WorkspacePinnedPanelContent:AnyObject {
+    var pinnedControls:NSView {get}
+    var pinnedControlsHeight:CGFloat {get}
+    var controlsArePinned:Bool {get set}
+}
+
+private final class WorkspacePanelHeader:NSView {
+    override var isFlipped:Bool {true}
+    override func draw(_ dirtyRect:NSRect){
+        fill(bounds,Design.card)
+        WorkspacePanelSurface.draw(in:bounds,selected:false)
+        hairline(x:0,y:bounds.height-1,width:bounds.width)
     }
 }
 
 final class WorkspacePanel: NSView {
     static let headerHeight: CGFloat = 34
     static let footerHeight: CGFloat = 18
+    static let contentPadding: CGFloat = 16
     let panelID: String
     let content: NSView
     var preferredHeight: CGFloat
+    /// Content-sized panels ignore remembered drag heights and have no resize footer.
+    var resizable:Bool {didSet{needsLayout=true;needsDisplay=true;rail?.arrange()}}
+    var draggable:Bool {didSet{needsLayout=true}}
+    /// A sole panel fills the dock, then grows with its contents into the rail's outer scroll.
+    var fillsRail=false {didSet{needsLayout=true;rail?.arrange()}}
+    var pinsHeader=false {didSet{rail?.arrange()}}
+    var headerIsPinned=false {didSet{needsLayout=true}}
+    fileprivate let headerSurface:NSView=WorkspacePanelHeader()
     var collapsed = false { didSet { disclosure.state = collapsed ? .off : .on; needsLayout = true; rail?.arrange() } }
     weak var rail: WorkspaceRail? {didSet{needsLayout=true}}
     private let contentScroll: WorkspacePanelScroll?
     private let disclosure = WorkspaceDisclosure()
     private let titleButton: NSButton
+    private let filledTitle: NSTextField
     private let grip = PanelDragGrip()
     private let resizeGrip = PanelResizeGrip()
     private let headerActionButton = NSButton()
     private var headerAction: (() -> Void)?
-    var panelHeight: CGFloat { collapsed ? Self.headerHeight : preferredHeight }
+    private var contentHeight:CGFloat {(content as? WorkspacePanelContentMetrics)?.minimumContentHeight ?? max(72,content.fittingSize.height)}
+    private var bottomPadding:CGFloat {(content as? WorkspacePanelContentMetrics)?.panelContentPadding ?? Self.contentPadding}
+    private var resizeFooterHeight:CGFloat {resizable && !fillsRail ? Self.footerHeight:0}
+    var minimumHeight:CGFloat {Self.headerHeight+contentHeight+bottomPadding+resizeFooterHeight}
+    var panelHeight: CGFloat { fillsRail ? max((headerIsPinned ? 0:Self.headerHeight)+contentHeight+bottomPadding,rail?.panelViewportHeight ?? minimumHeight):(collapsed ? Self.headerHeight:(resizable ? max(minimumHeight,preferredHeight):minimumHeight)) }
     override var isFlipped: Bool { true }
-    init(id: String, title: String, content: NSView, height: CGFloat) {
-        panelID = id; self.content = content; preferredHeight = height
+    init(id: String, title: String, content: NSView, height: CGFloat? = nil, resizable:Bool = true, draggable:Bool = true) {
+        panelID = id; self.content = content; preferredHeight = height ?? 0
+        self.resizable=resizable;self.draggable=draggable
         contentScroll = content is WorkspaceInspector || content is WorkspaceScrollableContent ? WorkspacePanelScroll() : nil
         titleButton = NSButton(title: title, target: nil, action: nil)
+        filledTitle = NSTextField(labelWithString:title)
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
         disclosure.setButtonType(.onOff); disclosure.state = .on; disclosure.isBordered = false
@@ -112,11 +155,13 @@ final class WorkspacePanel: NSView {
         titleButton.isBordered = false; titleButton.alignment = .left
         titleButton.font = Design.Text.bodyStrong.font(); titleButton.contentTintColor = Design.ink
         titleButton.target = self; titleButton.action = #selector(toggle)
+        filledTitle.font=Design.Text.bodyStrong.font();filledTitle.textColor=Design.ink;filledTitle.isHidden=true
         grip.panel = self; grip.setAccessibilityLabel("Move \(title) panel")
         grip.toolTip = "Drag to Rail1 or Rail2, above or below another panel"
         resizeGrip.panel = self; resizeGrip.toolTip = "Drag to resize \(title)"
         if let contentScroll {
             contentScroll.drawsBackground=false;contentScroll.hasVerticalScroller=true;contentScroll.autohidesScrollers=true
+            contentScroll.reservesScrollerLane = !(content is WorkspaceRailAwareContent)
             contentScroll.documentView=content;addSubview(contentScroll)
         } else { addSubview(content) }
         headerActionButton.isHidden=true
@@ -125,7 +170,9 @@ final class WorkspacePanel: NSView {
         headerActionButton.appearance=NSAppearance(named:.aqua)
         headerActionButton.contentTintColor=Design.quiet
         headerActionButton.target=self; headerActionButton.action=#selector(runHeaderAction)
-        [disclosure, titleButton, headerActionButton, grip, resizeGrip].forEach { addSubview($0) }
+        addSubview(headerSurface)
+        [disclosure,titleButton,filledTitle,headerActionButton,grip].forEach{headerSurface.addSubview($0)}
+        addSubview(resizeGrip)
     }
     required init?(coder: NSCoder) { fatalError() }
     func setHeaderAction(symbol: String, title: String, action: @escaping () -> Void) {
@@ -140,26 +187,40 @@ final class WorkspacePanel: NSView {
     @objc private func toggle() { collapsed.toggle() }
     override func layout() {
         super.layout()
+        if !headerIsPinned {headerSurface.frame=NSRect(x:0,y:0,width:bounds.width,height:Self.headerHeight)}
         disclosure.frame = NSRect(x: 8, y: 9, width: 16, height: 16)
-        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-(headerAction == nil ? 70:98)), height: Self.headerHeight)
-        headerActionButton.frame=NSRect(x:bounds.width-64,y:5,width:24,height:24)
+        let dragSpace:CGFloat=draggable ? 28:0
+        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-42-dragSpace-(headerAction == nil ? 0:28)), height: Self.headerHeight)
+        headerActionButton.frame=NSRect(x:bounds.width-36-dragSpace,y:5,width:24,height:24)
         grip.frame = NSRect(x: bounds.width-36, y: 0, width: 28, height: Self.headerHeight)
-        content.isHidden = collapsed; contentScroll?.isHidden=collapsed; resizeGrip.isHidden = collapsed
-        let viewport=NSRect(x:0,y:Self.headerHeight,width:bounds.width,height:max(0,bounds.height-Self.headerHeight-Self.footerHeight))
+        disclosure.isHidden=fillsRail;grip.isHidden=fillsRail || !draggable;titleButton.isHidden=fillsRail;filledTitle.isHidden = !fillsRail
+        if fillsRail {
+            titleButton.frame=NSRect(x:16,y:0,width:max(20,bounds.width-64),height:Self.headerHeight)
+            let labelHeight=filledTitle.intrinsicContentSize.height
+            filledTitle.frame=NSRect(x:16,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-64),height:labelHeight)
+            filledTitle.textColor=Design.ink
+            headerActionButton.frame=NSRect(x:bounds.width-36,y:5,width:24,height:24)
+        }
+        let closed=collapsed && !fillsRail
+        content.isHidden = closed; contentScroll?.isHidden=closed; resizeGrip.isHidden = closed || resizeFooterHeight == 0
+        let top:CGFloat=headerIsPinned ? 0:Self.headerHeight
+        let viewport=NSRect(x:0,y:top,width:bounds.width,height:max(0,bounds.height-top-resizeFooterHeight-bottomPadding))
         if let contentScroll {
-            let height=(content as? WorkspaceScrollableContent)?.minimumContentHeight ?? 440
-            contentScroll.onLeft=rail?.scrollbarOnLeft ?? false
-            contentScroll.hasVerticalScroller=height > viewport.height+0.5
+            let height=fillsRail ? viewport.height:contentHeight
+            contentScroll.onLeft=false
+            contentScroll.reservesScrollerLane=resizable && !fillsRail && !(content is WorkspaceRailAwareContent)
+            contentScroll.hasVerticalScroller=resizable && !fillsRail && height > viewport.height+0.5
             contentScroll.frame=viewport;contentScroll.tile()
-            content.frame=NSRect(x:0,y:0,width:contentScroll.contentSize.width,height:max((content as? WorkspaceScrollableContent)?.minimumContentHeight ?? 440,contentScroll.contentSize.height))
+            content.frame=NSRect(x:0,y:0,width:contentScroll.contentSize.width,height:max(height,contentScroll.contentSize.height))
         } else { content.frame=viewport }
-        (content as? WorkspaceRailAwareContent)?.scrollbarOnLeft=rail?.scrollbarOnLeft ?? false
+        (content as? WorkspaceRailAwareContent)?.scrollbarOnLeft=false
         resizeGrip.frame = NSRect(x: 0, y: bounds.height-Self.footerHeight, width: bounds.width, height: Self.footerHeight)
     }
     override func draw(_ dirtyRect: NSRect) {
-        WorkspacePanelSurface.draw(in:NSRect(x:0,y:0,width:bounds.width,height:Self.headerHeight),selected:false)
-        hairline(x: 0, y: Self.headerHeight-1, width: bounds.width)
-        if !collapsed { hairline(x: 0, y: bounds.height-Self.footerHeight, width: bounds.width);hairline(x: 0, y: bounds.height-1, width: bounds.width) }
+        if !collapsed && !fillsRail {
+            if resizeFooterHeight > 0 {hairline(x:0,y:bounds.height-resizeFooterHeight,width:bounds.width)}
+            hairline(x:0,y:bounds.height-1,width:bounds.width)
+        }
     }
 }
 
@@ -187,7 +248,7 @@ private final class PanelDragGrip: NSView {
     override func resetCursorRects() { addCursorRect(bounds,cursor:.openHand) }
     override func mouseDown(with event:NSEvent) { dragging=false;cancelled=false }
     override func mouseDragged(with event:NSEvent) {
-        guard !cancelled,let panel, let root=window?.contentView else{return}
+        guard !cancelled,let panel,panel.draggable, let root=window?.contentView else{return}
         lastLocation=event.locationInWindow
         func rails(_ view:NSView)->[WorkspaceRail] {
             if let rail=view as? WorkspaceRail { return rail.isHidden ? [] : [rail] }
@@ -216,7 +277,7 @@ private final class PanelDragGrip: NSView {
     }
     override func mouseUp(with event:NSEvent) {
         defer { endDrag() }
-        guard dragging,let panel else{return}
+        guard dragging,let panel,panel.draggable else{return}
         destination?.finishDrop(panel)
     }
 }
@@ -231,10 +292,10 @@ private final class PanelResizeGrip: NSView {
         }
     }
     override func resetCursorRects() { addCursorRect(bounds,cursor:.resizeUpDown) }
-    override func mouseDown(with event:NSEvent) { startY=event.locationInWindow.y; startHeight=panel?.preferredHeight ?? 0 }
+    override func mouseDown(with event:NSEvent) { startY=event.locationInWindow.y; startHeight=panel?.panelHeight ?? 0 }
     override func mouseDragged(with event:NSEvent) {
-        guard let panel else { return }
-        panel.preferredHeight=max(140,min(max(140,panel.rail?.bounds.height ?? 1000),startHeight+startY-event.locationInWindow.y))
+        guard let panel,panel.resizable,!panel.fillsRail else { return }
+        panel.preferredHeight=max(panel.minimumHeight,min(max(panel.minimumHeight,panel.rail?.bounds.height ?? 1000),startHeight+startY-event.locationInWindow.y))
         panel.rail?.arrange()
     }
 }
@@ -256,6 +317,7 @@ final class WorkspaceRail: NSView {
     private final class Stack:NSView { override var isFlipped:Bool { true } }
     private let scroll=WorkspaceRailScroll(), stack=Stack()
     var scrollbarOnLeft:Bool{scroll.onLeft}
+    var panelViewportHeight:CGFloat {scroll.contentSize.height}
     private(set) var panels:[WorkspacePanel]=[]
     private var insertion:Int? { didSet { for (i,target) in targets.enumerated(){target.active=i == insertion} } }
     private var targets:[PanelDropTarget]=[]
@@ -287,8 +349,25 @@ final class WorkspaceRail: NSView {
         if let old=panel.rail { old.panels.removeAll{$0 === panel};old.arrange() }
         panel.removeFromSuperview();panels.insert(panel,at:min(index ?? panels.count,panels.count));panel.rail=self;stack.addSubview(panel);arrange()
     }
-    override func layout(){super.layout();scroll.frame=NSRect(x:scroll.onLeft ? 0:1,y:0,width:max(0,bounds.width-1),height:bounds.height);arrange()}
+    override func layout(){super.layout();arrange()}
     func arrange() {
+        let pinned=panels.count == 1 && panels[0].fillsRail && panels[0].pinsHeader ? panels[0]:nil
+        let controls=pinned?.content as? WorkspacePinnedPanelContent
+        let fixedHeight:CGFloat=pinned == nil ? 0:WorkspacePanel.headerHeight+(controls?.pinnedControlsHeight ?? 0)
+        scroll.frame=NSRect(x:scroll.onLeft ? 0:1,y:fixedHeight,width:max(0,bounds.width-1),height:max(0,bounds.height-fixedHeight))
+        scroll.tile()
+        for panel in panels {
+            panel.headerIsPinned=panel === pinned
+            if panel === pinned {
+                if panel.headerSurface.superview !== self {addSubview(panel.headerSurface)}
+                panel.headerSurface.frame=NSRect(x:scroll.frame.minX+scroll.contentView.frame.minX,y:0,width:scroll.contentSize.width,height:WorkspacePanel.headerHeight)
+                if let controls {
+                    controls.controlsArePinned=true
+                    if controls.pinnedControls.superview !== self {addSubview(controls.pinnedControls)}
+                    controls.pinnedControls.frame=NSRect(x:panel.headerSurface.frame.minX,y:WorkspacePanel.headerHeight,width:scroll.contentSize.width,height:controls.pinnedControlsHeight)
+                }
+            } else if panel.headerSurface.superview !== panel {panel.addSubview(panel.headerSurface)}
+        }
         var y:CGFloat=0
         targetRects=[]
         let width=scroll.contentSize.width

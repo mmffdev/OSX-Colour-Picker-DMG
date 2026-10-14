@@ -21,7 +21,7 @@ enum QuickKeys {
     struct Command { let id: String; let title: String; let fallback: String }
     static let commands = [Command(id: "newPalette", title: "New Palette", fallback: "1"),
                            Command(id: "pick", title: "Picker", fallback: "2"),
-                           Command(id: "sample", title: "Rectangle Picker", fallback: "\u{21E7}2")]
+                           Command(id: "sample", title: "Rectangle Picker", fallback: "3")]
     static func key(for id: String) -> String { Prefs.quickKeys[id] ?? commands.first { $0.id == id }?.fallback ?? "" }
     static func set(_ key: String?, for id: String) { var all = Prefs.quickKeys; all[id] = key; Prefs.quickKeys = all }
     /// The key a press is, as it is written here: a shift arrow before the character when Shift was down.

@@ -740,7 +740,7 @@ final class LibraryController: NSObject {
     }
 
     /// Tree drops retain the exact schema node and never change navigation.
-    func assignPalette(_ id: UUID, to project: UUID, bucket: UUID?) {
+    func assignPalette(_ id: UUID, to project: UUID, bucket: UUID?,copyOnly:Bool = false) {
         guard let source = library.swatch(id) else { return }
         let tree = SchemaTrial.schema(for: project)
         var buckets: [(UUID, String)] = []
@@ -761,8 +761,8 @@ final class LibraryController: NSObject {
             var made: [UUID] = []
             self.apply("Assign Palette To Bucket") {
                 made = $0.assignPalette(id, to: project, bucket: resolved, buckets: buckets,
-                    catalogue: self.catalogue, allBuckets: Prefs.libraryCopyAllBuckets,
-                    keepOriginal: Prefs.libraryKeepOriginal, keepClaimed: Prefs.libraryKeepClaimed, withNotes: notes)
+                    catalogue: self.catalogue, allBuckets: copyOnly ? false:Prefs.libraryCopyAllBuckets,
+                    keepOriginal: copyOnly || Prefs.libraryKeepOriginal, keepClaimed: !copyOnly && Prefs.libraryKeepClaimed, withNotes: notes)
             }
             if !made.isEmpty { self.flash("Copied " + source.name + " To " + (self.library.project(project)?.name ?? "Project")) }
         }

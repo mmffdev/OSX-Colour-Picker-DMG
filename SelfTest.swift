@@ -27,6 +27,27 @@ func runSelfTest() -> Never {
     runWorkspaceStartupTests(check: check)
     runLibraryAssignmentTests(check: check)
     runPaletteSelectionAndClaimDeletionTests(check: check)
+    do {
+        let project=UUID(),firstBucket=UUID(),secondBucket=UUID()
+        let first=WorkspaceCatalogues.Node("first","Palettes")
+        first.destination=LibraryRail.DropDestination(project:project,bucket:firstBucket)
+        let second=WorkspaceCatalogues.Node("second","Other Palettes")
+        second.destination=LibraryRail.DropDestination(project:project,bucket:secondBucket)
+        let member=WorkspaceCatalogues.Node("member","Closed Project",place:.project(project))
+        member.children=[first,second];member.resolveDestination()
+        check(member.destination == first.destination,"a closed project drop resolves its first palette bucket without expanding")
+        let ancestor=WorkspaceCatalogues.Node("ancestor","Closed Folder")
+        ancestor.children=[member];ancestor.resolveDestination()
+        check(ancestor.destination == first.destination,"a closed folder with one project inherits that project's palette destination")
+        let other=WorkspaceCatalogues.Node("other","Other Project",place:.project(UUID()))
+        other.destination=LibraryRail.DropDestination(project:UUID(),bucket:UUID())
+        let multiple=WorkspaceCatalogues.Node("many","Multiple Projects")
+        multiple.children=[member,other];multiple.resolveDestination()
+        check(multiple.destination == nil,"a multi-project ancestor cannot silently copy into an arbitrary project")
+        let empty=WorkspaceCatalogues.Node("empty","Information")
+        empty.resolveDestination()
+        check(empty.destination == nil,"a branch without a palette bucket rejects palette drops")
+    }
 
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent("mmffdev-colour3-selftest-\(UUID().uuidString)")
@@ -340,6 +361,9 @@ func runSelfTest() -> Never {
     runAppbridgeTests(check: check)
     runColourQRTests(check: check)
     runPrintProfileTests(check: check)
+    check(!TileGrid.hasDeltaWarning([.init(colour:.white,delta:2)],tolerance:2),"a Delta at tolerance does not show a warning")
+    check(TileGrid.hasDeltaWarning([.init(colour:.white,delta:0.5),.init(colour:.red,delta:5.5)],tolerance:2),"a palette card warns when any colour exceeds the active Delta tolerance")
+    check(!TileGrid.hasDeltaWarning([.init(colour:.white,delta:.nan)],tolerance:2),"an unavailable Delta is not misreported as a measured warning")
     var hoverScroll=HoverScrollGate()
     hoverScroll.suppress(at:NSPoint(x:200,y:300))
     check(!hoverScroll.allows(at:NSPoint(x:200,y:300)), "scrolling content beneath a stationary pointer cannot reopen tile halos")
@@ -2551,6 +2575,12 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(GroupHeaderView.text(bySource[0]) == "Hex (sRGB)  \u{00B7}  4", "a group's title carries its count")
 
     print("histograms")
+    check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255]).count == 2 && WorkspaceHistogramPane.findings(type:.rgb,values:[16,128,235]).isEmpty,
+          "Histogram findings match inclusive RGB guard bands")
+    check(WorkspaceHistogramPane.findings(type:.ycbcr,values:[940,960,961]).count == 1 && WorkspaceHistogramPane.findings(type:.cmyk,values:[0,2,96,50]).count == 2,
+          "Histogram findings respect chroma legal range and zero ink")
+    check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255],channel:1).isEmpty && WorkspaceHistogramPane.findings(type:.lab,values:[0,-128,127]).isEmpty,
+          "Histogram findings follow the selected channel and models with guides")
     check(WorkspaceHistogramPane.retainedChannelSelection(1,channelCount:4) == 1 && WorkspaceHistogramPane.retainedChannelSelection(1,channelCount:3) == 1,
           "per-channel histogram presentation survives RGB/CMYK model changes")
     check(WorkspaceHistogramPane.retainedChannelSelection(0,channelCount:4) == 0 && WorkspaceHistogramPane.retainedChannelSelection(4,channelCount:4) == 4 && WorkspaceHistogramPane.retainedChannelSelection(5,channelCount:3) == 1,

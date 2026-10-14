@@ -14,6 +14,10 @@ Rail1 occupies columns 1–3, Rail2 4–5, page 6–10, history 11–12 (expande
 
 Panel construction and selection surfaces: follow [Panel surface rules](c_layout_registry.md#panel-surface-rules). Full-width selection grounds, inset contents, and theme-relative header/selection fades belong to the shared panel primitives. Expanded panels use the shared 20/80 template and Escape-to-close contract in [Expanded-panel rule](c_layout_registry.md#expanded-panel-rule).
 
+### Rail width standard
+
+Both expanded rails are 360 pt throughout the app, from `Design.App.railWidth` (Rick, 2026-10-14). This supersedes the former 280/340 pt workspace split and column-derived expanded rail widths. Preserve collapse behaviour and use available panel bounds for Histograms, Bloom and other contents.
+
 ## Alignment and spacing
 
 - Text on a horizontal row shares a baseline; use `.lastBaseline`, or `.bottom` for blocks. Never centre mixed-height text rows.
@@ -145,3 +149,7 @@ Saved print settings, palette Delta controls and .colpro exchange use the shared
 Header background presses use native window dragging after control hit tests. Tab hit areas cover only the icon/label band, leaving space above and below draggable. Header utility glyphs share the 18-point `HeaderUtilityIcon` square and optical centre. Help sits immediately before Settings; entry collapses Rail 1 and closes the other rails, restoring preceding rail goals on exit. Initial help content is bundled Markdown in `HelpResources`, rendered by `StudioHelpPage`; both build targets must include these resources.
 
 The `osx-full-app` branch trials the canvas-centred Library shell. Its current region names, dimensions, integration and prototype boundaries are in [c_full_app.md](c_full_app.md); explicit new workspace instructions supersede the old rail/page allocation for this shell.
+
+## Working with Rick
+
+Use a warm, supportive, personable voice. Be a candid collaborator: offer a clear design opinion and explain why it helps, disagree constructively when needed, and acknowledge progress naturally. Avoid nicknames or familiar forms of address such as “buddy”, “mate” or “dude”; conversational warmth should come from the wording itself. Keep updates concise and human; avoid stiff ceremony, empty praise, and repetitive build narration.

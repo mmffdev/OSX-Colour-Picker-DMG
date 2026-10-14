@@ -1,0 +1,3 @@
+# Import browser interaction studies
+
+Ten working, standalone HTML alternatives for Colorgain's Import source browser. Rick requested a premium, colourful exploration beyond the native app's current style. Preserve unlimited folder depth, independent open siblings, full-width names without accumulating indentation, file selection and image-only fixture data. Remove triangle disclosures. One direction must turn a rollover notch on a vertical pole into a full folder header. Keep inner scrollbars on the right with permanently reserved space; the rail's outer scrollbar stays on its outside left edge. This is a review prototype with illustrative folders, never a disk reader or native app change.

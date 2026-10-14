@@ -1273,8 +1273,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         ctx.restoreGState()
     }
 
-    /// The slide-to-confirm bar: a band-coloured track with chevrons drifting towards the far end
-    /// and a black thumb. It bounces in when it appears.
+    /// The confirmation slider shares Ring 1's ground and the centre circle's handle colour.
     private func drawSlider(_ menu: HaloMenu, _ ctx: CGContext) {
         let colours = menu.colours, band = colours.ring(0).band, still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let elapsed = CGFloat(CACurrentMediaTime() - menu.confirmStart)
@@ -1296,7 +1295,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         ctx.addPath(CGPath(roundedRect: inside, cornerWidth: 3, cornerHeight: 3, transform: nil))
         ctx.clip()
         let drift = still ? 0 : elapsed.truncatingRemainder(dividingBy: 1.3) / 1.3 * 20
-        ctx.setFillColor((band.blended(withFraction: 0.5, of: .black) ?? .gray).cgColor)
+        ctx.setFillColor(colours.ring(0).bandInk.withAlphaComponent(0.35).cgColor)
         for at in 0..<8 {
             let x = inside.minX - 20 + drift + CGFloat(at) * 20, y = inside.minY
             ctx.move(to: CGPoint(x: x, y: y))
@@ -1309,7 +1308,7 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
         }
         ctx.fillPath()
         let handle = thumb
-        ctx.setFillColor(NSColor.black.cgColor)
+        ctx.setFillColor(colours.centre.cgColor)
         ctx.fill(handle)
         ctx.setStrokeColor(colours.centreInk.cgColor)
         ctx.setLineWidth(1)

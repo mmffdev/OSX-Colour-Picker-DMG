@@ -185,6 +185,7 @@ final class MetadataFilterPanel:NSView {
     }
     required init?(coder:NSCoder){fatalError()}
     func configure(records:[TileGrid.Item],store:MetadataFilterStore?,catalogueID:UUID){
+        refreshRevision += 1 // Invalidate work for the previous page, even while hidden.
         self.records=records
         if self.catalogueID != catalogueID || self.store?.catalogueURL != store?.catalogueURL {
             self.catalogueID=catalogueID;self.store=store;selectedPresetID=nil
@@ -194,7 +195,7 @@ final class MetadataFilterPanel:NSView {
         valuesNeedRefresh = true
         refreshIfNeeded()
     }
-    func update(records:[TileGrid.Item]){self.records=records;valuesNeedRefresh=true;refreshIfNeeded()}
+    func update(records:[TileGrid.Item]){refreshRevision += 1;self.records=records;valuesNeedRefresh=true;refreshIfNeeded()}
     func refreshIfNeeded(){guard !isHidden,valuesNeedRefresh else{return};refreshValues()}
     private func rebuildColumns(){
         columnViews.forEach{$0.removeFromSuperview()};columnViews=[]

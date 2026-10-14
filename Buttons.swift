@@ -68,10 +68,29 @@ enum ActionButtonSkin {
     static func size(_ title: String, height: CGFloat = ActionButtonSkin.height) -> NSSize {
         NSSize(width: max(24, textX + ceil(Design.attributed(title, .action).size().width)), height: height)
     }
-    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor = .labelColor) {
+    private static func contrast(_ a:NSColor,_ b:NSColor)->CGFloat {
+        func luminance(_ colour:NSColor)->CGFloat {
+            let c=colour.usingColorSpace(.sRGB) ?? colour
+            func linear(_ v:CGFloat)->CGFloat {v <= 0.04045 ? v/12.92:pow((v+0.055)/1.055,2.4)}
+            return 0.2126*linear(c.redComponent)+0.7152*linear(c.greenComponent)+0.0722*linear(c.blueComponent)
+        }
+        let x=luminance(a),y=luminance(b)
+        return (max(x,y)+0.05)/(min(x,y)+0.05)
+    }
+    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor? = nil) {
         let active = enabled && pressed, hovered = enabled && hover
+        let ground=Design.card
         let customInk = (active ? Prefs.buttonActiveText : hovered ? Prefs.buttonHoverText : nil).flatMap(colorFromHex)
-        let ink = !enabled ? baseInk.withAlphaComponent(0.35) : (active || hovered ? customInk ?? baseInk : baseInk)
+        let candidate=(customInk ?? baseInk ?? Design.ink).withAlphaComponent(1)
+        let readable=contrast(candidate,ground) >= 4.5 ? candidate:ThemedButton.readable(on:ground)
+        var ink=readable
+        if !enabled {
+            // Dim the action without making its label disappear into the page.
+            for step in 0...10 {
+                ink=Design.mix(ground,readable,0.55+CGFloat(step)*0.045)
+                if contrast(ink,ground) >= 4.5 {break}
+            }
+        }
         let label = Design.attributed(title, .action, colour: ink)
         let width = max(0, bounds.width - textX)
         let y = bounds.minY + (bounds.height - label.size().height) / 2
@@ -183,7 +202,7 @@ final class ThemedButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         if !title.isEmpty {
             ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted || state == .on,
-                focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled, baseInk: Theme.text)
+                focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled, baseInk: Design.ink)
         } else if let image {
             tinted(image, isEnabled ? Design.ink : Design.soft).draw(in: NSRect(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2, width: image.size.width, height: image.size.height))
         }
