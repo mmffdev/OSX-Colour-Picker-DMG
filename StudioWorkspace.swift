@@ -49,7 +49,10 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             for row in rows {
                 let node:Node, level:Int
                 switch row {
-                case .palette: continue // Palettes belong to Page and Footer.
+                case .palette(let palette):
+                    // A leaf belongs under its real schema bucket. Selecting it opens the
+                    // palette in the centre canvas; it never introduces another palette rail.
+                    node=Node("palette:" + palette.id.uuidString,palette.name,count:palette.count,place:.palette(palette.id),symbol:"square.grid.2x2");level=palette.indent+1
                 case .group(let title,let key):
                     let target:StudioFrame.Place? = key?.hasPrefix("collection:") == true ? UUID(uuidString:String(key!.dropFirst(11))).map{.collection($0)} : (key == "palettes" ? .palettes : nil)
                     node=Node(key ?? title,title,place:target);level=0
