@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import UniformTypeIdentifiers
+import ImageIO
 
 // ---------- The Studio window: the app itself on Colorgain's own grid ----------
 //
@@ -71,7 +72,7 @@ final class StudioWindowController: NSWindowController {
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
         else {
             let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--prepress", .prepress(0)), ("--prepress-verify", .prepress(1)), ("--prepress-check", .prepress(2)), ("--prepress-print", .prepress(3)), ("--prepress-press", .prepress(4)), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share), ("--appbridge", .appbridge), ("--appbridge-settings", .appbridgeSettings)]
-            c.frame.go(views.first { args.contains($0.0) }?.1 ?? .catalogue)
+            c.frame.go(views.first { args.contains($0.0) }?.1 ?? c.frame.restoredLibraryPlace())
         }
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
@@ -191,13 +192,14 @@ private enum RailTile {
 // MARK: - The frame
 
 final class StudioFrame: NSView {
+    private static let imageCaptureDate:DateFormatter = {let f=DateFormatter();f.locale=Locale(identifier:"en_US_POSIX");f.dateFormat="yyyy:MM:dd HH:mm:ss";return f}()
     typealias A = Design.App
     let library: LibraryController
 
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
+    enum Place: Hashable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, imageIntake, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
     private var paletteSelection = PaletteSelection()
     private var selectionHalo: HaloMenu?
@@ -271,13 +273,167 @@ final class StudioFrame: NSView {
     private let filmstrip = WorkspaceFilmstrip()
     private let leftPanelRail = WorkspaceRail(scrollbarOnLeft:true)
     private let rightPanelRail = WorkspaceRail(scrollbarOnLeft:false)
+    private let intakeSourceRail = WorkspaceRail(scrollbarOnLeft:true)
+    private let intakeTargetRail = WorkspaceRail(scrollbarOnLeft:false)
+    private let intakeSourcePane = WorkspaceImageIntakePane()
+    private let intakeTargetPane = WorkspaceImageDestinationPane()
+    private var intakeReturnPlace:Place = .catalogue
+    private var intakeLinking=false
+    private var intakeImages:[TileGrid.Item]=[]
+    private var intakeSelectedPaths=Set<String>()
+    private var intakeSelectAll=true
+    private var intakeNewOnly=false
+    private var intakeFullView=false
+    private var intakeGridColumns=5
+    private var intakeSort:WorkspaceImageSort = .off
+    private var intakeFolder:URL?
+    private var intakeImageLoading=false
+    private var intakePreviewGeneration=0
+    private var intakePreviewOrder:[String]=[]
+    private var intakePreviews:[String:TileGrid.Item]=[:]
+    private var intakePendingBatches=0
+    private var intakeScanComplete=false
+    private let intakePreviewQueue:OperationQueue = {let q=OperationQueue();q.name="Colorgain.ImageIntake.Previews";q.qualityOfService = .userInitiated;q.maxConcurrentOperationCount=4;return q}()
     private let workspaceDragShade=WorkspaceDragShade()
     private let viewportHeader = WorkspaceViewportBar(footer: false)
     private let viewportFooter = WorkspaceViewportBar(footer: true)
     private var inspectedPalette: UUID?
     private var workspaceFilter: String?
     private var canvasWorkspace: Bool {
-        switch place { case .catalogue, .palettes, .palette, .collection, .folder, .project, .overview, .group: return true; default: return false }
+        switch place { case .catalogue, .palettes, .palette, .collection, .folder, .project, .overview, .group, .imageIntake: return true; default: return false }
+    }
+    private var imageIntakeWorkspace:Bool {place == .imageIntake}
+    private func canImportImagesFromCurrentPlace()->Bool {
+        guard case .group(let projectID,let nodeID)=place,
+              let node=SchemaTrial.rows(of:SchemaTrial.schema(for:projectID)).first(where:{$0.node.id==nodeID})?.node else{return false}
+        return node.name.trimmingCharacters(in:.whitespacesAndNewlines).caseInsensitiveCompare("Photography") == .orderedSame
+            || node.kind?.trimmingCharacters(in:.whitespacesAndNewlines).caseInsensitiveCompare("Photography") == .orderedSame
+    }
+    private func beginImageIntake(){
+        intakeReturnPlace=place;intakeLinking=false
+        intakeFullView=false;page.grid.across=intakeGridColumns
+        intakePreviewGeneration+=1;intakePreviewQueue.cancelAllOperations()
+        intakeImages=[];intakePreviewOrder=[];intakePreviews=[:];intakePendingBatches=0;intakeScanComplete=false
+        intakeFolder=nil;intakeImageLoading=false
+        intakeTargetPane.catalogue=library.catalogue;intakeTargetPane.linking=false
+        viewportHeader.setIntakeMode(true)
+        go(.imageIntake)
+    }
+    private func cancelImageIntake(){
+        let destination=intakeReturnPlace
+        viewportHeader.setIntakeMode(false)
+        go(destination)
+    }
+    private func setImageIntakeLinking(_ linking:Bool){
+        intakeLinking=linking
+        intakeTargetPane.catalogue=library.catalogue;intakeTargetPane.linking=linking
+        page.grid.note=linking ? "Link mode keeps files at their source locations. File linking is not connected yet." : "Select a source folder to review images here. Folder browsing is not connected yet."
+        page.needsDisplay=true
+        page.needsLayout=true
+        fillPage()
+    }
+    private func showIntakeImages(folder:URL?,files:[URL],event:WorkspaceImageScanEvent){
+        switch event {
+        case .began:
+            intakePreviewGeneration+=1;intakePreviewQueue.cancelAllOperations()
+            intakeFolder=folder;intakeImages=[];intakePreviewOrder=[];intakePreviews=[:]
+            intakeSelectedPaths=[]
+            intakePendingBatches=0;intakeScanComplete=false;intakeImageLoading=true;fillPage()
+        case .batch:
+            guard !files.isEmpty else{return}
+            let generation=intakePreviewGeneration
+            intakePreviewOrder += files.map{$0.standardizedFileURL.path}
+            intakePendingBatches+=1;intakeImageLoading=true
+            intakePreviewQueue.addOperation{[weak self] in
+                let decoded:[(URL,CGImage,Date?,[String:String])]=files.compactMap{url in
+                    guard let source=CGImageSourceCreateWithURL(url as CFURL,nil) else{return nil}
+                    let options:[CFString:Any]=[kCGImageSourceCreateThumbnailFromImageIfAbsent:true,
+                        kCGImageSourceCreateThumbnailWithTransform:true,
+                        kCGImageSourceThumbnailMaxPixelSize:480,
+                        kCGImageSourceShouldCacheImmediately:true]
+                    guard let image=CGImageSourceCreateThumbnailAtIndex(source,0,options as CFDictionary) else{return nil}
+                    let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any]
+                    let exif=props?[kCGImagePropertyExifDictionary] as? [CFString:Any]
+                    let tiff=props?[kCGImagePropertyTIFFDictionary] as? [CFString:Any]
+                    let dateString=(exif?[kCGImagePropertyExifDateTimeOriginal] as? String) ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String)
+                    var metadata=Self.flattenMetadata(props ?? [:])
+                    metadata.merge(Self.readImageSidecars(for:url),uniquingKeysWith:{_,sidecar in sidecar})
+                    if let doi=metadata.first(where:{$0.key.localizedCaseInsensitiveContains("doi")})?.value {metadata["DOI"]=doi}
+                    return (url,image,dateString.flatMap{Self.imageCaptureDate.date(from:$0)},metadata)
+                }
+                DispatchQueue.main.async{[weak self] in
+                    guard let self,self.intakePreviewGeneration==generation else{return}
+                    for (url,thumbnail,captureDate,metadata) in decoded{
+                        let path=url.standardizedFileURL.path
+                        let root=self.intakeFolder?.standardizedFileURL.path
+                        let relative=root.map{path.hasPrefix($0.hasSuffix("/") ? $0 : $0+"/") ? String(path.dropFirst($0.count+1)) : url.lastPathComponent} ?? url.lastPathComponent
+                        let parent=(relative as NSString).deletingLastPathComponent
+                        let caption=parent == "." ? "" : parent
+                        let image=NSImage(cgImage:thumbnail,size:NSSize(width:CGFloat(thumbnail.width),height:CGFloat(thumbnail.height)))
+                        self.intakePreviews[path]=TileGrid.Item(title:url.lastPathComponent,caption:caption,colours:[],hex:nil,id:nil,image:image,imagePath:path,captureDate:captureDate,metadata:metadata)
+                        if self.intakeSelectAll { self.intakeSelectedPaths.insert(path) }
+                    }
+                    self.intakePendingBatches=max(0,self.intakePendingBatches-1)
+                    self.refreshIntakeImages()
+                }
+            }
+        case .completed:
+            intakeScanComplete=true;refreshIntakeImages()
+        }
+    }
+
+    private func refreshIntakeImages(){
+        var images=intakePreviewOrder.compactMap{intakePreviews[$0]}
+        // Until catalogue membership is persisted, every file discovered in this intake is new.
+        switch intakeSort {
+        case .captureTime: images.sort{($0.captureDate ?? .distantPast) > ($1.captureDate ?? .distantPast)}
+        case .checkedState: images.sort{intakeSelectedPaths.contains($0.imagePath ?? "") && !intakeSelectedPaths.contains($1.imagePath ?? "")}
+        case .fileName: images.sort{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
+        case .fileType: images.sort{URL(fileURLWithPath:$0.title).pathExtension.localizedCaseInsensitiveCompare(URL(fileURLWithPath:$1.title).pathExtension) == .orderedAscending}
+        case .mediaType: images.sort{isRawImage($0.title) && !isRawImage($1.title)}
+        case .off: break
+        }
+        intakeImages=images
+        intakeImageLoading = !intakeScanComplete || intakePendingBatches > 0
+        fillPage()
+    }
+    private func isRawImage(_ name:String)->Bool { UTType(filenameExtension:URL(fileURLWithPath:name).pathExtension)?.conforms(to:.rawImage) == true }
+    private static func flattenMetadata(_ value:Any,prefix:String="")->[String:String]{
+        var result:[String:String]=[:]
+        if let dictionary=value as? [AnyHashable:Any]{
+            for (key,value) in dictionary{let name=prefix.isEmpty ? String(describing:key):"\(prefix).\(key)";result.merge(flattenMetadata(value,prefix:name),uniquingKeysWith:{_,new in new})}
+        }else if let array=value as? [Any]{for (i,value) in array.enumerated(){result.merge(flattenMetadata(value,prefix:"\(prefix)[\(i)]"),uniquingKeysWith:{_,new in new})}}
+        else if let string=value as? String{result[prefix]=string}
+        else if let number=value as? NSNumber{result[prefix]=number.stringValue}
+        return result
+    }
+    private static func readImageSidecars(for image:URL)->[String:String]{
+        var result:[String:String]=[:]
+        for ext in ["json","xml","xmp","csv","tsv"]{
+            let url=image.deletingPathExtension().appendingPathExtension(ext)
+            guard let data=try? Data(contentsOf:url) else{continue}
+            switch ext{
+            case "json":
+                if let object=try? JSONSerialization.jsonObject(with:data){result.merge(flattenMetadata(object)){_,new in new}}
+            case "csv","tsv":
+                guard let text=String(data:data,encoding:.utf8) else{continue}
+                let rows=text.components(separatedBy:.newlines).filter{!$0.isEmpty}.map{$0.components(separatedBy:ext == "tsv" ? "\t":",")}
+                guard rows.count>1 else{continue}
+                for row in rows.dropFirst(){for column in 0..<min(rows[0].count,row.count){result["Sidecar.\(rows[0][column].trimmingCharacters(in:.whitespacesAndNewlines))"] = row[column].trimmingCharacters(in:.whitespacesAndNewlines)}}
+            default:
+                if let text=String(data:data,encoding:.utf8){result.merge(parseXMLMetadata(text)){_,new in new}}
+            }
+        }
+        return result
+    }
+    private static func parseXMLMetadata(_ text:String)->[String:String]{
+        guard let data=text.data(using:.utf8),let document=try? XMLDocument(data:data,options:[]) else{return [:]}
+        var values:[String:String]=[:]
+        for node in (try? document.rootElement()?.nodes(forXPath:".//*")) ?? []{
+            guard let element=node as? XMLElement,let value=element.stringValue?.trimmingCharacters(in:.whitespacesAndNewlines),!value.isEmpty else{continue}
+            values["Sidecar.\(element.name ?? "value")"]=value
+        }
+        return values
     }
     private func inspectPalette(_ id: UUID) {
         if inspectedPalette != id { analysisColour=nil }
@@ -320,7 +476,7 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
-        for view in [leftPanelRail, rightPanelRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
+        for view in [leftPanelRail, rightPanelRail, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
         let cataloguesPanel=WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640)
         cataloguesPanel.setHeaderAction(symbol:"plus",title:"Open Catalogue…") { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
@@ -330,6 +486,12 @@ final class StudioFrame: NSView {
         rightPanelRail.add(bloomPanel)
         let inspectorPanel=WorkspacePanel(id:"inspector",title:"Inspector",content:inspectorPane,height:520)
         inspectorPanel.collapsed=true;rightPanelRail.add(inspectorPanel)
+        intakeSourceRail.add(WorkspacePanel(id:"image-source",title:"From",content:intakeSourcePane,height:500))
+        intakeTargetRail.add(WorkspacePanel(id:"image-target",title:"To",content:intakeTargetPane,height:500))
+        intakeSourcePane.onImageFiles = { [weak self] folder, files, event in
+            guard let self,self.imageIntakeWorkspace else{return}
+            self.showIntakeImages(folder:folder,files:files,event:event)
+        }
         addSubview(bloomWorkspace);bloomWorkspace.isHidden=true
         expandedBloom.expanded=true;expandedHistogram.expanded=true
         bloomPane.expandButton.run = { [weak self] in self?.expandAnalysis(.bloom) }
@@ -344,6 +506,23 @@ final class StudioFrame: NSView {
         histogramPane.onColour = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }
         for chart in [bloomPane.chart,expandedBloom.chart] {chart.onSelect = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }}
         viewportHeader.channels.onChange = { [weak self] in self?.fillPage() }
+        viewportHeader.onImport = { [weak self] in self?.beginImageIntake() }
+        viewportHeader.onImportLinking = { [weak self] linking in self?.setImageIntakeLinking(linking) }
+        viewportHeader.onSelectAllImages = { [weak self] select in
+            guard let self else{return};self.intakeSelectAll=select
+            if select { self.intakeSelectedPaths.formUnion(self.intakePreviewOrder) } else { self.intakeSelectedPaths=[] }
+            self.refreshIntakeImages()
+        }
+        viewportHeader.onImageFilter = { [weak self] newOnly in self?.intakeNewOnly=newOnly;self?.refreshIntakeImages() }
+        viewportHeader.onImageSort = { [weak self] sort in self?.intakeSort=sort;self?.refreshIntakeImages() }
+        viewportHeader.onImageView = { [weak self] full in
+            guard let self else{return};self.intakeFullView=full;self.page.grid.imageFullView=full
+            if full {self.window?.makeFirstResponder(self.page.grid)}
+            self.page.needsLayout=true
+        }
+        viewportFooter.onImageView = viewportHeader.onImageView
+        viewportFooter.onImageSort = viewportHeader.onImageSort
+        viewportHeader.onMetadataFilter = { [weak self] in self?.page.toggleMetadataFilter() }
         if CommandLine.arguments.contains("--ui-test-panels") {
             WorkspacePanelUITest.load(into:[leftPanelRail,rightPanelRail])
         }
@@ -409,7 +588,10 @@ final class StudioFrame: NSView {
             self.go(.palette(id))
         }
         header.onTab = { [weak self] i in self?.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge, .qrImport][i]) }
-        header.onSettings = { [weak self] in self?.openSettings() }
+        header.onSettings = { [weak self] in
+            guard self != nil else { return }
+            (NSApp.delegate as? AppDelegate)?.showSettings()
+        }
         page.add(StudioHelpPage(), as: .help)
         header.searchStorageKey = "Studio.Searches." + library.catalogue
         header.onSearch = { [weak self] _ in self?.fillPage() }
@@ -441,7 +623,30 @@ final class StudioFrame: NSView {
             return Array(results.prefix(100))
         }
 
-        page.onAcross = { [weak self] n in self?.page.grid.across = n }
+        page.onAcross = { [weak self] n in
+            guard let self else{return};self.page.grid.across=n
+            if self.imageIntakeWorkspace && !self.intakeFullView {self.intakeGridColumns=n;self.page.grid.needsLayout=true}
+        }
+        page.grid.onImageSelectionToggle = { [weak self] path in
+            guard let self else{return}
+            if self.intakeSelectedPaths.contains(path){self.intakeSelectedPaths.remove(path)}else{self.intakeSelectedPaths.insert(path)}
+            self.intakeSelectAll = !self.intakePreviewOrder.isEmpty && self.intakePreviewOrder.allSatisfy(self.intakeSelectedPaths.contains)
+            self.refreshIntakeImages()
+        }
+        page.grid.onImageContextAction = { [weak self] path, action in
+            guard let self else{return}
+            switch action {
+            case 0:
+                self.intakeSelectedPaths.insert(path)
+                self.intakeSelectAll = !self.intakePreviewOrder.isEmpty && self.intakePreviewOrder.allSatisfy(self.intakeSelectedPaths.contains)
+                self.refreshIntakeImages()
+            case 1:
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)])
+            case 2:
+                self.intakeFullView=true;self.page.grid.showImageFull(path);self.page.needsLayout=true;self.fillPage()
+            default:break
+            }
+        }
         rail1.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
         rail2.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
         rail1.onDeleteSelection = { [weak self] in guard let self else { return }; self.library.delete(palettes: self.paletteSelection.ids) }
@@ -675,23 +880,30 @@ final class StudioFrame: NSView {
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
-        leftPanelRail.isHidden = !canvasWorkspace
-        rightPanelRail.isHidden = !canvasWorkspace
-        filmstrip.isHidden = !canvasWorkspace
+        leftPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace
+        rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace
+        intakeSourceRail.isHidden = !imageIntakeWorkspace
+        intakeTargetRail.isHidden = !imageIntakeWorkspace
+        filmstrip.isHidden = !canvasWorkspace || imageIntakeWorkspace
         viewportHeader.isHidden = !canvasWorkspace
         viewportFooter.isHidden = !canvasWorkspace
         bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil
         footer.isHidden = canvasWorkspace
         if canvasWorkspace {
             let top = A.header + 1, bottom: CGFloat = 120
-            let left: CGFloat = 280, right: CGFloat = 340
+            // The Finder source tree needs room for real volume and folder names; keep its
+            // import width wider than the general workspace rail.
+            let left: CGFloat = imageIntakeWorkspace ? 360 : 280, right: CGFloat = 340
+            let workspaceFooterY=imageIntakeWorkspace ? h-32 : h-bottom-32
             header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
             header.grid = (16, A.columnWidth(in: w)); header.railEdge = 248
             leftPanelRail.frame = NSRect(x: 0, y: top, width: left, height: h-top-bottom)
             rightPanelRail.frame = NSRect(x: w-right, y: top, width: right, height: h-top-bottom)
-            page.frame = NSRect(x: left+1, y: top, width: w-left-right-2, height: h-top-bottom-32)
+            intakeSourceRail.frame=leftPanelRail.frame
+            intakeTargetRail.frame=rightPanelRail.frame
+            page.frame = NSRect(x: left+1, y: top, width: w-left-right-2, height: max(0,workspaceFooterY-top))
             viewportHeader.frame=NSRect(x:left+1,y:top+AreaHeader.rule,width:w-left-right-2,height:32)
-            viewportFooter.frame=NSRect(x:left+1,y:h-bottom-32,width:w-left-right-2,height:32)
+            viewportFooter.frame=NSRect(x:left+1,y:workspaceFooterY,width:w-left-right-2,height:32)
             workspaceDragShade.frame=NSRect(x:left+1,y:top,width:w-left-right-2,height:h-top-bottom)
             bloomWorkspace.frame=NSRect(x:left+1,y:viewportHeader.frame.maxY,width:w-left-right-2,height:max(0,viewportFooter.frame.minY-viewportHeader.frame.maxY))
             expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
@@ -712,8 +924,9 @@ final class StudioFrame: NSView {
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
         // Rail dividers bisect the gutters after columns 3 and 5.
-        let r1Full = A.column(4, in: A.size.width) - A.areaGutter / 2, r1Min = LibraryRail.collapsedWidth
-        let r2Full = A.column(6, in: A.size.width) - A.areaGutter / 2 - r1Full - 1
+        let baseR1Full = A.column(4, in: A.size.width) - A.areaGutter / 2
+        let r1Full = baseR1Full + 80, r1Min = LibraryRail.collapsedWidth
+        let r2Full = A.column(6, in: A.size.width) - A.areaGutter / 2 - baseR1Full - 1
         let hFull = A.size.width - A.column(11, in: A.size.width) + A.gutter / 2
         let r1W = (r1Min + (r1Full - r1Min) * (isSettings(place) || printWorkspace ? 0 : ease(open.rail1))).rounded(), r2W = (r2Full * ease(open.rail2)).rounded(), hW = (hFull * ease(open.history)).rounded()
         rail1.expandedWidth = r1Full; rail2.expandedWidth = r2Full
@@ -813,6 +1026,52 @@ final class StudioFrame: NSView {
     /// The Settings entry point resumes the last section; Catalogues remains an explicit rail destination.
     func openSettings() { go(lastSettingsPage) }
 
+    private var resumePlaceKey: String { "Workspace.LibraryPlace.\(library.catalogue)" }
+
+    /// Restores the last Library destination for this catalogue after the catalogue itself is opened.
+    func restoredLibraryPlace() -> Place {
+        guard let saved = AppPreferences.shared.string(forKey: resumePlaceKey) else { return .catalogue }
+        let parts = saved.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        let place: Place?
+        switch parts.first {
+        case "catalogue": place = .catalogue
+        case "palettes": place = .palettes
+        case "projects": place = .projects
+        case "palette": place = parts.count == 2 ? UUID(uuidString: parts[1]).map(Place.palette) : nil
+        case "project": place = parts.count == 2 ? UUID(uuidString: parts[1]).map(Place.project) : nil
+        case "collection": place = parts.count == 2 ? UUID(uuidString: parts[1]).map(Place.collection) : nil
+        case "folder": place = parts.count == 3 ? (UUID(uuidString: parts[1]).flatMap { c in UUID(uuidString: parts[2]).map { .folder(c, $0) } }) : nil
+        case "overview", "group":
+            place = parts.count == 3 ? (UUID(uuidString: parts[1]).flatMap { p in UUID(uuidString: parts[2]).map { parts[0] == "overview" ? .overview(p, $0) : .group(p, $0) } }) : nil
+        default: place = nil
+        }
+        guard let place else { return .catalogue }
+        switch place {
+        case .palette(let id): return library.library.swatch(id) == nil ? .catalogue : place
+        case .project(let id), .overview(let id, _), .group(let id, _): return library.library.project(id) == nil ? .catalogue : place
+        case .collection(let id): return SchemaTrial.collections.contains { $0.id == id } ? place : .catalogue
+        case .folder(let c, let f): return SchemaTrial.collections.first { $0.id == c }?.folders.contains { $0.id == f } == true ? place : .catalogue
+        default: return place
+        }
+    }
+
+    private func saveLibraryPlace(_ place: Place) {
+        let value: String?
+        switch place {
+        case .catalogue: value = "catalogue"
+        case .palettes: value = "palettes"
+        case .projects: value = "projects"
+        case .palette(let id): value = "palette:\(id.uuidString)"
+        case .project(let id): value = "project:\(id.uuidString)"
+        case .collection(let id): value = "collection:\(id.uuidString)"
+        case .folder(let c, let f): value = "folder:\(c.uuidString):\(f.uuidString)"
+        case .overview(let p, let n): value = "overview:\(p.uuidString):\(n.uuidString)"
+        case .group(let p, let n): value = "group:\(p.uuidString):\(n.uuidString)"
+        default: value = nil
+        }
+        if let value { AppPreferences.shared.set(value, forKey: resumePlaceKey) }
+    }
+
     /// Escape returns to the page that was visible before entering any settings section.
     @discardableResult func leaveSettings() -> Bool {
         guard isSettings(place) else { return false }
@@ -830,6 +1089,7 @@ final class StudioFrame: NSView {
     }
 
     func go(_ p: Place) {
+        if place == .imageIntake && p != .imageIntake { viewportHeader.setIntakeMode(false) }
         workspaceFilter=nil
         if place == .help, p != .help, let previous = beforeHelp {
             goal = previous; beforeHelp = nil
@@ -862,6 +1122,7 @@ final class StudioFrame: NSView {
             goal = (0, 0, 0)
         }
         place = p
+        saveLibraryPlace(p)
         slide()
         reload()
     }
@@ -936,7 +1197,7 @@ final class StudioFrame: NSView {
         }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette, .imageIntake: return 0; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -1245,6 +1506,11 @@ final class StudioFrame: NSView {
             // A member in no folder sits beside the folders, straight in its collection, so the tree's lines tie it to the
             // collection and not to the last folder above it, and shutting that folder leaves it showing.
             rows += members(of: c, folder: .some(nil)).flatMap { memberRows($0, indent: 0) }
+            if members(of: c).isEmpty {
+                // The Master Template is a recipe for members, so it has no live Library groups until the first member exists.
+                // Keep an explicit doorway here instead of leaving a new collection looking like a lone, broken heading.
+                rows.append(.row("Add First \(SchemaTrial.memberName(of: c))", 0, .collection(c.id), 0))
+            }
         }
         let loose = palettes(lib.palettes(in: nil)).filter { $0.claim == nil }
         let claimed = palettes(lib.palettes(in: nil)).filter { $0.claim != nil }
@@ -1312,7 +1578,7 @@ final class StudioFrame: NSView {
         }
         var heading = "Palettes", labels = ("Palette", "Count"), rows: [PaletteTable.Row] = []
         switch place {
-        case .qrImport, .help: break
+        case .qrImport, .help, .imageIntake: break
         case .catalogue:
             break // No context until a Library item is selected.
         case .palettes:
@@ -1467,6 +1733,8 @@ final class StudioFrame: NSView {
             }
         }
         viewportHeader.channels.reportUnavailable(unavailable)
+        viewportHeader.offerPhotographyImport(canImportImagesFromCurrentPlace())
+        if imageIntakeWorkspace { viewportHeader.setIntakeMode(true,linking:intakeLinking) }
         let search = header.search.lowercased()
         func keep(_ name: String, _ hex: String?) -> Bool { search.isEmpty || name.lowercased().contains(search) || (hex?.lowercased().contains(search) ?? false) }
         // A colour's words: its name, and its value in the model the page's header has chosen.
@@ -1489,7 +1757,7 @@ final class StudioFrame: NSView {
         page.show(.tiles)
         page.grid.note = nil
         page.acceptsPaletteDrop = place == .appbridge && appbridge.current?.problem == nil && appbridge.current != nil && !appbridge.writing
-        page.showsFormat = place != .appbridge
+        page.showsFormat = place != .appbridge && !imageIntakeWorkspace
         page.grid.showsHalo = true
         // A new member can be made wherever members are listed: the Members view, a collection, a folder.
         func newWord(_ c: SchemaCollection) -> String { "New " + SchemaTrial.memberName(of: c) }
@@ -1502,6 +1770,15 @@ final class StudioFrame: NSView {
             }
         }
         switch place {
+        case .imageIntake:
+            title = intakeLinking ? "Link Images" : "Import Images"
+            meta = (intakeFolder?.lastPathComponent ?? (intakeLinking ? "Files stay at source" : "Catalogue destination"), library.catalogue)
+            items = intakeImages
+            page.grid.note = intakeImageLoading ? "Reading image files and preparing previews…"
+                : intakeLinking ? "Select a source folder to review linked images here."
+                : intakeFolder == nil ? "Choose a source folder in Rail 1 to show its images here."
+                : items.isEmpty ? "No readable images found in this folder."
+                : nil
         case .appbridge:
             title = "Appbridge"; meta = ("Directory: Choose on save", "Connected folders")
             if let file = appbridge.current {
@@ -1660,6 +1937,18 @@ final class StudioFrame: NSView {
         page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
         analysisPalettes=items.compactMap{item in item.id.flatMap{lib.swatch($0)}}
         page.set(title: title, meta: meta, items: items)
+        let catalogueID=CatalogueTree.catalogue(in:library.store.root)?.id ?? UUID()
+        page.configureMetadataFilters(store:MetadataFilterStore(catalogueURL:library.store.url),catalogueID:catalogueID)
+        page.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,gridColumns:intakeGridColumns,fullView:intakeFullView)
+        let metadataFilterAvailable:Bool
+        switch place {
+        case .catalogue,.palette,.project,.overview,.group,.collection,.folder,.palettes: metadataFilterAvailable=true
+        default: metadataFilterAvailable=imageIntakeWorkspace
+        }
+        viewportHeader.configureMetadataFilter(visible:metadataFilterAvailable,active:page.metadataFilterIsExpanded)
+        page.grid.selectedImagePaths=intakeSelectedPaths
+        viewportHeader.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        viewportFooter.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
         page.grid.chosenHex = chosenHex
         inspectorPane.catalogue=library.catalogue;inspectorPane.total=palettes(lib.swatches).count
         inspectorPane.displayColours=shade
@@ -3285,6 +3574,15 @@ final class HistoryRail: StudioRail {
 final class StudioPage: NSView, Overlay {
     var compactWorkspace = false
     weak var workspaceToolbar: WorkspaceViewportBar?
+    var imageIntakeMode=false {didSet{grid.imageIntake=imageIntakeMode;if imageIntakeMode{grid.listView=false};needsLayout=true;needsDisplay=true}}
+    private var intakeGridColumns=6
+    private var metadataFilterExpanded=false
+    private let metadataFilterPanel=MetadataFilterPanel(frame:.zero)
+    private var basePageItems:[TileGrid.Item]=[]
+    var metadataFilterIsExpanded:Bool { metadataFilterExpanded }
+    func toggleMetadataFilter(){metadataFilterExpanded.toggle();metadataFilterPanel.isHidden = !metadataFilterExpanded;if metadataFilterExpanded{metadataFilterPanel.refreshIfNeeded()};needsLayout=true}
+    func configureMetadataFilters(store:MetadataFilterStore?,catalogueID:UUID){metadataFilterPanel.configure(records:basePageItems,store:store,catalogueID:catalogueID)}
+    func configureImageIntake(_ active:Bool,linking:Bool,gridColumns:Int,fullView:Bool){imageIntakeMode=active;intakeGridColumns=gridColumns;grid.imageFullView=active && fullView}
     private let workspaceFormat = DropdownButton()
     var layoutFrozen = false
     /// Palette content heading shares the first rail-row baseline.
@@ -3482,6 +3780,9 @@ final class StudioPage: NSView, Overlay {
         scroll.scrollerStyle = .overlay
         scroll.documentView = grid
         addSubview(scroll)
+        metadataFilterPanel.isHidden=true
+        metadataFilterPanel.onFiltered = { [weak self] filtered in self?.grid.items=filtered;self?.needsLayout=true }
+        addSubview(metadataFilterPanel)
         settingsScroll.drawsBackground = false
         settingsScroll.hasVerticalScroller = true
         settingsScroll.autohidesScrollers = true
@@ -3567,7 +3868,9 @@ final class StudioPage: NSView, Overlay {
         showsDeltaTools = items.contains{canShowDelta($0)}
         applyDeltaState(Prefs.deltaWarningsEnabled)
         grid.copyFormat=format
+        basePageItems=items
         grid.items = items
+        metadataFilterPanel.update(records:items)
         needsDisplay = true
         needsLayout = true
     }
@@ -3582,10 +3885,11 @@ final class StudioPage: NSView, Overlay {
         var top = Self.headerHeight
         let u = Design.App.unit
         // The slider: one column wide, its track through the arrow's centre, ending a step before the arrow.
-        slider.isHidden = section != .tiles
+        slider.isHidden = section != .tiles || (imageIntakeMode && grid.imageFullView)
         let arrowCentre = AreaHeader.headingBaseline - 5
         let column = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
         slider.frame = NSRect(x: bounds.width - insetRight - 16 - 24 - column, y: arrowCentre - 8, width: column, height: 16)
+        if imageIntakeMode {slider.value=CGFloat(max(0,min(4,intakeGridColumns-4)))/4}
         if !newButton.isHidden || !exportButton.isHidden {
             // The buttons stand on the second unit's foot, clear of the rule above it; the tiles a unit below.
             var x = inset
@@ -3593,8 +3897,12 @@ final class StudioPage: NSView, Overlay {
             if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
             top += 2 * u
         }
-        let tilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + 44 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
+        let baseTilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + 44 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
+        let filterHeight:CGFloat=metadataFilterExpanded && section == .tiles ? 236:0
+        let tilesTop=baseTilesTop+filterHeight
         let canvasWidth = bounds.width - inset - insetRight
+        metadataFilterPanel.frame=NSRect(x:inset,y:baseTilesTop,width:canvasWidth,height:filterHeight)
+        metadataFilterPanel.isHidden = filterHeight == 0
         scroll.frame = NSRect(x: inset, y: tilesTop, width: canvasWidth + min(insetRight, QuietScroller.lane), height: bounds.height - tilesTop)
         settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: bounds.height - top)
         let sh = settings.height(forWidth: canvasWidth)
@@ -3625,18 +3933,22 @@ final class StudioPage: NSView, Overlay {
         let controlParent: NSView = compactWorkspace ? (workspaceToolbar ?? self) : self
         for control in [slider,deltaButton,profileSelector] where control.superview !== controlParent { controlParent.addSubview(control) }
         profileSelector.opensUpward = compactWorkspace
-        workspaceFormat.isHidden = !compactWorkspace || !showsFormat || section != .tiles
+        workspaceFormat.isHidden = !compactWorkspace || !showsFormat || section != .tiles || imageIntakeMode
         if compactWorkspace,let toolbar=workspaceToolbar {
-            if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
-            // Justified right to the swatches' own padding by the bar itself, which knows its width: profile last, each control a gap left of the next.
-            let profileWidth=min(profileSelector.preferredControlWidth,min(240,max(140,toolbar.bounds.width-424)))
             toolbar.leftInset=inset + TileGrid.gap/2
             toolbar.rightInset=insetRight + TileGrid.gap/2
-            toolbar.rightControls=[(workspaceFormat,80,28,12),(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
+            if imageIntakeMode {
+                toolbar.rightControls=grid.imageFullView ? [] : [(slider,120,16,0)]
+            } else {
+                if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
+                let profileWidth=min(profileSelector.preferredControlWidth,min(240,max(140,toolbar.bounds.width-424)))
+                toolbar.rightControls=[(workspaceFormat,80,28,12),(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
+            }
             slider.alphaValue = grid.listView ? 0.4 : 1
         } else { slider.alphaValue=1 }
         grid.contentInset = compactWorkspace ? TileGrid.gap/2 : 0
         grid.width = canvasWidth
+        grid.fullImageViewportHeight=scroll.frame.height
         grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
         if let scroll = anchoredScroll, let last = anchors.last, let document = scroll.documentView {
@@ -3675,11 +3987,30 @@ final class StudioPage: NSView, Overlay {
 /// a caption. A colour tile carries one colour and its hex; a palette card a strip of its colours
 /// and its count, and opens the palette.
 final class TileGrid: NSView {
-    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil }
-    var items: [Item] = [] { didSet { hoverHalo?.dismiss(); hoverIndex=nil; suppressedIndex=nil; printPreviews=[:]; splitOverrides=[:]; onResize?() } }
+    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil; var image:NSImage? = nil; var imagePath:String? = nil; var captureDate:Date? = nil; var metadata:[String:String] = [:] }
+    var items: [Item] = [] { didSet {
+        if let focusedImagePath,let index=items.firstIndex(where:{$0.imagePath==focusedImagePath}){currentImageIndex=index}
+        else{currentImageIndex=min(currentImageIndex,max(0,items.count-1))}
+        if items.indices.contains(currentImageIndex){focusedImagePath=items[currentImageIndex].imagePath}
+        hoverHalo?.dismiss();hoverIndex=nil;suppressedIndex=nil;printPreviews=[:];splitOverrides=[:];onResize?()
+    } }
     /// Words shown in place of tiles when there are none, as a member's notes on its Information page; nil says Nothing Found.
     var note: String? { didSet { needsDisplay = true } }
     var across = 8 { didSet { onResize?() } }
+    var imageIntake=false {didSet{needsDisplay=true}}
+    var imageFullView=false {didSet{enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true;onResize?()}}
+    var fullImageViewportHeight:CGFloat=0 {didSet{needsDisplay=true}}
+    var selectedImagePaths=Set<String>() {didSet{needsDisplay=true}}
+    var onImageSelectionToggle:((String)->Void)?
+    private(set) var currentImageIndex=0
+    private var focusedImagePath:String?
+    private var lastFullWheelNavigation=Date.distantPast
+    private func moveFullImage(_ offset:Int){
+        guard imageIntake,imageFullView,!items.isEmpty else{return}
+        currentImageIndex=(currentImageIndex+offset+items.count)%items.count
+        focusedImagePath=items[currentImageIndex].imagePath
+        enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true
+    }
     var listView=false { didSet {
         guard listView != oldValue else{return}
         hoverHalo?.dismiss();hoverHalo=nil;hoverIndex=nil;suppressedIndex=nil
@@ -3726,10 +4057,21 @@ final class TileGrid: NSView {
     private var hoverIndex:Int?
     private var suppressedIndex:Int?
     private var scrollGate=HoverScrollGate()
+    private let imageContextMenu=SwissContextMenu()
+    var onImageContextAction:((String,Int)->Void)?
+    func showImageFull(_ path:String){
+        guard let index=items.firstIndex(where:{$0.imagePath==path}) else{return}
+        currentImageIndex=index;focusedImagePath=path;imageFullView=true
+        window?.makeFirstResponder(self);needsDisplay=true
+    }
+    private func itemIndex(at point:NSPoint)->Int?{
+        if imageIntake && imageFullView{return items.indices.contains(currentImageIndex) && rect(currentImageIndex).contains(point) ? currentImageIndex:nil}
+        return items.indices.first{rect($0).contains(point)}
+    }
     private func identity(_ item:Item)->String { item.hex ?? item.id?.uuidString ?? item.title }
     private func rollover(_ p:NSPoint) {
         guard !listView else{return}
-        let index=items.indices.first { i in let r=rect(i);return NSRect(x:r.minX,y:r.minY,width:r.width,height:Self.block).contains(p) }
+        let index=itemIndex(at:p)
         if index != suppressedIndex { suppressedIndex=nil }
         guard index != hoverIndex else { return }
         hoverHalo?.dismiss(); hoverHalo=nil; hoverIndex=nil
@@ -3752,7 +4094,23 @@ final class TileGrid: NSView {
         hoverHalo?.dismissForScrolling();hoverHalo=nil;hoverIndex=nil;suppressedIndex=nil
         enclosingScrollView?.scrollWheel(with:event)
     }
-    override func scrollWheel(with event:NSEvent){pageScroll(event)}
+    override func scrollWheel(with event:NSEvent){
+        if imageIntake && imageFullView {
+            let now=Date()
+            if (event.phase == .began || event.phase == []) && now.timeIntervalSince(lastFullWheelNavigation)>0.22 {
+                let delta=event.scrollingDeltaY == 0 ? event.scrollingDeltaX:event.scrollingDeltaY
+                if delta != 0 {moveFullImage(delta > 0 ? -1:1);lastFullWheelNavigation=now}
+            }
+            return
+        }
+        pageScroll(event)
+    }
+    override func keyDown(with event:NSEvent){
+        if imageIntake && imageFullView {
+            switch event.keyCode {case 123,126:moveFullImage(-1);return;case 124,125:moveFullImage(1);return;default:break}
+        }
+        super.keyDown(with:event)
+    }
     private func copy(_ item:Item) {
         if let hex=item.hex {let value=copyFormat == .cmyk ? item.sourceCMYK ?? copyFormat.text(hex,lowercase:Prefs.lowercaseHex) : copyFormat.text(hex,lowercase:Prefs.lowercaseHex);ColourCopies.copy(hex,text:value,sourceCMYK:item.sourceCMYK);onCopy?(value)}
         else if let id=item.id {onCopyPalette?(id)}
@@ -3786,6 +4144,7 @@ final class TileGrid: NSView {
     /// A column's left edge: the row justified to the block, every edge on a whole point, the last tile's right edge on the block's.
     private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (contentWidth + Self.gap) / CGFloat(columns)).rounded() }
     var height: CGFloat {
+        if imageIntake && imageFullView { return max(1,fullImageViewportHeight) }
         if listView { return CGFloat(items.count)*64 + contentInset*2 }
         let rows = (items.count + columns - 1) / columns
         return CGFloat(rows) * (Self.block + Self.words + Self.rowGap) + contentInset*2
@@ -3799,6 +4158,7 @@ final class TileGrid: NSView {
         scrollToVisible(rect(index))
     }
     private func rect(_ i: Int) -> NSRect {
+        if imageIntake && imageFullView { return NSRect(x:contentInset,y:contentInset,width:contentWidth,height:max(1,fullImageViewportHeight-contentInset*2)) }
         if listView { return NSRect(x:contentInset,y:contentInset+CGFloat(i)*64,width:contentWidth,height:64) }
         let c = i % columns, x = left(c)
         return NSRect(x: contentInset+x, y: contentInset+CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
@@ -3806,7 +4166,24 @@ final class TileGrid: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         markHits = []
-        for (i, it) in items.enumerated() {
+        let visible=visibleRect.union(dirtyRect)
+        let drawRange:Range<Int>
+        if imageIntake && imageFullView {
+            drawRange=items.indices.contains(currentImageIndex) ? currentImageIndex..<(currentImageIndex+1) : 0..<0
+        } else if listView {
+            let first=max(0,Int(floor((visible.minY-contentInset)/64)))
+            let last=min(items.count,Int(ceil((visible.maxY-contentInset)/64))+1)
+            drawRange=first..<max(first,last)
+        } else {
+            let stride=Self.block+Self.words+Self.rowGap
+            let firstRow=max(0,Int(floor((visible.minY-contentInset)/stride)))
+            let lastRow=min((items.count+columns-1)/columns,Int(ceil((visible.maxY-contentInset)/stride))+1)
+            let first=min(items.count,firstRow*columns),last=min(items.count,max(firstRow,lastRow)*columns)
+            drawRange=first..<max(first,last)
+        }
+        for i in drawRange {
+            let it=items[i]
+            if imageIntake && imageFullView && i != currentImageIndex { continue }
             let r = rect(i)
             if showsHalo, (it.hex != nil || it.id != nil), (canHover?(it) ?? true) {
                 // The halo mark on the caption's line, at the right, for the value beside it.
@@ -3817,8 +4194,24 @@ final class TileGrid: NSView {
             guard r.intersects(dirtyRect) else { continue }
             // No box: the colour block, the words on the ground beneath it, and nothing drawn around them.
             if it.id != nil && it.id == selectedPalette { fill(r.insetBy(dx: -4, dy: -4), Design.mist) }
-            let block = listView ? NSRect(x:r.minX+8,y:r.minY+8,width:min(120,r.width*0.25),height:48) : NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block)
-            if it.colours.isEmpty { fill(block, Design.mist) }
+            let block = listView ? NSRect(x:r.minX+8,y:r.minY+8,width:min(120,r.width*0.25),height:48) : (imageIntake && imageFullView ? NSRect(x:r.minX+8,y:r.minY+8,width:max(0,r.width-16),height:max(0,r.height-64)) : NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block))
+            if let image=it.image, image.size.width > 0, image.size.height > 0 {
+                if imageIntake {
+                    Design.rule.setStroke();let card=NSBezierPath(rect:block.insetBy(dx:0.5,dy:0.5));card.lineWidth=1;card.stroke()
+                    let inner=block.insetBy(dx:8,dy:8)
+                    let scale=min(inner.width/image.size.width,inner.height/image.size.height)
+                    let size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
+                    image.draw(in:NSRect(x:inner.midX-size.width/2,y:inner.midY-size.height/2,width:size.width,height:size.height))
+                    let checked=it.imagePath.map{selectedImagePaths.contains($0)} ?? false
+                    let box=NSRect(x:block.minX+8,y:block.minY+8,width:16,height:16)
+                    Design.card.setFill();NSBezierPath(rect:box).fill();Design.rule.setStroke();NSBezierPath(rect:box.insetBy(dx:0.5,dy:0.5)).stroke()
+                    if checked {Design.ink.setStroke();let tick=NSBezierPath();tick.lineWidth=2;tick.move(to:NSPoint(x:box.minX+3,y:box.midY));tick.line(to:NSPoint(x:box.minX+7,y:box.maxY-3));tick.line(to:NSPoint(x:box.maxX-2,y:box.minY+3));tick.stroke()}
+                } else {
+                    let scale=min(block.width/image.size.width,block.height/image.size.height)
+                    let size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
+                    image.draw(in:NSRect(x:block.midX-size.width/2,y:block.midY-size.height/2,width:size.width,height:size.height))
+                }
+            } else if it.colours.isEmpty { fill(block, Design.mist) }
             else {
                 // A palette's colours share the block as equal bands, a single colour takes it whole.
                 let bw = block.width / CGFloat(it.colours.count)
@@ -3868,8 +4261,11 @@ final class TileGrid: NSView {
         let p = convert(event.locationInWindow, from: nil)
         guard scrollGate.allows(at:event.locationInWindow) else{return}
         rollover(p)
-        if let i = items.indices.first(where: { rect($0).contains(p) }), items[i].hex != nil {
+        if let i = itemIndex(at:p), items[i].hex != nil {
             toolTip = items[i].caption + " · " + (items[i].sourceCMYK == nil ? PrintCondition.name() : "ASE source · No embedded ICC profile") + " · Δ = CIEDE2000 (ΔE00)"
+        } else if imageIntake,let i=itemIndex(at:p) {
+            let values=items[i].metadata
+            toolTip=values.isEmpty ? items[i].title : values.sorted{$0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending}.prefix(8).map{"\($0.key): \($0.value)"}.joined(separator:"\n")
         } else { toolTip = nil }
     }
     override func updateTrackingAreas() {
@@ -3880,15 +4276,28 @@ final class TileGrid: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let index = items.indices.first(where: { rect($0).contains(point) }) else { return }
+        if imageIntake,let index=itemIndex(at:point),let path=items[index].imagePath {
+            var actions=[
+                HaloAction(id:"import-file",label:"Import File",symbol:"square.and.arrow.down",description:"Select this image for import",onSelect:{[weak self] in self?.onImageContextAction?(path,0)}),
+                HaloAction(id:"finder",label:"Show in Finder",symbol:"folder",onSelect:{[weak self] in self?.onImageContextAction?(path,1)})
+            ]
+            if !imageFullView{actions.append(HaloAction(id:"full-view",label:"Show in Full",symbol:"arrow.up.left.and.arrow.down.right",onSelect:{[weak self] in self?.onImageContextAction?(path,2)}))}
+            imageContextMenu.open(actions,at:point,in:self)
+            return
+        }
+        guard let index=itemIndex(at:point) else{return}
         if let hex = items[index].hex { onContext?(hex, point) }
         else if let id = items[index].id { onAssetContext?(id, point) }
     }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
+        if imageIntake, let i=itemIndex(at:p),let path=items[i].imagePath {
+            let block=NSRect(x:rect(i).minX,y:rect(i).minY,width:rect(i).width,height:Self.block)
+            if NSRect(x:block.minX+4,y:block.minY+4,width:24,height:24).contains(p){onImageSelectionToggle?(path);return}
+        }
         if let m = markHits.first(where: { $0.0.contains(p) }) {if let h=items[m.1].hex{onPick?(h);onHalo?(h,m.0)}else if let id=items[m.1].id{onPaletteHalo?(id,m.0)};return}
-        guard let i = items.indices.first(where: { rect($0).contains(p) }) else { return }
+        guard let i = itemIndex(at:p) else { return }
         if let h = items[i].hex {
             onPick?(h)
             if let onPreviewSwatch { onPreviewSwatch(h); return }

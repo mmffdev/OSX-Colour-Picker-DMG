@@ -111,9 +111,10 @@ struct WorkspaceInventory {
             append(Catalogues.mainName, root)
         }
         let settings = manifest["settings"] as? [String: Any] ?? [:]
+        let savedDefault = manifest["defaultCatalogue"] as? [String: Any]
         return WorkspaceInventory(root: root, catalogues: entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
-                                  lastName: settings[Catalogues.currentKey] as? String,
-                                  lastID: (settings["currentCatalogueID"] as? String).flatMap(UUID.init(uuidString:)),
+                                  lastName: (savedDefault?["name"] as? String) ?? (settings[Catalogues.currentKey] as? String),
+                                  lastID: ((savedDefault?["id"] as? String) ?? (settings["currentCatalogueID"] as? String)).flatMap(UUID.init(uuidString:)),
                                   setupComplete: settings["assistantDone"] as? Bool == true)
     }
     static func isMissing(_ error: NSError) -> Bool {

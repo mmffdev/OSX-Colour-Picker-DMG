@@ -64,8 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettings() {
-        // In the Studio window, Settings is a page of its own; the old panels wait for their redesign.
-        if let studio = StudioWindowController.shared, studio.window?.isVisible == true { studio.frame.openSettings(); return }
         if settings == nil { settings = SettingsWindowController(library: library) }
         settings?.refresh()
         settings?.showWindow(nil)
@@ -104,7 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try AppDataStore(root:root).update { manifest in
                     var settings=manifest["settings"] as? [String:Any] ?? [:]
                     settings[Catalogues.currentKey]=name
-                    settings["currentCatalogueID"]=WorkspaceInventory.probe(name:name,folder:root.appendingPathComponent("Catalogues").appendingPathComponent(name)).id?.uuidString
+                    let id=WorkspaceInventory.probe(name:name,folder:root.appendingPathComponent("Catalogues").appendingPathComponent(name)).id?.uuidString
+                    if let id { settings["currentCatalogueID"]=id }
+                    var preferred: [String:Any] = ["name":name]
+                    if let id { preferred["id"]=id }
+                    manifest["defaultCatalogue"]=preferred
                     settings["assistantDone"]=false;settings["setupDone"]=false
                     manifest["settings"]=settings
                 }
@@ -145,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var settings=manifest["settings"] as? [String:Any] ?? [:]
                 settings[Catalogues.currentKey]=name
                 settings["currentCatalogueID"]=id?.uuidString
+                var preferred: [String:Any] = ["name":name]
+                if let id { preferred["id"]=id.uuidString }
+                manifest["defaultCatalogue"]=preferred
                 settings["assistantDone"]=true;settings["setupDone"]=true
                 manifest["settings"]=settings
             }

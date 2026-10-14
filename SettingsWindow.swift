@@ -373,10 +373,10 @@ final class CataloguePanel: SettingsPanel {
 
     override func rows() -> [[NSView]] {[
         [heading("Catalogue"), blank],
-        [label("Open:"), open],
+        [label("Default Catalogue:"), open],
         [blank, row([button("New\u{2026}", #selector(newCatalogue)), button("Rename\u{2026}", #selector(renameCatalogue)),
                      button("Open File\u{2026}", #selector(openFile)), button("Show in Finder", #selector(reveal))])],
-        [blank, note("A catalogue is a separate library with its own swatches and palettes, in the way Lightroom has catalogues. The app reopens the one you used last. Open File turns a library.json from an export or a backup into a new catalogue.")],
+        [blank, note("Choose the catalogue to open now. Colorgain remembers it and opens it at your next launch. Each catalogue keeps its own Library tree and last selected page. Open File adds a library.json export or backup as a new catalogue.")],
         [heading("Earlier versions"), blank],
         [blank, row([button("Import from MMFFDev Colour 2", #selector(importV2))])],
         [blank, note("Adds anything in your version 2 library that is missing here. Version 2's own library is never changed.")],

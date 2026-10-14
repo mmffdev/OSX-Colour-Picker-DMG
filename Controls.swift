@@ -188,7 +188,12 @@ final class SwissDropdown: NSView, Overlay {
         static func kind(_ s: String) -> Int { s == divider ? 1 : s.hasPrefix("#") ? 2 : 0 }
 
         private var menuRows: [Row] = []
+        private var outsideClickMonitor: Any?
         var onPreviewIndex: ((Int) -> Void)?
+        override func orderOut(_ sender: Any?) {
+            if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor); self.outsideClickMonitor = nil }
+            super.orderOut(sender)
+        }
         func configure(disabled: Set<Int>, submenus: Set<Int> = []) {
             for (i, row) in menuRows.enumerated() { row.enabled = !disabled.contains(i); row.hasSubmenu = submenus.contains(i); row.setAccessibilityElement(true); row.setAccessibilityRole(.menuItem); row.setAccessibilityLabel(row.accessibleTitle) }
         }
@@ -203,6 +208,14 @@ final class SwissDropdown: NSView, Overlay {
             let heights = items.enumerated().map { i, title in !literalItems && MenuPanel.kind(title) == 1 ? thin : (spectra.indices.contains(i) && !spectra[i].isEmpty ? 48 : rowHeight) }
             let h = heights.reduce(0, +) + 12
             super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: h), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                guard let self, self.isVisible, event.window !== self else { return event }
+                let point = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
+                guard !self.frame.contains(point) else { return event }
+                self.parent?.removeChildWindow(self)
+                self.orderOut(nil)
+                return event
+            }
             isOpaque = false
             backgroundColor = .clear
             hasShadow = true

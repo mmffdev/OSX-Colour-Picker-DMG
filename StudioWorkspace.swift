@@ -1,4 +1,6 @@
 import AppKit
+import UniformTypeIdentifiers
+import ImageIO
 
 /// The full-app shell uses the existing catalogue model; these views own presentation only.
 final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, WorkspaceRailAwareContent {
@@ -24,6 +26,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     private var dividerY: CGFloat = 0
     private var roots: [Node] = [], expanded = Set<String>(), rebuilding = false
     private var current = ""
+    private var expandedKey: String { "Workspace.CatalogueTree.Expanded.\(current)" }
     var onPick: ((StudioFrame.Place)->Void)?
     var onCatalogue: ((String)->Void)?
     var onFilter: ((String)->Void)?
@@ -61,7 +64,11 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     func update(names:[String], active:String, rows:[LibraryRail.Row], selected:StudioFrame.Place, selectedKey:String? = nil) {
         rebuilding=true
         defer{rebuilding=false}
-        current=active
+        if current != active {
+            if !current.isEmpty { AppPreferences.shared.set(expanded.sorted(), forKey: expandedKey) }
+            current=active
+            expanded=Set(AppPreferences.shared.stringArray(forKey: expandedKey) ?? [])
+        }
         catalogueRoots=names.map { Node("catalogue:"+$0,$0,catalogue:$0,symbol:"books.vertical") }
         if !names.contains(active){catalogueRoots.insert(Node("catalogue:"+active,active,catalogue:active,symbol:"books.vertical"),at:0)}
         let root=Node("content",active)
@@ -108,8 +115,8 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         cell.toolTip=node.title;return cell
     }
     func outlineViewSelectionDidChange(_ notification:Notification){guard !rebuilding,let tree=notification.object as? NSOutlineView,let node=tree.item(atRow:tree.selectedRow) as? Node else{return};if let cat=node.catalogue{if cat != current{onCatalogue?(cat)}else{onPick?(.catalogue)}}else if ["favourites","claimed","palettes"].contains(node.key){onFilter?(node.key)}else if let place=node.place{onPick?(place)}}
-    func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.insert(node.key);needsLayout=true}}
-    func outlineViewItemDidCollapse(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.remove(node.key);needsLayout=true}}
+    func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.insert(node.key);AppPreferences.shared.set(expanded.sorted(),forKey:expandedKey);needsLayout=true}}
+    func outlineViewItemDidCollapse(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.remove(node.key);AppPreferences.shared.set(expanded.sorted(),forKey:expandedKey);needsLayout=true}}
 }
 
 final class WorkspaceInspector:NSView {
@@ -172,12 +179,104 @@ final class WorkspaceFilmstrip:NSView {
     override func draw(_ dirtyRect:NSRect){hairline(x:0,y:0,width:bounds.width);Design.attributed("All Palettes · \(strip.palettes.count)",.body,colour:Design.quiet).draw(x:16,baseline:19);Design.attributed(ContentViewController.releaseLine,.body,colour:Design.quiet).draw(right:bounds.width-16,baseline:19)}
 }
 
+enum WorkspaceImageSort: String, CaseIterable {
+    case captureTime = "Capture Time", checkedState = "Checked State", fileName = "File Name"
+    case fileType = "File Type", mediaType = "Media Type", off = "Off"
+}
+
+/// A text-first, underline-selected control shared by intake and footer view modes.
+final class WorkspaceChoiceControl:NSView {
+    let labels:[String]
+    var selectedSegment=0 {didSet{needsDisplay=true}}
+    var onChange:((Int)->Void)?
+    private var hovered:Int?
+    override var isFlipped:Bool{true}
+    init(labels:[String]){self.labels=labels;super.init(frame:.zero);setAccessibilityRole(.radioGroup)}
+    required init?(coder:NSCoder){fatalError()}
+    override func draw(_ dirtyRect:NSRect){
+        let width=bounds.width/CGFloat(max(1,labels.count))
+        for (i,label) in labels.enumerated(){
+            let box=NSRect(x:CGFloat(i)*width,y:0,width:width,height:bounds.height)
+            let on=i == selectedSegment
+            Design.attributed(label,on ? .bodyStrong:.body,colour:on ? Design.ink:Design.quiet).draw(x:box.minX+8,baseline:bounds.midY+5,width:box.width-16)
+            if on {fill(NSRect(x:box.minX+8,y:bounds.maxY-2,width:max(0,box.width-16),height:2),Design.ink)}
+            else if hovered == i {hairline(x:box.minX+8,y:bounds.maxY-1,width:max(0,box.width-16),Design.rule)}
+        }
+    }
+    private func segment(_ event:NSEvent)->Int{min(labels.count-1,max(0,Int(convert(event.locationInWindow,from:nil).x/max(1,bounds.width)*CGFloat(labels.count))))}
+    override func mouseDown(with event:NSEvent){let next=segment(event);guard next != selectedSegment else{return};selectedSegment=next;onChange?(next)}
+    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
+    override func mouseMoved(with event:NSEvent){let next=segment(event);if hovered != next{hovered=next;needsDisplay=true}}
+    override func mouseExited(with event:NSEvent){hovered=nil;needsDisplay=true}
+    override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
+}
+
+final class WorkspaceMenuControl:NSView {
+    var title="Sort: Off"{didSet{needsDisplay=true}}
+    var onPress:(()->Void)?
+    private var hovering=false
+    override var isFlipped:Bool{true}
+    override func draw(_ dirtyRect:NSRect){
+        Design.attributed(title,.bodyStrong,colour:Design.ink).draw(x:8,baseline:bounds.midY+5,width:max(0,bounds.width-24))
+        let x=bounds.width-9,y=bounds.midY-1
+        let path=NSBezierPath();path.lineWidth=1.5;path.move(to:NSPoint(x:x-3,y:y-2));path.line(to:NSPoint(x:x,y:y+1));path.line(to:NSPoint(x:x+3,y:y-2));Design.ink.setStroke();path.stroke()
+        if hovering{hairline(x:8,y:bounds.maxY-1,width:max(0,bounds.width-20),Design.rule)}
+    }
+    override func mouseDown(with event:NSEvent){onPress?()}
+    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
+    override func mouseEntered(with event:NSEvent){hovering=true;needsDisplay=true}
+    override func mouseExited(with event:NSEvent){hovering=false;needsDisplay=true}
+    override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
+}
+
+final class WorkspaceTextActionControl:NSView {
+    var title:String {didSet{needsDisplay=true}}
+    var onPress:(()->Void)?
+    private var hovering=false
+    override var isFlipped:Bool{true}
+    init(_ title:String){self.title=title;super.init(frame:.zero);setAccessibilityRole(.button);setAccessibilityLabel(title)}
+    required init?(coder:NSCoder){fatalError()}
+    override func draw(_ dirtyRect:NSRect){
+        let text=Design.attributed(title,.bodyStrong,colour:Design.ink)
+        text.draw(x:0,baseline:bounds.midY+5,width:bounds.width)
+        if hovering{hairline(x:0,y:bounds.maxY-1,width:min(bounds.width,text.size().width),Design.ink)}
+    }
+    override func mouseDown(with event:NSEvent){onPress?()}
+    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
+    override func mouseEntered(with event:NSEvent){hovering=true;needsDisplay=true}
+    override func mouseExited(with event:NSEvent){hovering=false;needsDisplay=true}
+    override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
+}
+
 /// The Page's fixed tool rows stay independent of rail panels and the global carousel.
 final class WorkspaceViewportBar:NSView {
     private let isFooter:Bool
     private let gridButton=NSButton(),listButton=NSButton()
     private let appearancePresets=AppearancePresetControl()
     let channels=WorkspaceChannelControls(frame:.zero)
+    private let importButton=SwissButton("Import", .secondary)
+    private let cancelButton=SwissButton("Cancel", .quiet)
+    private let allImages=NSButton(checkboxWithTitle:"All Images",target:nil,action:nil)
+    private let imageCount=NSTextField(labelWithString:"0 Images")
+    private let intakeView=WorkspaceChoiceControl(labels:["Grid","Full"])
+    private let sortButton=WorkspaceMenuControl()
+    private let imageFilter=WorkspaceChoiceControl(labels:["All Images","New Images"])
+    private let metadataFilterButton=WorkspaceMenuControl()
+    private let importLinkChoice=WorkspaceChoiceControl(labels:["Import","Link"])
+    private var intakeSort=WorkspaceImageSort.off
+    var onImport:(()->Void)?
+    var onIntakeMode:((Bool)->Void)?
+    var onCancel:(()->Void)?
+    var onSelectAllImages:((Bool)->Void)?
+    var onImageFilter:((Bool)->Void)?
+    var onImageSort:((WorkspaceImageSort)->Void)?
+    var onImageView:((Bool)->Void)?
+    var onMetadataFilter:(()->Void)?
+    var onImportLinking:((Bool)->Void)?
+    private var offersImport=false
+    private var intake=false
+    private var linking=false
+    private var imageIntake=false
     var onMode:((Bool)->Void)?
     var listMode=false { didSet{updateButtons()} }
     override var isFlipped:Bool{true}
@@ -185,6 +284,8 @@ final class WorkspaceViewportBar:NSView {
         isFooter=footer;super.init(frame:.zero)
         wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
         NotificationCenter.default.addObserver(self,selector:#selector(refreshAppearance),name:.themeDidChange,object:nil)
+        metadataFilterButton.title="Filter by Meta"
+        metadataFilterButton.onPress={[weak self] in self?.onMetadataFilter?()}
         if footer {
             for (button,symbol,label) in [(gridButton,"square.grid.2x2","Grid View"),(listButton,"list.bullet","List View")] {
                 button.image=NSImage(systemSymbolName:symbol,accessibilityDescription:label)
@@ -193,9 +294,20 @@ final class WorkspaceViewportBar:NSView {
                 button.target=self;button.action=#selector(choose(_:));button.toolTip=label;button.setAccessibilityLabel(label)
                 addSubview(button)
             }
+            intakeView.onChange={[weak self] segment in self?.onImageView?(segment == 1)}
+            sortButton.onPress={[weak self] in self?.openSortMenu()}
+            [intakeView,sortButton,metadataFilterButton].forEach(addSubview)
+            intakeView.isHidden=true;sortButton.isHidden=true;metadataFilterButton.isHidden=true
             updateButtons()
         } else {
-            addSubview(appearancePresets);addSubview(channels)
+            importButton.target=self;importButton.action=#selector(beginImport)
+            allImages.target=self;allImages.action=#selector(selectAllChanged)
+            allImages.state = .on
+            imageFilter.onChange={[weak self] segment in self?.onImageFilter?(segment == 1)}
+            importLinkChoice.onChange={[weak self] segment in self?.onImportLinking?(segment == 1)}
+            imageCount.font=Design.Text.body.font();imageCount.textColor=Design.quiet;imageCount.alignment = .right
+            [importButton,appearancePresets,channels,allImages,imageFilter,imageCount,metadataFilterButton,importLinkChoice].forEach(addSubview)
+            setIntakeMode(false)
         }
     }
     required init?(coder:NSCoder){fatalError()}
@@ -203,14 +315,71 @@ final class WorkspaceViewportBar:NSView {
     @objc private func refreshAppearance(){updateButtons()}
     private func updateButtons(){gridButton.state=listMode ? .off:.on;listButton.state=listMode ? .on:.off;gridButton.contentTintColor=listMode ? Design.quiet:Design.ink;listButton.contentTintColor=listMode ? Design.ink:Design.quiet;needsDisplay=true}
     @objc private func choose(_ sender:NSButton){listMode=sender === listButton;onMode?(listMode)}
+    func offerPhotographyImport(_ offered:Bool){offersImport=offered;importButton.isHidden = !offered || intake;needsLayout=true}
+    func setIntakeMode(_ active:Bool,linking:Bool=false){
+        intake=active;self.linking=linking
+        channels.isHidden=active;appearancePresets.isHidden=active
+        importLinkChoice.isHidden = !active
+        importButton.isHidden = !offersImport || active
+        allImages.isHidden = !active;imageFilter.isHidden = !active;imageCount.isHidden = !active
+        if active && !imageIntake {imageFilter.selectedSegment=0}
+        needsLayout=true
+    }
+    func configureImageIntake(_ active:Bool,linking:Bool=false,selectAll:Bool,newOnly:Bool,fullView:Bool,sort:WorkspaceImageSort,imageCount:Int,selectedCount:Int,columns:Int){
+        imageIntake=active
+        if !isFooter {
+            setIntakeMode(active,linking:linking)
+            importLinkChoice.selectedSegment=linking ? 1:0
+            allImages.state=selectAll ? .on:.off
+            imageFilter.selectedSegment=newOnly ? 1:0
+            self.imageCount.stringValue="\(imageCount) Images · \(selectedCount) Selected"
+        } else {
+            for control in [intakeView,sortButton] {control.isHidden = !active}
+            gridButton.isHidden=active;listButton.isHidden=active
+            intakeView.selectedSegment=fullView ? 1:0
+            intakeSort=sort;sortButton.title="Sort: \(sort.rawValue)"
+        }
+        needsLayout=true;needsDisplay=true
+    }
+    @objc private func selectAllChanged(){onSelectAllImages?(allImages.state == .on)}
+    @objc private func beginImport(){onImport?()}
+    func configureMetadataFilter(visible:Bool,active:Bool){guard !isFooter else{return};metadataFilterButton.isHidden = !visible;metadataFilterButton.title=active ? "Metadata Filter: On" : "Filter by Meta";needsLayout=true}
+    @objc private func openSortMenu(){
+        guard let win=window else{return}
+        if let old=droppedSort {old.parent?.removeChildWindow(old);old.orderOut(nil);droppedSort=nil;return}
+        let items=WorkspaceImageSort.allCases.map(\.rawValue)
+        let panel=SwissDropdown.MenuPanel(items:items,chosen:intakeSort.rawValue,width:196){[weak self] index in
+            guard let self,WorkspaceImageSort.allCases.indices.contains(index) else{return}
+            self.intakeSort=WorkspaceImageSort.allCases[index];self.sortButton.title="Sort: \(self.intakeSort.rawValue)"
+            self.onImageSort?(self.intakeSort);self.droppedSort?.parent?.removeChildWindow(self.droppedSort!);self.droppedSort?.orderOut(nil);self.droppedSort=nil
+        }
+        let rect=win.convertToScreen(sortButton.convert(sortButton.bounds,to:nil));panel.place(above:NSPoint(x:rect.minX,y:rect.maxY+4));win.addChildWindow(panel,ordered:.above);droppedSort=panel
+    }
+    private var droppedSort:SwissDropdown.MenuPanel?
     /// The right-hand controls, left to right, each with its width, its height and the gap before it; the bar steps them left from `rightInset`, so their last edge is the swatches' at any width.
     var rightControls:[(view:NSView,width:CGFloat,height:CGFloat,gap:CGFloat)]=[] { didSet{needsLayout=true} }
     var leftInset:CGFloat=16 { didSet{needsLayout=true;needsDisplay=true} }
     var rightInset:CGFloat=16 { didSet{needsLayout=true} }
     override func layout(){
         super.layout();gridButton.frame=NSRect(x:leftInset,y:4,width:28,height:24);listButton.frame=NSRect(x:leftInset+32,y:4,width:28,height:24)
-        channels.frame=NSRect(x:12,y:2,width:min(440,max(80,bounds.width-184)),height:28)
+        intakeView.frame=NSRect(x:leftInset,y:2,width:128,height:28)
+        sortButton.frame=NSRect(x:leftInset+148,y:2,width:128,height:28)
+        allImages.frame=NSRect(x:leftInset,y:3,width:136,height:26)
+        imageFilter.frame=NSRect(x:leftInset+148,y:2,width:226,height:28)
+        imageCount.frame=NSRect(x:bounds.width-rightInset-300,y:6,width:284,height:20)
+        importButton.frame=NSRect(x:12,y:2,width:78,height:28)
+        importLinkChoice.frame=NSRect(x:leftInset+550,y:2,width:128,height:28)
+        channels.frame=NSRect(x:100,y:2,width:min(440,max(80,bounds.width-272)),height:28)
         appearancePresets.frame=NSRect(x:bounds.width-156,y:2,width:140,height:28)
+        if isFooter {
+            metadataFilterButton.isHidden=true;metadataFilterButton.frame = .zero
+            intakeView.frame=NSRect(x:leftInset,y:2,width:128,height:28)
+            sortButton.frame=NSRect(x:leftInset+148,y:2,width:160,height:28)
+        } else if intake {
+            metadataFilterButton.frame=NSRect(x:leftInset+384,y:2,width:156,height:28)
+        } else {
+            metadataFilterButton.frame=NSRect(x:max(12,bounds.width-rightInset-156-148),y:2,width:156,height:28)
+        }
         var right=bounds.width-rightInset
         for c in rightControls.reversed() {
             let width = (c.view as? PrintProfileSelector).map { min(c.width, $0.preferredControlWidth) } ?? c.width
@@ -220,12 +389,209 @@ final class WorkspaceViewportBar:NSView {
     }
     override func draw(_ dirtyRect:NSRect){
         hairline(x:0,y:isFooter ? 0:bounds.height-1,width:bounds.width)
+        if !isFooter && intake {hairline(x:0,y:bounds.height-1,width:bounds.width,Design.rule)}
         if isFooter {
             fill(NSRect(x:leftInset+(listMode ? 32:0),y:bounds.height-3,width:28,height:2),Design.ink)
         } else {
             Design.rule.setStroke()
             let border=NSBezierPath(rect:bounds.insetBy(dx:0.5,dy:0.5));border.lineWidth=1;border.stroke()
 
+        }
+    }
+}
+
+/// Lazy Finder-style source tree. Folder browsing and selection are active; import/link actions
+/// remain separate from browsing and are added in a later phase.
+enum WorkspaceImageScanEvent { case began, batch, completed }
+
+final class WorkspaceImageIntakePane:NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, WorkspaceScrollableContent, WorkspaceRailAwareContent {
+    private final class ScanCancellation {
+        private let lock=NSLock();private var cancelled=false
+        func cancel(){lock.lock();cancelled=true;lock.unlock()}
+        var isCancelled:Bool{lock.lock();defer{lock.unlock()};return cancelled}
+    }
+    final class Node:NSObject {
+        let url:URL
+        let isDirectory:Bool
+        let isRoot:Bool
+        var children:[Node]?
+        var loading=false
+        init(url:URL,isDirectory:Bool,isRoot:Bool=false){self.url=url;self.isDirectory=isDirectory;self.isRoot=isRoot}
+        var title:String { isRoot && url.path == NSHomeDirectory() ? "Home — \(url.lastPathComponent)" : url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
+    }
+    var scrollbarOnLeft=false {didSet{scroll.onLeft=scrollbarOnLeft}}
+    var onImageFiles:((URL?,[URL],WorkspaceImageScanEvent)->Void)?
+    var minimumContentHeight:CGFloat {380}
+    private var roots:[Node]=[]
+    private var selectedFolder:Node?
+    private var rebuilding=false
+    private var scanGeneration=0
+    private var scanCancellation:ScanCancellation?
+    private var includeNested=false
+    private let outline=WorkspaceOutline(),scroll=WorkspacePanelScroll()
+    private let nestedFolders=NSButton(checkboxWithTitle:"Include Nested Folders",target:nil,action:nil)
+    private static let supportedImageExtensions:Set<String> = {
+        let identifiers=CGImageSourceCopyTypeIdentifiers() as? [String] ?? []
+        let extensions=identifiers.flatMap{identifier -> [String] in
+            guard let type=UTType(identifier),type.conforms(to:.image) else{return []}
+            return type.tags[.filenameExtension] ?? []
+        }
+        return Set(extensions.map{$0.lowercased()})
+    }()
+    override var isFlipped:Bool {true}
+    override init(frame:NSRect){
+        super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
+        let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("Image File Tree"))
+        outline.addTableColumn(column);outline.outlineTableColumn=column;outline.headerView=nil
+        outline.rowHeight=28;outline.indentationPerLevel=16;outline.intercellSpacing=NSSize(width:0,height:0)
+        outline.backgroundColor=Design.card;outline.appearance=Theme.appearance;outline.style = .plain
+        outline.dataSource=self;outline.delegate=self;outline.focusRingType = .none;outline.allowsMultipleSelection=true
+        outline.setAccessibilityLabel("Source folders and images")
+        scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;scroll.documentView=outline
+        nestedFolders.font=Design.Text.body.font();nestedFolders.contentTintColor=Design.ink
+        nestedFolders.target=self;nestedFolders.action=#selector(nestedFoldersChanged)
+        nestedFolders.setAccessibilityLabel("Include Nested Folders")
+        addSubview(nestedFolders);addSubview(scroll)
+        reloadRoots()
+    }
+    required init?(coder:NSCoder){fatalError()}
+    override func layout(){
+        super.layout();nestedFolders.frame=NSRect(x:16,y:0,width:max(0,bounds.width-32),height:32)
+        scroll.frame=NSRect(x:0,y:32,width:bounds.width,height:max(0,bounds.height-32))
+        scroll.hasVerticalScroller=CGFloat(outline.numberOfRows)*outline.rowHeight > scroll.bounds.height
+        scroll.tile();outline.tableColumns.first?.width=scroll.contentSize.width
+    }
+    private func reloadRoots(){
+        let home=Node(url:URL(fileURLWithPath:NSHomeDirectory(),isDirectory:true),isDirectory:true,isRoot:true)
+        let volumeRoot=URL(fileURLWithPath:"/Volumes",isDirectory:true)
+        var volumes:[Node]=[]
+        if let urls=try? FileManager.default.contentsOfDirectory(at:volumeRoot,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles]) {
+            volumes=urls.compactMap{url in
+                guard (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true else{return nil}
+                return Node(url:url,isDirectory:true,isRoot:true)
+            }.sorted{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
+        }
+        roots=[home]+volumes
+        outline.reloadData();needsLayout=true
+    }
+    private func imageFile(_ url:URL)->Bool {
+        let ext=url.pathExtension.lowercased()
+        if let type=UTType(filenameExtension:ext),type.conforms(to:.image) {return true}
+        return Self.supportedImageExtensions.contains(ext)
+    }
+    private func load(_ node:Node){
+        guard node.isDirectory,node.children == nil,!node.loading else{return}
+        node.loading=true
+        let url=node.url
+        DispatchQueue.global(qos:.userInitiated).async { [weak self,weak node] in
+            let urls=(try? FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles,.skipsPackageDescendants])) ?? []
+            let found=urls.compactMap{child -> Node? in
+                guard let values=try? child.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey]),values.isSymbolicLink != true else{return nil}
+                if values.isDirectory == true {return Node(url:child,isDirectory:true)}
+                return self?.imageFile(child) == true ? Node(url:child,isDirectory:false):nil
+            }.sorted{
+                if $0.isDirectory != $1.isDirectory{return $0.isDirectory}
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            DispatchQueue.main.async { [weak self,weak node] in
+                guard let self,let node else{return};node.children=found;node.loading=false
+                self.outline.reloadItem(node,reloadChildren:true);self.needsLayout=true
+                if self.selectedFolder === node {
+                    self.publishSelection()
+                }
+            }
+        }
+    }
+    func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int{
+        guard let node=item as? Node else{return roots.count};return node.children?.count ?? 0
+    }
+    func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any{
+        guard let node=item as? Node else{return roots[index]};return node.children![index]
+    }
+    func outlineView(_ outlineView:NSOutlineView,isItemExpandable item:Any)->Bool{(item as! Node).isDirectory}
+    func outlineView(_ outlineView:NSOutlineView,rowViewForItem item:Any)->NSTableRowView?{WorkspacePanelRow()}
+    func outlineView(_ outlineView:NSOutlineView,viewFor tableColumn:NSTableColumn?,item:Any)->NSView?{
+        let node=item as! Node
+        let cell=WorkspaceCatalogues.Cell(frame:NSRect(x:0,y:0,width:outlineView.tableColumns[0].width,height:28))
+        let icon=NSImageView(frame:NSRect(x:0,y:6,width:16,height:16))
+        icon.image=NSImage(systemSymbolName:node.isDirectory ? "folder":"photo",accessibilityDescription:node.isDirectory ? "Folder":"Image")
+        icon.contentTintColor=Design.quiet
+        let label=NSTextField(labelWithString:node.title);label.font=Design.Text.body.font();label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
+        label.frame=NSRect(x:24,y:5,width:max(30,outlineView.frame.width-40),height:20);label.autoresizingMask=[.width]
+        cell.addSubview(icon);cell.addSubview(label);cell.textField=label;cell.imageView=icon;cell.toolTip=node.url.path
+        return cell
+    }
+    func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node {load(node)}}
+    func outlineViewSelectionDidChange(_ notification:Notification){guard !rebuilding else{return};publishSelection()}
+    private func publishSelection(){
+        let nodes=outline.selectedRowIndexes.compactMap{outline.item(atRow:$0) as? Node}
+        if let folder=nodes.last(where:\.isDirectory){
+            selectedFolder=folder;load(folder)
+        }
+        let files=nodes.filter{ !$0.isDirectory }.map(\.url)
+        if !files.isEmpty {scanGeneration+=1;scanCancellation?.cancel();onImageFiles?(selectedFolder?.url,[],.began);onImageFiles?(selectedFolder?.url,files,.batch);onImageFiles?(selectedFolder?.url,[],.completed)}
+        else if let folder=selectedFolder {scan(folder.url)}
+        else {scanGeneration+=1;scanCancellation?.cancel();onImageFiles?(nil,[],.began);onImageFiles?(nil,[],.completed)}
+    }
+    @objc private func nestedFoldersChanged(){includeNested=nestedFolders.state == .on;if let folder=selectedFolder{scan(folder.url)}}
+    private func scan(_ folder:URL){
+        scanGeneration+=1;let generation=scanGeneration,recursive=includeNested
+        scanCancellation?.cancel();let cancellation=ScanCancellation();scanCancellation=cancellation
+        onImageFiles?(folder,[],.began)
+        DispatchQueue.global(qos:.userInitiated).async{[weak self] in
+            guard let self else{return}
+            var batch:[URL]=[]
+            func emit(){
+                guard !batch.isEmpty else{return}
+                let ready=batch.sorted{$0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending};batch=[]
+                DispatchQueue.main.async{[weak self] in guard let self,self.scanGeneration==generation else{return};self.onImageFiles?(folder,ready,.batch)}
+            }
+            func inspect(_ url:URL,values supplied:URLResourceValues?=nil){
+                guard !cancellation.isCancelled,self.imageFile(url) else{return}
+                // Extension checks are cheap; avoid a metadata round-trip for every non-image
+                // document in large camera folders. Only image candidates need stat data.
+                let values=supplied ?? (try? url.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey]))
+                guard let values,values.isSymbolicLink != true,values.isDirectory != true else{return}
+                batch.append(url);if batch.count>=24{emit()}
+            }
+            if recursive {
+                var pending=[folder]
+                while let directory=pending.popLast(),!cancellation.isCancelled {
+                    guard let urls=try? FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey,.isPackageKey],options:[.skipsHiddenFiles,.skipsPackageDescendants]) else{continue}
+                    for url in urls {
+                        if cancellation.isCancelled{break}
+                        guard let values=try? url.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey,.isPackageKey]),values.isSymbolicLink != true else{continue}
+                        if values.isDirectory == true {
+                            if values.isPackage != true {pending.append(url)}
+                        } else {inspect(url,values:values)}
+                    }
+                }
+            } else if let urls=try? FileManager.default.contentsOfDirectory(at:folder,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles,.skipsPackageDescendants]) {
+                urls.forEach{inspect($0)}
+            }
+            emit()
+            DispatchQueue.main.async{[weak self] in guard let self,self.scanGeneration==generation,!cancellation.isCancelled else{return};self.onImageFiles?(folder,[],.completed)}
+        }
+    }
+}
+
+final class WorkspaceImageDestinationPane:NSView,WorkspaceScrollableContent {
+    var catalogue="" {didSet{needsDisplay=true}}
+    var linking=false {didSet{needsDisplay=true}}
+    var minimumContentHeight:CGFloat {220}
+    override var isFlipped:Bool {true}
+    override func draw(_ dirtyRect:NSRect){
+        let title=linking ? "Linked Files":"Destination"
+        Design.attributed(title,.bodyStrong).draw(x:16,baseline:24,width:bounds.width-32)
+        Design.attributed(catalogue,.bodyStrong,colour:Design.quiet).draw(x:16,baseline:58,width:bounds.width-32)
+        if linking {
+            Design.attributed("Images / Photography",.body).draw(x:16,baseline:94,width:bounds.width-32)
+            Design.attributed("Files remain at their source locations.",.body,colour:Design.quiet).draw(x:16,baseline:132,width:bounds.width-32)
+            Design.attributed("Linking is not connected yet.",.caption,colour:Design.quiet).draw(x:16,baseline:160,width:bounds.width-32)
+        } else {
+            Design.attributed("Images",.body).draw(x:16,baseline:94,width:bounds.width-32)
+            Design.attributed("Photography",.body).draw(x:16,baseline:124,width:bounds.width-32)
+            Design.attributed("This previews the catalogue destination.",.body,colour:Design.quiet).draw(x:16,baseline:166,width:bounds.width-32)
         }
     }
 }

@@ -58,7 +58,7 @@ func watchTheme(_ view: NSView) {
     }
 }
 
-/// Shared text-action treatment: leading diagonal arrow, left-aligned label and text-only rule.
+/// Shared text-action treatment: leading diagonal arrow and left-aligned label; feedback appears on interaction.
 /// Intrinsic width includes the complete label; wider layout slots retain the same left origin.
 enum ActionButtonSkin {
     static let height: CGFloat = 32
@@ -68,21 +68,19 @@ enum ActionButtonSkin {
     static func size(_ title: String, height: CGFloat = ActionButtonSkin.height) -> NSSize {
         NSSize(width: max(24, textX + ceil(Design.attributed(title, .action).size().width)), height: height)
     }
-    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor = Design.ink) {
+    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor = .labelColor) {
         let active = enabled && pressed, hovered = enabled && hover
-        let background = (active ? Prefs.buttonActiveBackground : hovered ? Prefs.buttonHoverBackground : nil).flatMap(colorFromHex) ?? Design.mist
         let customInk = (active ? Prefs.buttonActiveText : hovered ? Prefs.buttonHoverText : nil).flatMap(colorFromHex)
-        let ink = !enabled ? baseInk.withAlphaComponent(0.35) : (active || hovered ? customInk ?? ThemedButton.readable(on: background) : baseInk)
+        let ink = !enabled ? baseInk.withAlphaComponent(0.35) : (active || hovered ? customInk ?? baseInk : baseInk)
         let label = Design.attributed(title, .action, colour: ink)
         let width = max(0, bounds.width - textX)
-        if enabled && (hover || pressed) {
-            fill(NSRect(x: bounds.minX, y: bounds.minY, width: min(bounds.width, size(title).width), height: bounds.height), background)
-        }
         let y = bounds.minY + (bounds.height - label.size().height) / 2
         Design.arrow(arrowSize, colour: ink).draw(in: NSRect(x: bounds.minX, y: bounds.midY - arrowSize / 2, width: arrowSize, height: arrowSize), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         label.draw(x: bounds.minX + textX, baseline: y + label.baselineFont.ascender, width: width)
-        let ruleY = min(bounds.maxY - 1, y + label.size().height + 1.5)
-        fill(NSRect(x: bounds.minX + textX, y: ruleY, width: min(width, label.size().width), height: pressed || focus ? 2 : 1), ink)
+        if enabled && (hover || pressed || focus) {
+            let ruleY = min(bounds.maxY - 1, y + label.size().height + 1.5)
+            fill(NSRect(x: bounds.minX + textX, y: ruleY, width: min(width, label.size().width), height: pressed || focus ? 2 : 1), ink)
+        }
     }
 }
 
@@ -187,7 +185,6 @@ final class ThemedButton: NSButton {
             ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hovering, pressed: isHighlighted || state == .on,
                 focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled, baseInk: Theme.text)
         } else if let image {
-            if isEnabled && (hovering || isHighlighted) { fill(bounds, Design.mist) }
             tinted(image, isEnabled ? Design.ink : Design.soft).draw(in: NSRect(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2, width: image.size.width, height: image.size.height))
         }
     }

@@ -344,10 +344,15 @@ struct Catalogues {
     static var currentName: String {
         get {
             let names = standard.names()
-            let saved = AppPreferences.shared.string(forKey: currentKey) ?? mainName
+            let manifest = try? AppDataStore.current.read()
+            let saved = ((manifest?["defaultCatalogue"] as? [String: Any])?["name"] as? String)
+                ?? AppPreferences.shared.string(forKey: currentKey) ?? mainName
             return names.contains(saved) ? saved : (names.first ?? mainName)
         }
-        set { AppPreferences.shared.set(newValue, forKey: currentKey) }
+        set {
+            let id = WorkspaceInventory.probe(name: newValue, folder: standard.directory(for: newValue)).id?.uuidString
+            AppPreferences.shared.rememberDefaultCatalogue(newValue, id: id)
+        }
     }
 
     var folder: URL { root.appendingPathComponent("Catalogues") }

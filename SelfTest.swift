@@ -954,7 +954,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "a folder counts as unlocked only when its rules let this very account add and replace files")
     check(AdobeAccess.state == .nothingToDo || !AdobeAccess.folders.isEmpty, "Adobe access has nothing to set up where no Adobe app is installed")
     let permissionTitles = Permission.all.map { $0.title }
-    check(permissionTitles == ["Screen Recording"], "the setup asks up front for Screen Recording alone; Documents is asked on the catalogue step")
+    check(permissionTitles == ["Screen Recording", "Camera For QR Import"], "setup offers Screen Recording and optional QR camera access; Documents is asked on the catalogue step")
     #else
     let kept = fm.temporaryDirectory.appendingPathComponent("mmffdev-colour3-kept-\(UUID().uuidString)")
     try! fm.createDirectory(at: kept, withIntermediateDirectories: true)
@@ -3200,12 +3200,20 @@ private func runWorkspaceStartupTests(check: (Bool, String) -> Void) {
         var inventory=try WorkspaceInventory.read(root:root)
         check(inventory.catalogues.count == 2 && inventory.catalogues.allSatisfy { $0.state == .ready }, "Existing app data discovers multiple saved catalogues without creating another")
         let secondID=inventory.catalogues.first { $0.name == second }!.id!
+        try AppDataStore(root:root).rememberDefaultCatalogue(second,id:secondID.uuidString)
+        let savedDefault=try AppDataStore(root:root).read()["defaultCatalogue"] as? [String:Any]
+        check(savedDefault?["name"] as? String == second && savedDefault?["id"] as? String == secondID.uuidString, "The default catalogue and stable identity are saved directly in coldata")
         try AppDataStore(root:root).update { manifest in
             manifest["customFutureField"]="Retain this"
-            manifest["settings"]=["assistantDone":true,"currentCatalogue":second,"currentCatalogueID":secondID.uuidString]
+            manifest["settings"]=["assistantDone":true,"currentCatalogue":first,"currentCatalogueID":inventory.catalogues.first { $0.name == first }!.id!.uuidString]
         }
         inventory=try WorkspaceInventory.read(root:root)
-        check(inventory.lastUsed?.name == second, "Last catalogue is preselected by stable identity")
+        check(inventory.lastUsed?.name == second, "The saved default catalogue takes priority over an older last-opened value")
+        try AppDataStore(root:root).update { $0.removeValue(forKey:"defaultCatalogue") }
+        inventory=try WorkspaceInventory.read(root:root)
+        check(inventory.lastUsed?.name == first, "Older workspaces fall back to their saved last-opened catalogue")
+        try AppDataStore(root:root).rememberDefaultCatalogue(second,id:secondID.uuidString)
+        inventory=try WorkspaceInventory.read(root:root)
         check(DevelopmentLaunch.canResume(inventory,enabled:true) && !DevelopmentLaunch.canResume(inventory,enabled:false), "Development resume skips selection only when explicitly enabled and setup is complete")
         try AppDataStore(root:root).update { $0["settings"]=["assistantDone":false,"currentCatalogue":second] }
         check(!DevelopmentLaunch.canResume(try WorkspaceInventory.read(root:root),enabled:true), "Development mode cannot bypass incomplete setup")

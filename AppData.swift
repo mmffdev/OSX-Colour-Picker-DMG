@@ -28,6 +28,18 @@ struct AppDataStore {
     func update(_ change: (inout [String: Any]) throws -> Void) throws {
         var value = try read(); try change(&value); try write(value)
     }
+    func rememberDefaultCatalogue(_ name: String, id: String? = nil) throws {
+        try update { manifest in
+            var record: [String: Any] = ["name": name]
+            if let id { record["id"] = id }
+            manifest["defaultCatalogue"] = record
+            var settings = manifest["settings"] as? [String: Any] ?? [:]
+            settings[Catalogues.currentKey] = name
+            if let id { settings["currentCatalogueID"] = id }
+            else { settings.removeValue(forKey: "currentCatalogueID") }
+            manifest["settings"] = settings
+        }
+    }
     static var current: AppDataStore { AppDataStore(root: Catalogues.standard.root) }
 }
 
@@ -93,6 +105,13 @@ final class AppPreferences {
             }
             settingsCache.invalidate()
             preferences.set(value, forKey: key)
+        } catch { NSApp.presentError(error) }
+    }
+    func rememberDefaultCatalogue(_ name: String, id: String?) {
+        do {
+            try AppDataStore.current.rememberDefaultCatalogue(name, id: id)
+            settingsCache.invalidate()
+            preferences.set(name, forKey: Catalogues.currentKey)
         } catch { NSApp.presentError(error) }
     }
 }

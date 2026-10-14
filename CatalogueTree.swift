@@ -126,6 +126,8 @@ struct CatalogueFile: Codable, Equatable {
     /// The Library's loose colours and its profiles, from the catalogue's folder.
     var swatches: String?
     var profiles: String?
+    /// User-saved metadata filter presets; portable with the catalogue.
+    var metadataFilters: [MetadataFilterPreset]? = nil
 }
 
 /// "Web.colinf": a member's information pack, its record and details.
@@ -830,7 +832,8 @@ enum CatalogueTree {
         let file = CatalogueFile(id: catID, name: catName, about: old?.about, createdAt: old?.createdAt ?? now, changedAt: now, library: lib.version,
                                  activePalette: lib.activeSwatchID, colours: lib.colours.map { $0.hex }, tags: lib.tagInfo, deleted: lib.deleted,
                                  templates: schema.templates ?? [], collections: collections, libraryAssets: libraryLinks,
-                                 swatches: createEmptyPools || !looseColours.isEmpty ? relative(swatchesURL, to: root) : nil, profiles: createEmptyPools || !lib.colourProfiles.isEmpty ? relative(profilesURL, to: root) : nil)
+                                 swatches: createEmptyPools || !looseColours.isEmpty ? relative(swatchesURL, to: root) : nil, profiles: createEmptyPools || !lib.colourProfiles.isEmpty ? relative(profilesURL, to: root) : nil,
+                                 metadataFilters: old?.metadataFilters)
         let before = catalogue(in: root)
         var sameDate = file
         sameDate.changedAt = before?.changedAt ?? now
