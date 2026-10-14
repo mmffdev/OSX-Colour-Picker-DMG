@@ -3524,7 +3524,7 @@ final class StudioPage: NSView, Overlay {
         if compactWorkspace,let toolbar=workspaceToolbar {
             if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
             // Justified right to the swatches' own padding by the bar itself, which knows its width: profile last, each control a gap left of the next.
-            let profileWidth=min(240,max(140,toolbar.bounds.width-424))
+            let profileWidth=min(profileSelector.preferredControlWidth,min(240,max(140,toolbar.bounds.width-424)))
             toolbar.rightInset=insetRight
             toolbar.rightControls=[(workspaceFormat,80,28,12),(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
             slider.alphaValue = grid.listView ? 0.4 : 1

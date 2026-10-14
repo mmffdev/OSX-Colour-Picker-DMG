@@ -24,9 +24,16 @@ final class WorkspaceOutline: NSOutlineView {
         if identifier.rawValue == "NSOutlineViewDisclosureButtonKey" {
             let button = WorkspaceDisclosure(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
             button.identifier = identifier; button.setButtonType(.onOff); button.isBordered = false
+            button.target = self; button.action = #selector(toggleDisclosure(_:))
             return button
         }
         return super.makeView(withIdentifier: identifier, owner: owner)
+    }
+    @objc private func toggleDisclosure(_ sender: NSButton) {
+        let index = row(for: sender)
+        guard index >= 0, let item = item(atRow: index), isExpandable(item) else { return }
+        if isItemExpanded(item) { collapseItem(item) } else { expandItem(item) }
+        sender.state = isItemExpanded(item) ? .on : .off
     }
 }
 

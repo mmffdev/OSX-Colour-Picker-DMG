@@ -10,6 +10,7 @@ final class PrintProfileSelector:NSView,Overlay {
         return event.window === window && bounds.contains(convert(event.locationInWindow,from:nil))
     }
     var opensUpward=false { didSet { button.opensUpward=opensUpward;button.needsDisplay=true } }
+    var preferredControlWidth:CGFloat { ceil(Design.attributed(button.title,.body).size().width)+24 }
     let compact:Bool
     private let button=PrintProfileValueButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -19,7 +20,7 @@ final class PrintProfileSelector:NSView,Overlay {
     required init?(coder:NSCoder){fatalError()}
     deinit{NotificationCenter.default.removeObserver(self)}
     override var isFlipped:Bool{true}
-    @objc func reload(){do{document=try SavedPrintProfiles.load();button.title=document.profiles.first{$0.id==document.selected}?.name ?? "Current Settings"}catch{button.title="Profiles Unavailable"};button.setAccessibilityLabel("Print Profile: "+button.title);needsDisplay=true}
+    @objc func reload(){do{document=try SavedPrintProfiles.load();button.title=document.profiles.first{$0.id==document.selected}?.name ?? "Current Settings"}catch{button.title="Profiles Unavailable"};button.setAccessibilityLabel("Print Profile: "+button.title);needsDisplay=true;superview?.needsLayout=true}
     override func layout(){super.layout();button.frame=NSRect(x:0,y:compact ? 0:18,width:bounds.width,height:compact ? bounds.height:38)}
     override func draw(_ dirtyRect:NSRect){if !compact{Design.attributed("Saved Print Profile",.caption,colour:Design.quiet).draw(x:0,baseline:11,width:bounds.width);hairline(x:0,y:47,width:bounds.width,Design.rule)}}
     func dismissOverlay(){if let dropped{dropped.parent?.removeChildWindow(dropped);dropped.orderOut(nil)};dropped=nil;Overlays.closed(self)}

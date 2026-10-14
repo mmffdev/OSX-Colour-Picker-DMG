@@ -182,8 +182,9 @@ final class WorkspaceViewportBar:NSView {
         super.layout();gridButton.frame=NSRect(x:12,y:4,width:28,height:24);listButton.frame=NSRect(x:44,y:4,width:28,height:24)
         var right=bounds.width-rightInset
         for c in rightControls.reversed() {
-            c.view.frame=NSRect(x:right-c.width,y:((bounds.height-c.height)/2).rounded(),width:c.width,height:c.height)
-            right-=c.width+c.gap
+            let width = (c.view as? PrintProfileSelector).map { min(c.width, $0.preferredControlWidth) } ?? c.width
+            c.view.frame=NSRect(x:right-width,y:((bounds.height-c.height)/2).rounded(),width:width,height:c.height)
+            right-=width+c.gap
         }
     }
     override func draw(_ dirtyRect:NSRect){
