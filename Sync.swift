@@ -565,7 +565,8 @@ enum SyncError: LocalizedError {
         case .stillDownloading(let u):
             return "\(u.lastPathComponent) is still downloading from the cloud. Try Sync Now in a moment."
         case .unreadable(let u):
-            return "\(u.path) could not be read as a library. It has been left untouched."
+            let kind = [ColourFiles.catalogue, ColourFiles.legacyCatalogue].contains(u.pathExtension.lowercased()) ? "catalogue" : "library"
+            return "\(u.lastPathComponent) could not be opened as a \(kind). The file has been left untouched.\n\nLocation: \(u.path)"
         case .backupFailed(let u, let e):
             return "Could not write a backup to \(u.path), so nothing was changed: \(e.localizedDescription)"
         }

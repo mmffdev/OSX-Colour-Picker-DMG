@@ -35,6 +35,7 @@
 		1844F8A785AEA4815E0A5FFB /* StudioColourPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA9EBE36D281B308FDCCBF /* StudioColourPicker.swift */; };
 		2237BB3D8942CCDEDB54A4C7 /* StudioWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34EE382E2A558E8D79E1AEFD /* StudioWorkspace.swift */; };
 		254AAE0331D01DB68534BC99 /* MenubarPaletteNameBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 640C851653EC4127996EFAF5 /* MenubarPaletteNameBar.swift */; };
+		26A7EBCECA892C62B435764E /* CatalogueOpen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3796E31E53DF1C96D86A64AD /* CatalogueOpen.swift */; };
 		28A65495003A764A47ECA6F2 /* StudioSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4558269298343A558D55123D /* StudioSchema.swift */; };
 		2D92733039594F61140B7498 /* FormMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722CA791E5DD7E6EE8E66AA9 /* FormMemory.swift */; };
 		2F7ACA9EB3B0EF94334EB5BA /* col3d.icns in Resources */ = {isa = PBXBuildFile; fileRef = 63D999D79887FEBC8BF31F46 /* col3d.icns */; };
@@ -166,6 +167,7 @@
 		2F5F86B39BE41109D29DE6FF /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
 		2FBC1685363EF1068609773A /* SlideConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideConfirm.swift; sourceTree = "<group>"; };
 		34EE382E2A558E8D79E1AEFD /* StudioWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioWorkspace.swift; sourceTree = "<group>"; };
+		3796E31E53DF1C96D86A64AD /* CatalogueOpen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogueOpen.swift; sourceTree = "<group>"; };
 		37AA14645C973C22AD6859FA /* StudioProofCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioProofCharts.swift; sourceTree = "<group>"; };
 		3A7D6831A452CA89370158C1 /* Logo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logo.swift; sourceTree = "<group>"; };
 		3AB833D2F35F7560CAA2FFCD /* PrePress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrePress.swift; sourceTree = "<group>"; };
@@ -349,6 +351,7 @@
 				2C4A96C75B51CCA9FC94FE74 /* Brand.swift */,
 				C8231212FC6BE4F5BBD61B56 /* Buttons.swift */,
 				8D04FF49E321ABEC88D19A13 /* Catalogue.swift */,
+				3796E31E53DF1C96D86A64AD /* CatalogueOpen.swift */,
 				CF432AA3C31AFEDF27BA8AF6 /* CatalogueTree.swift */,
 				CC575DE2D5BE598297D1ABCE /* CatalogueWatch.swift */,
 				FA64E8FACD17BFE0A7BE0281 /* ColourEngine.swift */,
@@ -593,6 +596,7 @@
 				0B5943E9714BC255E13ED372 /* Brand.swift in Sources */,
 				731704A82C24D4FC560A8387 /* Buttons.swift in Sources */,
 				42AEAD0331A3A69666C4C7D9 /* Catalogue.swift in Sources */,
+				26A7EBCECA892C62B435764E /* CatalogueOpen.swift in Sources */,
 				02DB64A2A13FF1ED6E2CB0D0 /* CatalogueTree.swift in Sources */,
 				95AEB071D3B2F8AE62D82DED /* CatalogueWatch.swift in Sources */,
 				7AC304C23E633B1C9BC65222 /* ColourEngine.swift in Sources */,
