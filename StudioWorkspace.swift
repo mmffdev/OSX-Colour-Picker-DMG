@@ -172,7 +172,17 @@ final class WorkspaceViewportBar:NSView {
     required init?(coder:NSCoder){fatalError()}
     private func updateButtons(){gridButton.state=listMode ? .off:.on;listButton.state=listMode ? .on:.off;gridButton.contentTintColor=listMode ? Design.quiet:Design.ink;listButton.contentTintColor=listMode ? Design.ink:Design.quiet;needsDisplay=true}
     @objc private func choose(_ sender:NSButton){listMode=sender === listButton;onMode?(listMode)}
-    override func layout(){super.layout();gridButton.frame=NSRect(x:12,y:4,width:28,height:24);listButton.frame=NSRect(x:44,y:4,width:28,height:24)}
+    /// The right-hand controls, left to right, each with its width, its height and the gap before it; the bar steps them left from `rightInset`, so their last edge is the swatches' at any width.
+    var rightControls:[(view:NSView,width:CGFloat,height:CGFloat,gap:CGFloat)]=[] { didSet{needsLayout=true} }
+    var rightInset:CGFloat=16 { didSet{needsLayout=true} }
+    override func layout(){
+        super.layout();gridButton.frame=NSRect(x:12,y:4,width:28,height:24);listButton.frame=NSRect(x:44,y:4,width:28,height:24)
+        var right=bounds.width-rightInset
+        for c in rightControls.reversed() {
+            c.view.frame=NSRect(x:right-c.width,y:((bounds.height-c.height)/2).rounded(),width:c.width,height:c.height)
+            right-=c.width+c.gap
+        }
+    }
     override func draw(_ dirtyRect:NSRect){
         hairline(x:0,y:isFooter ? 0:bounds.height-1,width:bounds.width)
         if isFooter {

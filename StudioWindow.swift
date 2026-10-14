@@ -3523,14 +3523,11 @@ final class StudioPage: NSView, Overlay {
         workspaceFormat.isHidden = !compactWorkspace || !showsFormat || section != .tiles
         if compactWorkspace,let toolbar=workspaceToolbar {
             if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
-            // Justified right to the swatches' own padding: the profile's right edge is the last tile's, every control stepping left from it.
+            // Justified right to the swatches' own padding by the bar itself, which knows its width: profile last, each control a gap left of the next.
             let profileWidth=min(240,max(140,toolbar.bounds.width-424))
-            let right=toolbar.bounds.width-insetRight
-            profileSelector.frame=NSRect(x:right-profileWidth,y:2,width:profileWidth,height:28)
-            deltaButton.frame=NSRect(x:profileSelector.frame.minX-16-100,y:2,width:100,height:28)
-            slider.frame=NSRect(x:deltaButton.frame.minX-16-96,y:8,width:96,height:16)
+            toolbar.rightInset=insetRight
+            toolbar.rightControls=[(workspaceFormat,80,28,12),(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
             slider.alphaValue = grid.listView ? 0.4 : 1
-            workspaceFormat.frame=NSRect(x:slider.frame.minX-12-80,y:2,width:80,height:28)
         } else { slider.alphaValue=1 }
         grid.width = canvasWidth
         grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
