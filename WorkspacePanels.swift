@@ -19,7 +19,33 @@ final class WorkspaceDisclosure: NSButton {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
+/// Shared restrained surface treatment for all docked panels and tree selections.
+enum WorkspacePanelSurface {
+    static func draw(in rect: NSRect, selected: Bool) {
+        let top: CGFloat = selected ? 0.16 : 0.045
+        let bottom: CGFloat = selected ? 0.10 : 0.015
+        let from = Design.card.blended(withFraction:top,of:Design.ink) ?? Design.card
+        let to = Design.card.blended(withFraction:bottom,of:Design.ink) ?? Design.card
+        NSGradient(starting:from,ending:to)?.draw(in:rect,angle:90)
+    }
+}
+
+final class WorkspacePanelRow: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        WorkspacePanelSurface.draw(in:bounds,selected:true)
+    }
+}
+
 final class WorkspaceOutline: NSOutlineView {
+    // Inset the disclosure and cell contents, never the full-width selection surface.
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        var rect = super.frameOfOutlineCell(atRow:row); rect.origin.x += 8; return rect
+    }
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var rect = super.frameOfCell(atColumn:column,row:row); rect.origin.x += 8; rect.size.width=max(0,rect.width-8); return rect
+    }
+
     override func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier, owner: Any?) -> NSView? {
         if identifier.rawValue == "NSOutlineViewDisclosureButtonKey" {
             let button = WorkspaceDisclosure(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
@@ -37,6 +63,26 @@ final class WorkspaceOutline: NSOutlineView {
     }
 }
 
+/// Inner scrolling consumes a bordered lane only when content actually overflows.
+/// The outer side follows the owning rail, including after a panel is moved.
+protocol WorkspaceRailAwareContent:AnyObject {var scrollbarOnLeft:Bool {get set}}
+final class WorkspacePanelScroll:FittedScrollView {
+    var onLeft=false {didSet{if oldValue != onLeft {needsLayout=true;needsDisplay=true}}}
+    override func tile(){
+        super.tile()
+        let lane=hasVerticalScroller ? QuietScroller.lane:0
+        let border:CGFloat=hasVerticalScroller ? 1:0
+        contentView.frame=NSRect(x:onLeft ? lane+border:0,y:0,width:max(0,bounds.width-lane-border),height:bounds.height)
+        verticalScroller?.frame=NSRect(x:onLeft ? 0:bounds.width-lane,y:0,width:lane,height:bounds.height)
+        if let document=documentView,abs(document.frame.width-contentView.bounds.width)>0.5 {document.setFrameSize(NSSize(width:contentView.bounds.width,height:document.frame.height))}
+        needsDisplay=true
+    }
+    override func draw(_ dirtyRect:NSRect){
+        super.draw(dirtyRect)
+        if hasVerticalScroller {Design.rule.setFill();NSRect(x:onLeft ? QuietScroller.lane:bounds.width-QuietScroller.lane-1,y:0,width:1,height:bounds.height).fill()}
+    }
+}
+
 final class WorkspacePanel: NSView {
     static let headerHeight: CGFloat = 34
     static let footerHeight: CGFloat = 18
@@ -44,8 +90,8 @@ final class WorkspacePanel: NSView {
     let content: NSView
     var preferredHeight: CGFloat
     var collapsed = false { didSet { disclosure.state = collapsed ? .off : .on; needsLayout = true; rail?.arrange() } }
-    weak var rail: WorkspaceRail?
-    private let contentScroll: NSScrollView?
+    weak var rail: WorkspaceRail? {didSet{needsLayout=true}}
+    private let contentScroll: WorkspacePanelScroll?
     private let disclosure = WorkspaceDisclosure()
     private let titleButton: NSButton
     private let grip = PanelDragGrip()
@@ -56,7 +102,7 @@ final class WorkspacePanel: NSView {
     override var isFlipped: Bool { true }
     init(id: String, title: String, content: NSView, height: CGFloat) {
         panelID = id; self.content = content; preferredHeight = height
-        contentScroll = content is WorkspaceInspector ? NSScrollView() : nil
+        contentScroll = content is WorkspaceInspector || content is WorkspaceScrollableContent ? WorkspacePanelScroll() : nil
         titleButton = NSButton(title: title, target: nil, action: nil)
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
@@ -101,12 +147,17 @@ final class WorkspacePanel: NSView {
         content.isHidden = collapsed; contentScroll?.isHidden=collapsed; resizeGrip.isHidden = collapsed
         let viewport=NSRect(x:0,y:Self.headerHeight,width:bounds.width,height:max(0,bounds.height-Self.headerHeight-Self.footerHeight))
         if let contentScroll {
-            contentScroll.frame=viewport
-            content.frame=NSRect(x:0,y:0,width:contentScroll.contentSize.width,height:max(440,contentScroll.contentSize.height))
+            let height=(content as? WorkspaceScrollableContent)?.minimumContentHeight ?? 440
+            contentScroll.onLeft=rail?.scrollbarOnLeft ?? false
+            contentScroll.hasVerticalScroller=height > viewport.height+0.5
+            contentScroll.frame=viewport;contentScroll.tile()
+            content.frame=NSRect(x:0,y:0,width:contentScroll.contentSize.width,height:max((content as? WorkspaceScrollableContent)?.minimumContentHeight ?? 440,contentScroll.contentSize.height))
         } else { content.frame=viewport }
+        (content as? WorkspaceRailAwareContent)?.scrollbarOnLeft=rail?.scrollbarOnLeft ?? false
         resizeGrip.frame = NSRect(x: 0, y: bounds.height-Self.footerHeight, width: bounds.width, height: Self.footerHeight)
     }
     override func draw(_ dirtyRect: NSRect) {
+        WorkspacePanelSurface.draw(in:NSRect(x:0,y:0,width:bounds.width,height:Self.headerHeight),selected:false)
         hairline(x: 0, y: Self.headerHeight-1, width: bounds.width)
         if !collapsed { hairline(x: 0, y: bounds.height-Self.footerHeight, width: bounds.width);hairline(x: 0, y: bounds.height-1, width: bounds.width) }
     }
@@ -204,6 +255,7 @@ private final class WorkspaceRailScroll:FittedScrollView {
 final class WorkspaceRail: NSView {
     private final class Stack:NSView { override var isFlipped:Bool { true } }
     private let scroll=WorkspaceRailScroll(), stack=Stack()
+    var scrollbarOnLeft:Bool{scroll.onLeft}
     private(set) var panels:[WorkspacePanel]=[]
     private var insertion:Int? { didSet { for (i,target) in targets.enumerated(){target.active=i == insertion} } }
     private var targets:[PanelDropTarget]=[]

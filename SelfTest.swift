@@ -1890,6 +1890,9 @@ func runHaloTests(check: (Bool, String) -> Void) {
     check(Theme.next(after: nil) == 0 && Theme.next(after: 0) == 1 && Theme.next(after: 1) == 2 && Theme.next(after: 2) == 3 && Theme.next(after: 3) == nil
           && Theme.lights == ["#242424", "#000000", "#FFFFFF", "#F2F2F2"] && !Theme.takesLightText(on: Theme.light),
           "L turns the background charcoal, then black, then white, then off-white with dark text, then back to the theme")
+    check(AppearancePresets.all.map { $0.hex } == ["#FFFFFF","#F8F7F5","#808080","#242424","#000000"], "appearance presets keep the five neutral backgrounds in order")
+    check(AppearancePresets.next(after:4) == 0 && AppearancePresets.next(after:0) == 1, "appearance cycling wraps from black to white")
+    check(AppearancePresets.index(for:nil) == 1 && AppearancePresets.index(for:"invalid") == 1 && AppearancePresets.index(for:"charcoal") == 3, "appearance selection restores known IDs and defaults to cream")
     check(Theme.light == "#F2F2F2" && colorFromHex(Theme.light) != nil, "light is a neutral off-white, not pure white")
     check(Theme.takesLightText(on: "#000000") && !Theme.takesLightText(on: "#FFFFFF") && !Theme.takesLightText(on: "#808080")
           && Theme.takesLightText(on: "#404040") && Theme.takesLightText(on: "#7A0019") && !Theme.takesLightText(on: "#F5C542"),
@@ -2536,6 +2539,10 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(GroupHeaderView.text(bySource[0]) == "Hex (sRGB)  \u{00B7}  4", "a group's title carries its count")
 
     print("histograms")
+    check(WorkspaceHistogramPane.retainedChannelSelection(1,channelCount:4) == 1 && WorkspaceHistogramPane.retainedChannelSelection(1,channelCount:3) == 1,
+          "per-channel histogram presentation survives RGB/CMYK model changes")
+    check(WorkspaceHistogramPane.retainedChannelSelection(0,channelCount:4) == 0 && WorkspaceHistogramPane.retainedChannelSelection(4,channelCount:4) == 4 && WorkspaceHistogramPane.retainedChannelSelection(5,channelCount:3) == 1,
+          "histograms retain merged or valid individual channels and fall back to per-channel for a missing fourth channel")
     PrintCondition.current = PrintCondition.fallback
     let spread = Histogram.counts(of: ["#FF0000", "#FF8000", "#0000FF", "nonsense"], as: .rgb)
     check(spread.count == 3 && spread[0].count == 256 && spread[0][255] == 2 && spread[0][0] == 1 && spread[1][128] == 1 && spread[1][0] == 2 && spread[2][255] == 1 && spread.map { $0.reduce(0, +) } == [3, 3, 3],

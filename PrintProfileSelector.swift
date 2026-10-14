@@ -10,7 +10,7 @@ final class PrintProfileSelector:NSView,Overlay {
         return event.window === window && bounds.contains(convert(event.locationInWindow,from:nil))
     }
     var opensUpward=false { didSet { button.opensUpward=opensUpward;button.needsDisplay=true } }
-    var preferredControlWidth:CGFloat { ceil(Design.attributed(button.title,.body).size().width)+24 }
+    var preferredControlWidth:CGFloat { ceil(Design.attributed(button.title,.body).size().width)+48 }
     let compact:Bool
     private let button=PrintProfileValueButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -22,7 +22,7 @@ final class PrintProfileSelector:NSView,Overlay {
     override var isFlipped:Bool{true}
     @objc func reload(){do{document=try SavedPrintProfiles.load();button.title=document.profiles.first{$0.id==document.selected}?.name ?? "Current Settings"}catch{button.title="Profiles Unavailable"};button.setAccessibilityLabel("Print Profile: "+button.title);needsDisplay=true;superview?.needsLayout=true}
     override func layout(){super.layout();button.frame=NSRect(x:0,y:compact ? 0:18,width:bounds.width,height:compact ? bounds.height:38)}
-    override func draw(_ dirtyRect:NSRect){if !compact{Design.attributed("Saved Print Profile",.caption,colour:Design.quiet).draw(x:0,baseline:11,width:bounds.width);hairline(x:0,y:47,width:bounds.width,Design.rule)}}
+    override func draw(_ dirtyRect:NSRect){if !compact{Design.attributed("Saved Print Profile",.caption,colour:Design.quiet).draw(x:0,baseline:11,width:bounds.width)}}
     func dismissOverlay(){if let dropped{dropped.parent?.removeChildWindow(dropped);dropped.orderOut(nil)};dropped=nil;Overlays.closed(self)}
     @objc private func open(){
         if dropped != nil {dismissOverlay();return}
@@ -72,7 +72,11 @@ private final class PrintProfileValueButton:NSButton {
     override init(frame:NSRect){super.init(frame:frame);isBordered=false;alignment = .left}
     required init?(coder:NSCoder){fatalError()}
     override var isFlipped:Bool{true}
-    override func draw(_ dirtyRect:NSRect){let hover=window.map{bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil))} ?? false;if hover || isHighlighted{Design.mist.setFill();bounds.fill()};let text=Design.attributed(title,.body,colour:Design.ink);text.draw(x:0,baseline:compact ? 17:15,width:max(0,bounds.width-22));RowMark.draw(opensUpward ? "chevron.up":"chevron.down",x:min(bounds.width-14,text.size().width+8),baseline:compact ? 17:15,colour:Design.quiet)}
+    override func draw(_ dirtyRect:NSRect){
+        let hover=window.map{bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil))} ?? false
+        DropdownSkin.draw(in:bounds,hover:hover || isHighlighted,up:opensUpward)
+        Design.attributed(title,.body,colour:Design.ink).draw(x:8,baseline:bounds.midY+4,width:max(0,bounds.width-44))
+    }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
     override func mouseEntered(with event:NSEvent){needsDisplay=true}

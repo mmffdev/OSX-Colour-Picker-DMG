@@ -1,7 +1,8 @@
 import AppKit
 
 /// The full-app shell uses the existing catalogue model; these views own presentation only.
-final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, WorkspaceRailAwareContent {
+    var scrollbarOnLeft=false {didSet{if oldValue != scrollbarOnLeft {scroll.onLeft=scrollbarOnLeft;catalogueScroll.onLeft=scrollbarOnLeft;needsLayout=true}}}
     final class Cell: NSTableCellView {
         override func layout() {
             super.layout()
@@ -17,8 +18,8 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             self.key=key; self.title=title; self.count=count; self.place=place; self.catalogue=catalogue; self.symbol=symbol
         }
     }
-    private let outline = WorkspaceOutline(), scroll = FittedScrollView()
-    private let catalogueList = WorkspaceOutline(), catalogueScroll = FittedScrollView()
+    private let outline = WorkspaceOutline(), scroll = WorkspacePanelScroll()
+    private let catalogueList = WorkspaceOutline(), catalogueScroll = WorkspacePanelScroll()
     private var catalogueRoots: [Node] = []
     private var dividerY: CGFloat = 0
     private var roots: [Node] = [], expanded = Set<String>(), rebuilding = false
@@ -34,7 +35,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(name))
             tree.addTableColumn(column); tree.outlineTableColumn=column; tree.headerView=nil
             tree.rowHeight=28; tree.indentationPerLevel=16; tree.intercellSpacing=NSSize(width:0,height:0)
-            tree.backgroundColor=Design.card; tree.appearance=NSAppearance(named:.aqua); tree.style = .plain
+            tree.backgroundColor=Design.card; tree.appearance=Theme.appearance; tree.style = .plain
             tree.dataSource=self; tree.delegate=self; tree.focusRingType = .none
             tree.setAccessibilityLabel(name)
             container.drawsBackground=false; container.hasVerticalScroller=true; container.autohidesScrollers=true; container.documentView=tree
@@ -45,9 +46,13 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     override func layout() {
         super.layout()
         let topHeight=min(CGFloat(catalogueRoots.count)*28+8,max(32,min(176,bounds.height*0.35)))
-        catalogueScroll.frame=NSRect(x:8,y:4,width:max(0,bounds.width-16),height:max(0,topHeight-8))
+        catalogueScroll.frame=NSRect(x:0,y:4,width:bounds.width,height:max(0,topHeight-8))
         dividerY=topHeight
-        scroll.frame=NSRect(x:8,y:topHeight+5,width:max(0,bounds.width-16),height:max(0,bounds.height-topHeight-9))
+        scroll.frame=NSRect(x:0,y:topHeight+5,width:bounds.width,height:max(0,bounds.height-topHeight-9))
+        // Do not leave an empty scrollbar lane beside full-width selected rows.
+        catalogueScroll.hasVerticalScroller=CGFloat(catalogueList.numberOfRows)*catalogueList.rowHeight > catalogueScroll.bounds.height
+        scroll.hasVerticalScroller=CGFloat(outline.numberOfRows)*outline.rowHeight > scroll.bounds.height
+        catalogueScroll.tile();scroll.tile()
         catalogueList.tableColumns.first?.width=catalogueScroll.contentSize.width
         outline.tableColumns.first?.width=scroll.contentSize.width
         needsDisplay=true
@@ -92,6 +97,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int{(item as? Node)?.children.count ?? (outlineView === catalogueList ? catalogueRoots.count : roots.count)}
     func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any{(item as? Node)?.children[index] ?? (outlineView === catalogueList ? catalogueRoots[index] : roots[index])}
     func outlineView(_ outlineView:NSOutlineView,isItemExpandable item:Any)->Bool{!(item as! Node).children.isEmpty}
+    func outlineView(_ outlineView:NSOutlineView,rowViewForItem item:Any)->NSTableRowView? { WorkspacePanelRow() }
     func outlineView(_ outlineView:NSOutlineView,viewFor tableColumn:NSTableColumn?,item:Any)->NSView?{
         let node=item as! Node
         let cell=Cell(frame:NSRect(x:0,y:0,width:outlineView.tableColumns[0].width,height:28))
@@ -102,8 +108,8 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         cell.toolTip=node.title;return cell
     }
     func outlineViewSelectionDidChange(_ notification:Notification){guard !rebuilding,let tree=notification.object as? NSOutlineView,let node=tree.item(atRow:tree.selectedRow) as? Node else{return};if let cat=node.catalogue{if cat != current{onCatalogue?(cat)}else{onPick?(.catalogue)}}else if ["favourites","claimed","palettes"].contains(node.key){onFilter?(node.key)}else if let place=node.place{onPick?(place)}}
-    func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.insert(node.key)}}
-    func outlineViewItemDidCollapse(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.remove(node.key)}}
+    func outlineViewItemDidExpand(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.insert(node.key);needsLayout=true}}
+    func outlineViewItemDidCollapse(_ notification:Notification){if let node=notification.userInfo?["NSObject"] as? Node{expanded.remove(node.key);needsLayout=true}}
 }
 
 final class WorkspaceInspector:NSView {
@@ -111,20 +117,17 @@ final class WorkspaceInspector:NSView {
     var catalogue="" {didSet{needsDisplay=true}}
     var displayColours: [String:NSColor] = [:] {didSet{needsDisplay=true}}
     var total=0 {didSet{needsDisplay=true}}
-    var onOpen:(()->Void)?,onTarget:(()->Void)?,onBackground:((NSColor)->Void)?
+    var onOpen:(()->Void)?,onTarget:(()->Void)?
     private let open=SwissButton("Open Swatches",.primary),target=SwissButton("Set Picker Target",.secondary)
-    private let background=NSColorWell()
     override var isFlipped:Bool{true}
     override init(frame:NSRect){super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
         open.target=self;open.action=#selector(openPalette);target.target=self;target.action=#selector(targetPalette)
-        background.color=Design.card;background.target=self;background.action=#selector(changeBackground);background.setAccessibilityLabel("Canvas background colour")
-        [open,target,background].forEach{addSubview($0)}
+        [open,target].forEach{addSubview($0)}
     }
     required init?(coder:NSCoder){fatalError()}
     @objc private func openPalette(){onOpen?()}
     @objc private func targetPalette(){onTarget?()}
-    @objc private func changeBackground(){onBackground?(background.color)}
-    override func layout(){super.layout();open.frame=NSRect(x:16,y:196,width:bounds.width-32,height:32);target.frame=NSRect(x:16,y:236,width:bounds.width-32,height:32);background.frame=NSRect(x:16,y:336,width:44,height:28)}
+    override func layout(){super.layout();open.frame=NSRect(x:16,y:196,width:bounds.width-32,height:32);target.frame=NSRect(x:16,y:236,width:bounds.width-32,height:32)}
     override func draw(_ dirtyRect:NSRect){
         Design.attributed("Selection",.bodyStrong).draw(x:16,baseline:28)
         Design.attributed(palette?.name ?? "Select A Palette",.bodyStrong).draw(x:16,baseline:60,width:bounds.width-32)
@@ -133,10 +136,8 @@ final class WorkspaceInspector:NSView {
         if colours.isEmpty{fill(box,Design.mist)}else{for (i,c) in colours.enumerated(){fill(NSRect(x:box.minX+CGFloat(i)*box.width/CGFloat(colours.count),y:box.minY,width:box.width/CGFloat(colours.count)+0.5,height:box.height),c)}}
         Design.attributed(palette.map{"\($0.entries.count) Colours"} ?? "\(total) Palettes In Catalogue",.body,colour:Design.quiet).draw(x:16,baseline:168,width:bounds.width-32)
         hairline(x:0,y:292,width:bounds.width)
-        Design.attributed("Canvas",.bodyStrong).draw(x:16,baseline:320)
-        Design.attributed("Background",.body).draw(x:72,baseline:355)
-        Design.attributed(catalogue,.body,colour:Design.quiet).draw(x:16,baseline:408,width:bounds.width-32)
-        hairline(x:0,y:432,width:bounds.width)
+        Design.attributed(catalogue,.body,colour:Design.quiet).draw(x:16,baseline:320,width:bounds.width-32)
+        hairline(x:0,y:344,width:bounds.width)
     }
 }
 
@@ -175,12 +176,15 @@ final class WorkspaceFilmstrip:NSView {
 final class WorkspaceViewportBar:NSView {
     private let isFooter:Bool
     private let gridButton=NSButton(),listButton=NSButton()
+    private let appearancePresets=AppearancePresetControl()
+    let channels=WorkspaceChannelControls(frame:.zero)
     var onMode:((Bool)->Void)?
     var listMode=false { didSet{updateButtons()} }
     override var isFlipped:Bool{true}
     init(footer:Bool) {
         isFooter=footer;super.init(frame:.zero)
         wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
+        NotificationCenter.default.addObserver(self,selector:#selector(refreshAppearance),name:.themeDidChange,object:nil)
         if footer {
             for (button,symbol,label) in [(gridButton,"square.grid.2x2","Grid View"),(listButton,"list.bullet","List View")] {
                 button.image=NSImage(systemSymbolName:symbol,accessibilityDescription:label)
@@ -190,16 +194,23 @@ final class WorkspaceViewportBar:NSView {
                 addSubview(button)
             }
             updateButtons()
+        } else {
+            addSubview(appearancePresets);addSubview(channels)
         }
     }
     required init?(coder:NSCoder){fatalError()}
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func refreshAppearance(){updateButtons()}
     private func updateButtons(){gridButton.state=listMode ? .off:.on;listButton.state=listMode ? .on:.off;gridButton.contentTintColor=listMode ? Design.quiet:Design.ink;listButton.contentTintColor=listMode ? Design.ink:Design.quiet;needsDisplay=true}
     @objc private func choose(_ sender:NSButton){listMode=sender === listButton;onMode?(listMode)}
     /// The right-hand controls, left to right, each with its width, its height and the gap before it; the bar steps them left from `rightInset`, so their last edge is the swatches' at any width.
     var rightControls:[(view:NSView,width:CGFloat,height:CGFloat,gap:CGFloat)]=[] { didSet{needsLayout=true} }
+    var leftInset:CGFloat=16 { didSet{needsLayout=true;needsDisplay=true} }
     var rightInset:CGFloat=16 { didSet{needsLayout=true} }
     override func layout(){
-        super.layout();gridButton.frame=NSRect(x:12,y:4,width:28,height:24);listButton.frame=NSRect(x:44,y:4,width:28,height:24)
+        super.layout();gridButton.frame=NSRect(x:leftInset,y:4,width:28,height:24);listButton.frame=NSRect(x:leftInset+32,y:4,width:28,height:24)
+        channels.frame=NSRect(x:12,y:2,width:min(440,max(80,bounds.width-184)),height:28)
+        appearancePresets.frame=NSRect(x:bounds.width-156,y:2,width:140,height:28)
         var right=bounds.width-rightInset
         for c in rightControls.reversed() {
             let width = (c.view as? PrintProfileSelector).map { min(c.width, $0.preferredControlWidth) } ?? c.width
@@ -210,7 +221,11 @@ final class WorkspaceViewportBar:NSView {
     override func draw(_ dirtyRect:NSRect){
         hairline(x:0,y:isFooter ? 0:bounds.height-1,width:bounds.width)
         if isFooter {
-            fill(NSRect(x:listMode ? 44:12,y:bounds.height-3,width:28,height:2),Design.ink)
-        } else { Design.attributed("Library Filter",.body,colour:Design.quiet).draw(x:16,baseline:17) }
+            fill(NSRect(x:leftInset+(listMode ? 32:0),y:bounds.height-3,width:28,height:2),Design.ink)
+        } else {
+            Design.rule.setStroke()
+            let border=NSBezierPath(rect:bounds.insetBy(dx:0.5,dy:0.5));border.lineWidth=1;border.stroke()
+
+        }
     }
 }

@@ -94,6 +94,7 @@ final class StudioWindowController: NSWindowController {
         if gridKey == nil {
             gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c, weak library] e in
                 guard let c = c, e.window === c.window else { return e }
+                if e.keyCode == 53, !Overlays.any, c.window?.attachedSheet == nil, c.frame.closeExpandedPanel() { return nil }
                 if e.keyCode == 53, !Overlays.any, (c.window?.firstResponder as? ShortcutsSettings)?.isRecordingShortcut != true, c.frame.leaveSettings() { return nil }
                 guard !(c.window?.firstResponder is NSText), !Overlays.any else { return e }
                 if c.window?.firstResponder is ShortcutsSettings { return e }   // a key being recorded is not a key being used
@@ -102,6 +103,9 @@ final class StudioWindowController: NSWindowController {
                         c.frame.paletteWheel.present()
                     }
                     return nil
+                }
+                if e.charactersIgnoringModifiers?.lowercased() == "l", e.modifierFlags.intersection([.command,.control,.option,.shift]).isEmpty, c.window?.attachedSheet == nil, c.frame.splash == nil {
+                    if !e.isARepeat { AppearancePresets.cycle() }; return nil
                 }
                 if e.characters == "\\" { c.frame.toggleGrid(); return nil }
                 // The quick keys: single keys that work anywhere in the window.
@@ -255,6 +259,15 @@ final class StudioFrame: NSView {
     let footer = StudioFooter()
     private let cataloguePane = WorkspaceCatalogues()
     private let inspectorPane = WorkspaceInspector()
+    private let histogramPane=WorkspaceHistogramPane(frame:.zero)
+    private let bloomPane=WorkspaceBloomPane(frame:.zero)
+    private let bloomWorkspace=WorkspaceExpandedPanel(frame:.zero)
+    private let expandedBloom=WorkspaceBloomPane(frame:.zero)
+    private let expandedHistogram=WorkspaceHistogramPane(frame:.zero)
+    private enum ExpandedAnalysis {case bloom,histogram}
+    private var expandedAnalysis:ExpandedAnalysis?
+    private var analysisColour:String?
+    private var analysisPalettes:[Swatch]=[]
     private let filmstrip = WorkspaceFilmstrip()
     private let leftPanelRail = WorkspaceRail(scrollbarOnLeft:true)
     private let rightPanelRail = WorkspaceRail(scrollbarOnLeft:false)
@@ -267,9 +280,12 @@ final class StudioFrame: NSView {
         switch place { case .catalogue, .palettes, .palette, .collection, .folder, .project, .overview, .group: return true; default: return false }
     }
     private func inspectPalette(_ id: UUID) {
+        if inspectedPalette != id { analysisColour=nil }
         inspectedPalette = id
         inspectorPane.palette = library.library.swatch(id)
         page.grid.selectedPalette = id
+        viewportHeader.channels.configure(library:library.library,palette:id)
+        if viewportHeader.channels.selectedChannel != nil { fillPage() } else { refreshAnalysis() }
         filmstrip.update(palettes(library.library.swatches), selected: id, colours: shade)
     }
     /// Master Inner over everything: the columns and the beat, in the grid's orange, when it is on.
@@ -308,7 +324,26 @@ final class StudioFrame: NSView {
         let cataloguesPanel=WorkspacePanel(id: "catalogues", title: "Catalogues", content: cataloguePane, height: 640)
         cataloguesPanel.setHeaderAction(symbol:"plus",title:"Open Catalogue…") { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
-        rightPanelRail.add(WorkspacePanel(id: "inspector", title: "Inspector", content: inspectorPane, height: 520))
+        rightPanelRail.add(WorkspacePanel(id:"histograms",title:"Histograms",content:histogramPane,height:392))
+        let bloomPanel=WorkspacePanel(id:"bloom",title:"Delta Bloom",content:bloomPane,height:720)
+
+        rightPanelRail.add(bloomPanel)
+        let inspectorPanel=WorkspacePanel(id:"inspector",title:"Inspector",content:inspectorPane,height:520)
+        inspectorPanel.collapsed=true;rightPanelRail.add(inspectorPanel)
+        addSubview(bloomWorkspace);bloomWorkspace.isHidden=true
+        expandedBloom.expanded=true;expandedHistogram.expanded=true
+        bloomPane.expandButton.run = { [weak self] in self?.expandAnalysis(.bloom) }
+        histogramPane.expandButton.run = { [weak self] in self?.expandAnalysis(.histogram) }
+        histogramPane.onConfiguration = { [weak self] in guard let self else{return}; self.expandedHistogram.copyConfiguration(from:self.histogramPane) }
+        expandedHistogram.onConfiguration = { [weak self] in guard let self else{return};self.histogramPane.copyConfiguration(from:self.expandedHistogram) }
+        expandedHistogram.onColour = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }
+        bloomPane.onConfiguration = { [weak self] in self?.refreshAnalysis() }
+        expandedBloom.onConfiguration = { [weak self] in self?.refreshAnalysis() }
+        bloomWorkspace.onClose = { [weak self] in _ = self?.closeExpandedPanel() }
+        bloomWorkspace.onPick = { [weak self] in self?.inspectPalette($0) }
+        histogramPane.onColour = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }
+        for chart in [bloomPane.chart,expandedBloom.chart] {chart.onSelect = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }}
+        viewportHeader.channels.onChange = { [weak self] in self?.fillPage() }
         if CommandLine.arguments.contains("--ui-test-panels") {
             WorkspacePanelUITest.load(into:[leftPanelRail,rightPanelRail])
         }
@@ -317,7 +352,7 @@ final class StudioFrame: NSView {
             rail.onDragging = { [weak self] dragging in self?.workspaceDragShade.isHidden = !dragging }
         }
         page.workspaceToolbar = viewportFooter
-        viewportFooter.onMode = { [weak self] list in self?.page.grid.listView = list; self?.page.needsLayout = true }
+        viewportFooter.onMode = { [weak self] list in self?.closeExpandedPanel(); self?.page.grid.listView = list; self?.page.needsLayout = true }
         cataloguePane.onPick = { [weak self] in self?.go($0) }
         cataloguePane.onFilter = { [weak self] key in
             guard let self else { return }; self.workspaceFilter=key; self.place = .palettes; self.reload(); self.needsLayout=true
@@ -330,7 +365,11 @@ final class StudioFrame: NSView {
         }
         inspectorPane.onOpen = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.go(.palette(id)) }
         inspectorPane.onTarget = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.library.setTarget(id) }
-        inspectorPane.onBackground = { [weak self] colour in self?.page.grid.wantsLayer = true; self?.page.grid.layer?.backgroundColor = colour.cgColor }
+        var previousSurfaces = Design.surfaceColours
+        NotificationCenter.default.addObserver(forName: .themeDidChange, object: nil, queue: .main) { _ in
+            Design.refreshSurfaces(from: previousSurfaces)
+            previousSurfaces = Design.surfaceColours
+        }
         settingsCurtainClip.wantsLayer = true
         settingsCurtainClip.layer?.masksToBounds = true
         settingsCurtainClip.isHidden = true
@@ -584,7 +623,7 @@ final class StudioFrame: NSView {
     }
     @objc private func printProfilesChanged(){
         if let settings=try? SavedPrintProfiles.load().current {PrintCondition.current=settings.channel}
-        page.grid.invalidatePrintPreviews();page.refreshPrintProfiles()
+        page.grid.invalidatePrintPreviews();page.refreshPrintProfiles();fillPage()
     }
     @objc private func flashed(_ n: Notification) { if let t = n.userInfo?["text"] as? String { footer.flash(t) } }
     required init?(coder: NSCoder) { fatalError() }
@@ -641,18 +680,21 @@ final class StudioFrame: NSView {
         filmstrip.isHidden = !canvasWorkspace
         viewportHeader.isHidden = !canvasWorkspace
         viewportFooter.isHidden = !canvasWorkspace
+        bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil
         footer.isHidden = canvasWorkspace
         if canvasWorkspace {
             let top = A.header + 1, bottom: CGFloat = 120
-            let left: CGFloat = 260, right: CGFloat = 280
+            let left: CGFloat = 280, right: CGFloat = 340
             header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
             header.grid = (16, A.columnWidth(in: w)); header.railEdge = 248
             leftPanelRail.frame = NSRect(x: 0, y: top, width: left, height: h-top-bottom)
             rightPanelRail.frame = NSRect(x: w-right, y: top, width: right, height: h-top-bottom)
             page.frame = NSRect(x: left+1, y: top, width: w-left-right-2, height: h-top-bottom-32)
-            viewportHeader.frame=NSRect(x:left+1,y:top+AreaHeader.rule+1,width:w-left-right-2,height:24)
+            viewportHeader.frame=NSRect(x:left+1,y:top+AreaHeader.rule,width:w-left-right-2,height:32)
             viewportFooter.frame=NSRect(x:left+1,y:h-bottom-32,width:w-left-right-2,height:32)
             workspaceDragShade.frame=NSRect(x:left+1,y:top,width:w-left-right-2,height:h-top-bottom)
+            bloomWorkspace.frame=NSRect(x:left+1,y:viewportHeader.frame.maxY,width:w-left-right-2,height:max(0,viewportFooter.frame.minY-viewportHeader.frame.maxY))
+            expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
             page.inset=16;page.insetRight=16
             page.compactWorkspace=true
             filmstrip.frame=NSRect(x:0,y:h-bottom,width:w,height:bottom)
@@ -1415,6 +1457,16 @@ final class StudioFrame: NSView {
     private func fillPage() {
         page.paletteCount = nil
         let lib = library.library
+        viewportHeader.channels.configure(library:lib,palette:inspectedPalette)
+        var shade=self.shade
+        var unavailable=0
+        if canvasWorkspace, let channel=viewportHeader.channels.selectedChannel {
+            for key in Array(shade.keys) {
+                if let definition=lib.definition(of:key),let shown=Rendering.of(definition,in:channel).shown {shade[key]=shown.display}
+                else {unavailable += 1}
+            }
+        }
+        viewportHeader.channels.reportUnavailable(unavailable)
         let search = header.search.lowercased()
         func keep(_ name: String, _ hex: String?) -> Bool { search.isEmpty || name.lowercased().contains(search) || (hex?.lowercased().contains(search) ?? false) }
         // A colour's words: its name, and its value in the model the page's header has chosen.
@@ -1606,6 +1658,7 @@ final class StudioFrame: NSView {
         default: break
         }
         page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
+        analysisPalettes=items.compactMap{item in item.id.flatMap{lib.swatch($0)}}
         page.set(title: title, meta: meta, items: items)
         page.grid.chosenHex = chosenHex
         inspectorPane.catalogue=library.catalogue;inspectorPane.total=palettes(lib.swatches).count
@@ -1614,6 +1667,32 @@ final class StudioFrame: NSView {
         inspectorPane.palette=inspectedPalette.flatMap{lib.swatch($0)}
         page.grid.selectedPalette=inspectedPalette
         filmstrip.update(palettes(lib.swatches),selected:inspectedPalette,colours:shade)
+        refreshAnalysis()
+    }
+
+    private func expandAnalysis(_ kind:ExpandedAnalysis) {
+        expandedAnalysis=kind
+        if kind == .histogram {expandedHistogram.copyConfiguration(from:histogramPane)}
+        bloomWorkspace.present(kind == .bloom ? expandedBloom:expandedHistogram)
+        refreshAnalysis();needsLayout=true
+    }
+    @discardableResult func closeExpandedPanel()->Bool {
+        guard expandedAnalysis != nil else{return false}
+        expandedAnalysis=nil;page.expandedPanelTitle=nil;window?.makeFirstResponder(page.grid);needsLayout=true;return true
+    }
+    private func refreshAnalysis() {
+        let lib=library.library
+        let visible=analysisPalettes
+        if case .palette(let id)=place { inspectedPalette=id }
+        else if !visible.contains(where:{$0.id==inspectedPalette}) {inspectedPalette=visible.first?.id;analysisColour=nil}
+        let palette=inspectedPalette.flatMap{lib.swatch($0)}
+        page.expandedPanelTitle=canvasWorkspace ? expandedAnalysis.map{($0 == .bloom ? "Delta Bloom":"Histograms")+" > "+(palette?.name ?? "Select A Palette")} : nil
+        expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
+        histogramPane.update(palette,library:lib,selected:analysisColour)
+        bloomPane.update(palette,library:lib,selected:analysisColour)
+        if expandedAnalysis == .bloom {expandedBloom.update(palette,library:lib,selected:analysisColour)}
+        if expandedAnalysis == .histogram {expandedHistogram.update(palette,library:lib,selected:analysisColour)}
+        bloomWorkspace.update(visible.isEmpty ? palette.map{[$0]} ?? []:visible,selected:inspectedPalette)
     }
 
     /// Every step the catalogue took, newest first, each with what it did: the colours that came or went, by name, and the
@@ -1692,7 +1771,8 @@ private enum HeaderUtilityIcon {
         NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
     }
     static func draw(_ name: String, in bounds: NSRect) {
-        if let image = images[name] {
+        let key = name + (hexOf(Design.ink) ?? "")
+        if let image = images[key] {
             image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             return
         }
@@ -1716,7 +1796,7 @@ private enum HeaderUtilityIcon {
         guard maxX >= minX, maxY >= minY,
               let pixels = bitmap.cgImage?.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)) else { return }
         let image = NSImage(cgImage: pixels, size: NSSize(width: size, height: size))
-        images[name] = image
+        images[key] = image
         image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }
@@ -3205,7 +3285,7 @@ final class HistoryRail: StudioRail {
 final class StudioPage: NSView, Overlay {
     var compactWorkspace = false
     weak var workspaceToolbar: WorkspaceViewportBar?
-    private let workspaceFormat = NSButton()
+    private let workspaceFormat = DropdownButton()
     var layoutFrozen = false
     /// Palette content heading shares the first rail-row baseline.
     var paletteCount: String? { didSet { needsLayout = true; needsDisplay = true } }
@@ -3234,7 +3314,7 @@ final class StudioPage: NSView, Overlay {
     private let slider = MiniSlider()
     var onAcross: ((Int) -> Void)?
     /// The colour model the tiles' captions are in, chosen on the menu before the slider.
-    var format: ColourFormat = .hex { didSet { workspaceFormat.title = format.label + " ▴"; needsDisplay = true } }
+    var format: ColourFormat = .hex { didSet { workspaceFormat.title = format.label; needsDisplay = true } }
     var onFormat: (() -> Void)?
     var showsFormat = true
     private var formatRect = NSRect.zero
@@ -3378,6 +3458,7 @@ final class StudioPage: NSView, Overlay {
             self.window?.makeFirstResponder(editor)
         }
     }
+    var expandedPanelTitle:String? {didSet{needsDisplay=true}}
     private var title = ""
     private var meta: (String, String) = ("", "")
     /// The area header, then 16 clear before the tiles.
@@ -3385,7 +3466,7 @@ final class StudioPage: NSView, Overlay {
 
     init() {
         super.init(frame: .zero)
-        workspaceFormat.title=format.label + " ▴";workspaceFormat.font=Design.Text.body.font()
+        workspaceFormat.opensUpward=true;workspaceFormat.title=format.label;workspaceFormat.font=Design.Text.body.font()
         workspaceFormat.isBordered=false;workspaceFormat.alignment = .left;workspaceFormat.contentTintColor=Design.quiet
         workspaceFormat.target=self;workspaceFormat.action=#selector(openFormats);workspaceFormat.setAccessibilityLabel("Colour Format")
         addSubview(workspaceFormat);workspaceFormat.isHidden=true
@@ -3512,7 +3593,7 @@ final class StudioPage: NSView, Overlay {
             if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
             top += 2 * u
         }
-        let tilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + 36 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
+        let tilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + 44 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
         let canvasWidth = bounds.width - inset - insetRight
         scroll.frame = NSRect(x: inset, y: tilesTop, width: canvasWidth + min(insetRight, QuietScroller.lane), height: bounds.height - tilesTop)
         settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: bounds.height - top)
@@ -3549,10 +3630,12 @@ final class StudioPage: NSView, Overlay {
             if workspaceFormat.superview !== toolbar { toolbar.addSubview(workspaceFormat) }
             // Justified right to the swatches' own padding by the bar itself, which knows its width: profile last, each control a gap left of the next.
             let profileWidth=min(profileSelector.preferredControlWidth,min(240,max(140,toolbar.bounds.width-424)))
-            toolbar.rightInset=insetRight
+            toolbar.leftInset=inset + TileGrid.gap/2
+            toolbar.rightInset=insetRight + TileGrid.gap/2
             toolbar.rightControls=[(workspaceFormat,80,28,12),(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
             slider.alphaValue = grid.listView ? 0.4 : 1
         } else { slider.alphaValue=1 }
+        grid.contentInset = compactWorkspace ? TileGrid.gap/2 : 0
         grid.width = canvasWidth
         grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
         scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
@@ -3566,7 +3649,7 @@ final class StudioPage: NSView, Overlay {
 
     override func draw(_ dirtyRect: NSRect) {
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        AreaHeader.draw(heading: aseName == nil ? title : "", left: anchors.isEmpty && !showsDeltaTools ? meta.0 : "", right: anchors.isEmpty && !showsDeltaTools ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open))
+        AreaHeader.draw(heading: aseName == nil ? (expandedPanelTitle ?? title) : "", left: anchors.isEmpty && !showsDeltaTools ? meta.0 : "", right: anchors.isEmpty && !showsDeltaTools ? meta.1 : "", in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open))
         if showsDeltaTools {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:compactWorkspace ? bounds.width-inset-insetRight : max(0,deltaButton.frame.minX-inset-16))}
         if let paletteCount, !compactWorkspace {
             Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)
@@ -3604,6 +3687,29 @@ final class TileGrid: NSView {
         onResize?();needsDisplay=true
     } }
     var selectedPalette: UUID? { didSet { needsDisplay = true } }
+    var contentInset: CGFloat = 0
+    var canvasColour: NSColor = Design.card { didSet {
+        wantsLayer = true; layer?.backgroundColor = canvasColour.cgColor; needsDisplay = true
+    } }
+    private var contentWidth: CGFloat { max(0, width - contentInset * 2) }
+    /// Use actual sRGB contrast, including saturated grounds, rather than appearance mode.
+    private func ink(on background: NSColor, secondary: Bool = false) -> NSColor {
+        func luminance(_ colour: NSColor) -> CGFloat {
+            let c = colour.usingColorSpace(.sRGB) ?? .white
+            func linear(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v/12.92 : pow((v+0.055)/1.055, 2.4) }
+            return 0.2126*linear(c.redComponent)+0.7152*linear(c.greenComponent)+0.0722*linear(c.blueComponent)
+        }
+        let ground = luminance(background)
+        func contrast(_ colour: NSColor) -> CGFloat {
+            let value = luminance(colour)
+            return (max(value,ground)+0.05)/(min(value,ground)+0.05)
+        }
+        let primary: NSColor = contrast(Design.ink) >= 4.5 ? Design.ink : (ground > 0.179 ? .black : .white)
+        guard secondary else { return primary }
+        if contrast(Design.quiet) >= 4.5 { return Design.quiet }
+        let muted = primary.blended(withFraction: 0.2, of: background) ?? primary
+        return contrast(muted) >= 4.5 ? muted : primary
+    }
     var width: CGFloat = 600
     var chosenHex: String? { didSet { needsDisplay = true } }
     struct PrintPreview { let colour:NSColor; let delta:Double }
@@ -3675,13 +3781,14 @@ final class TileGrid: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     /// How many tiles a row holds: the slider's count, or fewer when there are fewer tiles, so one row always fills the block.
-    private var columns: Int { max(1, min(across, max(1, Int((width + Self.gap) / 176)), max(items.count, 1))) }
+    var paletteTileWidth:CGFloat {left(1)-Self.gap}
+    private var columns: Int { max(1, min(across, max(1, Int((contentWidth + Self.gap) / 176)), max(items.count, 1))) }
     /// A column's left edge: the row justified to the block, every edge on a whole point, the last tile's right edge on the block's.
-    private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (width + Self.gap) / CGFloat(columns)).rounded() }
+    private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (contentWidth + Self.gap) / CGFloat(columns)).rounded() }
     var height: CGFloat {
-        if listView { return CGFloat(items.count)*64 }
+        if listView { return CGFloat(items.count)*64 + contentInset*2 }
         let rows = (items.count + columns - 1) / columns
-        return CGFloat(rows) * (Self.block + Self.words + Self.rowGap)
+        return CGFloat(rows) * (Self.block + Self.words + Self.rowGap) + contentInset*2
     }
     func revealPalette(_ id: UUID) {
         guard let index = items.firstIndex(where: {$0.id == id}) else { return }
@@ -3692,9 +3799,9 @@ final class TileGrid: NSView {
         scrollToVisible(rect(index))
     }
     private func rect(_ i: Int) -> NSRect {
-        if listView { return NSRect(x:0,y:CGFloat(i)*64,width:width,height:64) }
+        if listView { return NSRect(x:contentInset,y:contentInset+CGFloat(i)*64,width:contentWidth,height:64) }
         let c = i % columns, x = left(c)
-        return NSRect(x: x, y: CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
+        return NSRect(x: contentInset+x, y: contentInset+CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -3726,18 +3833,20 @@ final class TileGrid: NSView {
                 for (k,p) in prediction.enumerated(){fill(NSRect(x:block.minX+CGFloat(k)*bw,y:block.midY,width:bw+0.5,height:block.height/2),p.colour)}
                 Design.card.setStroke();let divider=NSBezierPath();divider.move(to:NSPoint(x:block.minX,y:block.midY));divider.line(to:NSPoint(x:block.maxX,y:block.midY));divider.lineWidth=1;divider.stroke()
             }
+            let ground = it.id != nil && it.id == selectedPalette ? Design.mist : canvasColour
+            let primaryInk = ink(on: ground), secondaryInk = ink(on: ground, secondary: true)
             let textX = listView ? block.maxX+16 : r.minX+6
-            Design.attributed(it.title, .bodyStrong).draw(x:textX,baseline:listView ? r.minY+25 : block.maxY+Design.App.textBaseline,width:listView ? max(0,r.maxX-textX-120) : r.width-12)
+            Design.attributed(it.title, .bodyStrong, colour: primaryInk).draw(x:textX,baseline:listView ? r.minY+25 : block.maxY+Design.App.textBaseline,width:listView ? max(0,r.maxX-textX-120) : r.width-12)
             let capB = listView ? r.minY+45 : block.maxY + Design.App.unit + Design.App.textBaseline
-            if listView { hairline(x:0,y:r.maxY-1,width:r.width) }
+            if listView { hairline(x:r.minX,y:r.maxY-1,width:r.width) }
             let hasHalo=showsHalo && eligible
             let delta=eligible ? (prediction.map{$0.delta}.max().map{String(format:it.hex == nil ? "Δmax %.1f":"Δ %.1f",$0)} ?? "Δ —") : ""
-            let deltaText=Design.attributed(delta,.caption,colour:Design.quiet)
+            let deltaText=Design.attributed(delta,.caption,colour:secondaryInk)
             let right=r.maxX-6-(hasHalo ? 24:0)
             let deltaX=max(r.minX+6,right-deltaText.size().width)
-            Design.attributed(it.caption,.caption,colour:Design.quiet).draw(x:textX,baseline:capB,width:max(0,deltaX-textX-8))
+            Design.attributed(it.caption,.caption,colour:secondaryInk).draw(x:textX,baseline:capB,width:max(0,deltaX-textX-8))
             if eligible{deltaText.draw(x:deltaX,baseline:capB)}
-            if hasHalo {Design.haloMark(in:NSRect(x:r.maxX-6-16,y:capB-13,width:16,height:16),colour:Design.quiet)}
+            if hasHalo {Design.haloMark(in:NSRect(x:r.maxX-6-16,y:capB-13,width:16,height:16),colour:secondaryInk)}
             if let h = it.hex, h == chosenHex {
                 // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
                 Design.rule.setStroke()
@@ -3748,11 +3857,11 @@ final class TileGrid: NSView {
             // Words in place of tiles, a member's notes: the Lead, no wider than 34em, every line on the beat and the first on the first unit's line.
             let font = Design.Text.lead.font(), p = NSMutableParagraphStyle()
             p.minimumLineHeight = Design.App.unit; p.maximumLineHeight = Design.App.unit
-            let text = NSAttributedString(string: n, attributes: [.font: font, .foregroundColor: Design.ink, .kern: Design.Text.lead.size * Design.Text.lead.tracking, .paragraphStyle: p])
+            let text = NSAttributedString(string: n, attributes: [.font: font, .foregroundColor: ink(on: canvasColour), .kern: Design.Text.lead.size * Design.Text.lead.tracking, .paragraphStyle: p])
             // A fixed line sets its glyphs at its foot, the descender clear of it: the first line's top is where that puts the baseline on the line.
             let top = Design.App.textBaseline - (Design.App.unit + font.descender)
-            text.draw(with: NSRect(x: 0, y: top, width: min(bounds.width, Design.Text.lead.size * 34), height: bounds.height - top), options: [.usesLineFragmentOrigin])
-        } else if items.isEmpty { Design.attributed("Nothing found", .lead, colour: Design.soft).draw(x: 0, baseline: Design.App.textBaseline) }
+            text.draw(with: NSRect(x: contentInset, y: top+contentInset, width: min(contentWidth, Design.Text.lead.size * 34), height: bounds.height - top), options: [.usesLineFragmentOrigin])
+        } else if items.isEmpty { Design.attributed("Nothing found", .lead, colour: ink(on: canvasColour, secondary: true)).draw(x: contentInset, baseline: contentInset+Design.App.textBaseline) }
     }
 
     override func mouseMoved(with event: NSEvent) {

@@ -123,17 +123,48 @@ enum Design {
 
     // MARK: Colour
 
-    static let paper = hex("#C4C4C4")
+    /// Swiss surfaces share the user's saved app background; palette samples never use these tokens.
+    private static var customGround: NSColor? { Theme.fixedBackground.flatMap(colorFromHex) }
+    static var surfaceColours: [NSColor] { [paper, card, mist, rule, soft, quiet, ink] }
+
+    /// Refresh cached AppKit/layer colours as well as custom-drawn surfaces.
+    static func refreshSurfaces(from previous: [NSColor]) {
+        let current = surfaceColours
+        func mapped(_ colour: NSColor?) -> NSColor? {
+            guard let colour else { return nil }
+            return previous.firstIndex(where: { hexOf($0) == hexOf(colour) }).map { current[$0] } ?? colour
+        }
+        func walk(_ view: NSView) {
+            if view is AppearancePresetControl { return }
+            if let colour = view.layer?.backgroundColor { view.layer?.backgroundColor = mapped(NSColor(cgColor: colour))?.cgColor }
+            if let colour = view.layer?.borderColor { view.layer?.borderColor = mapped(NSColor(cgColor: colour))?.cgColor }
+            if let field = view as? NSTextField { field.textColor = mapped(field.textColor); field.backgroundColor = mapped(field.backgroundColor) ?? card }
+            if let button = view as? NSButton { button.contentTintColor = mapped(button.contentTintColor) }
+            if let scroll = view as? NSScrollView { scroll.backgroundColor = card; scroll.contentView.backgroundColor = card }
+            if let table = view as? NSTableView { table.backgroundColor = card; table.appearance = Theme.appearance }
+            if let image = view as? NSImageView { image.contentTintColor = mapped(image.contentTintColor) }
+            if let grid = view as? TileGrid { grid.canvasColour = card }
+            view.needsDisplay = true
+            view.subviews.forEach(walk)
+        }
+        for window in NSApp.windows where !(window is NSColorPanel) {
+            Theme.apply(to: window)
+            if let content = window.contentView { walk(content) }
+        }
+    }
+
+
+    static var paper: NSColor { customGround ?? hex("#C4C4C4") }
     /// The step being worked, and every other step card. Rick's trial of 2026-10-07.
     static let houseYellow = hex("#F4BE00")
     static let active = houseYellow
     static let inactive = hex("#B8B5AF")
-    static let card = hex("#F8F7F5")
-    static let mist = hex("#E3E2DE")
-    static let rule = hex("#CFCDC7")
-    static let soft = hex("#A3A19B")
-    static let quiet = hex("#6B6964")
-    static let ink = hex("#161616")
+    static var card: NSColor { customGround ?? hex("#F8F7F5") }
+    static var mist: NSColor { customGround.map { $0.blended(withFraction: 0.12, of: ink) ?? $0 } ?? hex("#E3E2DE") }
+    static var rule: NSColor { customGround.map { $0.blended(withFraction: 0.22, of: ink) ?? $0 } ?? hex("#CFCDC7") }
+    static var soft: NSColor { customGround.map { _ in ink } ?? hex("#A3A19B") }
+    static var quiet: NSColor { customGround.map { _ in ink } ?? hex("#6B6964") }
+    static var ink: NSColor { customGround.map { Theme.takesLightText(on: hexOf($0) ?? "#FFFFFF") ? NSColor.white : NSColor.black } ?? hex("#161616") }
     /// The one accent: focus rings and the grid overlay, nothing else.
     static let orange = hex("#EC7A3C")
 
@@ -441,5 +472,30 @@ extension Design {
         colour.setStroke()
         let outer = NSBezierPath(ovalIn: g.insetBy(dx: 2, dy: 2)); outer.lineWidth = 2; outer.stroke()
         let inner = NSBezierPath(ovalIn: g.insetBy(dx: 5.5, dy: 5.5)); inner.lineWidth = 1; inner.stroke()
+    }
+}
+
+/// Shared dropdown chrome: a quiet rounded field and a contained trailing arrow cell.
+enum DropdownSkin {
+    static let arrowWidth:CGFloat = 28
+    static func draw(in bounds:NSRect,hover:Bool=false,up:Bool=false,flipped:Bool=true) {
+        let r=bounds.insetBy(dx:0.5,dy:0.5)
+        let outline=NSBezierPath(roundedRect:r,xRadius:4,yRadius:4)
+        if hover { Design.mist.setFill();outline.fill() }
+        Design.rule.setStroke();outline.lineWidth=1;outline.stroke()
+        let x=bounds.maxX-arrowWidth
+        let divider=NSBezierPath();divider.move(to:NSPoint(x:x,y:r.minY));divider.line(to:NSPoint(x:x,y:r.maxY));divider.lineWidth=1;divider.stroke()
+        let c=NSPoint(x:x+arrowWidth/2,y:bounds.midY), sign:CGFloat = (up != flipped) ? 1 : -1
+        let arrow=NSBezierPath();arrow.move(to:NSPoint(x:c.x-3,y:c.y-sign*1.5));arrow.line(to:NSPoint(x:c.x,y:c.y+sign*1.5));arrow.line(to:NSPoint(x:c.x+3,y:c.y-sign*1.5));arrow.lineWidth=1.2;arrow.lineJoinStyle = .round
+        Design.quiet.setStroke();arrow.stroke()
+    }
+}
+
+final class DropdownButton:NSButton {
+    var opensUpward=false
+    override var isFlipped:Bool{true}
+    override func draw(_ dirtyRect:NSRect){
+        DropdownSkin.draw(in:bounds,hover:isHighlighted,up:opensUpward)
+        Design.attributed(title,.body,colour:isEnabled ? Design.ink:Design.quiet).draw(x:8,baseline:bounds.midY+4,width:max(0,bounds.width-44))
     }
 }

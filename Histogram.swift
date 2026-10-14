@@ -159,7 +159,12 @@ final class HistogramView: NSView {
     static let stripGap: CGFloat = 4
 
     var type = HistogramType.rgb { didSet { changed() } }
+    var fillsHeight = false
     var split = false { didSet { changed() } }
+    var selectedChannel: Int? { didSet { changed() } }
+    var showsGuides = true { didSet { needsDisplay = true } }
+    /// The dock can label optional legacy guard bands without treating them as universal limits.
+    var guideRanges: [ClosedRange<Int>?]? { didSet { needsDisplay = true } }
     /// This swatch's value in each channel; nil when it cannot be worked out.
     var own: [Int]? { didSet { needsDisplay = true } }
     /// The palette's counts, channel by channel.
@@ -176,7 +181,8 @@ final class HistogramView: NSView {
         let n = type.channels.count
         if split {
             for channel in 0..<n {
-                let strip = NSRect(x: 0, y: CGFloat(channel) * (HistogramView.stripHeight + HistogramView.stripGap), width: bounds.width, height: HistogramView.stripHeight)
+                let height = fillsHeight ? max(20,(bounds.height-CGFloat(n-1)*Self.stripGap)/CGFloat(n)) : Self.stripHeight
+                let strip = NSRect(x: 0, y: CGFloat(channel) * (height + Self.stripGap), width: bounds.width, height: height)
                 plot([channel], in: strip, lit: false)
                 let value = own.flatMap { $0.indices.contains(channel) ? "\($0[channel])" : nil } ?? "\u{2014}"
                 let label = NSAttributedString(string: "\(type.channels[channel])  \(value)", attributes: [
@@ -186,7 +192,7 @@ final class HistogramView: NSView {
                 label.draw(at: NSPoint(x: low ? strip.maxX - label.size().width - 8 : strip.minX + 8, y: strip.minY + 4))
             }
         } else {
-            plot(Array(0..<n), in: bounds, lit: true)
+            plot(selectedChannel.map { [$0] } ?? Array(0..<n), in: bounds, lit: selectedChannel == nil)
         }
     }
 
@@ -207,10 +213,12 @@ final class HistogramView: NSView {
         context.saveGraphicsState()
         context.compositingOperation = .sourceOver
         // Only where the values have a safe range, which is the same for every channel that does.
-        let safe = type.safe ?? type.ranges[0]
-        let low = NSRect(x: rect.minX, y: rect.minY, width: x(safe.lowerBound, 0) - rect.minX, height: rect.height)
-        let high = NSRect(x: x(safe.upperBound, 0), y: rect.minY, width: rect.maxX - x(safe.upperBound, 0), height: rect.height)
-        for zone in (type.safe == nil ? [] : [low, high]) {
+        let first = channels.first ?? 0
+        let guide = showsGuides ? (guideRanges?[safe:first] ?? type.safe) : nil
+        let safe = guide ?? type.ranges[first]
+        let low = NSRect(x: rect.minX, y: rect.minY, width: x(safe.lowerBound, first) - rect.minX, height: rect.height)
+        let high = NSRect(x: x(safe.upperBound, first), y: rect.minY, width: rect.maxX - x(safe.upperBound, first), height: rect.height)
+        for zone in (guide == nil ? [] : [low, high]) {
             NSColor(white: 1, alpha: 0.07).setFill()
             zone.fill()
             // Fine diagonal lines, so a zone reads as "not here" without a colour of its own.
@@ -224,7 +232,7 @@ final class HistogramView: NSView {
             hatch.stroke()
             context.restoreGraphicsState()
         }
-        NSColor(white: 1, alpha: type.safe == nil ? 0 : 0.28).setFill()
+        NSColor(white: 1, alpha: guide == nil ? 0 : 0.28).setFill()
         NSRect(x: low.maxX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
         NSRect(x: high.minX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
         context.restoreGraphicsState()

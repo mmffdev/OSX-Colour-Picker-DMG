@@ -51,7 +51,10 @@ final class PrintBloomView: NSView {
     var selected: String? { didSet { needsDisplay = true } }
     var onSelect: ((String) -> Void)?
     var onExpand: (() -> Void)?
+    var showsCaption = true
+    var showsExpandControl = true
     var expanded = false
+    var compact = false { didSet { orderMenu.isHidden=compact;needsLayout=true;needsDisplay=true } }
     /// One pose per colour identity, shared by its fill, border, label and hit region.
     struct PetalMotion {
         var from: Double, to: Double, scaleFrom: Double, started: Double, duration: Double
@@ -79,7 +82,7 @@ final class PrintBloomView: NSView {
         if !motionDirty && !entrancePending && !reduced { return }
         let arranged = order.arrange(items, tolerance: tolerance)
         let step = Double.pi * 2 / Double(max(1, items.count))
-        let gap = min(step * 0.11, 0.035)
+        let gap = 0.0
         let opening = entrancePending
         var next: [String: PetalMotion] = [:]
         for (index, item) in arranged.enumerated() {
@@ -111,8 +114,9 @@ final class PrintBloomView: NSView {
     private var hovered: String?
     private var tracking: NSTrackingArea?
     private var expandRect = NSRect.zero
-    private var diameter: CGFloat { max(20, min(bounds.width - 112, bounds.height - 316)) }
-    var captionGuide: CGFloat { SettingsSheet.baseline(ceil((150 + diameter + 56 - Design.App.textBaseline) / Design.App.unit)) }
+    private var plotTop: CGFloat { compact ? 24 : 150 }
+    private var diameter: CGFloat { max(20, min(bounds.width - (compact ? 72 : 112), bounds.height - (compact ? 96 : 316))) }
+    var captionGuide: CGFloat { if compact { return plotTop + diameter + 20 }; return SettingsSheet.baseline(ceil((150 + diameter + 56 - Design.App.textBaseline) / Design.App.unit)) }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func updateTrackingAreas() {
@@ -125,13 +129,13 @@ final class PrintBloomView: NSView {
         paths = []
         let now = ProcessInfo.processInfo.systemUptime
         // Wait until the plot itself scrolls into view before spending its entrance animation.
-        let plot = NSRect(x: 0, y: 150, width: bounds.width, height: diameter)
+        let plot = NSRect(x: 0, y: plotTop, width: bounds.width, height: diameter)
         if !items.isEmpty && visibleRect.intersects(plot) { prepareMotion(at: now) }
-        Design.attributed("Colour Bloom", .bodyStrong).draw(x: 0, baseline: 17)
-        expandRect = expanded ? .zero : NSRect(x: bounds.width - 28, y: 0, width: 28, height: 28)
-        if !expanded { Design.arrow(14, colour: Design.ink, back: expanded).draw(in: expandRect.insetBy(dx: 7, dy: 7), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
+        if !compact { Design.attributed("Delta Bloom", .bodyStrong).draw(x: 0, baseline: 17) }
+        expandRect = expanded || !showsExpandControl ? .zero : NSRect(x: bounds.width - 28, y: 0, width: 28, height: 28)
+        if !expanded && showsExpandControl { Design.arrow(14, colour: Design.ink, back: expanded).draw(in: expandRect.insetBy(dx: 7, dy: 7), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
         let diameter = self.diameter
-        let centre = NSPoint(x: bounds.midX, y: 150 + diameter / 2), radius = diameter / 2 - 10, inner = radius * 0.20
+        let centre = NSPoint(x: bounds.midX, y: plotTop + diameter / 2), radius = diameter / 2 - 10, inner = max(22, radius * 0.20)
         let ceiling = max(tolerance * 1.6, (items.compactMap(\.delta).max() ?? tolerance) * 1.12, 0.1)
         func reach(_ value: Double) -> CGFloat { inner + (radius - inner) * CGFloat(max(0, value) / ceiling) }
         let toleranceRadius = reach(tolerance)
@@ -140,7 +144,7 @@ final class PrintBloomView: NSView {
         func petal(_ start: CGFloat, _ end: CGFloat, _ r: CGFloat, from hole: CGFloat? = nil, rounded: Bool = false) -> NSBezierPath {
             let holeRadius = hole ?? inner
             let path = NSBezierPath(); path.move(to: point(holeRadius, start))
-            let corner = rounded ? min(8, (r - holeRadius) * 0.5, r * (end - start) * 0.15) : 0
+            let corner = rounded ? min(radius * 0.065, (r - holeRadius) * 0.5, r * (end - start) * 0.15) : 0
             let angle = corner / max(1, r)
             path.line(to: point(r - corner, start))
             path.curve(to: point(r, start + angle), controlPoint1: point(r, start), controlPoint2: point(r, start))
@@ -152,7 +156,7 @@ final class PrintBloomView: NSView {
             path.close(); path.lineJoinStyle = .round; return path
         }
         for (index, item) in order.arrange(items, tolerance: tolerance).enumerated() {
-            let step = CGFloat.pi * 2 / CGFloat(max(1, items.count)), gap = min(step * 0.11, 0.035)
+            let step = CGFloat.pi * 2 / CGFloat(max(1, items.count)), gap: CGFloat = 0
             let pose = motions[item.id]?.pose(at: now)
             petalScale = CGFloat(pose?.scale ?? (entrancePending ? 0 : 1))
             let start = CGFloat(pose?.angle ?? Double(-CGFloat.pi / 2 + CGFloat(index) * step + gap)), end = start + step - gap * 2
@@ -163,46 +167,57 @@ final class PrintBloomView: NSView {
             (item.printed ?? Design.mist).withAlphaComponent(0.08).setFill(); petal(start, end, radius, from: toleranceRadius).fill()
             Design.rule.withAlphaComponent(0.55).setStroke(); envelope.lineWidth = 0.5; envelope.stroke()
             let r = item.delta.map(reach) ?? inner + (radius - inner) * 0.2
-            let outer = max(inner + 5, r)
-            item.master.setFill(); petal(start, end, min(outer, toleranceRadius)).fill()
+            let outer = min(radius * 0.90, max(inner + 5, r))
+            // Prediction underlays the whole filled petal, including the rounded master corners.
+            // Keep the faint outer envelope and status-rim clearance separate from this fill.
+            (item.printed ?? Design.mist).setFill()
+            petal(start, end, outer, rounded: true).fill()
+            item.master.setFill(); petal(start, end, min(outer, toleranceRadius), rounded: true).fill()
             if outer > toleranceRadius {
                 (item.printed ?? Design.mist).setFill()
-                petal(start, end, outer, from: toleranceRadius).fill()
+                petal(start, end, outer, from: toleranceRadius, rounded: true).fill()
             }
             let status: NSColor = item.delta.map { $0 <= tolerance ? NSColor(calibratedRed: 0.16, green: 0.48, blue: 0.34, alpha: 1) : NSColor(calibratedRed: 0.77, green: 0.22, blue: 0.23, alpha: 1) } ?? Design.quiet
 
             NSGraphicsContext.restoreGraphicsState()
             // A gently rounded outer rim preserves the result colour and physical thickness.
-            let rimWidth = 15 / max(1, window?.backingScaleFactor ?? 1)
-            status.setFill()
-            petal(start, end, radius, from: radius - rimWidth, rounded: true).fill()
+            let rimWidth = radius * 0.035
+            let rimRadius=radius-rimWidth/2
+            let capAngle=min((end-start)/2,asin(min(1,rimWidth/(2*rimRadius))))
+            let rim=NSBezierPath(), rimStart=start+capAngle, rimEnd=end-capAngle
+            rim.move(to:point(rimRadius,rimStart))
+            let rimSteps=max(2,Int((rimEnd-rimStart)*64))
+            for n in 1...rimSteps {rim.line(to:point(rimRadius,rimStart+(rimEnd-rimStart)*CGFloat(n)/CGFloat(rimSteps)))}
+            status.setStroke();rim.lineWidth=rimWidth*petalScale;rim.lineCapStyle = .round;rim.stroke()
             if selected == item.id {
                 // The number sits 24 points outside the petal; selection sits another 24 out.
                 let selection = NSBezierPath()
-                selection.move(to: point(radius + 48, start))
+                selection.move(to: point(radius + (compact ? 30 : 48), start))
                 let segments = max(3, Int((end - start) * 48))
-                for n in 1...segments { selection.line(to: point(radius + 48, start + (end - start) * CGFloat(n) / CGFloat(segments))) }
+                for n in 1...segments { selection.line(to: point(radius + (compact ? 30 : 48), start + (end - start) * CGFloat(n) / CGFloat(segments))) }
                 Design.ink.setStroke(); selection.lineWidth = 2; selection.lineCapStyle = .round; selection.stroke()
             }
             paths.append((envelope, item.id))
             if items.count <= 12, petalScale > 0.75, let delta = item.delta {
-                let position = point(radius + 24, (start + end) / 2)
+                let position = point(radius + (compact ? 16 : 24), (start + end) / 2)
                 let label = Design.attributed(String(format: "%.1f", delta), .caption, colour: Design.ink)
                 label.draw(x: position.x - label.size().width / 2, baseline: position.y + 4)
             }
         }
         let ring = NSBezierPath(ovalIn: NSRect(x: centre.x - toleranceRadius, y: centre.y - toleranceRadius, width: toleranceRadius * 2, height: toleranceRadius * 2))
         Design.ink.withAlphaComponent(0.6).setStroke(); ring.lineWidth = 1; ring.setLineDash([3, 4], count: 2, phase: 0); ring.stroke()
-        fill(NSRect(x: centre.x - 18, y: centre.y - 13, width: 36, height: 26), Design.card)
+        Design.card.setFill(); NSBezierPath(ovalIn:NSRect(x:centre.x-inner,y:centre.y-inner,width:inner*2,height:inner*2)).fill()
         let value = Design.attributed("ΔE", .bodyStrong); value.draw(x: centre.x - value.size().width / 2, baseline: centre.y + 5)
+        if showsCaption {
         let y = captionGuide
-        let inspect = items.first { $0.id == (hovered ?? selected) }
+        let inspect = items.first { $0.id == (selected ?? hovered) }
         Design.attributed(inspect?.name ?? "\(items.count) Palette Colours", .bodyStrong).draw(x: 0, baseline: y, width: bounds.width)
         let detail = inspect.map { item in
             item.delta.map { String(format: "ΔE00 %.2f · %@", $0, $0 <= tolerance ? "Holds" : "Outside") } ?? "No Profile Prediction"
         } ?? String(format: "Dashed Ring: ΔE00 %.1f Tolerance", tolerance)
-        Design.attributed(detail, .caption, colour: Design.quiet).draw(x: 0, baseline: y + Design.App.unit, width: bounds.width)
-        Design.attributed("Inside: RGB · Outside: Print Prediction · Rim: Pass / Fail", .caption, colour: Design.quiet).draw(x: 0, baseline: y + 2 * Design.App.unit, width: bounds.width)
+        Design.attributed(detail, .caption, colour: Design.quiet).draw(x: 0, baseline: y + (compact ? 20 : Design.App.unit), width: bounds.width)
+        if !compact { Design.attributed("Inside: RGB · Outside: Print Prediction · Rim: Pass / Fail", .caption, colour: Design.quiet).draw(x: 0, baseline: y + 2 * Design.App.unit, width: bounds.width) }
+        }
         if items.isEmpty { Design.attributed("Choose A Palette", .body).draw(x: centre.x - 50, baseline: centre.y + 40) }
     }
     override func mouseMoved(with event: NSEvent) {
@@ -319,7 +334,7 @@ final class PrintBloomDetail: NSView {
 }
 
 /// Guidance uses prediction data only; it never claims a measured proof or gamut diagnosis.
-private final class PrintBloomFeedback: NSView {
+final class PrintBloomFeedback: NSView {
     private var labels: [(NSTextField, Bool)] = []
     override var isFlipped: Bool { true }
 
@@ -350,8 +365,8 @@ private final class PrintBloomFeedback: NSView {
         add("Profile Prediction · No Measured Proof")
         add("Check The Printing Condition", heading: true)
         add(condition == "Generic CMYK"
-            ? "Generic CMYK is an approximation. Use Printing Condition on the left to choose the profile supplied by your printer for the intended press, inks and paper."
-            : "Confirm that \(condition.isEmpty ? "the selected profile" : condition) matches your printer’s press, inks and paper. Use Printing Condition on the left to change it.")
+            ? "Generic CMYK is an approximation. Use Printing Condition in the Delta Bloom panel to choose the profile supplied by your printer for the intended press, inks and paper."
+            : "Confirm that \(condition.isEmpty ? "the selected profile" : condition) matches your printer’s press, inks and paper. Use Printing Condition in the Delta Bloom panel to change it.")
         if delta.map({ $0 > tolerance }) ?? false {
             add("Compare Real Printing Options", heading: true)
             add("Try another profile only if your printer can produce that printing condition. Ask about different paper, a wider-gamut process or a spot ink if a closer match is essential.")

@@ -107,6 +107,7 @@
 		B8831DD6046B6A13E9F8CC12 /* Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B26795F4CD0F47937EE65C8 /* Controls.swift */; };
 		B8A664748499269E0AE309D1 /* PaletteWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C406905D9249240422DB3FB /* PaletteWheel.swift */; };
 		BB61E0C78F607EAD5F04557C /* StudioProofCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37AA14645C973C22AD6859FA /* StudioProofCharts.swift */; };
+		BD02D6975B65E2BD4EF55A29 /* WorkspaceAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A70D17F31F6822CFBAFD448 /* WorkspaceAnalysis.swift */; };
 		BF1041A4B9042D7D26D1CE8B /* StudioWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1451250ED5E9CB05C38BC0 /* StudioWindow.swift */; };
 		C02F4A81DAEBE31E0BA36C81 /* FileVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1709329933DB3572ED846D4 /* FileVersion.swift */; };
 		C042CE8805156AD22A5BDB1E /* PrintProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D513A193D9BC7015463182 /* PrintProfileTests.swift */; };
@@ -127,6 +128,7 @@
 		E333C0CFF515E963F811E7FF /* ProjectFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 919C86D0F465F428AB6B143B /* ProjectFile.swift */; };
 		E35FA8720C202458BFB8FA5F /* Purposes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E928A5478FE3E08EE5EED09 /* Purposes.swift */; };
 		E408EBF4AF93B415EB78E035 /* SplashTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1F67B07B471E97C4CD3CE /* SplashTree.swift */; };
+		E7BC0C4894BBD139A1E18FCD /* AppearancePresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65DB58453983B04D07DEE1C4 /* AppearancePresets.swift */; };
 		EB6A4FF8C9BC5933D6CEAB47 /* getting-started.md in Resources */ = {isa = PBXBuildFile; fileRef = 515D34059D9259BA4E4FC404 /* getting-started.md */; };
 		EC6EE9903067BC5639085183 /* ColourQRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7347A1D885A19F020F5D88 /* ColourQRTests.swift */; };
 		ED5E15DFDAB7B92EC6CBD176 /* Lab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E74A3257E9F77D283E9C9F /* Lab.swift */; };
@@ -195,9 +197,11 @@
 		63D999D79887FEBC8BF31F46 /* col3d.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = col3d.icns; sourceTree = "<group>"; };
 		640C851653EC4127996EFAF5 /* MenubarPaletteNameBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarPaletteNameBar.swift; sourceTree = "<group>"; };
 		651C9FD1C438A46990E7AE3A /* Sharing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sharing.swift; sourceTree = "<group>"; };
+		65DB58453983B04D07DEE1C4 /* AppearancePresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearancePresets.swift; sourceTree = "<group>"; };
 		65F8EEF50E373A8F0B9B9E15 /* StudioTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioTags.swift; sourceTree = "<group>"; };
 		6694BB41A62A24511F4F7099 /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		680C0F7DF343637CFB7E02E6 /* StudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioSettings.swift; sourceTree = "<group>"; };
+		6A70D17F31F6822CFBAFD448 /* WorkspaceAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceAnalysis.swift; sourceTree = "<group>"; };
 		6B26795F4CD0F47937EE65C8 /* Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controls.swift; sourceTree = "<group>"; };
 		6BF9979F94062DC5D7C93D44 /* Overview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Overview.swift; sourceTree = "<group>"; };
 		6CA8CA1C5C0A278B7E824A31 /* colspace.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colspace.icns; sourceTree = "<group>"; };
@@ -345,6 +349,7 @@
 				5489D7799D946E94D4F25E5A /* Analysis.swift */,
 				9A0F43090DDB6BC8051376B1 /* Appbridge.swift */,
 				E4D366DB6D6776BD8A2B5251 /* AppData.swift */,
+				65DB58453983B04D07DEE1C4 /* AppearancePresets.swift */,
 				4C00FF1D8467FD3E60361012 /* AppIcon.icns */,
 				C27D205925CF69248F979FA0 /* AppleMenubar.swift */,
 				8A8679F77CFD5E37825A3F39 /* Bookmarks.swift */,
@@ -450,6 +455,7 @@
 				97C357DB6CB5B4FF75DDA543 /* Tags.swift */,
 				D0B1255E7434A75BC3B8B90A /* TileHoverHalo.swift */,
 				583EDACD2A9725C3B1FE6519 /* Typography.swift */,
+				6A70D17F31F6822CFBAFD448 /* WorkspaceAnalysis.swift */,
 				942A1199A7D6CB9AF884BB73 /* WorkspacePanels.swift */,
 				3CA74757DEEC16E4E5B8CAA9 /* WorkspacePanelUITest.swift */,
 				CA1A35084AD0B80913667FCA /* WorkspaceStartup.swift */,
@@ -591,6 +597,7 @@
 				573D0924BC80B983CE96EBA0 /* Analysis.swift in Sources */,
 				A9BD9AD60C9ACFAAAB06ED14 /* AppData.swift in Sources */,
 				5F93BAD006455914A91E41FE /* Appbridge.swift in Sources */,
+				E7BC0C4894BBD139A1E18FCD /* AppearancePresets.swift in Sources */,
 				E31BBBA30B55D89BE2BEF1E9 /* AppleMenubar.swift in Sources */,
 				5CE7C1BD20EA751B2D9C03AF /* Bookmarks.swift in Sources */,
 				0B5943E9714BC255E13ED372 /* Brand.swift in Sources */,
@@ -694,6 +701,7 @@
 				E0D32715DA5284EC3C402116 /* Tags.swift in Sources */,
 				020AB5ABB63C8F257C78AAEB /* TileHoverHalo.swift in Sources */,
 				63DA199EFE37BFF61BA77393 /* Typography.swift in Sources */,
+				BD02D6975B65E2BD4EF55A29 /* WorkspaceAnalysis.swift in Sources */,
 				C220077172DDE31B09651D01 /* WorkspacePanelUITest.swift in Sources */,
 				E02225800AA16801164566CD /* WorkspacePanels.swift in Sources */,
 				0C788097BAAACEEEC25E076A /* WorkspaceStartup.swift in Sources */,

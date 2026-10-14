@@ -219,7 +219,7 @@ enum Theme {
     }
 
     /// The background as a hex where it is a fixed colour: one of L's steps, or the user's own. nil is the theme's own light or dark.
-    static var fixedBackground: String? { lightsOut.map { lights[$0] } ?? (mode == .custom ? customBackground : nil) }
+    static var fixedBackground: String? { AppearancePresets.selected.hex }
 
     /// The off-white in light, and the Mac's own dark window colour in dark, unless a fixed colour is on.
     static var background: NSColor { fixedBackground.flatMap(colorFromHex) ?? (isDark ? .windowBackgroundColor : colorFromHex(light) ?? .white) }
@@ -243,15 +243,7 @@ enum Theme {
         return NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
 
-    static var isDark: Bool {
-        if let l = lightsOut { return takesLightText(on: lights[l]) }
-        switch mode {
-        case .light: return false
-        case .dark: return true
-        case .system: return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        case .custom: return customText == .white || (customText == .automatic && takesLightText(on: customBackground))
-        }
-    }
+    static var isDark: Bool { takesLightText(on: AppearancePresets.selected.hex) }
 
     /// The step after this one as L walks them: from the theme to charcoal, black, white, off-white, then the theme again.
     static func next(after place: Int?) -> Int? {
@@ -261,8 +253,7 @@ enum Theme {
 
     /// L: the next background.
     static func cycle() {
-        lightsOut = next(after: lightsOut)
-        NotificationCenter.default.post(name: .themeDidChange, object: nil)
+        AppearancePresets.cycle()
     }
 
     /// Chooses light, dark, the Mac's own or the user's colours, and lets go of L's step.

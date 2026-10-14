@@ -71,6 +71,8 @@ final class SwissDropdown: NSView, Overlay {
     }
     var spectra: [[NSColor]] = [] { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
+        let field=convert(value.bounds,from:value)
+        DropdownSkin.draw(in:NSRect(x:0,y:field.midY-14,width:bounds.width,height:28),up:list != nil,flipped:isFlipped)
         guard let i = options.firstIndex(of: text), spectra.indices.contains(i) else { return }
         Self.drawSpectrum(spectra[i], in: NSRect(x: 0, y: 1, width: bounds.width, height: 6))
     }
@@ -82,7 +84,7 @@ final class SwissDropdown: NSView, Overlay {
     private let cap: NSTextField
     private let value = NSTextField(string: "")
     private let chevron = Design.text("\u{25BE}", .caption, colour: Design.quiet)
-    private let line = Design.hairline(Design.rule)
+    private let line = Design.hairline(.clear)
     private let options: [String]
     private let allowsOwn: Bool
     private var list: MenuPanel?
@@ -112,6 +114,9 @@ final class SwissDropdown: NSView, Overlay {
         row.orientation = .horizontal
         row.alignment = .lastBaseline
         row.spacing = 8
+        row.edgeInsets=NSEdgeInsets(top:5,left:8,bottom:5,right:8)
+        chevron.alphaValue=0
+        chevron.widthAnchor.constraint(equalToConstant:12).isActive=true
         let col = NSStackView(views: [cap, row, line])
         col.orientation = .vertical
         col.alignment = .leading
@@ -167,7 +172,6 @@ final class SwissDropdown: NSView, Overlay {
         value.isSelectable = true
         value.stringValue = ""
         value.placeholderAttributedString = Design.attributed("Your word", .body, colour: Design.soft)
-        line.layer?.backgroundColor = Design.ink.cgColor
         window?.makeFirstResponder(value)
     }
 
@@ -661,14 +665,9 @@ enum SwissConfirm {
                 Design.attributed(label, .label, colour: Design.quiet).draw(x: 0, baseline: 12)
                 // The value without the indent a row has in the menu.
                 let value = items.indices.contains(chosen) ? items[chosen].trimmingCharacters(in: .whitespaces) : ""
-                Design.attributed(value, .body).draw(x: 0, baseline: 40, width: w - 24)
-                // The chevron, turned up while the menu is open.
-                Design.quiet.setStroke()
-                let c = NSBezierPath(), up = dropped != nil
-                c.lineWidth = 1
-                c.move(to: NSPoint(x: w - 9, y: up ? 36 : 32)); c.line(to: NSPoint(x: w - 5, y: up ? 32 : 36)); c.line(to: NSPoint(x: w - 1, y: up ? 36 : 32))
-                c.stroke()
-                fill(NSRect(x: 0, y: bounds.height - 1, width: w, height: 1), up ? Design.ink : Design.rule)
+                Design.attributed(value, .body).draw(x: 8, baseline: 42, width: w - 44)
+                DropdownSkin.draw(in:NSRect(x:0,y:24,width:w,height:28),up:dropped != nil)
+
             }
             override func mouseDown(with event: NSEvent) { toggle() }
             /// Opens the menu under the row, or closes it when it is open.

@@ -1,17 +1,19 @@
 # Concept: Palette Nodes
 
 Status: concept, not built. Written 2026-10-14. Nothing here is committed to the backlog yet.
+
+Review added 2026-10-14: section 17 records research findings, proposed refinements and a smaller first release. Its recommendations are not additional approved product decisions. Read it alongside the original catalogue and acceptance criteria; it qualifies the originality, solver, proofing and reproducibility claims below.
 Home when built: **cNodes**, its own page in the Studio window (decided 2026-10-14), drawn on Colorgain's own grid (`.claude/c_design_guide.md` applies in full). "cNodes" is the working name used in code and conversation, like cLab; user-facing text and Vector titles say "Palette Nodes".
 
 ---
 
 ## 1. One-line pitch
 
-Build a palette the way a colourist builds a grade in DaVinci Resolve: a graph of small, single-purpose nodes joined by wires, read left to right, every node showing its own live result. Unlike any palette tool today, the graph is a **recipe**: deterministic, explainable, proofable against a press condition, and shareable as a file.
+Build a palette the way a colourist builds a grade in DaVinci Resolve: a graph of small, single-purpose nodes joined by wires, read left to right, every node showing its own live result. The graph is a **recipe**: deterministic, explainable, proofable against a press condition, and shareable as a file.
 
 ## 2. Why this, why Colorgain
 
-- Every palette tool on the market is a one-shot generator (press a key, get five colours) or a panel of sliders. Neither can answer "how did we arrive at this colour?", and neither can be re-run next year with a new brand colour.
+- One-shot generators and disconnected adjustments make decisions difficult to trace or reuse. Procedural palette tools already exist; Colorgain should distinguish itself through reusable colour relationships, full colour records, proofing and provenance rather than a first-of-its-kind claim.
 - Colorgain's promise is enterprise colour management and proofing (`COLOUR-MANAGEMENT.md`). A node graph is the natural place to put the things only we can do: press landing, substrate, tolerance, provenance.
 - Resolve proved that professionals trust node graphs. The image above this concept (a serial and parallel node tree with layer mixers) is the reference for *feel*, not for looks.
 
@@ -423,3 +425,146 @@ As proven by the self-test and a command Rick can re-run:
 ## 16. Suggested Vector home
 
 New objective under runway PR-23 (never a new runway): **Palette Nodes** (not "cNodes": Vector refuses titles that look like code, as it did "cLab"), with themes for Graph Engine, Node Library, Proofing Nodes, Canvas And Tools, and Graph Files. Titles must not look like code; descriptions open "As a …"; each needs "As proven by …" acceptance criteria (section 12 is the source). Check that `PR-23` returns "MMFFDev - Colour Picker" before any write.
+
+
+---
+
+## 17. Concept review and proposed enrichment — 2026-10-14
+
+Recorded at Rick's request after discussion. Research findings qualify earlier claims; the design changes and revised sequencing below remain recommendations, not implementation commitments or new backlog items. The five decisions in section 15 remain intact.
+
+### 17.1 Assessment and positioning
+
+This is worth pursuing when the recipe becomes as useful as the resulting palette. A changed brand seed should regenerate supporting colours, preserve approved anchors and reveal which checks now fail. A graph that merely reproduces five sliders would add unnecessary work.
+
+Proposed promise: **Design the relationships once. Generate, inspect and deliver the colour system whenever its inputs change.**
+
+The general idea has precedents. Adobe Substance Designer has palette creation nodes connected to palette modification, quantisation and viewing nodes. Do not claim that all other palette tools are one-shot generators or that palette nodes are unprecedented. Colorgain's opportunity is the combination of full colour identity, reusable relationships, delivery conditions and readable provenance. [Adobe palette-node documentation](https://experienceleague.adobe.com/en/docs/substance-3d-designer/using/substance-graphs/nodes-reference-for-substance-graphs/node-library/filters/adjustments/create-color-palette-16)
+
+### 17.2 Selection is a first-class operation
+
+Add the palette equivalent of a grading qualifier. Pick extracts entries; Select identifies entries inside a palette without removing the rest.
+
+| Operation | Responsibility | Example |
+|---|---|---|
+| Select | Produce entry identities and optional soft weights | Neutrals, accents, hue range, lightness range or failed entries |
+| Adjust | Apply a change to selected entries while retaining the complete palette | Warm neutrals without changing the brand orange |
+| Recombine | Return changed entries to their original slots | Substitute corrected accents without duplicating backgrounds |
+
+Add a **Selection** wire type. Selections refer to stable identities, not mutable list positions. Soft weights allow partial influence. A selection derived from an earlier stage must have an explicit identity mapping when a later generator adds or removes entries.
+
+Separate branch operations rather than overloading Merge:
+
+- **Combine:** append sets, with explicit duplicate handling.
+- **Mix:** interpolate corresponding entries from two versions.
+- **Replace selected:** substitute entries in an original palette using another branch.
+
+Match by identity or declared role; report unmatched entries. Never silently blend by current array position when branches differ in length or order.
+
+Example journey: Brand seed → Supporting colours → Assign roles → Select neutrals → Adjust warmth → Master palette. Branch the result into a screen variant with text/background checks and a print prediction compared against the unchanged master.
+
+### 17.3 Additional nodes that express design intent
+
+These supplement or refine section 7; they are candidates, not a requirement to ship every node.
+
+| Node | Purpose |
+|---|---|
+| Anchor | Preserve a colour exactly or allow movement within a declared budget; develops Lock into a useful constraint |
+| Relationship | Maintain a hue offset, lightness difference or other declared relationship between named roles |
+| Palette curves | Map lightness to lightness, hue to chroma, or lightness to chroma across selected entries |
+| Chroma envelope | Limit chroma as a function of lightness, allowing restrained highlights/shadows and stronger midtones |
+| Separate | Increase distinction between specified entries while protecting anchors |
+| Usage balance | Record intended area proportions and preview them; initially changes metadata and composition, not colour values |
+| Surface states | Derive default, hover, pressed, selected and disabled roles with explicit relationships and checks |
+| Variant | Create named alternatives such as Light, Dark, Coated or Uncoated from shared upstream work |
+| Candidate set | Produce reproducible alternatives, compare them and promote a chosen candidate; extends Scatter |
+| Reference match | Find candidates in a supplied reference library and report differences without silently replacing masters |
+
+Five equal swatches can disguise poor balance in use. Usage proportions and role-based previews should help users judge a colour system in context.
+
+### 17.4 Context previews and existing analysis tools
+
+Offer controlled compositions consuming named roles: text and buttons on a surface, a poster, a categorical chart, a packaging face and a light/dark interface. These are previews of use, not evidence of universal accessibility or print accuracy.
+
+Histograms and Delta Bloom can follow the selected node or wire. Reuse their existing renderers and expanded analysis template rather than inventing separate scopes for the graph. A user should be able to inspect intermediate results with the same tools used for finished palettes.
+
+### 17.5 Separate Check from Resolve
+
+Replace the single conceptual Must responsibility with two explicit operations:
+
+- **Check** measures declared rules without modifying colours.
+- **Resolve** proposes changes within allowed constraints.
+
+The visible journey is Palette → Check → Resolve, if wanted → Check again. A resolver must expose hard constraints, soft preferences, movement limits and priorities. Its report distinguishes **Satisfied**, **Infeasible** when established, and **No solution found within the search budget**. Failure to find a solution does not establish infeasibility.
+
+Replace the general guarantee of minimum possible movement with **seeks the smallest change under the chosen priorities**. Define the distance metric and objective. Use bounded cases with known optima for exact tests; use feasibility, constraint preservation and objective-quality checks for general cases. Section 12's exhaustive-minimum criterion cannot serve as a universal guarantee.
+
+Report that specified contrast pairs passed, not that a palette is universally accessible. Text size, usage and non-colour cues remain relevant. WCAG checks and APCA analysis must be separately labelled; APCA must not be presented as an adopted WCAG 3 conformance test. The current WCAG 3 draft leaves its contrast algorithm undecided. Sources: [WCAG contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html), [use of colour](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html), [WCAG 3 draft](https://www.w3.org/TR/wcag-3.0/).
+
+### 17.6 Physical-colour claims and node boundaries
+
+| Node | Required qualification |
+|---|---|
+| Press Landing | Return predicted appearance, delivery values and evidence alongside the master. Do not replace the master automatically. Predicted within tolerance is not a measured printed result or certification |
+| Substrate | Paper white alone cannot characterise a printing process. Do not tint a coated prediction and describe it as a valid kraft or uncoated prediction |
+| Paint Mix | Physically grounded mixing requires suitable pigment data and a defined model; RGB values do not identify physical pigments or their mixing behaviour. A creative simulation must say so |
+| Fade | A quantified ageing prediction requires material and exposure evidence. Defer it, or offer a clearly artistic Weathering effect |
+| Temperature | Separate creative warm/cool adjustment from chromatic adaptation; they answer different questions |
+
+An ICC output profile describes reproduction within the capabilities of the device and medium. Pigment models depend on their material data. Sources: [ICC profile introduction](https://preview.color.org/getting-started/), [Cornell pigment research](https://www.graphics.cornell.edu/pubs/2006/BGM06.pdf).
+
+### 17.7 Evaluation, identity and provenance refinements
+
+1. **Branching provenance:** a mixed colour has multiple parents; an extracted colour can represent many image samples. Replace duplicated linear entry histories with shared evaluation records and parent references. Why presents a readable journey through that structure, including settings and intermediate values.
+2. **Revision-bound evidence:** a proof/check result belongs to the exact input revision and conditions evaluated. Downstream changes preserve it as historical evidence but mark it stale for the current colour until checked again.
+3. **Dependency-aware reproducibility:** record node algorithm versions, source/dependency fingerprints, transform conditions and frozen outputs. An embedded graph alone cannot reproduce a missing image or ICC transform. Package dependencies where permitted; otherwise list what is needed to rerun. Missing dependencies must not trigger silent substitution.
+4. **Live versus frozen sources:** make “follow the current catalogue palette” and “use the approved snapshot” explicit source modes.
+5. **Stable generated identities:** derive entry identities from stable graph/node/slot lineage. Do not mint random identities on every evaluation. Define what happens when generators change their number of outputs.
+6. **Deterministic results versus run metadata:** timestamps and audit identifiers may legitimately change. Compare canonical colour results separately from run metadata. Cross-machine byte equality requires a pinned, validated numerical and transform pipeline; an app version stamp alone does not guarantee it.
+7. **Cache completeness:** memoisation keys include dependency fingerprints, algorithm versions and relevant evaluation context as well as inputs, settings and seed. A changed profile must invalidate its dependent results.
+8. **Run versus publish:** evaluation changes previews; publishing explicitly updates a catalogue output or export. Slider movement must not overwrite approved deliverables.
+
+These qualify the “rebuildable anywhere” statement in section 8.9: a frozen result remains viewable without dependencies, but recomputation requires the recorded dependencies and compatible algorithms. Keep the embedded graph and its evidence even when rerunning is unavailable.
+
+### 17.8 Interaction recommendations
+
+- Small node cards: name, output spectrum, one headline control, affected-entry count and status. Full controls live in the inspector.
+- Select a wire to inspect its palette; select a swatch to reveal all contributing branches.
+- Bypass provides before/after comparison. Define bypass separately for generators, multiple-input nodes and outputs; not every node has an obvious single passthrough input.
+- Missing inputs are quiet but explicit: “Connect a palette” or “Printing profile unavailable,” not an unexplained empty result.
+- Begin with a working starter recipe. A new user changes a seed before needing to learn ports.
+- Preserve keyboard access and non-colour identification of port types and statuses.
+
+### 17.9 Proposed smaller first release
+
+Section 11's first phase combines a graph editor, image extraction, a general solver, proofing, provenance and publishing. Reduce the initial implementation to prove the interaction before taking on every engine.
+
+Proposed first journey:
+
+**Seed / Catalogue → Harmony or Ramp → Select → Adjust → Assign roles → Check → Output**
+
+Include branching, Why and save/reopen from the beginning: they demonstrate why the graph is useful. Let the existing Delta Bloom inspect an output before introducing the full proofing-node family. Add constrained correction, delivery branches, image extraction and reusable groups in subsequent increments. The four agreed starter recipes remain the destination, with each shipping when its dependencies exist.
+
+First demonstration and acceptance scenario:
+
+> Open a brand recipe. Change its primary colour. Supporting colours regenerate, an approved anchor stays fixed, a newly failing contrast pair is identified, and Why explains each changed colour. Save, reopen and recover the same result and lineage.
+
+Test the creative interaction as well as the mathematics. Relationships, selective adjustments and traceability are the foundation; a larger node catalogue is worthwhile only when it makes a real journey easier.
+
+
+### 17.10 Priority-aware background work
+
+The image catalogue and graph engine should prepare useful work in the background while yielding promptly to direct interaction. Adopt the Lightroom-style behaviour Rick described: previews, thumbnails, metadata and cached graph results continue to build as the user works, but their rate falls when foreground editing needs the machine.
+
+Use one application-level work coordinator for image and graph tasks. Give visible interaction and its required upstream nodes first priority; then visible previews and the selected graph; then nearby thumbnails and likely next graph outputs; then off-screen catalogue indexing, full-resolution renders and maintenance. Priorities change with selection, scrolling and editing. This ordering is a proposal for implementation and tuning, not a claim about Lightroom's internal scheduler.
+
+- Keep interactive RAW previews at the resolution needed for the current view. Schedule final-quality renders separately.
+- Coalesce rapid slider changes, cancel obsolete preview renders and avoid queuing every intermediate state.
+- Recompute only invalidated graph descendants; share cached upstream evaluation between branches.
+- Bound global CPU, GPU and memory work. Do not start a full worker pool for every image or graph node; account for libraries that create their own threads and allow each backend's concurrency to be limited where supported.
+- Pause or reduce background work when interaction latency rises, memory pressure increases, the app is inactive, or the user requests pause. Resume gradually to avoid bursts.
+- Keep independent budgets for CPU and GPU work, and avoid holding large decoded buffers merely because a thumbnail task was queued.
+- Preserve cancellation and priority when nodes depend on image decoding; the scheduler must not wait for a low-priority catalogue job before rendering the selected image.
+- Show useful progress for explicit imports and exports. Routine thumbnail preparation should stay quiet; indicate a pending image or preview only when it affects the user's current action.
+
+Acceptance should measure responsiveness while a large catalogue is importing and thumbnails are generating, while the user edits a RAW image and changes graph settings. Test cancellation, rapid edits, concurrent graph branches, memory pressure and recovery after the foreground work ends. The 60 fps canvas and edit-to-result goals in section 12 should be measured under this mixed workload, not only on an idle machine.

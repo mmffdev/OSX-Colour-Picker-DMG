@@ -4,7 +4,7 @@ Branch: `osx-full-app` (App Store build). Rick authorised a new canvas-centred s
 
 ## Names and layout
 
-The [app layout component registry](c_layout_registry.md) owns region names and source mappings. Rail1 is the 260-point left dock; Rail2 is the 280-point right dock. The flexible Viewport contains its Header, Actionbar, Page and Footer. The Carousel currently occupies a combined 120-point band with app status; the independent app Footer remains to be split out.
+The [app layout component registry](c_layout_registry.md) owns region names and source mappings. Rail1 is the 280-point left dock; Rail2 is the 340-point right dock. The flexible Viewport contains its Header, Actionbar, Page and Footer. The Carousel currently occupies a combined 120-point band with app status; the independent app Footer remains to be split out.
 
 Catalogues uses a native disclosure tree with 28-point rows, 16-point indentation and house type/icons. Roots come from the existing controller. The active catalogue's schema filters Viewport-Page; palettes are not duplicated as tree rows. All Palettes includes project-owned palettes in the active catalogue. Selection updates Inspector; Open Swatches opens the palette. The Carousel shows all active-catalogue palettes, with wheel/trackpad movement clamped at both ends.
 
@@ -20,4 +20,4 @@ The views consume LibraryController and SchemaTrial; they do not create or migra
 
 ## Page tool rows and presentation
 
-Within the centre Page only, the existing title header is followed by a 24-point filter/navigation row. A fixed 32-point viewport footer above the global carousel holds Grid/List on the left and colour format, tile-size slider, Delta and print-profile controls in a right-aligned group. Footer menus open upward; the viewport title has no expand arrow. These reuse StudioPage's existing actions. Grid/List switch the same TileGrid dataset; List uses 64-point rows with compact colour previews, names, metadata, Delta and halo actions. Filters and selection survive presentation switches. Other tool screens retain their legacy presentation until migration.
+Within the centre Page only, the existing title header is followed by a 32-point channel-preview and appearance actionbar. A fixed 32-point viewport footer above the global carousel holds Grid/List on the left and colour format, tile-size slider, Delta and print-profile controls in a right-aligned group. Footer menus open upward; the viewport title has no expand arrow. These reuse StudioPage's existing actions. Grid/List switch the same TileGrid dataset; List uses 64-point rows with compact colour previews, names, metadata, Delta and halo actions. Filters and selection survive presentation switches. Other tool screens retain their legacy presentation until migration.

@@ -12,6 +12,8 @@ Use `Design.App`, never approximate its columns. Reference window 1440 × 900: 1
 
 Rail1 occupies columns 1–3, Rail2 4–5, page 6–10, history 11–12 (expanded workspace; settings collapses Rail1). Closed rails give their space to the page. Do not alter protected header/divider positions. Align overlay edges to their owning control and underlying columns. Derive geometry from the current window, not screenshot pixels.
 
+Panel construction and selection surfaces: follow [Panel surface rules](c_layout_registry.md#panel-surface-rules). Full-width selection grounds, inset contents, and theme-relative header/selection fades belong to the shared panel primitives. Expanded panels use the shared 20/80 template and Escape-to-close contract in [Expanded-panel rule](c_layout_registry.md#expanded-panel-rule).
+
 ## Alignment and spacing
 
 - Text on a horizontal row shares a baseline; use `.lastBaseline`, or `.bottom` for blocks. Never centre mixed-height text rows.
@@ -26,7 +28,7 @@ Rail1 occupies columns 1–3, Rail2 4–5, page 6–10, history 11–12 (expande
 
 Use `Design.Text` styles (Helvetica Neue, Helvetica/Arial fallback), not ad-hoc system-font substitutions. Body 13, caption 13, and 13-point minimum for readable UI text; body strong Medium; section headers use the existing Header style. `TextSize` governs reading sizes; never below 11. Bold is reserved for the wordmark. Use `Design` colours; do not inherit macOS button text colours on custom light surfaces.
 
-Text action buttons use the All Workflows reference: a leading diagonal arrow, left-aligned medium label and an underline beneath the label only. `ActionButtonSkin` is the shared renderer for SwissButton, ThemedButton and older ActionButton forms. No default boxes, fills, trailing arrow cells or centred labels. Group text actions from the left edge of their owning column; keep disabled, hover, pressed and keyboard-focus feedback. Icon controls, selection chips, tabs, sliders and pagination retain their semantic affordances. Dropdowns and panels keep square corners, without stock bezels. Control rows are 32 points. Menus use Card, Rule separators and Mist hover. Every actionable row/icon needs hover feedback, pointing-hand cursor and accessible naming. Keep section headings away from panel edges with measured padding; search dropdown titles align above the star column and use the page heading style and first heading baseline. Favourites precede recent searches with a divider.
+Text action buttons use the All Workflows reference: a leading diagonal arrow, left-aligned medium label and an underline beneath the label only. `ActionButtonSkin` is the shared renderer for SwissButton, ThemedButton and older ActionButton forms. No default boxes, fills, trailing arrow cells or centred labels. Group text actions from the left edge of their owning column; keep disabled, hover, pressed and keyboard-focus feedback. Icon controls, selection chips, tabs, sliders and pagination retain their semantic affordances. Panels keep square corners. Dropdowns use the shared faint border, 4-point radius and contained trailing arrow compartment, without stock bezels. Control rows are 32 points. Menus use Card, Rule separators and Mist hover. Every actionable row/icon needs hover feedback, pointing-hand cursor and accessible naming. Keep section headings away from panel edges with measured padding; search dropdown titles align above the star column and use the page heading style and first heading baseline. Favourites precede recent searches with a divider.
 
 ## Verification and builds
 
