@@ -79,10 +79,15 @@ struct WorkspaceInventory {
         var entries: [WorkspaceCatalogue] = [], paths = Set<String>(), identities = Set<UUID>()
         let detached = Set(manifest["detachedCatalogues"] as? [String] ?? [])
         let detachedIDs = Set((manifest["detachedCatalogueIDs"] as? [String] ?? []).compactMap(UUID.init(uuidString:)))
-        func append(_ name: String, _ folder: URL) {
+        func append(_ name: String, _ folder: URL, expected: UUID? = nil) {
             guard !detached.contains(folder.standardizedFileURL.path), !detached.contains(folder.resolvingSymlinksInPath().path) else { return }
             guard paths.insert(folder.resolvingSymlinksInPath().path).inserted else { return }
             var entry = probe(name: name, folder: folder)
+            if let expected, let actual = entry.id, actual != expected {
+                let issue = FileIssue(url: CatalogueFiles.index(in: folder) ?? folder, state: .identityMismatch, message: "This folder belongs to a different catalogue. Locate the original or explicitly detach its registration.")
+                entry.state = .invalid; entry.issue = issue.message
+                entry.recovery = FileRecoveryReport(root: folder, issues: [issue])
+            }
             if let id = entry.id, detachedIDs.contains(id) { return }
             let canonical=folder.resolvingSymlinksInPath().path
             if canonical == root.appendingPathComponent("Assets").resolvingSymlinksInPath().path || canonical.hasPrefix(root.appendingPathComponent("Backups").resolvingSymlinksInPath().path+"/") {
@@ -99,7 +104,7 @@ struct WorkspaceInventory {
                 guard !link.path.split(separator: "/").contains("..") else { throw failure("Invalid relative catalogue location.") }
                 folder = root.appendingPathComponent(link.path)
             }
-            append(link.name, folder)
+            append(link.name, folder, expected: link.id)
         }
         let local = root.appendingPathComponent("Catalogues")
         do {

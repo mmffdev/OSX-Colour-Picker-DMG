@@ -1104,6 +1104,7 @@ final class LibraryStore {
     let assetsHome: URL?
     private var globalAtLoad: Library?
     var pendingReconciliation: FileCatalogueReconciliationPlan?
+    private var expectedIdentity: UUID?
     private var expectedCatalogue: Bool
     /// The catalogue's index, "Rick 001.colcatalogue"; the tree is the folder round it.
     let url: URL
@@ -1132,9 +1133,15 @@ final class LibraryStore {
         // The structure file is "<name>.colcat"; an earlier version's index beside it gives the name until it is brought across.
         let found = CatalogueFiles.anyIndex(in: directory)
         expectedCatalogue = found != nil
+        expectedIdentity = CatalogueTree.catalogue(in: directory)?.id
         if let home = assetsHome, let data = try? Data(contentsOf: AppDataStore(root: home).url),
            let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let rows = manifest["catalogues"] as? [[String: Any]] {
+            if let entry = rows.first(where: { row in
+                guard let path = row["path"] as? String else { return false }
+                let location = path.hasPrefix("/") ? URL(fileURLWithPath: path) : home.appendingPathComponent(path)
+                return location.resolvingSymlinksInPath() == directory.resolvingSymlinksInPath()
+            }), let value = entry["id"] as? String, let identity = UUID(uuidString: value) { expectedIdentity = identity }
             expectedCatalogue = expectedCatalogue || rows.contains { row in
                 guard let path = row["path"] as? String else { return false }
                 let location = path.hasPrefix("/") ? URL(fileURLWithPath: path) : home.appendingPathComponent(path)
@@ -1178,6 +1185,7 @@ final class LibraryStore {
         }
         if Migration.needed(in: root) { throw FileIssue(url: url, state: .unsupportedVersion, message: "This catalogue needs an explicit legacy migration. Open it through the workspace chooser to review and migrate it.") }
         if let index = CatalogueFiles.index(in: root) {
+            try Handler_File_Manager.shared.requireCatalogueIdentity(index, expected: expectedIdentity)
             let observed = Handler_File_Manager.shared.inspectCatalogue(index)
             guard observed.complete else { throw FileRecoveryReport(root: root, issues: observed.issues) }
             do {
@@ -1221,7 +1229,10 @@ final class LibraryStore {
     func save(_ lib: Library) throws { try save(lib, schema: SchemaTrial.schema(for: root) ?? schema) }
 
     func save(_ lib: Library, schema f: SchemaTrial.SchemaFile) throws {
-        if expectedCatalogue { try Handler_File_Manager.shared.requireAvailableCatalogue(url) }
+        if expectedCatalogue {
+            try Handler_File_Manager.shared.requireCatalogueIdentity(url, expected: expectedIdentity)
+            try Handler_File_Manager.shared.requireAvailableCatalogue(url)
+        }
         do {
             if let home = assetsHome {
                 if expectedCatalogue && !FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path) {
@@ -1248,6 +1259,7 @@ final class LibraryStore {
         pendingReconciliation = nil
         schema = f
         expectedCatalogue = true
+        expectedIdentity = CatalogueTree.catalogue(in: root)?.id
         SchemaTrial.adopt(f, for: root)
     }
 

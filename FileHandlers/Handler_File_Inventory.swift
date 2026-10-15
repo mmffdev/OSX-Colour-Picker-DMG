@@ -96,6 +96,14 @@ extension Handler_File_Manager {
         return result
     }
 
+    func requireCatalogueIdentity(_ index: URL, expected: UUID?) throws {
+        guard let expected else { return }
+        let actual = try ColourFiles.decoder().decode(CatalogueFile.self, from: read(index)).id
+        guard actual == expected else {
+            throw FileRecoveryReport(root: index.deletingLastPathComponent(), issues: [FileIssue(url: index, state: .identityMismatch, message: "This folder belongs to a different catalogue. Locate the original or detach this reference; the disk files have been retained.")])
+        }
+    }
+
     func requireAvailableCatalogue(_ index: URL) throws {
         let observed = inspectCatalogue(index)
         guard observed.complete else { throw FileRecoveryReport(root: observed.root, issues: observed.issues) }

@@ -87,4 +87,25 @@ func runFileCatalogueLifecycleTests(check: (Bool, String) -> Void) {
         check(cats.names().isEmpty, "Detaching the last catalogue leaves an empty workspace without inventing Main")
     } catch { check(false, "Catalogue cancellation, Bin and final entry: \(error)") }
 
+    do {
+        let fixture = try FileHandlerFixture(); defer { fixture.remove() }
+        let cats = Catalogues(root: fixture.root, legacyURL: nil)
+        let diskBefore = try FileHandlerFixture.snapshot(fixture.first)
+        try AppDataStore(root: fixture.root).update { manifest in
+            var rows = manifest["catalogues"] as! [[String: Any]]
+            let index = rows.firstIndex { $0["name"] as? String == "First" }!
+            rows[index]["id"] = UUID().uuidString; manifest["catalogues"] = rows
+        }
+        let store = cats.store(for: "First")
+        check((try? store.load()) == nil, "A registered UUID mismatch prevents opening another catalogue at the remembered path")
+        check((try? store.save(Library())) == nil, "A registered UUID mismatch prevents overwriting the foreign catalogue")
+        let removal = try manager.prepareCatalogueRemoval(name: "First", catalogues: cats)
+        check(!removal.canTransfer && removal.inventory.issues.contains { $0.state == .identityMismatch }, "A mismatched catalogue permits only a leave-files detach plan")
+        var fs = FileSystemAccess(); var binned = false; fs.trash = { _ in binned = true }
+        do { try Handler_File_Manager(filesystem: fs).executeCatalogueRemoval(removal, outcome: .binOwnedFiles) } catch {}
+        check(try !binned && FileHandlerFixture.snapshot(fixture.first) == diskBefore, "Mismatched catalogue removal never bins or rewrites the disk files")
+        let inventory = try WorkspaceInventory.read(root: fixture.root)
+        check(inventory.catalogues.first { $0.name == "First" }?.state == .invalid, "Startup exposes registered UUID mismatch as a recovery case")
+    } catch { check(false, "Registered identity mismatch: \(error)") }
+
 }

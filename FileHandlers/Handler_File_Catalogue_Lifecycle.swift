@@ -32,8 +32,10 @@ extension Handler_File_Manager {
     func prepareCatalogueRemoval(name: String, catalogues: Catalogues) throws -> FileCatalogueRemovalPlan {
         let root = catalogues.directory(for: name)
         let index = CatalogueFiles.index(in: root) ?? root.appendingPathComponent(filesystemName(name) + ".colcat")
-        let observed = inspectCatalogue(index)
+        var observed = inspectCatalogue(index)
+        let registeredID = catalogues.registry.first(where: { $0.name == name })?.id
         let doc = (try? read(index)).flatMap { try? ColourFiles.decoder().decode(CatalogueFile.self, from: $0) }
+        if let registeredID, let doc, registeredID != doc.id { observed.issues.append(FileIssue(url: index, state: .identityMismatch, message: "This folder contains a different catalogue. Only detaching this registration and leaving all disk files is available.")) }
         var known: [String: Int] = [:], verified: [String: Int] = [:], owned: [URL] = [], others: [URL] = []
         if let doc {
             let assets = doc.libraryAssets + doc.collections.flatMap { $0.allMembers.flatMap { $0.member.assets } }
@@ -75,7 +77,7 @@ extension Handler_File_Manager {
             let identity = String(describing: attributes[.systemNumber]) + ":" + String(describing: attributes[.systemFileNumber])
             if identities.insert(identity).inserted { estimatedBytes += (attributes[.size] as? NSNumber)?.int64Value ?? 0 }
         }
-        return FileCatalogueRemovalPlan(workspace: catalogues.root, name: name, root: root, index: index, identity: doc?.id ?? catalogues.registry.first(where: { $0.name == name })?.id,
+        return FileCatalogueRemovalPlan(workspace: catalogues.root, name: name, root: root, index: index, identity: registeredID ?? doc?.id,
             inventory: observed, lastKnown: known, verified: verified, revisions: revisions, ownedFiles: owned, otherFiles: others, estimatedBytes: estimatedBytes)
     }
 
