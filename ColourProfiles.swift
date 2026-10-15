@@ -25,8 +25,8 @@ struct ColourProfile: Codable, Equatable {
 }
 
 enum ColourProfiles {
-    private static func made(_ id: String, _ name: String, _ spaces: [RGBSpace], print: Bool = false) -> ColourProfile {
-        var channels = spaces.map { ProfileChannel(space: $0.rawValue) }
+    private static func made(_ id: String, _ name: String, _ spaces: [RGBSpace], print: Bool = false, targets:[ColourTargetSpace]=[]) -> ColourProfile {
+        var channels = spaces.map { ProfileChannel(space: $0.rawValue) }+targets.map{ProfileChannel(space:$0.rawValue)}
         if print { channels.append(ProfileChannel(space: ProfileChannel.print, press: PressProfiles.generic, intent: .relative)) }
         return ColourProfile(id: UUID(uuidString: id)!, name: name, channels: channels, changedAt: Date(timeIntervalSince1970: 0))
     }
@@ -34,12 +34,12 @@ enum ColourProfiles {
     /// What every Mac starts with. Their ids are fixed, so two Macs mean the same profile by them.
     static let starters: [ColourProfile] = [
         made("C0100000-0000-4000-8000-000000000001", "Screen And Web", [.srgb, .displayP3]),
-        made("C0100000-0000-4000-8000-000000000002", "Print", [.srgb], print: true),
-        made("C0100000-0000-4000-8000-000000000003", "Video", [.rec709, .rec2020, .displayP3]),
-        made("C0100000-0000-4000-8000-000000000004", "Rendering And Effects", [.acescg, .linearSRGB, .rec709, .srgb]),
-        made("C0100000-0000-4000-8000-000000000005", "Every Channel", RGBSpace.allCases, print: true),
-        made("C0100000-0000-4000-8000-000000000006", "Photography", [.adobeRGB, .prophoto, .displayP3, .srgb], print: true),
-        made("C0100000-0000-4000-8000-000000000007", "Cinema And VFX", [.acescg, .dciP3, .p3D65, .rec709]),
+        made("C0100000-0000-4000-8000-000000000002", "Print", [], print: true),
+        made("C0100000-0000-4000-8000-000000000003", "Video", [.rec709, .rec2020, .displayP3],targets:[.pq,.hlg]),
+        made("C0100000-0000-4000-8000-000000000004", "Rendering And Effects", [.acescg, .linearSRGB, .rec709, .srgb],targets:[.linear2020,.linearP3,.aces2065]),
+        made("C0100000-0000-4000-8000-000000000005", "Every Channel", RGBSpace.allCases, print: true,targets:ColourTargetSpace.allCases),
+        made("C0100000-0000-4000-8000-000000000006", "Photography", [.adobeRGB, .prophoto, .displayP3, .srgb], print: true,targets:[.eciRGB,.grey22]),
+        made("C0100000-0000-4000-8000-000000000007", "Cinema And VFX", [.acescg, .dciP3, .p3D65, .rec709,.rec2020],targets:[.aces2065,.acescct,.dciXYZ]),
     ]
 
     static var url: URL { Catalogues.standard.root.appendingPathComponent("colour-profiles.json") }
@@ -49,7 +49,7 @@ enum ColourProfiles {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .millisecondsSince1970
         guard let data = try? Data(contentsOf: url), let saved = try? d.decode([ColourProfile].self, from: data), !saved.isEmpty else { return starters }
-        return saved
+        return saved.map{profile in profile.changedAt == Date(timeIntervalSince1970:0) ? starters.first(where:{$0.id == profile.id}) ?? profile:profile}
     }
 
     static func save(_ profiles: [ColourProfile], to url: URL = url) throws {

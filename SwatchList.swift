@@ -733,7 +733,7 @@ final class SwatchSheet: NSView, NSTextViewDelegate {
         value.textColor = r.value == nil ? .tertiaryLabelColor : .labelColor
         value.alignment = .right
         value.isSelectable = true
-        let verdict = caption(r.difference.map { String(format: "\u{0394}E %.1f", $0) + (r.inRange ? "  \u{00B7}  In Range" : "  \u{00B7}  Out Of Range") } ?? "Not Worked Out")
+        let verdict = caption(r.difference.map { r.differenceName+String(format: " %.1f", $0) + (r.inRange ? "  \u{00B7}  In Range" : "  \u{00B7}  Out Of Range") } ?? "Not Worked Out")
         verdict.alignment = .right
         verdict.textColor = r.inRange ? .secondaryLabelColor : .systemOrange
         let figures = NSStackView(views: [value, verdict])

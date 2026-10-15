@@ -311,82 +311,169 @@ final class WorkspaceExpandedPanel: NSView, NSTableViewDataSource, NSTableViewDe
 }
 
 final class WorkspaceChannelControls:NSView,Overlay {
-    private struct Choice {let profile:UUID?;let channel:ProfileChannel?;let group:String}
+    private enum Toggle:Equatable {case paper,kOnly}
+    private struct Choice {
+        var profile:UUID?,channel:ProfileChannel?,group:String
+        var link:URL?=nil,toggle:Toggle?=nil,enabled=true,relocateID:String?=nil,warning=false
+    }
     private let button=DropdownButton()
     private var items:[String]=[],choices:[Choice?]=[]
     private var chosenIndex=0
     private var proofMenu:SwissDropdown.MenuPanel?
     private var preview:ProfileChannel?
     private var selectionTitle="Master Colours"
+    private var library=Library(),palette:UUID?
+    private var paper:Bool {AppPreferences.shared.bool(forKey:"workspace.targetPaperWhite")}
+    private var kOnly:Bool {AppPreferences.shared.bool(forKey:"workspace.targetKOnly")}
     var onChange:(()->Void)?
+    var onLocateICC:((String)->Void)?
+    static let iccSection=UUID(uuidString:"F5A3B5A1-9764-4C37-9AD0-19AE7F958A21")!
+    func useICC(_ profile:ICCProfileLibrary.Profile){
+        AppPreferences.shared.set(Self.iccSection.uuidString,forKey:"workspace.channelProfile")
+        AppPreferences.shared.set(profile.channel.space,forKey:"workspace.previewChannel")
+        AppPreferences.shared.set(profile.key,forKey:"workspace.targetPress")
+    }
     var selectedChannel:ProfileChannel? {preview}
     var overlayWindows:[NSWindow] {proofMenu.map{[$0]} ?? []}
-    func dismissOverlay(){if let proofMenu {proofMenu.parent?.removeChildWindow(proofMenu);proofMenu.orderOut(nil)};proofMenu=nil;Overlays.closed(self)}
+    func dismissOverlay(){if let proofMenu{proofMenu.parent?.removeChildWindow(proofMenu);proofMenu.orderOut(nil)};proofMenu=nil;Overlays.closed(self)}
     override var isFlipped:Bool{true}
     override init(frame:NSRect){
-        super.init(frame:frame);addSubview(button)
-        button.title=selectionTitle;button.target=self;button.action=#selector(openMenu)
-        button.setAccessibilityLabel("Colour Proofing");button.font=Design.Text.body.font()
+        super.init(frame:frame);addSubview(button);button.title=selectionTitle;button.target=self;button.action=#selector(openMenu)
+        button.setAccessibilityLabel("Colour Target");button.font=Design.Text.body.font()
     }
     required init?(coder:NSCoder){fatalError()}
     static func previewTitle(_ channel:ProfileChannel)->String {
-        channel.isPrint ? "CMYK · "+(channel.press ?? PressProfiles.generic):channel.name
+        if let key=channel.press,key.hasPrefix(ICCProfileLibrary.prefix){return ICCProfileLibrary.shared.profile(for:key).map{$0.model+" · "+$0.name} ?? "Missing ICC Profile"}
+        if let target=channel.target{return target.name+" · "+target.hint}
+        if channel.isPrint{return (channel.space == ProfileChannel.printGrey ? "Grey · ":(channel.blackOnly == true ? "K-only · ":"CMYK · "))+(channel.press ?? PressProfiles.generic)}
+        switch channel.rgb {
+        case .displayP3?:return "Display P3 · Screen"
+        case .p3D65?:return "P3-D65 · Cinema D65"
+        case .dciP3?:return "DCI-P3 · Cinema White"
+        default:return channel.name
+        }
     }
     func configure(library:Library,palette:UUID?){
-        let profiles=ColourProfiles.load()
-        let effective=library.profile(forPalette:palette,house:profiles,houseDefault:ColourProfiles.houseDefault).profile
-        let printChannel=(try? SavedPrintProfiles.load().current.channel)
+        self.library=library;self.palette=palette
+        let profiles=ColourProfiles.load(),record=library.profile(forPalette:palette,house:profiles,houseDefault:ColourProfiles.houseDefault).profile
+        let effective=record.changedAt == Date(timeIntervalSince1970:0) ? ColourProfiles.starters.first(where:{$0.id == record.id}) ?? record:record
+        let savedPrint=try? SavedPrintProfiles.load().current.channel
+        let installed=PressProfiles.all.filter{$0.name != PressProfiles.generic},greys=PressProfiles.greys
         items=["Master Colours"];choices=[Choice(profile:nil,channel:nil,group:"")]
+        func heading(_ title:String){items += [SwissDropdown.MenuPanel.divider,SwissDropdown.MenuPanel.heading(title)];choices += [nil,nil]}
+        func append(_ title:String,_ choice:Choice){items.append(title);choices.append(choice)}
+        func condition(_ original:ProfileChannel)->ProfileChannel {
+            var channel=original
+            if channel.isPrint {
+                channel.intent=paper ? .absolute:(savedPrint?.intent == .absolute ? .relative:savedPrint?.intent ?? .relative)
+                channel.blackPoint=savedPrint?.blackPoint
+                channel.blackOnly=channel.space == ProfileChannel.print && kOnly ? true:nil
+            }
+            return channel
+        }
         func section(_ title:String,_ id:UUID?,_ channels:[ProfileChannel]){
-            items += [SwissDropdown.MenuPanel.divider,SwissDropdown.MenuPanel.heading(title)];choices += [nil,nil]
+            heading(title)
             for original in channels {
-                let channel=original.isPrint ? (printChannel ?? original):original
-                items.append(Self.previewTitle(channel));choices.append(Choice(profile:id,channel:channel,group:title))
+                let channel=condition(original)
+                let available = !channel.isPrint || (channel.press != PressProfiles.generic && PressProfiles.installed.contains{$0.name == channel.press})
+                if channel.isPrint,channel.press == PressProfiles.generic {
+                    append("Generic CMYK · Unspecified, Not A Press",Choice(profile:id,channel:nil,group:title,enabled:false))
+                } else {append(Self.previewTitle(channel)+(available ? "":" · Not Installed"),Choice(profile:id,channel:channel,group:title,enabled:available))}
             }
         }
-        section("Palette Channels · "+effective.name,nil,effective.channels)
-        for profile in profiles {section(profile.name,profile.id,profile.channels)}
+        let iccGroups=ICCProfileLibrary.shared.grouped(ICCProfileLibrary.shared.profiles)
+        if !iccGroups.missing.isEmpty {
+            heading("Missing Profiles")
+            for profile in iccGroups.missing {append(Self.previewTitle(profile.channel)+" · Locate…",Choice(profile:Self.iccSection,channel:condition(profile.channel),group:"Your ICC Profiles",relocateID:profile.id,warning:true))}
+        }
+        let paletteName=palette.flatMap{library.swatch($0)?.name} ?? "Current Selection"
+        section("Palette: "+paletteName+" · "+effective.name,nil,effective.channels)
+        let everyID=ColourProfiles.starters[4].id,printID=ColourProfiles.starters[1].id
+        let ordered=profiles.filter{$0.id != everyID}+profiles.filter{$0.id == everyID}
+        for profile in ordered {
+            if profile.id == everyID {
+                let linked=iccGroups.available
+                if !linked.isEmpty {
+                    heading("Your ICC Profiles")
+                    for profile in linked.sorted(by:{$0.name.localizedStandardCompare($1.name) == .orderedAscending}) {
+                        let available=ICCProfileLibrary.shared.space(for:profile.key) != nil
+                        let channel=condition(profile.channel)
+                        append(Self.previewTitle(channel)+(!profile.canTarget ? " · Inspect Only":(available ? "":" · Missing · Locate…")),Choice(profile:Self.iccSection,channel:channel,group:"Your ICC Profiles",enabled:profile.canTarget,relocateID:available ? nil:profile.id))
+                    }
+                }
+            }
+            var channels=profile.channels
+            if profile.id == printID {channels=[]}
+            if profile.id == everyID {channels=RGBSpace.allCases.map{ProfileChannel(space:$0.rawValue)}+ColourTargetSpace.allCases.map{ProfileChannel(space:$0.rawValue)}}
+            if profile.id == printID || profile.id == everyID {
+                channels.removeAll( where:{$0.isPrint})
+                channels += installed.map{ProfileChannel(space:ProfileChannel.print,press:$0.name,intent:.relative)}
+                channels += greys.map{ProfileChannel(space:ProfileChannel.printGrey,press:$0.name,intent:.relative)}
+                if let missing=AppPreferences.shared.string(forKey:"workspace.targetPress"),missing != PressProfiles.generic,
+                   !PressProfiles.installed.contains(where:{$0.name == missing}),AppPreferences.shared.string(forKey:"workspace.channelProfile") == profile.id.uuidString {
+                    channels.append(ProfileChannel(space:AppPreferences.shared.string(forKey:"workspace.previewChannel") ?? ProfileChannel.print,press:missing))
+                }
+            }
+            section(profile.name,profile.id,channels)
+            if profile.id == printID {
+                if greys.isEmpty{append("Grey Press ICC · None Installed",Choice(profile:profile.id,channel:nil,group:profile.name,enabled:false))}
+                if channels.isEmpty{append("No Press ICC Profiles Installed",Choice(profile:profile.id,channel:nil,group:profile.name,enabled:false))}
+                append("Simulate Paper White",Choice(profile:profile.id,channel:nil,group:profile.name,toggle:.paper,enabled:!channels.isEmpty))
+                append("K-only · Use Selected CMYK Condition",Choice(profile:profile.id,channel:nil,group:profile.name,toggle:.kOnly,enabled:!installed.isEmpty))
+                let missing=PrintTargetStandards.all.filter{!$0.installed(in:installed)}
+                if !missing.isEmpty{heading("Not Installed · Get Profiles From Publisher")}
+                for standard in missing {append(standard.name+" · "+standard.publisher+"…",Choice(profile:profile.id,channel:nil,group:profile.name,link:standard.url))}
+            }
+        }
         let savedProfile=AppPreferences.shared.string(forKey:"workspace.channelProfile").flatMap(UUID.init(uuidString:))
-        let space=AppPreferences.shared.string(forKey:"workspace.previewChannel")
-        chosenIndex=space == nil ? 0:(choices.firstIndex{ $0?.profile == savedProfile && $0?.channel?.space == space } ?? 0)
-        let selected=choices[chosenIndex]
-        preview=selected?.channel
-        selectionTitle=preview.map{(selected?.group ?? "")+" · "+Self.previewTitle($0)} ?? "Master Colours"
-        button.title=selectionTitle;button.toolTip="Colour Proofing · "+selectionTitle
-        needsDisplay=true
+        let space=AppPreferences.shared.string(forKey:"workspace.previewChannel"),press=AppPreferences.shared.string(forKey:"workspace.targetPress")
+        chosenIndex=space == nil ? 0:(choices.firstIndex{choice in
+            guard let choice,let channel=choice.channel else{return false}
+            return choice.profile == savedProfile && channel.space == space && (!(channel.isPrint || channel.space == ProfileChannel.iccRGB) || channel.press == press)
+        } ?? 0)
+        let selected=choices[chosenIndex];preview=selected?.channel
+        selectionTitle=preview.map{(selected?.group ?? "")+" · "+Self.previewTitle($0)+(paper && $0.isPrint ? " · Paper White":"")} ?? "Master Colours"
+        button.title=selectionTitle;button.toolTip="Colour Target · "+selectionTitle;needsDisplay=true
     }
     @objc private func openMenu(){
         guard let win=window else{return}
-        if let proofMenu,proofMenu.isVisible {dismissOverlay();return}
-        dismissOverlay()
-        let snapshot=choices,width=max(320,bounds.width)
+        if let proofMenu,proofMenu.isVisible{dismissOverlay();return}
+        dismissOverlay();PressProfiles.refresh();configure(library:library,palette:palette)
+        let snapshot=choices,width=max(400,bounds.width)
         let panel=SwissDropdown.MenuPanel(items:items,chosen:"",width:width,chosenIndex:chosenIndex){[weak self] index in
             guard let self,snapshot.indices.contains(index),let choice=snapshot[index] else{return}
             self.dismissOverlay()
-            AppPreferences.shared.set(choice.profile?.uuidString,forKey:"workspace.channelProfile")
-            AppPreferences.shared.set(choice.channel?.space,forKey:"workspace.previewChannel")
+            if let id=choice.relocateID {self.onLocateICC?(id);return}
+            if let link=choice.link{NSWorkspace.shared.open(link);return}
+            if let toggle=choice.toggle {
+                let key=toggle == .paper ? "workspace.targetPaperWhite":"workspace.targetKOnly"
+                AppPreferences.shared.set(!(toggle == .paper ? self.paper:self.kOnly),forKey:key)
+            } else {
+                AppPreferences.shared.set(choice.profile?.uuidString,forKey:"workspace.channelProfile")
+                AppPreferences.shared.set(choice.channel?.space,forKey:"workspace.previewChannel")
+                AppPreferences.shared.set(choice.channel?.press,forKey:"workspace.targetPress")
+            }
             self.onChange?()
         }
-        panel.configure(disabled:Set(choices.indices.filter{choices[$0] == nil}))
-        let anchor=win.convertToScreen(convert(bounds,to:nil))
-        panel.place(below:NSPoint(x:anchor.maxX-width,y:anchor.minY-4))
+        panel.configure(disabled:Set(choices.indices.filter{choices[$0]?.enabled != true}))
+        panel.setWarnings(Set(choices.indices.filter{choices[$0]?.warning == true}))
+        var checked:Set<Int>=[chosenIndex]
+        for (index,choice) in choices.enumerated(){if choice?.toggle == .paper && paper || choice?.toggle == .kOnly && kOnly {checked.insert(index)}}
+        panel.setCheckedIndexes(checked)
+        let anchor=win.convertToScreen(convert(bounds,to:nil));panel.place(anchoredTo:NSRect(x:anchor.maxX-width,y:anchor.minY,width:width,height:anchor.height),within:win)
         win.addChildWindow(panel,ordered:.above);proofMenu=panel;Overlays.opened(self)
     }
     func reportUnavailable(_ count:Int){
         button.title=selectionTitle+(count > 0 ? " · Unavailable":"")
-        button.toolTip=count > 0 ? "Colour Proofing · Some previews are unavailable; those colours retain their master display. Check the installed ICC profile.":"Colour Proofing · "+selectionTitle
+        button.toolTip="Colour Target · "+selectionTitle+(count > 0 ? " · Selected ICC unavailable; master display retained, target values unavailable":"")
     }
-    private var labelTitle:String {bounds.width < 240 ? "Proofing":"Colour Proofing"}
-    private var labelWidth:CGFloat {Design.attributed(labelTitle,.bodyStrong).size().width}
     override func layout(){
-        super.layout()
-        let left=labelWidth+12
+        super.layout();let left=Design.attributed("Colour Target",.bodyStrong).size().width+12
         button.frame=NSRect(x:left,y:(bounds.height-28)/2,width:max(0,bounds.width-left),height:28)
     }
     override func draw(_ dirtyRect:NSRect){
-        let font=Design.Text.bodyStrong.font()
-        let baseline=bounds.midY+(font.ascender+font.descender)/2
-        Design.attributed(labelTitle,.bodyStrong).draw(x:0,baseline:baseline,width:labelWidth)
+        let font=Design.Text.bodyStrong.font(),width=Design.attributed("Colour Target",.bodyStrong).size().width
+        Design.attributed("Colour Target",.bodyStrong).draw(x:0,baseline:bounds.midY+(font.ascender+font.descender)/2,width:width)
     }
 }
 

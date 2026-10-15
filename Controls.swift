@@ -147,8 +147,7 @@ final class SwissDropdown: NSView, Overlay {
             if self.allowsOwn && i == items.count - 1 { self.typeOwn() }
             else { self.set(items[i]) }
         }
-        let origin = win.convertToScreen(convert(NSRect(x: 0, y: 0, width: 1, height: 1), to: nil)).origin
-        panel.place(below: NSPoint(x: origin.x, y: origin.y - 6))
+        panel.place(anchoredTo:win.convertToScreen(convert(bounds,to:nil)))
         win.addChildWindow(panel, ordered: .above)
         list = panel
         Overlays.opened(self)
@@ -197,6 +196,8 @@ final class SwissDropdown: NSView, Overlay {
         func configure(disabled: Set<Int>, submenus: Set<Int> = []) {
             for (i, row) in menuRows.enumerated() { row.enabled = !disabled.contains(i); row.hasSubmenu = submenus.contains(i); row.setAccessibilityElement(true); row.setAccessibilityRole(.menuItem); row.setAccessibilityLabel(row.accessibleTitle) }
         }
+        func setCheckedIndexes(_ indexes:Set<Int>){for (index,row) in menuRows.enumerated(){row.setChecked(indexes.contains(index))}}
+        func setWarnings(_ indexes:Set<Int>){for (index,row) in menuRows.enumerated(){row.warning=indexes.contains(index);row.setAccessibilityLabel(row.accessibleTitle);row.needsDisplay=true}}
         func setLeadingSymbols(_ symbols:[Int:(String,NSColor)]) {
             for (index,row) in menuRows.enumerated(){row.leadingSymbol=symbols[index];row.needsDisplay=true}
         }
@@ -238,15 +239,24 @@ final class SwissDropdown: NSView, Overlay {
             }
             contentView = card
         }
-        /// Footer menus grow upward, retaining scrolling when the available space is limited.
-        func place(above p: NSPoint) {
-            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else {
-                setFrameOrigin(p); return
-            }
-            let visible = screen.visibleFrame
-            fitHeight(max(1, visible.maxY - p.y - 8))
-            setFrameOrigin(NSPoint(x: max(visible.minX, min(p.x, visible.maxX - frame.width)), y: p.y))
+        /// Fit menus to the owning window, flipping direction before adding a scroll lane.
+        static func placement(anchor:NSRect,size:NSSize,within bounds:NSRect,preferAbove:Bool=false)->(origin:NSPoint,height:CGFloat) {
+            let below=max(0,anchor.minY-bounds.minY-4),above=max(0,bounds.maxY-anchor.maxY-4)
+            let upward=preferAbove ? (size.height <= above || above >= below):(size.height > below && above > below)
+            let height=min(size.height,max(1,upward ? above:below))
+            let x=max(bounds.minX,min(anchor.minX,bounds.maxX-size.width))
+            return (NSPoint(x:x,y:upward ? anchor.maxY+4:anchor.minY-4-height),height)
         }
+        func place(anchoredTo anchor:NSRect,preferAbove:Bool=false,within owningWindow:NSWindow?=nil){
+            guard let screen=NSScreen.screens.first(where:{$0.frame.intersects(anchor) || $0.frame.contains(anchor.origin)}) else {setFrameTopLeftPoint(anchor.origin);return}
+            var bounds=screen.visibleFrame.insetBy(dx:8,dy:8)
+            if let owner=owningWindow ?? NSApp.keyWindow ?? NSApp.mainWindow,owner !== self,(owner.frame.intersects(anchor) || owner.frame.contains(anchor.origin)) {
+                bounds=bounds.intersection(owner.frame.insetBy(dx:8,dy:8))
+            }
+            let result=Self.placement(anchor:anchor,size:frame.size,within:bounds,preferAbove:preferAbove)
+            fitHeight(result.height);setFrameOrigin(result.origin)
+        }
+        func place(above p:NSPoint){place(anchoredTo:NSRect(x:p.x,y:p.y-4,width:0,height:0),preferAbove:true)}
         private func fitHeight(_ available: CGFloat) {
             let fullHeight = frame.height
             if fullHeight > available, let card = contentView {
@@ -260,24 +270,21 @@ final class SwissDropdown: NSView, Overlay {
                 scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, fullHeight - available)))
             }
         }
-        func place(below p: NSPoint) {
-            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) else { setFrameTopLeftPoint(p); return }
-            let visible = screen.visibleFrame
-            let available = max(150, p.y - visible.minY - 8)
-            fitHeight(available)
-            setFrameTopLeftPoint(NSPoint(x: min(p.x, visible.maxX - frame.width), y: min(visible.maxY, max(p.y, visible.minY + frame.height))))
-        }
+        func place(below p:NSPoint){place(anchoredTo:NSRect(x:p.x,y:p.y+4,width:0,height:0))}
 
         final class Row: NSView {
             private let act: () -> Void
-            private let title: String, chosen: Bool
+            private let title: String
+            private var chosen: Bool
             private var hover = false
             var spectrum: [NSColor] = []
             var leadingSymbol:(String,NSColor)?
+            var warning=false
             var literalTitle = false
             var hasSubmenu = false
             var enabled = true { didSet { needsDisplay = true } }
-            var accessibleTitle: String { title }
+            func setChecked(_ value:Bool){chosen=value;needsDisplay=true}
+            var accessibleTitle: String { (warning ? "Warning: ":"")+title }
             func setHover(_ value: Bool) { hover = value && enabled; needsDisplay = true }
             var preview: (() -> Void)?
             init(title: String, chosen: Bool, frame: NSRect, act: @escaping () -> Void) {
@@ -300,11 +307,17 @@ final class SwissDropdown: NSView, Overlay {
                 if hover { Design.mist.setFill(); bounds.fill() }
                 let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
                 if !spectrum.isEmpty { SwissDropdown.drawSpectrum(spectrum, in: NSRect(x: 14, y: 8, width: max(0, bounds.width - 44), height: 7)) }
-                if let (name,colour)=leadingSymbol {
+                if warning {
+                    NSGraphicsContext.saveGraphicsState()
+                    let transform=NSAffineTransform();transform.translateX(by:14,yBy:bounds.midY+8);transform.scaleX(by:1,yBy:-1);transform.concat()
+                    ResultGlyph.warning.draw(in:NSRect(x:0,y:0,width:16,height:16));NSGraphicsContext.restoreGraphicsState()
+                }
+                if !warning,let (name,colour)=leadingSymbol {
                     let image=RowMark.image(name,colour:colour),size=image.size
                     image.draw(in:NSRect(x:14,y:(bounds.height-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
                 }
-                t.draw(x: leadingSymbol == nil ? 14:36, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender + (spectrum.isEmpty ? 0 : 6), width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
+                let textX:CGFloat=leadingSymbol == nil && !warning ? 14:36
+                t.draw(x:textX,baseline:(bounds.height-t.size().height)/2+t.baselineFont.ascender+(spectrum.isEmpty ? 0:6),width:bounds.width-textX-14-(chosen || hasSubmenu ? 16:0))
                 if hasSubmenu {
                     let arrow = Design.attributed("›", .bodyStrong, colour: enabled ? Design.ink : Design.soft)
                     arrow.draw(at: NSPoint(x: bounds.width - 24, y: (bounds.height - arrow.size().height) / 2))

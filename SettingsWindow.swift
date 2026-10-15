@@ -853,6 +853,7 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
     private lazy var picker = popup([], #selector(picked))
     private let nameField = NSTextField()
     private var spaceChecks: [(space: RGBSpace, box: NSButton)] = []
+    private var targetChecks:[(space:ColourTargetSpace,box:NSButton)]=[]
     private lazy var printCheck = check("Print, through a press profile", #selector(changed))
     private lazy var press = popup(PressProfiles.all.map { $0.name }, #selector(changed))
     private lazy var intent = popup(RenderingIntent.allCases.map { $0.name }, #selector(changed))
@@ -863,6 +864,7 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
 
     override func rows() -> [[NSView]] {
         nameField.delegate = self
+        targetChecks=ColourTargetSpace.allCases.map{($0,check($0.name+": "+$0.hint,#selector(changed)))}
         spaceChecks = RGBSpace.allCases.map { ($0, check("\($0.name): \($0.about)", #selector(changed))) }
         var out: [[NSView]] = [
             [heading("Colour Profiles"), blank],
@@ -877,6 +879,7 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
             lastChannel = space.channel
             if space == RGBSpace.allCases.last(where: { $0.isVideo }) { out.append([blank, legal]) }
         }
+        for (space,box) in targetChecks {out.append([label(space.name+":"),box])}
         out += [
             [label("Print:"), printCheck],
             [label("Press profile:"), press],
@@ -904,6 +907,7 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
         let p = profiles[i]
         if nameField.currentEditor() == nil { nameField.stringValue = p.name }
         for (space, box) in spaceChecks { box.state = p.holds(space.rawValue) ? .on : .off }
+        for (space,box) in targetChecks {box.state=p.holds(space.rawValue) ? .on:.off}
         printCheck.state = p.print != nil ? .on : .off
         let chosenPress = p.print?.press ?? PressProfiles.generic
         if press.itemTitles.contains(chosenPress) { press.selectItem(withTitle: chosenPress) }
@@ -936,6 +940,7 @@ final class ColourPanel: SettingsPanel, NSTextFieldDelegate {
         var channels = spaceChecks.filter { $0.box.state == .on }.map {
             ProfileChannel(space: $0.space.rawValue, legal: $0.space.isVideo && legal.state == .on ? true : nil)
         }
+        channels += targetChecks.filter{$0.box.state == .on}.map{ProfileChannel(space:$0.space.rawValue,legal:$0.space.isHDR && legal.state == .on ? true:nil)}
         if printCheck.state == .on {
             channels.append(ProfileChannel(space: ProfileChannel.print, press: press.titleOfSelectedItem ?? PressProfiles.generic,
                                            intent: RenderingIntent.allCases[max(intent.indexOfSelectedItem, 0)],

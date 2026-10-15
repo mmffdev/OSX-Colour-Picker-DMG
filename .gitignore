@@ -12,3 +12,8 @@ appstore/build/
 .claude/worktrees/
 icons/.claude/
 appstore/*.xcodeproj/
+
+# User-downloaded ICC test files are linked locally, never shipped.
+/ICC Profiles/
+
+/ICC/

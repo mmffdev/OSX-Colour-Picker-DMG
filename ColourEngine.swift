@@ -488,6 +488,7 @@ enum PressProfiles {
     struct Profile: Equatable {
         let name: String
         let path: String
+        var isGray:Bool=false
     }
 
     /// Where profiles are looked for: the system's folders, the user's, and Adobe's.
@@ -499,40 +500,36 @@ enum PressProfiles {
     /// The profile every Mac has, used until the user chooses a press.
     static let generic = "Generic CMYK"
 
-    /// Every CMYK profile found, by its own name, sorted. ColorSync is asked first, since it knows every
-    /// profile installed wherever it sits, which matters under the sandbox where the folders above cannot
-    /// all be looked in; the folders are then walked as well, for a profile ColorSync has yet to notice.
-    static let all: [Profile] = {
-        var found: [String: Profile] = [:]
-        let fm = FileManager.default
-        func consider(_ path: String) {
-            guard path.lowercased().hasSuffix(".icc") || path.lowercased().hasSuffix(".icm"),
-                  let data = fm.contents(atPath: path), let space = CGColorSpace(iccData: data as CFData), space.model == .cmyk,
-                  let name = NSColorSpace(cgColorSpace: space)?.localizedName, found[name] == nil else { return }
-            found[name] = Profile(name: name, path: path)
+    private static var cachedProfiles:[Profile] = []
+    private static var cacheDate=Date.distantPast
+    static func refresh(){cacheDate = .distantPast;spaces=spaces.filter{$0.key.hasPrefix("Proof ICC ")};whites=whites.filter{$0.key.hasPrefix("Proof ICC ")};blacks=[:]}
+    static var installed:[Profile] {
+        if Date().timeIntervalSince(cacheDate) < 10 {return cachedProfiles}
+        var found:[String:Profile]=[:]
+        for path in installedProfilePaths() {
+            guard let data=FileManager.default.contents(atPath:path),let space=CGColorSpace(iccData:data as CFData),
+                  space.model == .cmyk || space.model == .monochrome,
+                  let name=NSColorSpace(cgColorSpace:space)?.localizedName,found[name] == nil else{continue}
+            found[name]=Profile(name:name,path:path,isGray:space.model == .monochrome)
         }
-        for path in installedProfilePaths() { consider(path) }
-        for folder in folders {
-            for item in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] { consider(folder + "/" + item) }
-        }
-        return found.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }()
-
-    /// The file of every profile ColorSync has installed, CMYK ones only.
-    private static func installedProfilePaths() -> [String] {
-        final class Found { var paths: [String] = [] }
-        let found = Found()
-        var seed: UInt32 = 0
-        ColorSyncIterateInstalledProfiles({ info, user in
-            guard let info = info as? [String: Any], let user = user else { return true }
-            let found = Unmanaged<Found>.fromOpaque(user).takeUnretainedValue()
-            if let space = info[kColorSyncProfileColorSpace.takeUnretainedValue() as String] as? String,
-               space == kColorSyncSigCmykData.takeUnretainedValue() as String,
-               let url = info[kColorSyncProfileURL.takeUnretainedValue() as String] as? URL {
-                found.paths.append(url.path)
-            }
+        cachedProfiles=found.values.sorted{$0.name.localizedStandardCompare($1.name) == .orderedAscending};cacheDate=Date()
+        return cachedProfiles
+    }
+    static var all:[Profile] {installed.filter{!$0.isGray}}
+    static var greys:[Profile] {installed.filter(\.isGray)}
+    /// ColorSync is the authority for installed profiles; no folder scans or bundled substitutes.
+    private static func installedProfilePaths()->[String]{
+        final class Found{var paths:[String]=[]}
+        let found=Found();var seed:UInt32=0
+        ColorSyncIterateInstalledProfiles({info,user in
+            guard let info=info as? [String:Any],let user else{return true}
+            let found=Unmanaged<Found>.fromOpaque(user).takeUnretainedValue()
+            let space=info[kColorSyncProfileColorSpace.takeUnretainedValue() as String] as? String
+            let kind=info[kColorSyncProfileClass.takeUnretainedValue() as String] as? String
+            if space == kColorSyncSigCmykData.takeUnretainedValue() as String || (space == kColorSyncSigGrayData.takeUnretainedValue() as String && kind == kColorSyncSigOutputClass.takeUnretainedValue() as String),
+               let url=info[kColorSyncProfileURL.takeUnretainedValue() as String] as? URL {found.paths.append(url.path)}
             return true
-        }, &seed, Unmanaged.passUnretained(found).toOpaque(), nil)
+        },&seed,Unmanaged.passUnretained(found).toOpaque(),nil)
         return found.paths
     }
 
@@ -550,8 +547,9 @@ enum PressProfiles {
     /// The paper white a profile was measured on, read from the profile's own file ("wtpt"). D50,
     /// a perfect white, when the profile gives none.
     static func paperWhite(of name: String) -> XYZ {
+        if name.hasPrefix(ICCProfileLibrary.prefix) { return ICCProfileLibrary.shared.profile(for:name).flatMap { try? Data(contentsOf:ICCProfileLibrary.resolvedURL($0)) }.flatMap(mediaWhite(inProfile:)) ?? .d50 }
         if let have = whites[name] { return have }
-        let white = all.first { $0.name == name }.flatMap { FileManager.default.contents(atPath: $0.path) }.flatMap(mediaWhite(inProfile:)) ?? XYZ.d50
+        let white = installed.first { $0.name == name }.flatMap { FileManager.default.contents(atPath: $0.path) }.flatMap(mediaWhite(inProfile:)) ?? XYZ.d50
         whites[name] = white
         return white
     }
@@ -591,8 +589,9 @@ enum PressProfiles {
 
     /// The colour space of a profile by name; nil when the profile is not on this Mac.
     static func space(named name: String) -> CGColorSpace? {
+        if name.hasPrefix(ICCProfileLibrary.prefix) {return ICCProfileLibrary.shared.space(for:name)}
         if let have = spaces[name] { return have }
-        guard let profile = all.first(where: { $0.name == name }), let data = FileManager.default.contents(atPath: profile.path),
+        guard let profile = installed.first(where: { $0.name == name }), let data = FileManager.default.contents(atPath: profile.path),
               let space = CGColorSpace(iccData: data as CFData) else { return nil }
         spaces[name] = space
         return space
@@ -662,12 +661,16 @@ struct ProfileChannel: Codable, Equatable {
     /// For video: code values in broadcast legal range (64 to 940). nil is full range (0 to 1023).
     var legal: Bool? = nil
 
+    var blackOnly:Bool? = nil
     static let print = "print"
-    var isPrint: Bool { space == ProfileChannel.print }
+    static let printGrey = "print-grey"
+    static let iccRGB = "icc-rgb"
+    var isPrint: Bool { space == ProfileChannel.print || space == Self.printGrey }
+    var target:ColourTargetSpace? {ColourTargetSpace(rawValue:space)}
     var rgb: RGBSpace? { RGBSpace(rawValue: space) }
 
     /// "sRGB", "Print: Coated FOGRA39 (ISO 12647-2:2004)".
-    var name: String { rgb?.name ?? "Print: " + (press ?? PressProfiles.generic) }
+    var name: String {if let press,press.hasPrefix(ICCProfileLibrary.prefix){return ICCProfileLibrary.shared.profile(for:press)?.name ?? "Missing ICC Profile"};return target?.name ?? rgb?.name ?? (isPrint ? (space == Self.printGrey ? "Grey: ":"Print: ")+(press ?? PressProfiles.generic):space)}
 }
 
 /// A master expressed for one channel: the value to use, and how faithful it is.
@@ -679,6 +682,7 @@ struct Rendering: Equatable {
     let shown: XYZ?
     /// The difference from the master, CIEDE2000.
     let difference: Double?
+    var differenceName:String {channel.target?.isHDR == true ? "ΔE ITP":"ΔE00"}
     /// Whether the channel can show the colour as it is.
     let inRange: Bool
     /// A line under the value: the intent and total ink for print, or why nothing could be worked out.
@@ -689,6 +693,9 @@ struct Rendering: Equatable {
 
     static func of(_ definition: ColourDefinition, in channel: ProfileChannel) -> Rendering {
         let master = definition.master
+        if channel.space == ProfileChannel.iccRGB {return ICCRGBRendering.render(definition,in:channel)}
+        if let target=channel.target {return target.render(definition,in:channel)}
+        if channel.space == ProfileChannel.printGrey || channel.blackOnly == true {return MonochromePrint.render(definition,in:channel)}
         if let space = channel.rgb {
             let raw = space.values(of: master)
             // A light keeps values above white where the space has no ceiling; everything else stops at the range.
@@ -703,6 +710,7 @@ struct Rendering: Equatable {
                              detail: (space.isVideo ? "Y\u{2032}CbCr " + space.yCbCr(held, legal: channel.legal ?? false).map { "\($0)" }.joined(separator: ", ") + "  \u{00B7}  " : "")
                                 + (within ? space.about : "Outside \(space.name): the nearest it can show"))
         }
+        guard channel.isPrint else{return Rendering(channel:channel,value:nil,shown:nil,difference:nil,inRange:false,detail:"Unsupported Colour Target")}
         let press = channel.press ?? PressProfiles.generic, intent = channel.intent ?? .relative, blackPoint = channel.blackPoint ?? false
         // A colour given as a build for this very press is delivered as given: the build is the truth, not a round trip through maths.
         if definition.source.space == "cmyk", definition.source.press == press, definition.source.values.count == 4 {

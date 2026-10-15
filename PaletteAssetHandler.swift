@@ -103,6 +103,19 @@ enum PaletteAssetHandler {
         let keys=Set(palette.entries.map(\.hex))
         return Presentation(palette:palette,swatches:palette.entries,colours:library.colours.filter{keys.contains($0.hex)},useCount:projects.count,isTarget:library.activeSwatchID == palette.id)
     }
+    struct Filter:Equatable {
+        var rating:Int?
+        /// Nil means all flags; an empty string means unflagged.
+        var flag:String?
+        var order:Order = .newest
+        func matches(_ palette:Swatch)->Bool {
+            (rating == nil || (palette.review?.rating ?? 0) == rating) &&
+            (flag == nil || (palette.review?.flag?.rawValue ?? "") == flag)
+        }
+    }
+    static func filtered(_ palettes:[Swatch],by filter:Filter,in library:Library)->[Swatch] {
+        ordered(palettes.filter{filter.matches($0)},by:filter.order,in:library)
+    }
     enum Order:String,CaseIterable {
         case newest="Newest",oldest="Oldest",name="Name",starred="Starred",useCount="Project Use Count",rating="Rating",flag="Flag"
     }

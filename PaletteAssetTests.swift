@@ -39,6 +39,17 @@ func runPaletteAssetTests(check:(Bool,String)->Void){
         PaletteAssetHandler.setFlag(nil,on:id,in:&lib,at:date.addingTimeInterval(20))
         let merged=mergeLibraries(local:lib,remote:remote).swatch(id)!
         check(merged.review?.rating == 2 && merged.review?.flag == nil,"sync merges rating and flag independently and preserves flag clearing")
+        check(PaletteAssetHandler.Filter(rating:4).matches(original) && !PaletteAssetHandler.Filter(rating:0).matches(original),"palette rating filters match exact whole ratings")
+        check(PaletteAssetHandler.Filter(rating:0,flag:"").matches(old),"unrated and unflagged filters include legacy palettes")
+        check(PaletteAssetHandler.Filter(flag:PaletteReview.Flag.orange.rawValue).matches(original) && !PaletteAssetHandler.Filter(flag:PaletteReview.Flag.green.rawValue).matches(original),"palette flag filters match the selected flag")
+        let filtered=PaletteAssetHandler.filtered([old,original],by:.init(rating:4,flag:PaletteReview.Flag.orange.rawValue),in:lib)
+        check(filtered.map(\.id) == [original.id],"palette rating and flag filters combine without changing assets")
+        let bounds=NSRect(x:0,y:0,width:800,height:600),size=NSSize(width:200,height:250)
+        let low=SwissDropdown.MenuPanel.placement(anchor:NSRect(x:100,y:20,width:80,height:28),size:size,within:bounds)
+        let high=SwissDropdown.MenuPanel.placement(anchor:NSRect(x:100,y:540,width:80,height:28),size:size,within:bounds)
+        check(low.origin.y == 52 && low.height == 250 && high.origin.y == 286,"dropdown placement flips upward near the lower edge and downward near the upper edge")
+        let clipped=SwissDropdown.MenuPanel.placement(anchor:NSRect(x:760,y:280,width:40,height:28),size:NSSize(width:200,height:900),within:bounds)
+        check(clipped.origin.x == 600 && clipped.origin.y >= 0 && clipped.origin.y+clipped.height <= 600,"oversized menus stay within the window and retain a scrollable height")
         let ranked=PaletteAssetHandler.ordered([merged,old],by:.rating,in:lib)
         check(ranked.first?.review?.rating == 2,"palette rating order puts rated assets above unrated assets")
     } catch {check(false,"palette asset handler: "+error.localizedDescription)}

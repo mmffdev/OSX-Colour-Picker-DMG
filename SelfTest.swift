@@ -23,6 +23,8 @@ func runSelfTest() -> Never {
     preferences.set(savedCatalogue, forKey: Catalogues.currentKey)
     preferences.set(savedCatalogueID, forKey: "currentCatalogueID")
 
+    runColourTargetTests(check:check)
+    runICCProfileTests(check:check)
     runPaletteAssetTests(check: check)
     runPickerCacheTests(check: check)
     runWorkspaceStartupTests(check: check)
@@ -2665,7 +2667,7 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     studio.move(webPalette, to: client2, index: 0, at: t); studio.move(printPalette, to: client2, index: 1, at: t)
     let house = ColourProfiles.starters, screenProfile = house[0], printProfile = house[1], videoProfile = house[2]
     check(house.map { $0.name } == ["Screen And Web", "Print", "Video", "Rendering And Effects", "Every Channel", "Photography", "Cinema And VFX"] && printProfile.print?.press == PressProfiles.generic
-          && house[4].channels.count == RGBSpace.allCases.count + 1 && Set(house.map { $0.id }).count == 7,
+          && house[4].channels.count == RGBSpace.allCases.count + ColourTargetSpace.allCases.count + 1 && Set(house.map { $0.id }).count == 7,
           "seven profiles to begin with, each with an id of its own; Print carries a press, Every Channel carries them all")
     check(studio.profile(forPalette: webPalette, house: house, houseDefault: nil).profile == screenProfile
           && studio.profile(forPalette: webPalette, house: house, houseDefault: videoProfile.id) == (videoProfile, .house),
