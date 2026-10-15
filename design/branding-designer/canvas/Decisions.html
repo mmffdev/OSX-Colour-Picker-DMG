@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Branding · Decision log page</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#1C1C1A}a:hover{color:#000}
+.app{width:2866px;height:1558px;position:relative;background:#F8F7F5;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:#1C1C1A;overflow:hidden;-webkit-font-smoothing:antialiased;font-size:13px;line-height:1.3}
+.app *{box-sizing:border-box}
+img.chrome{display:block;position:absolute}
+.hdr{left:0;top:0;width:2866px;height:65px}
+.r1{left:0;top:65px;width:347px;height:1446px}
+.sub{left:347px;top:65px;width:2158px;height:52px}
+.ftr{left:0;top:1512px;width:2865px;height:46px}
+.vp{position:absolute;left:347px;top:117px;width:2158px;height:1394px}
+.abar{height:52px;border-bottom:1px solid #D3D1CC;display:flex;align-items:center;padding:0 24px;gap:28px}
+.vpage{height:1300px;position:relative;overflow:hidden}
+.vfoot{height:42px;border-top:1px solid #D3D1CC;display:flex;align-items:center;padding:0 24px;gap:28px}
+.rail2{position:absolute;left:2505px;top:65px;width:361px;height:1446px;border-left:2px solid #D3D1CC;background:#F8F7F5;overflow:hidden}
+.grow{flex:1 1 auto}
+.act{font:500 13px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#1C1C1A;background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+.act.quiet{color:#6B6964;font-weight:400}
+.sep{width:1px;height:20px;background:#D3D1CC}
+.chk{display:inline-flex;align-items:center;gap:8px;font-size:13px;white-space:nowrap}
+.chk i{display:inline-block;width:10px;height:10px;border:1px solid #1C1C1A}
+.chk i.on{background:#1C1C1A}
+.dd{display:inline-flex;align-items:center;height:28px;border:1px solid #D8D6D1;border-radius:4px;background:#FAF9F7;font-size:13px;white-space:nowrap}
+.dd span{padding:0 12px}
+.dd b{display:inline-flex;align-items:center;justify-content:center;width:28px;height:26px;border-left:1px solid #D8D6D1;font-weight:400;font-size:10px;color:#1C1C1A}
+.dd.ink{background:#1C1C1A;color:#F8F7F5;border-color:#1C1C1A}
+.dd.ink b{border-left-color:#4A4A48;color:#F8F7F5}
+.cap{font-size:11px;color:#6B6964}
+.thumbs{position:absolute;left:0;top:0;width:220px;height:1300px;padding:16px 0 0 24px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.th{display:flex;flex-direction:column;gap:5px;cursor:pointer}
+.th .pg{width:150px;height:106px;background:#FFFFFF;border:1px solid #D3D1CC;position:relative;overflow:hidden}
+.th.cur .pg{outline:2px solid #1C1C1A;outline-offset:1px}
+.th .lb{display:flex;gap:8px;font-size:11px;color:#6B6964;align-items:baseline}
+.th .lb b{font-weight:500;color:#1C1C1A;width:16px;font-variant-numeric:tabular-nums}
+.th .st{margin-left:auto;width:7px;height:7px;border-radius:50%;border:1px solid #1C1C1A}
+.th .st.ok{background:#1C1C1A}
+.th .st.half{background:linear-gradient(90deg,#1C1C1A 50%,transparent 50%)}
+.th .ln{position:absolute;height:2px;background:#D3D1CC}
+.th .bx{position:absolute;background:#E3E2DE}
+.sheet{position:absolute;left:439px;top:119px;width:1500px;height:1061px;background:#FFFFFF;border:1px solid #CFCDC7;padding:56px 60px 48px 60px;color:#161616}
+.bleed{position:absolute;left:424px;top:104px;width:1530px;height:1091px;border:1px dashed #D3D1CC;pointer-events:none}
+.tm{position:absolute;width:14px;height:1px;background:#8C8A82}
+.tm.v{width:1px;height:14px}
+.row{display:grid;grid-template-columns:230px 360px 1fr 120px;column-gap:24px;border-top:1px solid #161616;padding-top:10px;align-items:start}
+.row .num{font-size:15px;line-height:1.3}
+.row .num b{display:block;font-weight:500}
+.row .txt{font-size:15px;line-height:1.45}
+.row .txt.soft{color:#6B6964}
+.why{justify-self:end;display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#6B6964;white-space:nowrap}
+.why i{display:inline-flex;align-items:center;justify-content:center;height:18px;padding:0 6px;background:#161616;color:#FFFFFF;font-style:normal;font-weight:500;letter-spacing:.04em}
+.log{width:100%;border-collapse:collapse;margin-top:26px;font-size:12px;line-height:1.4}
+.log th{text-align:left;font-weight:500;font-size:11px;color:#6B6964;padding:0 12px 8px 0;border-bottom:1px solid #161616;letter-spacing:.04em;text-transform:uppercase}
+.log td{vertical-align:top;padding:9px 12px 9px 0;border-bottom:1px solid #D3D1CC}
+.log td.id i{display:inline-flex;align-items:center;justify-content:center;height:18px;padding:0 6px;background:#161616;color:#FFFFFF;font-style:normal;font-weight:500;letter-spacing:.04em;font-size:11px}
+.log td.sw{width:60px}
+.log td.sw span{display:inline-block;width:14px;height:14px;margin-right:2px;vertical-align:middle}
+.log td.st{white-space:nowrap}
+.log td.st.sup{color:#6B6964}
+.log td.st.prop{color:#C9382C}
+.log td.pg{text-align:right;font-variant-numeric:tabular-nums;padding-right:0}
+.log tr.sup td{color:#6B6964}
+.pfoot{position:absolute;left:60px;right:60px;bottom:24px;display:flex;font-size:11px;color:#6B6964}
+.pfoot b{margin-left:auto;font-weight:500;color:#161616;font-variant-numeric:tabular-nums}
+.panel{border-bottom:1px solid #D3D1CC}
+.ph{height:36px;display:flex;align-items:center;padding:0 12px 0 14px;gap:10px;background:linear-gradient(#F3F2EF,#F8F7F5);border-bottom:1px solid #E6E4DF}
+.ph .tri{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid #1C1C1A}
+.ph .tri.closed{border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #1C1C1A;border-right:0}
+.ph .ttl{font-size:15px;font-weight:500}
+.ph .grip{margin-left:auto;display:grid;grid-template-columns:repeat(2,3px);gap:3px}
+.ph .grip i{width:3px;height:3px;background:#1C1C1A;border-radius:50%}
+.pb{padding:12px 16px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.lbl{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:baseline;gap:8px}
+.lbl .n{color:#6B6964;font-weight:400;letter-spacing:0}
+.lbl .r{margin-left:auto;font-weight:400;letter-spacing:0;text-transform:none;font-size:11px;color:#6B6964}
+.kv{display:grid;grid-template-columns:92px 1fr;row-gap:4px;font-size:12px;line-height:1.35}
+.kv span:first-child{color:#6B6964}
+.ok{color:#2F8F86}.warn{color:#C9382C}
+.preset{display:grid;grid-template-columns:14px 1fr;column-gap:10px;row-gap:2px;align-items:start;padding:8px 0;border-bottom:1px solid #E6E4DF;font-size:13px}
+.preset i{display:inline-block;width:10px;height:10px;border:1px solid #1C1C1A;margin-top:3px}
+.preset i.on{background:#1C1C1A}
+.preset small{grid-column:2;font-size:11px;color:#6B6964;line-height:1.4}
+.chks{display:flex;flex-direction:column;gap:6px}
+.btnrow{display:flex;gap:8px;margin-top:4px}
+.btn{height:28px;display:inline-flex;align-items:center;border:1px solid #1C1C1A;font:500 13px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;background:none;padding:0;cursor:pointer;color:#1C1C1A}
+.btn span{padding:0 12px}
+.btn b{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-left:1px solid #1C1C1A;font-weight:400}
+.btn.ink{background:#1C1C1A;color:#F8F7F5}
+.btn.ink b{border-left-color:#4A4A48}
+.lead{height:34px}
+.lead span{padding:0 16px}
+.lead b{width:34px;height:32px}
+.findings{display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.4}
+.findings div{display:grid;grid-template-columns:16px 1fr;column-gap:8px}
+</style>
+</helmet>
+<div class="app">
+<img class="chrome hdr" src="../img/header.png" alt="Colorgain header">
+<img class="chrome r1" src="../img/rail1.png" alt="Rail1: the Library panel">
+<img class="chrome sub" src="../img/submenu.png" alt="Designer sub-menu">
+<img class="chrome ftr" src="../img/footer.png" alt="App footer">
+
+<div class="vp">
+  <div class="abar">
+    <div class="dd"><span>+ Page</span><b>&#9662;</b></div>
+    <div class="sep"></div>
+    <button class="act">Section row</button>
+    <button class="act">Text</button>
+    <button class="act">Image</button>
+    <button class="act">Colour tiles</button>
+    <button class="act">Proportion</button>
+    <button class="act">Pairing grid</button>
+    <button class="act">Type specimen</button>
+    <button class="act">Hierarchy</button>
+    <button class="act">Note</button>
+    <div class="grow"></div>
+    <label class="chk"><i class="on"></i>Why marks</label>
+    <label class="chk"><i></i>Grid</label>
+    <label class="chk"><i class="on"></i>Bleed</label>
+    <div class="dd"><span>Template: Colorgain Swiss · A4 landscape</span><b>&#9662;</b></div>
+  </div>
+
+  <div class="vpage">
+    <div class="thumbs">
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:30px;height:22px;background:#1F6B2E"></div><div class="bx" style="left:74px;top:24px;width:30px;height:22px;background:#B9DC6E"></div><div class="bx" style="left:108px;top:24px;width:30px;height:22px;background:#7FB844"></div><div class="bx" style="left:40px;top:52px;width:98px;height:16px;background:#C8643C"></div><div class="bx" style="left:40px;top:74px;width:98px;height:12px;background:#8C8A82"></div></div><div class="lb"><b>4</b>Colour<span class="st half"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:98px;height:70px;background:repeating-linear-gradient(90deg,#1F6B2E 0 14px,#FFF 14px 16px,#C8643C 16px 30px,#FFF 30px 32px)"></div></div><div class="lb"><b>5</b>Pairs<span class="st half"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:98px;height:14px;background:linear-gradient(90deg,#E8F1E1,#1F6B2E)"></div><div class="bx" style="left:40px;top:44px;width:98px;height:14px;background:linear-gradient(90deg,#F6EAE2,#C8643C)"></div></div><div class="lb"><b>6</b>Tints and proofs<span class="st"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:30px;width:98px;height:30px;background:#1C1C1A"></div><div class="bx" style="left:40px;top:66px;width:70px;height:8px"></div></div><div class="lb"><b>7</b>Typography<span class="st ok"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:98px;height:6px"></div><div class="bx" style="left:40px;top:36px;width:98px;height:6px"></div><div class="bx" style="left:40px;top:48px;width:98px;height:6px"></div><div class="bx" style="left:40px;top:60px;width:60px;height:6px"></div></div><div class="lb"><b>8</b>Hierarchy<span class="st ok"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:46px;height:70px;background:#CFCDC7"></div><div class="bx" style="left:92px;top:24px;width:46px;height:70px;background:#CFCDC7"></div></div><div class="lb"><b>9</b>Imagery<span class="st half"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:40px;top:24px;width:98px;height:70px;background:#E3E2DE"></div></div><div class="lb"><b>10</b>Applications<span class="st"></span></div></div>
+      <div class="th cur"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:12px;top:24px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:34px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:44px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:54px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:64px;width:126px;height:5px"></div></div><div class="lb"><b>11</b>Decisions<span class="st ok"></span></div></div>
+      <div class="th"><div class="pg"><div class="ln" style="left:12px;top:14px;width:126px"></div><div class="bx" style="left:12px;top:24px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:34px;width:126px;height:5px"></div><div class="bx" style="left:12px;top:44px;width:126px;height:5px"></div></div><div class="lb"><b>12</b>Values<span class="st ok"></span></div></div>
+    </div>
+
+    <div class="bleed"></div>
+    <div class="tm" style="left:404px;top:118px"></div><div class="tm v" style="left:438px;top:84px"></div>
+    <div class="tm" style="left:1946px;top:118px"></div><div class="tm v" style="left:1939px;top:84px"></div>
+    <div class="tm" style="left:404px;top:1180px"></div><div class="tm v" style="left:438px;top:1200px"></div>
+    <div class="tm" style="left:1946px;top:1180px"></div><div class="tm v" style="left:1939px;top:1200px"></div>
+
+    <div class="sheet">
+      <div class="row">
+        <div class="num">07.1<b>Decisions</b></div>
+        <div class="txt">Every artefact in this pack carries the reason it was chosen, what it replaced, and what was turned down. This page is written by the app from those records, in the order they were made.</div>
+        <div class="txt soft">A superseded decision stays in the log. It is the only way the next designer learns why the obvious option was not taken.</div>
+        <div class="why"><span>Generated</span><i>Log</i></div>
+      </div>
+      <table class="log">
+        <tr><th>Mark</th><th>Artefact</th><th></th><th>Decision</th><th>Why</th><th>Turned down</th><th>Status</th><th>Date</th><th style="text-align:right;padding-right:0">Page</th></tr>
+        <tr><td class="id"><i>W01</i></td><td>Pack format</td><td class="sw"></td><td>A4 landscape, printed and on screen</td><td>The family prints at home and shows on a phone; one shape fits both</td><td>16:9 deck</td><td class="st">Agreed</td><td>2 Oct</td><td class="pg">1</td></tr>
+        <tr><td class="id"><i>W02</i></td><td>The brief</td><td class="sw"></td><td>Chalkboard-plain, no agency gloss</td><td>Mara's sentence, agreed at the table</td><td>—</td><td class="st">Agreed</td><td>6 Oct</td><td class="pg">2</td></tr>
+        <tr><td class="id"><i>W03</i></td><td>Imagery direction</td><td class="sw"></td><td>Photograph the place, never the product on white</td><td>The hill is the reason people drive out</td><td>White sweeps · Illustration</td><td class="st prop">Proposed</td><td>14 Oct</td><td class="pg">2, 9</td></tr>
+        <tr class="sup"><td class="id"><i>W04</i></td><td>Brand system v1</td><td class="sw"><span style="background:#2E5C3A"></span><span style="background:#B9DC6E"></span></td><td>Forest and Conifer</td><td>First pass from the site visit</td><td>—</td><td class="st sup">Superseded by W07</td><td>8 Oct</td><td class="pg">—</td></tr>
+        <tr><td class="id"><i>W05</i></td><td>Press condition</td><td class="sw"></td><td>FOGRA51, coated, relative colorimetric with black point compensation</td><td>The local printer runs coated stock to ISO 12647-2</td><td>FOGRA39 · uncoated</td><td class="st">Agreed</td><td>9 Oct</td><td class="pg">6</td></tr>
+        <tr><td class="id"><i>W06</i></td><td>Value formats</td><td class="sw"></td><td>Lab is the master; HEX, RGB and CMYK are derived and shown</td><td>One source value, so screen and press cannot drift apart</td><td>HEX as master</td><td class="st">Agreed</td><td>9 Oct</td><td class="pg">4, 12</td></tr>
+        <tr><td class="id"><i>W07</i></td><td>Brand system v2</td><td class="sw"><span style="background:#1F6B2E"></span><span style="background:#B9DC6E"></span><span style="background:#7FB844"></span></td><td>One green carries the brand; two lift it</td><td>Forest fell 4.1 ΔE outside the press tolerance; Camarone proofs at 2.07</td><td>Forest #2E5C3A · a two-green system</td><td class="st">Agreed</td><td>12 Oct</td><td class="pg">4</td></tr>
+        <tr><td class="id"><i>W08</i></td><td>Supporting system</td><td class="sw"><span style="background:#C8643C"></span><span style="background:#D9A441"></span><span style="background:#4C6A86"></span><span style="background:#6E3B5A"></span></td><td>Four colours, a tenth of any composition</td><td>Seasons and charts need more than green</td><td>Six colours</td><td class="st prop">Proposed</td><td>13 Oct</td><td class="pg">4</td></tr>
+        <tr><td class="id"><i>W09</i></td><td>Neutral system</td><td class="sw"><span style="background:#1A1A1A"></span><span style="background:#8C8A82"></span><span style="background:#F2F0EA"></span></td><td>Warm greys, six steps, 60 percent of every page</td><td>Cool greys made the greens look synthetic</td><td>Pure greys</td><td class="st">Agreed</td><td>12 Oct</td><td class="pg">4</td></tr>
+        <tr><td class="id"><i>W10</i></td><td>Primary typeface</td><td class="sw"></td><td>Helvetica Neue, Light, Regular and Medium</td><td>Already on every Mac the client owns</td><td>Söhne · Inter</td><td class="st">Agreed</td><td>13 Oct</td><td class="pg">7</td></tr>
+        <tr><td class="id"><i>W11</i></td><td>Hierarchy</td><td class="sw"></td><td>Six levels from 11 pt, ratio 1.333</td><td>One scale survives a leaflet and a phone</td><td>Golden ratio · nine levels</td><td class="st">Agreed</td><td>13 Oct</td><td class="pg">7, 8</td></tr>
+      </table>
+      <div class="pfoot"><span>Fernhill · Brand pack · 11 decisions, 8 agreed, 2 proposed, 1 superseded · written by Colorgain</span><b>11</b></div>
+    </div>
+  </div>
+
+  <div class="vfoot">
+    <button class="act quiet">&#8249;</button>
+    <span style="font-variant-numeric:tabular-nums">Page 11 of 12</span>
+    <button class="act quiet">&#8250;</button>
+    <div class="dd"><span>Fit · 72%</span><b>&#9662;</b></div>
+    <div class="grow"></div>
+    <span class="cap">Log order</span>
+    <div class="dd"><span>By date made</span><b>&#9662;</b></div>
+    <label class="chk"><i class="on"></i>Show superseded</label>
+    <div class="sep"></div>
+    <div class="dd"><span>Proof: CMYK · FOGRA51</span><b>&#9662;</b></div>
+    <div class="dd ink"><span>Export PDF</span><b>&#9662;</b></div>
+  </div>
+</div>
+
+<div class="rail2">
+  <div class="panel"><div class="ph"><div class="tri closed"></div><div class="ttl">Document</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+  <div class="panel"><div class="ph"><div class="tri closed"></div><div class="ttl">Colour Systems</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+  <div class="panel"><div class="ph"><div class="tri closed"></div><div class="ttl">Typography</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+  <div class="panel"><div class="ph"><div class="tri closed"></div><div class="ttl">Imagery</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+  <div class="panel"><div class="ph"><div class="tri closed"></div><div class="ttl">Why</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+
+  <div class="panel">
+    <div class="ph"><div class="tri"></div><div class="ttl">Output</div><div class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+    <div class="pb">
+      <div class="lbl">Presets</div>
+      <div class="preset"><i class="on"></i><span>Brand book · print</span><small>A4 landscape · PDF/X-4 · 3 mm bleed, trim marks · CMYK to FOGRA51, Lab kept as spot data · fonts embedded</small></div>
+      <div class="preset"><i></i><span>Client presentation · screen</span><small>16:9 · sRGB PDF · one artefact a page · why text as presenter notes</small></div>
+      <div class="preset"><i></i><span>Web guidelines</span><small>Static HTML, one page a section · tokens as CSS variables</small></div>
+      <div class="preset"><i></i><span>Asset pack</span><small>.colpal · .coltyp · ASE · JSON tokens · PNG swatches · the decision log as Markdown</small></div>
+
+      <div class="lbl" style="margin-top:6px">Include</div>
+      <div class="chks">
+        <label class="chk"><i class="on"></i>Decision log as the last section</label>
+        <label class="chk"><i class="on"></i>Value tables, HEX RGB CMYK Lab</label>
+        <label class="chk"><i class="on"></i>Proof report, ΔE per colour</label>
+        <label class="chk"><i class="on"></i>Contrast pairs, AA and AAA</label>
+        <label class="chk"><i></i>Superseded decisions</label>
+        <label class="chk"><i></i>Watermark: Draft for discussion</label>
+      </div>
+
+      <div class="lbl" style="margin-top:6px">Press</div>
+      <div class="dd"><span style="flex:1">Coated FOGRA51 · ISO 12647-2:2013</span><b>&#9662;</b></div>
+      <div class="dd"><span style="flex:1">Relative colorimetric · black point compensation</span><b>&#9662;</b></div>
+
+      <div class="lbl" style="margin-top:6px">Before export <span class="r warn">2 findings</span></div>
+      <div class="findings">
+        <div><span class="warn">⚠</span><span>Terracotta sits 2.6 ΔE outside the tolerance on page 4. Nearest reachable value is offered on page 6.</span></div>
+        <div><span class="warn">⚠</span><span>bench-cuttings.heic prints at 232 dpi on page 9. Place it smaller or supply 3500 px.</span></div>
+        <div><span class="ok">✓</span><span>8 of 11 decisions agreed. 2 proposed will print as Proposed.</span></div>
+      </div>
+      <div class="btnrow"><button class="btn ink lead"><span>Export Brand book · 12 pages</span><b>&#8599;</b></button></div>
+      <div class="cap">Last export: 13 Oct 2026, 18:42 · Fernhill Brand Pack v3.pdf · 14.2 MB</div>
+    </div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2866,"height":1558}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

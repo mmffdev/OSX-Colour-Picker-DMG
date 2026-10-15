@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branding Designer Capture</title>
+<style>
+/* Layout: one reading column on the Colorgain grid; ink on warm paper; the Swiss row grammar reused for the document's own sections. */
+:root{
+  --bg:#EEEDEA; --card:#F8F7F5; --mist:#E3E2DE; --rule:#CFCDC7; --soft:#A3A19B; --quiet:#6B6964; --fg:#161616;
+  --accent:#EC7A3C; --good:#2F8F86; --bad:#C9382C;
+  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#161616; --card:#1F1F1E; --mist:#2A2A28; --rule:#3B3B38; --soft:#6B6964; --quiet:#A3A19B; --fg:#EEEDEA; --good:#5FB3A8; --bad:#E0695C; color-scheme:dark } }
+:root[data-theme="dark"]{ --bg:#161616; --card:#1F1F1E; --mist:#2A2A28; --rule:#3B3B38; --soft:#6B6964; --quiet:#A3A19B; --fg:#EEEDEA; --good:#5FB3A8; --bad:#E0695C; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:24px;padding-block:48px 96px}
+h1{font-size:clamp(40px,6vw,72px);font-weight:200;line-height:.98;letter-spacing:-.035em;margin:0 0 8px 0;text-wrap:balance}
+h1 span{color:var(--soft)}
+.lead{font-size:20px;font-weight:300;line-height:1.38;max-width:34em;margin:24px 0 0 0}
+.meta{font-size:11px;color:var(--quiet);margin-top:16px;display:flex;gap:16px;flex-wrap:wrap}
+.meta a{color:var(--fg)}
+section{margin-top:72px}
+.row{display:grid;grid-template-columns:200px 1fr;column-gap:32px;border-top:1px solid var(--fg);padding-top:12px}
+.row .num{font-size:15px;line-height:1.3}
+.row .num b{display:block;font-weight:500}
+.row .num small{display:block;font-size:11px;color:var(--quiet);margin-top:8px;line-height:1.4}
+.body p{margin:0 0 14px 0;max-width:68ch}
+.body h3{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;margin:28px 0 8px 0}
+.body h3:first-child{margin-top:0}
+.body ul,.body ol{margin:0 0 14px 0;padding-left:20px;max-width:70ch}
+.body li{margin:0 0 6px 0}
+.call{background:var(--card);border:1px solid var(--rule);padding:20px 24px;max-width:70ch}
+.call b{font-weight:500}
+.tradeoff{border-left:2px solid var(--accent);padding-left:16px;max-width:66ch;margin:16px 0}
+table{border-collapse:collapse;width:100%;font-size:13px;line-height:1.4}
+th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--quiet);padding:0 12px 8px 0;border-bottom:1px solid var(--fg);vertical-align:bottom}
+td{vertical-align:top;padding:9px 12px 9px 0;border-bottom:1px solid var(--rule)}
+.scroll{overflow-x:auto}
+.scroll table{min-width:900px}
+.tag{display:inline-block;height:18px;line-height:18px;padding:0 6px;background:var(--fg);color:var(--bg);font-size:11px;font-weight:500;letter-spacing:.04em;vertical-align:middle}
+.unv{color:var(--quiet);font-size:11px}
+/* recreations of the Herman Miller patterns, drawn from the crawled values */
+.demo{margin:16px 0 24px 0;max-width:900px}
+.demo .capt{font-size:11px;color:var(--quiet);margin-top:8px}
+.hmrow{display:grid;grid-template-columns:150px 1fr 110px;column-gap:20px;border-top:1px solid var(--fg);padding-top:8px;font-size:13px}
+.hmrow b{display:block;font-weight:500}
+.hmrow .btnx{height:34px;border:1px solid #ee3a24;color:#ee3a24;display:flex;align-items:center;justify-content:center;font-weight:500;border-radius:4px}
+.hmtiles{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:20px 0 0 170px}
+.hmtile{height:150px;padding:10px 12px;font-size:11px;line-height:1.55;font-variant-numeric:tabular-nums}
+.hmtile table{width:auto;font-size:11px}
+.hmtile td{padding:0 8px 0 0;border:0}
+.prop{display:flex;height:36px;margin:12px 0 0 0}
+.prop div{display:flex;align-items:center;padding-left:8px;font-size:11px;font-weight:500;color:#fff}
+.pair{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;max-width:560px}
+.pair div{aspect-ratio:1;display:flex;align-items:center;justify-content:center;position:relative}
+.pair i{width:34%;height:34%;border-radius:50%;display:block}
+.pair .no{background:var(--mist);opacity:.9}
+.pair .no:after{content:"";position:absolute;left:4%;top:4%;width:92%;height:92%;background:linear-gradient(to top right,transparent 48%,#ee3a24 48%,#ee3a24 52%,transparent 52%)}
+.leadings{display:grid;grid-template-columns:150px 1fr;row-gap:6px;font-size:13px;max-width:520px}
+.leadings b{font-weight:500}
+.ideas{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.ideas div{background:var(--card);padding:14px 16px;font-size:13px;line-height:1.45}
+.ideas div b{display:block;font-weight:500;margin-bottom:4px}
+.ideas div small{display:block;color:var(--quiet);font-size:11px;margin-top:6px}
+.ideas div em{font-style:normal;color:var(--good)}
+.walk{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+.walk h4{font-size:15px;font-weight:500;margin:0 0 6px 0}
+.walk p{font-size:13px;color:var(--fg);margin:0 0 8px 0}
+.walk ul{font-size:13px;padding-left:18px;margin:0}
+.schema{font-size:13px;display:grid;grid-template-columns:140px 1fr;row-gap:6px;column-gap:16px;max-width:760px}
+.schema span:first-child{font-weight:500}
+.q{counter-reset:q}
+.q > div{display:grid;grid-template-columns:48px 1fr;column-gap:16px;padding:14px 0;border-bottom:1px solid var(--rule);max-width:76ch;align-items:start}
+.q > div:before{counter-increment:q;content:counter(q,decimal-leading-zero);font-size:24px;font-weight:200;line-height:1.1;color:var(--quiet)}
+.q > div > div{min-width:0}
+.q b{font-weight:500}
+.q p{margin:4px 0 0 0;font-size:13px}
+.src{font-size:12px;line-height:1.5;color:var(--quiet)}
+.src a{color:var(--fg);word-break:break-all}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:760px){
+  .row{grid-template-columns:1fr;row-gap:12px}
+  .hmrow{grid-template-columns:1fr}
+  .hmtiles{margin-left:0;grid-template-columns:repeat(2,1fr)}
+  .schema{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Branding Designer<br><span>what we learned, what we build, and why</span></h1>
+    <p class="lead">A capture of the research behind the Designer ▸ Branding page: the Herman Miller standards crawl, the tools we compete with, the ideas worth borrowing, and the reasoning behind every choice in the four artboards.</p>
+    <div class="meta"><span>Colorgain · Designer ▸ Branding</span><span>15 October 2026</span><a href="https://claude.ai/artifact/M9ezmqz2k42TkThyJZ1RhX">The design canvas, four artboards ↗</a></div>
+  </header>
+
+  <section>
+    <div class="row">
+      <div class="num">01<b>The call</b><small>Read this first. Everything after is the evidence.</small></div>
+      <div class="body">
+        <div class="call">
+          <p><b>Build Branding as a document builder, not a canvas.</b> A brand pack is a sequence of pages. Each page is a stack of section rows in one fixed grammar: a number and a title in column one, the paragraph in column two, the content block beneath. The designer registers three colour systems (Brand, Supporting, Neutral), a typography hierarchy and an image set as data; the pages draw them. Every artefact carries a Why record, and the app writes the decision log as the last section and renders the PDF itself.</p>
+          <p style="margin:0"><b>Why it wins on value.</b> Nobody in the market does three of our four things: a colour defined in Lab and proofed to a named press condition, a structured reason behind every artefact, and a print-ready PDF with bleed and an output intent. The fourth, a document you own outright rather than rent monthly, is the Colorgain business model already. Each of those is a line in the sales page, and none of them is a feature Frontify or Canva can add in a quarter.</p>
+        </div>
+        <div class="tradeoff"><b>The one real trade-off.</b> A fixed page grammar gives up free placement. Designers who want to drag a swatch to any pixel will feel the rails. The alternative, a free canvas, gives up the thing that makes the output credible: every page in the pack looking like it came from the same hand, and the PDF paginating itself. I recommend the grammar, with one free-form block (text, image, quote, on a 12-column grid) so the brief and the story pages still breathe. If a client later needs a loose layout, that is Web &amp; Screen or Print, not Branding.</div>
+        <p><b>What Rick decides.</b> Section 08 lists the five open questions. The rest is ready to be built from the artboards.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">02<b>What Herman Miller taught us</b><small>brandstandards.hermanmiller.com, read in full: 21 pages, 56 colour assets, 12 type styles. Images were not reachable; structure and every value were.</small></div>
+      <div class="body">
+        <h3>The order of the book</h3>
+        <p>Rationale comes before any rule. Pages 2 to 7 are belief, who we are, what we do, how we show up, voice and history. Accessibility sits at page 8, before a single visual rule. Then identity, colour, typography, photography, illustration, graphic elements, infographics, composition, motion, video, applications, in use, resources. The framing line on page one is worth keeping on our wall: <em>"the definitive source of truth, a rubric by which we gauge the success of everything we make… guidelines are just that, a guide. Always use your best judgment."</em></p>
+
+        <h3>The row grammar, which the artboards copy</h3>
+        <p>Every sub-section is the same row: a hairline across the top, the number and a bold title in the first column, the explanatory paragraph in the second, an action on the right where there is one, and the content block beneath, starting at the paragraph's left edge. Rick's screenshots of 10.2, 10.3, 10.5, 10.6, 11.1, 11.2 and 11.3 all follow it. It is the single most useful thing on the site: one grammar, dozens of content blocks.</p>
+        <div class="demo">
+          <div class="hmrow"><div>10.2<b>Core palette</b></div><div>The following values represent our core palette. These are used most often in the system and should be relied on when the color palette must be limited.</div><div class="btnx">Download</div></div>
+          <div class="hmtiles">
+            <div class="hmtile" style="background:#FFFFFF;color:#111;border:1px solid var(--rule)"><table><tr><td>Name</td><td>White</td></tr><tr><td>CMYK</td><td>0/0/0/0</td></tr><tr><td>RGB</td><td>255/255/255</td></tr><tr><td>HEX</td><td>#FFFFFF</td></tr><tr><td>PMS</td><td>Bright White</td></tr></table></div>
+            <div class="hmtile" style="background:#F7F7F6;color:#111;border:1px solid var(--rule)"><table><tr><td>Name</td><td>Gray 01</td></tr><tr><td>CMYK</td><td>0/0/0/3</td></tr><tr><td>RGB</td><td>247/247/246</td></tr><tr><td>HEX</td><td>#F7F7F6</td></tr><tr><td>PMS</td><td>663 C</td></tr></table></div>
+            <div class="hmtile" style="background:#C3C3C8;color:#111"><table><tr><td>Name</td><td>Light Gray</td></tr><tr><td>CMYK</td><td>21/13/8/0</td></tr><tr><td>RGB</td><td>195/195/200</td></tr><tr><td>HEX</td><td>#C3C3C8</td></tr><tr><td>PMS</td><td>428 C</td></tr></table></div>
+            <div class="hmtile" style="background:#000;color:#fff"><table><tr><td>Name</td><td>Black</td></tr><tr><td>CMYK</td><td>0/0/0/100</td></tr><tr><td>RGB</td><td>0/0/0</td></tr><tr><td>HEX</td><td>#000000</td></tr><tr><td>PMS</td><td>Not specified</td></tr></table></div>
+            <div class="hmtile" style="background:#EE3A24;color:#fff"><table><tr><td>Name</td><td>Red</td></tr><tr><td>CMYK</td><td>0/95/100/0</td></tr><tr><td>RGB</td><td>238/58/36</td></tr><tr><td>HEX</td><td>#EE3A24</td></tr><tr><td>PMS</td><td>485 C</td></tr></table></div>
+          </div>
+          <div class="capt">Recreated from the crawled values of section 10.2. The tile carries its own record in its top-left corner, and the text flips to white on dark fills. Our tile adds Lab and the role, and drops Pantone unless the user holds a licence.</div>
+        </div>
+
+        <h3>Colour, section 10, sixteen sub-sections</h3>
+        <p>History · Herman Miller Red · Core palette · Extended palette · Digital and print values · Use proportion · Pairing with neutrals · Pairing with values · Pairing do's · Pairing don'ts · Colour families · Identity and colour · Type and colour · Accessibility and contrast · Application · Additional don'ts.</p>
+        <ul>
+          <li><b>Roles before swatches.</b> One hero colour, then a core set, then an extended set of fifteen. That maps directly onto Brand, Supporting and Neutral.</li>
+          <li><b>Two value sets, shown separately.</b> RGB and HEX for digital, CMYK and Pantone for print, with the line <em>"Digital and print applications require colors built in different blend spaces."</em> The data behind the page also stores Pantone uncoated and RAL, but never shows them. No Lab anywhere.</li>
+          <li><b>Tints and shades are not brand colours.</b> They exist only in an infographics palette (Blue 01, Blue, Blue 02) and are forbidden in brand material. Our tint ladder stays a tool for proofing and UI, not a page of the pack, unless the designer registers it.</li>
+          <li><b>Use proportion is a chart, not a sentence.</b> A single bar: Red at 30 percent, fourteen supporting values at 5 percent each. We draw the same bar at 60 / 30 / 10 by system.</li>
+          <li><b>Pairing is shown, never described.</b> A grid of each colour with a black or white dot, then a full matrix of combinations to avoid, then a sparse matrix of the fully AA-compliant pairs. Every one of those is computable, so we generate them.</li>
+          <li><b>Contrast is stated with the size rule attached.</b> <em>"White text on Red is unacceptable below 19px."</em> Large text at 19 px bold or 24 px needs 3:1, normal text needs 4.5:1, graphics 3:1.</li>
+        </ul>
+        <div class="demo">
+          <div class="prop"><div style="flex:30;background:#EE3A24">30%</div><div style="flex:5;background:#F978CD">5%</div><div style="flex:5;background:#505A00">5%</div><div style="flex:5;background:#51A5E1">5%</div><div style="flex:5;background:#009B3C">5%</div><div style="flex:5;background:#912896">5%</div><div style="flex:5;background:#C3C3C8;color:#111">5%</div><div style="flex:5;background:#EB7300">5%</div><div style="flex:5;background:#0050B4">5%</div><div style="flex:5;background:#7D4B28">5%</div><div style="flex:5;background:#FFB805;color:#111">5%</div><div style="flex:5;background:#EB5078">5%</div><div style="flex:5;background:#7D001E">5%</div><div style="flex:5;background:#DCB98C;color:#111">5%</div><div style="flex:5;background:#4B2355">5%</div></div>
+          <div class="capt">Section 10.5, Use proportion, recreated. Our version reads the weights from the registered systems instead of being drawn by hand.</div>
+        </div>
+        <div class="demo">
+          <div class="pair">
+            <div style="background:#51A5E1"><i style="background:#000"></i></div><div style="background:#C3C3C8"><i style="background:#000"></i></div><div style="background:#0050B4"><i style="background:#fff"></i></div><div style="background:#EB5078"><i style="background:#fff"></i></div><div style="background:#4B2355"><i style="background:#fff"></i></div><div style="background:#505A00"><i style="background:#fff"></i></div><div style="background:#912896"><i style="background:#fff"></i></div><div style="background:#EE3A24"><i style="background:#fff"></i></div>
+            <div style="background:#EE3A24"><i style="background:#fff"></i></div><div style="background:#EE3A24"><i style="background:#7D001E"></i></div><div class="no"><i style="background:#EB7300"></i></div><div style="background:#EE3A24"><i style="background:#FFB805"></i></div><div class="no"><i style="background:#009B3C"></i></div><div style="background:#EE3A24"><i style="background:#505A00"></i></div><div class="no"><i style="background:#51A5E1"></i></div><div style="background:#EE3A24"><i style="background:#0050B4"></i></div>
+          </div>
+          <div class="capt">Sections 10.6 and 10.8, recreated in miniature: the neutral pairing row, then one row of the combinations matrix with the struck-out cells. Both are pure functions of the palette, so the app draws them from the registered systems and keeps them current.</div>
+        </div>
+
+        <h3>Typography, section 11, twenty sub-sections</h3>
+        <p>History · Primary typeface · Weights in use · Leading · Tracking · Hierarchy · Scale and proportion · Capitalization · Punctuation · Whitespace · Line length · Margins · Principles · Grids · Application · Alternates · Primary alternate · Secondary alternate · Additional languages · Additional don'ts.</p>
+        <ul>
+          <li><b>The specimen is the hero.</b> 11.1 is the family name set enormous, then the alphabet. 11.2 is a row per weight: the weight's name on the left, upper case, lower case and numerals on the right, a hairline between rows. Our Typography artboard does exactly this.</li>
+          <li><b>Leading and tracking are multipliers, not sizes.</b> Headline 0.98, Subhead 1.00, Detail 1.12, Body 1.34 times the size. Tracking −25 for headlines, −5 subhead, 0 body and detail. And the scale is relative: <em>"select a base type size in a composition and make all other sizes proportionate"</em>, with X, X×1.5, X×6, X×10, X×18.5 as the example.</li>
+          <li><b>Hierarchy by weight, named as voices.</b> <em>"Söhne Kräftig is our primary voice… Halbfett and Buch are both supporting voices."</em> Three weights only, each with an italic.</li>
+          <li><b>Typesetting rules are short and absolute.</b> Sentence case. Always left-aligned, never justified or centred. 45 to 75 characters a line. Type no wider than three quarters of the page. Fallbacks named: Arial for system apps, Inter for Google apps, Noto for CJK.</li>
+        </ul>
+        <div class="demo">
+          <div class="leadings"><b>Headline</b><span>0.98 × size, tracking −25</span><b>Subhead</b><span>1.00 × size, tracking −5</span><b>Detail</b><span>1.12 × size, tracking 0</span><b>Body</b><span>1.34 × size, tracking 0</span></div>
+          <div class="capt">Section 11.3 and 11.4 as data. Our hierarchy row stores exactly these four fields plus a size, and renders the live line beside them.</div>
+        </div>
+
+        <h3>What works poorly, and we avoid</h3>
+        <ul>
+          <li>The whole book ships as one 5.8 MB page. Ours is a file the client owns, paginated.</li>
+          <li>The data is dirty: CMYK stored as strings in places, duplicate names, core versus extended not explicit in the record. Our colour is one typed record with the system as a field.</li>
+          <li>Contrast badges are static and the site admits <em>"examples shown may not be inclusive of web standards."</em> Ours are computed from Lab at export time.</li>
+          <li>Typography gives no point sizes at all. Elegant, but an implementer has nothing to type. We store both the ratio and the resolved sizes.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">03<b>The competition</b><small>Web-first, asset-centric, hex-centric, rented monthly. Pricing marked unverified came from third-party listings.</small></div>
+      <div class="body">
+        <div class="scroll">
+        <table>
+          <tr><th>Tool</th><th>Structure</th><th>Colour</th><th>Export</th><th>Price</th><th>Strength</th><th>Weakness for our buyer</th></tr>
+          <tr><td>Frontify</td><td>Web portal of content blocks, multi-brand, SDK for custom blocks</td><td>Palette block; hex converted to RGB and CMYK automatically <span class="unv">unverified</span></td><td>Web first; native PDF not confirmed, requested by users</td><td>Unpublished; about $79/month entry <span class="unv">unofficial</span></td><td>Enterprise governance</td><td>Conversion is not colour-managed; no rationale; rented</td></tr>
+          <tr><td>Corebook</td><td>Online guidelines; templates for InDesign, Keynote, XD</td><td>Not found</td><td>Explicitly against PDF ("make PDF brand guidelines extinct")</td><td>$39 to $119/month, sources conflict</td><td>Designer-to-client handover</td><td>Anti-PDF; print is an afterthought</td></tr>
+          <tr><td>Standards.site</td><td>Hosted sites; the platform Herman Miller uses</td><td>Hex copy</td><td>Logo download; no PDF found</td><td>Pro, price not shown</td><td>Fast to publish, beautiful grammar</td><td>No colour science, no rationale</td></tr>
+          <tr><td>Lingo</td><td>Asset and design-system hub</td><td>Stores colours</td><td>Custom exports, tiers unclear</td><td>$80/month + $16 per editor</td><td>Living asset library</td><td>Not a narrative document</td></tr>
+          <tr><td>zeroheight</td><td>Design-system documentation</td><td>Custom colours</td><td>Markdown; no PDF</td><td>Free for one editor; $49 per editor</td><td>Token sets</td><td>UI systems, not brand packs</td></tr>
+          <tr><td>Bynder, Brandfolder</td><td>DAM with a guidelines module</td><td>Not found</td><td>PDF not confirmed</td><td>Enterprise</td><td>Assets and rules together</td><td>Not an authoring tool</td></tr>
+          <tr><td>Marq (Lucidpress)</td><td>Locked templates, web-to-print</td><td>CMYK for print, RGB for digital, per template</td><td>Print and digital</td><td>Not found</td><td>Template locking for non-designers</td><td>Produces collateral, not the decision story</td></tr>
+          <tr><td>Canva Brand Kit</td><td>Colours, fonts, logos, voice</td><td>Hex only</td><td>Designs export to PDF; the kit is not a document</td><td>Pro plan</td><td>Ubiquitous</td><td>No print colour management at all</td></tr>
+          <tr><td>Brandpad, Baseline, Brandy, Mediavalet, Adobe Express</td><td colspan="6"><span class="unv">Not verified from their own pages. Brandpad is positioned at agencies delivering brand books; treat the rest as unknown until checked.</span></td></tr>
+        </table>
+        </div>
+        <h3>Palette and type tools worth knowing</h3>
+        <ul>
+          <li><b>Leonardo (Adobe)</b> builds tint scales from target contrast ratios against a declared background, not from picked colours, and exports CSS variables and tokens. Adobe rebuilt Spectrum with it.</li>
+          <li><b>Radix</b> gives every one of twelve steps a job: 1 to 2 backgrounds, 3 to 5 component states, 6 to 8 borders, 9 to 10 solid fills, 11 to 12 text, with guaranteed text pairs.</li>
+          <li><b>Material 3</b> defines tonal palettes that vary in tone only, with Primary, Secondary, Tertiary, Neutral, Neutral Variant and Error as the roles, and a 15-style type scale of Display, Headline, Title, Body, Label at three sizes each.</li>
+          <li><b>Coolors, Adobe Color, Huemint, Khroma</b> are exploration tools. None builds a system with roles, proofs or reasons; they are where our Library's palettes get sampled, not competitors.</li>
+        </ul>
+        <h3>The gaps, which are our product</h3>
+        <ul>
+          <li><b>Rationale as data.</b> No platform stores a structured why per colour, font or image and renders it as a narrative. Decision records exist for software (Nygard's ADR: title, status, context, decision, consequences), not for identity work.</li>
+          <li><b>Colour-managed values.</b> Every tool is hex-centric. A Lab master with an ICC-proofed CMYK and a named press condition is not offered anywhere found.</li>
+          <li><b>A real print PDF</b> with bleed, trim and an output intent. Web-first tools treat PDF as a download button, Corebook as the enemy.</li>
+          <li><b>Ownership.</b> The market charges per editor per month. A local app that produces a client-owned file has no direct competitor in what was found.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">04<b>Ideas we borrow</b><small>Each with its source and where it lands in the design. Green marks the ones already drawn in the artboards.</small></div>
+      <div class="body">
+        <div class="ideas">
+          <div><b>One row grammar for every section</b>Number and title, paragraph, action, then the block. <small>Herman Miller · every page template. <em>Drawn.</em></small></div>
+          <div><b>The record lives in the tile</b>Name and values in the swatch's own corner, text flipped to white on dark fills. <small>Herman Miller 10.2. <em>Drawn, with Lab and role added.</em></small></div>
+          <div><b>Roles before swatches</b>Hero, core, extended becomes Brand, Supporting, Neutral; a fixed role set like Material's. <small>Herman Miller, Material 3. <em>Drawn as the Colour Systems panel.</em></small></div>
+          <div><b>Use proportion as a bar</b>Relative weight per system, drawn from data. <small>Herman Miller 10.5. <em>Drawn, 60 / 30 / 10.</em></small></div>
+          <div><b>Generated pairing grids</b>Neutral dots, combinations to avoid, the AA matrix, all computed. <small>Herman Miller 10.6 to 10.8. Planned as page 5, Pairs.</small></div>
+          <div><b>Contrast with the size rule</b>"Unacceptable below 19 px" beside the ratio, not just a badge. <small>Herman Miller 10.14. <em>Shown as live evidence in the Why panel.</em></small></div>
+          <div><b>Print and screen values apart</b>Lab master; CMYK and HEX derived and labelled by use. <small>Herman Miller 10.4, Marq. <em>Drawn, with the footer's value toggles.</em></small></div>
+          <div><b>Weights as voices</b>Primary voice, supporting voices, three weights only. <small>Herman Miller 11.2 and 11.5. <em>Drawn as the weight specimen rows.</em></small></div>
+          <div><b>Leading and tracking as multipliers</b>Stored per level, with the resolved size beside. <small>Herman Miller 11.3 and 11.4. <em>Drawn in the Typography panel table.</em></small></div>
+          <div><b>A scale from one base</b>Base size and ratio, every level derived; both the rule and the numbers kept. <small>Herman Miller 11.7, Typescale. <em>Drawn: 11 pt × 1.333.</em></small></div>
+          <div><b>A use-case line per style</b>What Display is for, what Label is for. <small>Material 3, Canva. <em>Drawn in the hierarchy rows.</em></small></div>
+          <div><b>Decision record per artefact</b>Status, decision, why, alternatives, evidence, who, when, supersedes. <small>Nygard's ADR. <em>Drawn as the Why panel.</em></small></div>
+          <div><b>Supersede, never overwrite</b>Rejected and replaced choices stay in the log. <small>ADR practice. <em>Drawn: W04 struck through under W07.</em></small></div>
+          <div><b>Generated contents and numbering</b>Section numbers and the decision log written by the app. <small>Herman Miller contents strips. <em>Drawn as page 11.</em></small></div>
+          <div><b>Contrast-targeted tints</b>A tint defined by the contrast it must reach against a declared ground. <small>Leonardo. Planned for page 6, Tints and proofs.</small></div>
+          <div><b>Steps with jobs</b>Tint steps named for background, border, fill, text. <small>Radix. Planned for the tint ladder.</small></div>
+          <div><b>Imagery mix by percentage</b>Environment 30, sweeps 20, product 20, people 15, and so on. <small>Herman Miller 12. <em>Drawn as the Imagery panel's mix bar.</em></small></div>
+          <div><b>On-brand beside off-brand</b>Paired examples with a reason caption. <small>Inkbot, Herman Miller don'ts. Planned: the Pair on and off brand action.</small></div>
+          <div><b>What the brand rejects</b>A line in the brief that feeds the don'ts. <small>CodeSignal, Herman Miller values. <em>Drawn: "What is out" in the brief.</em></small></div>
+          <div><b>Token export beside the PDF</b>CSS variables, JSON, ASE, our own .colpal and .coltyp. <small>Leonardo, zeroheight. <em>Drawn as the Asset pack preset.</em></small></div>
+          <div><b>Template plus data to PDF</b>Pages are templates; the registered systems are the data. <small>Typst, InDesign data merge. <em>The architecture of the whole page.</em></small></div>
+          <div><b>Pre-flight before export</b>Out-of-tolerance colours and under-resolution images listed before the button. <small>Print production practice. <em>Drawn in the Output panel.</em></small></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">05<b>The design, region by region</b><small>Nothing in the layout moves. Header, Rail1, the Designer sub-menu and the app footer are Rick's pixels. The work sits in the Viewport-Actionbar, Viewport-Page, Viewport-Footer and Rail2.</small></div>
+      <div class="body">
+        <div class="walk">
+          <div><h4>Viewport-Actionbar, 52 pt</h4><p>What you can put on a page, and how the page is shown.</p><ul><li>Left: + Page, then the block types as text actions: Section row, Text, Image, Colour tiles, Proportion, Pairing grid, Type specimen, Hierarchy, Note.</li><li>Right: three house checkboxes, Why marks, Grid, Bleed; then the Template dropdown (Colorgain Swiss · A4 landscape).</li><li>Reasoning: the bar already holds filters and toggles elsewhere in the app. Insertion belongs here because it is a verb on the page, not a property of the document.</li></ul></div>
+          <div><h4>Viewport-Page</h4><p>A page-thumbnail column on the left, the current page at trim size in the middle, bleed and trim marks drawn around it.</p><ul><li>Every artefact on the page is a block from the registered data. Select one and it gets the orange ring, the house focus colour, and the Why panel follows it.</li><li>The small ink tags, W07 and so on, are Why marks. They print in the PDF when the checkbox is on, so the client can find the reason behind any element in the log.</li><li>Thumbnails carry the section number, the name and a status dot: filled agreed, half proposed, empty untouched.</li></ul></div>
+          <div><h4>Viewport-Footer, 42 pt</h4><p>How the page is viewed and what the values mean.</p><ul><li>Left: page navigation and zoom.</li><li>Right: the value toggles (HEX, RGB, CMYK, Lab, Pantone off until licensed), the proof condition, and Export PDF as the one ink button. Menus open upward, as the footer's do now.</li><li>Reasoning: this mirrors the Library footer, where format, size, Delta and profile already live. A designer moving between Library and Branding finds the same things in the same place.</li></ul></div>
+          <div><h4>Rail2 · Document</h4><p>The outline. Sections with page counts and the same status dots, a free-form page or a section added from here, and the one switch that writes the decision log as the last section.</p></div>
+          <div><h4>Rail2 · Colour Systems</h4><p>Three blocks, Brand, Supporting, Neutral. Each shows its strip, its source palette from the Library, its roles, and its proof status against the current press condition, in the same words Delta Bloom uses. Register a system is the only button.</p><ul><li>Reasoning: registration is the act that makes a Library palette a brand asset. The page cannot draw a colour that is not registered, which is the governance Frontify sells.</li></ul></div>
+          <div><h4>Rail2 · Typography</h4><p>Families and allowed weights, the fallback stack and the licence note, then the scale: base, ratio and the level table with weight, tracking, size and leading. Add a level and Specimen on page are the actions.</p></div>
+          <div><h4>Rail2 · Imagery</h4><p>The mix bar by category, the image list with resolution and gamut at the placed size, the three or four rules in words, and the on-brand / off-brand pairing action.</p></div>
+          <div><h4>Rail2 · Why</h4><p>The decision record for whatever is selected. Status as a house choice control (Proposed, Agreed, Superseded), decision in one line, the why in a box, alternatives struck through with their reason, evidence computed live, who and when, Save to log and Show on page.</p><ul><li>Reasoning: this is the differentiator, so it is a panel of its own and never a modal. It can be moved to Rail1 like any panel.</li></ul></div>
+          <div><h4>Rail2 · Output</h4><p>Four presets (print book, screen presentation, web guidelines, asset pack), the include switches, the press condition and intent, a pre-flight list of findings, and the lead button with the page count in it.</p></div>
+        </div>
+
+        <h3>The Why record</h3>
+        <div class="schema">
+          <span>mark</span><span>W07, sequential in the pack, printed on the page and in the log</span>
+          <span>artefact</span><span>the registered thing it explains: a system, a level, an image set, a page, the format</span>
+          <span>status</span><span>Proposed, Agreed, Superseded; only Agreed prints without a label</span>
+          <span>decision</span><span>one sentence, fixed box, rewritten to fit</span>
+          <span>why</span><span>three to five lines, the client's words where possible</span>
+          <span>alternatives</span><span>each with its reason for rejection; superseded records link here</span>
+          <span>evidence</span><span>computed, never typed: contrast ratios, ΔE against the press condition, gamut, resolution at placed size</span>
+          <span>decided by, date</span><span>a name and a day; the client's approval is a second name</span>
+          <span>supersedes</span><span>the earlier mark, which stays in the log struck through</span>
+        </div>
+        <p style="margin-top:16px">Every record gets a UUID and a changed date, like every other record in the catalogue, so it syncs later without special cases.</p>
+
+        <h3>Where it lives and what comes out</h3>
+        <ul>
+          <li>A brand pack is an asset of the member it belongs to, in the member's folder: proposed as <b>.colbrd</b>, plain JSON like every other asset, pointing at the registered .colpal and .coltyp by id, holding the pages, the Why records and the output settings. The images stay as files beside it. Name and extension are Rick's to settle, question 03 below.</li>
+          <li>Outputs: PDF/X-4 with bleed, trim marks and the output intent embedded for print; an sRGB 16:9 PDF with the why text as presenter notes for the client meeting; static HTML for the web; and an asset pack with .colpal, .coltyp, ASE, JSON tokens, PNG swatches and the log as Markdown.</li>
+          <li>Pantone, RAL and NCS names appear only when the user holds the licence, per the third-party colour rules already agreed. The toggle exists in the footer and is off.</li>
+          <li>Press profiles come from ColorSync's installed list, so the same code serves the Store build.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">06<b>Why it works</b><small>The reasoning against the five laws and the product's promise.</small></div>
+      <div class="body">
+        <ul>
+          <li><b>It is the product's promise made visible.</b> A client sees a green defined in Lab, proofed to FOGRA51 and shown with a ΔE, beside the sentence that explains why it was chosen. That is enterprise colour management in a leaflet-sized brand, which is the pitch.</li>
+          <li><b>The grammar does the design work.</b> Because every section is the same row, a family nursery with no designer produces a book that reads like Herman Miller's. The template carries the Swiss laws: baseline justification, balance, fixed boxes for changing text, so nothing beneath a rewritten paragraph moves.</li>
+          <li><b>Reasons compound.</b> The log is written from the records, so the narrative is never out of date, and a superseded decision is proof of rigour rather than an embarrassment. Agencies will buy this to show their process; clients will buy it to remember theirs.</li>
+          <li><b>It reuses what exists.</b> Palettes and typography palettes from the Library, Delta Bloom's proof language and settings, the panel primitive, the house controls, the footer's value and profile menus. Branding adds page templates, the Why record and a PDF writer; it does not add a second colour engine.</li>
+          <li><b>It sells twice.</b> The PDF is the client deliverable; the asset pack is the developer and printer deliverable. One file, two audiences, no monthly fee.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">07<b>What the artboards do not show yet</b><small>Deliberately left for the next round, so the first round stays reviewable.</small></div>
+      <div class="body">
+        <ul>
+          <li>Pages 5 and 6, Pairs and Tints and proofs: the generated pairing grids, the AA matrix and the contrast-targeted tint ladder. The panels and the page list already name them.</li>
+          <li>The cover and the Applications page: a leaflet, a label and a van side drawn from the registered data.</li>
+          <li>Template choice beyond Colorgain Swiss · A4 landscape: Letter, A5 portrait and 16:9 are the obvious three.</li>
+          <li>The client's approval flow: a second name on an Agreed record, and a Draft watermark until it is there.</li>
+          <li>Measurement: the screenshots must be measured against the real window once built, per the house rule.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">08<b>Five decisions for Rick</b><small>Each with the recommendation first.</small></div>
+      <div class="body q">
+        <div><div><b>Page grammar or free canvas?</b><p>Recommend the grammar with one free-form block type, as argued in 01. Web &amp; Screen and Print stay the free canvases.</p></div></div>
+        <div><div><b>What is the panel called: Why, Rationale or Decision?</b><p>Recommend Why. It is the word a client uses, it is three letters on a page tag, and the log page can still be titled Decisions.</p></div></div>
+        <div><div><b>The file: one .colbrd asset, or pages inside the member's .colinf information pack?</b><p>Recommend its own asset. A pack is shared and exported on its own, and the information pack should stay the member's notes, not a 12-page document.</p></div></div>
+        <div><div><b>Default paper: A4 landscape or Letter?</b><p>Recommend A4 landscape, matching the catalogue's European press conditions, with Letter one dropdown away and the Store build following the region.</p></div></div>
+        <div><div><b>Is Branding a Pro feature in the Store edition?</b><p>Recommend yes for the PDF/X-4 and asset-pack outputs, no for building and the screen PDF. The book is the thing people pay for; the builder is how they find out.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <div class="num">09<b>Sources</b><small>What was read, and what could not be.</small></div>
+      <div class="body src">
+        <p>Herman Miller brand standards, all 21 pages parsed from the page's own data: <a href="https://brandstandards.hermanmiller.com">brandstandards.hermanmiller.com</a>, <a href="https://brandstandards.hermanmiller.com/color">/color</a>, <a href="https://brandstandards.hermanmiller.com/typography">/typography</a>. Images on the site were not reachable from here; the recreations above use the crawled values and Rick's screenshots.</p>
+        <p>Leonardo: <a href="https://leonardocolor.io/">leonardocolor.io</a> · Radix scale: <a href="https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale">radix-ui.com</a> · Material 3 typography: <a href="https://material-web.dev/theming/typography">material-web.dev</a> · Brand book anatomy: <a href="https://inkbotdesign.com/creating-a-brand-book/">inkbotdesign.com</a> · Chris Do on context: <a href="https://underconsideration.com/brandnew/archives/create_stories_that_sell_with_the_futur.php">underconsideration.com</a> · Typst automated PDF: <a href="https://typst.app/blog/2025/automated-generation">typst.app</a> · InDesign data merge: <a href="https://developer.adobe.com/firefly-services/docs/indesign-apis/api/datamerge">developer.adobe.com</a> · Nygard's decision record, via a mirror of the template.</p>
+        <p>Not researched or not verifiable from vendors' own pages: Brandpad, Baseline, Brandy, Mediavalet, Adobe Express brand kit, Notion and Figma templates, Atmos, Palettte, Realtime Colors, Khroma, Colormind, Typescale, Modular Scale, Fontjoy, Sagmeister's presentation method. Frontify and Corebook pricing and PDF export need a second look before any sales comparison is published.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-15T03:05:00Z"},
+  "title": "Colorgain Branding Designer",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 2866, "h": 1558, "title": "1 · Colour page, Brand system selected"},
+    "Typography.dc.html": {"x": 2946, "y": 0, "w": 2866, "h": 1558, "title": "2 · Typography page, hierarchy selected"},
+    "Brief.dc.html": {"x": 0, "y": 1678, "w": 2866, "h": 1558, "title": "3 · Free-form page, the brief"},
+    "Decisions.dc.html": {"x": 2946, "y": 1678, "w": 2866, "h": 1558, "title": "4 · Decision log page and export"}
+  },
+  "order": ["Main.dc.html", "Typography.dc.html", "Brief.dc.html", "Decisions.dc.html"],
+  "notes": {
+    "t1": {"x": 0, "y": -300, "text": "Designer · Branding: the brand pack builder", "kind": "title1", "maxW": 5812},
+    "n1": {"x": 0, "y": -170, "w": 1400, "text": "Layout is Rick's screenshot, pixel for pixel: header, Rail1, the Designer sub-menu and the app footer are the real pixels. Everything drawn is inside the Viewport-Actionbar, Viewport-Page, Viewport-Footer and Rail2. Orange ring = the selected artefact; the small ink tags are Why marks, one per recorded decision.", "fill": "gray"}
+  },
+  "designSystems": []
+}
