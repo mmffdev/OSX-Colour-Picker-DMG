@@ -575,6 +575,10 @@ final class StudioFrame: NSView {
         cataloguePane.onFilter = { [weak self] key in
             guard let self else { return }; self.workspaceFilter=key; self.place = .palettes; self.reload(); self.needsLayout=true
         }
+        cataloguePane.onCatalogueAction = { [weak self] name,action in
+            guard let self,let window=self.window else{return}
+            CatalogueRowActions.perform(action,name:name,library:self.library,window:window) { [weak self] in self?.needsLayout=true;if let library=self?.library {NotificationCenter.default.post(name:.appStateDidChange,object:library)} }
+        }
         cataloguePane.onCatalogue = { [weak self] name in self?.library.open(catalogue: name); self?.go(.catalogue) }
         filmstrip.onPick = { [weak self] id in self?.go(.palette(id)) }
         inspectorPane.onOpen = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.go(.palette(id)) }

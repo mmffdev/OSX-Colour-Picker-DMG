@@ -269,3 +269,67 @@ final class FileCatalogueRemovalWizard {
 }
 
 private extension Result where Success == Void { var isSuccess: Bool { if case .success = self { return true }; return false } }
+
+
+/// Catalogue-row menus share the same file-management operations as the settings journeys.
+enum CatalogueRowAction: String, CaseIterable {
+    case remove = "Remove", backup = "Backup", export = "Export"
+    var symbol: String {
+        switch self {case .remove: return "trash";case .backup: return "externaldrive";case .export: return "square.and.arrow.up"}
+    }
+}
+
+enum CatalogueRowActions {
+    static func perform(_ action: CatalogueRowAction, name: String, library: LibraryController, window: NSWindow, changed: @escaping () -> Void) {
+        if action == .remove {
+            FileCatalogueRemovalWizard(name:name,window:window) { success in
+                guard success else{return}
+                if library.catalogue == name {
+                    if let next=Catalogues.standard.names().first {library.open(catalogue:next)}
+                    else {(NSApp.delegate as? AppDelegate)?.runSetupAssistant()}
+                }
+                changed()
+            }.start()
+            return
+        }
+        let root=Catalogues.standard.root
+        if action == .backup {
+            let stamp=ISO8601DateFormatter().string(from:Date()).replacingOccurrences(of:":",with:"-")
+            let destination=root.appendingPathComponent("Backups/Catalogues",isDirectory:true)
+                .appendingPathComponent(filesystemName(name)+"-"+stamp+"-"+UUID().uuidString.prefix(8)+".colshr")
+            archive(name:name,to:destination,window:window,backup:true)
+        } else {
+            let panel=NSSavePanel()
+            panel.title="Export Catalogue";panel.prompt="Export"
+            panel.nameFieldStringValue=filesystemName(name)+".colshr"
+            panel.message="Save a verified catalogue archive. Your catalogue remains registered and its original files stay in place. Shared global assets and external ICC references are not bundled."
+            panel.beginSheetModal(for:window) { result in
+                guard result == .OK,let destination=panel.url else{return}
+                guard destination.pathExtension.lowercased() == "colshr" else {
+                    FileRecoveryPresenter.showFailure(failure("Use the .colshr extension for a catalogue archive."),over:window);return
+                }
+                archive(name:name,to:destination,window:window,backup:false)
+            }
+        }
+    }
+    private static func archive(name:String,to destination:URL,window:NSWindow,backup:Bool) {
+        guard let view=window.contentView else{return}
+        let progress=SwissFocusModal(title:backup ? "Backing Up Catalogue":"Exporting Catalogue",message:"Checking and archiving “\(name)”. The catalogue stays in place. Missing files will be reported instead of producing an incomplete archive.")
+        progress.present(over:view)
+        let catalogues=Catalogues.standard
+        DispatchQueue.global(qos:.userInitiated).async {
+            let result=Result {try Handler_File_Manager.shared.createCatalogueArchive(name:name,catalogues:catalogues,to:destination)}
+            DispatchQueue.main.async {
+                progress.dismissOverlay()
+                switch result {
+                case .success:
+                    guard let view=window.contentView else{return}
+                    let done=SwissFocusModal(title:backup ? "Backup Saved":"Catalogue Exported",message:"“\(name)” remains in your library.\n\n\(destination.path)\n\nShared global assets remain in the workspace. ICC dependencies remain links unless embedded in a proof; individual ASE files are included. Monitored ASE folders must be converted to individual links before archiving.")
+                    done.button("Show In Finder") {NSWorkspace.shared.activateFileViewerSelecting([destination]);done.dismissOverlay()}
+                    done.button("Close",primary:true) {done.dismissOverlay()};done.present(over:view)
+                case .failure(let error):FileRecoveryPresenter.showFailure(error,over:window)
+                }
+            }
+        }
+    }
+}

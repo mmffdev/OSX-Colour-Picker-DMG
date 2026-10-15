@@ -392,3 +392,10 @@ Final source verification at `e4cf98d`:
 - Direct and Store native UI checks cover the recovery/removal/reconciliation journeys and sizes recorded above. Final acceptance remains Rick’s; this ledger signs off implementation and the stated local checks only.
 
 Local diagnostic logs are `/tmp/colorgain-handler-{debug,release-build,store-build,tests,store-tests}.log`; they are transient machine-local evidence. A subsequent documentation-only commit is rebuilt to keep the installed footer aligned with HEAD; the source verification identity above remains unchanged.
+
+
+### Catalogue-row follow-up — 2026-10-15
+
+- [x] Trailing sliders actions align under the Catalogues header’s plus; the in-house menu routes Remove to the removal wizard and Backup/Export to a transaction-bound, revision-validated archive helper. Backup uses unique names in Backups/Catalogues; Export asks for its destination. Neither archive action detaches a catalogue.
+- [x] Archive regression checks verify retained source bytes/registration, validated output and refusal to overwrite an existing archive. Full debug suite: 1,032 passed, 0 failed.
+- [x] Isolated native Studio checks: aligned icons, keyboard menu selection, successful Backup, Export save-panel entry/cancellation and inactive-row Remove targeting Second while First stays selected. Folders filters/space removed; genuinely empty My Palette’s shows its message without filters. Active filter controls remain available when filtering excludes existing palettes.

@@ -108,4 +108,16 @@ func runFileCatalogueLifecycleTests(check: (Bool, String) -> Void) {
         check(inventory.catalogues.first { $0.name == "First" }?.state == .invalid, "Startup exposes registered UUID mismatch as a recovery case")
     } catch { check(false, "Registered identity mismatch: \(error)") }
 
+    do {
+        let fixture=try FileHandlerFixture();defer{fixture.remove()}
+        let cats=Catalogues(root:fixture.root,legacyURL:nil)
+        let before=try FileHandlerFixture.snapshot(fixture.first)
+        let manifest=try Data(contentsOf:AppDataStore(root:fixture.root).url)
+        let output=fixture.root.appendingPathComponent("Backups/Catalogues/First.colshr")
+        try manager.createCatalogueArchive(name:"First",catalogues:cats,to:output)
+        check(try FileHandlerFixture.snapshot(fixture.first) == before && Data(contentsOf:AppDataStore(root:fixture.root).url) == manifest,"Catalogue backup/export preserves every original byte and registration")
+        check(try manager.handler(for:output).canonical(Data(contentsOf:output)).count > 0,"Catalogue backup/export produces a validated share archive")
+        check((try? manager.createCatalogueArchive(name:"First",catalogues:cats,to:output)) == nil,"Catalogue backup/export never overwrites an existing archive")
+    } catch {check(false,"Catalogue row archive: \(error)")}
+
 }

@@ -163,6 +163,16 @@ extension Handler_File_Manager {
         _ = try handler(for: destination).canonical(filesystem.read(destination))
     }
 
+    /// Backup/export publishes a verified archive without detaching or changing the catalogue.
+    func createCatalogueArchive(name: String, catalogues: Catalogues, to destination: URL) throws {
+        let plan = try prepareCatalogueRemoval(name: name, catalogues: catalogues)
+        try withTransaction(home: plan.workspace) {
+            try validate(plan)
+            try archiveCatalogue(plan, to: destination)
+            try validate(plan)
+        }
+    }
+
     func executeCatalogueRemoval(_ plan: FileCatalogueRemovalPlan, outcome: FileCatalogueRemovalPlan.Outcome, cancellation: FileOperationCancellation? = nil) throws {
         try cancellation?.check()
         try validate(plan)
