@@ -22,7 +22,7 @@ struct WorkspaceCatalogue {
             switch self {
             case .ready: return "Ready"
             case .migration: return "Update required"
-            case .missing: return "Folder unavailable"
+            case .missing: return "Files unavailable"
             case .access: return "Folder access required"
             case .invalid: return "Invalid catalogue"
             }

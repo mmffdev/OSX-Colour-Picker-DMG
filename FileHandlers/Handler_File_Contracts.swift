@@ -25,12 +25,10 @@ struct FileIssue: Error, LocalizedError, Equatable {
         let underlying = value.userInfo[NSUnderlyingErrorKey] as? NSError
         let deviceError = [value, underlying].compactMap { $0 }.contains { $0.domain == NSPOSIXErrorDomain && [6, 19, 70].contains($0.code) }
         if deviceError { state = .volumeUnavailable }
-        else if FolderAccess.requiresRenewal(url) { state = .accessExpired }
         else if error is FileValidationError { state = .unsupportedVersion }
-        else if value.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(value.code) { state = .missing }
-        else if value.domain == NSCocoaErrorDomain && [NSFileReadNoPermissionError, NSFileWriteNoPermissionError].contains(value.code) { state = .inaccessible }
-        else if value.domain == NSPOSIXErrorDomain && value.code == 2 { state = .missing }
-        else if value.domain == NSPOSIXErrorDomain && [1, 13].contains(value.code) { state = .inaccessible }
+        else if value.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(value.code) || value.domain == NSPOSIXErrorDomain && value.code == 2 { state = .missing }
+        else if FolderAccess.requiresRenewal(url) { state = .accessExpired }
+        else if value.domain == NSCocoaErrorDomain && [NSFileReadNoPermissionError, NSFileWriteNoPermissionError].contains(value.code) || value.domain == NSPOSIXErrorDomain && [1, 13].contains(value.code) { state = .inaccessible }
         else { state = .corrupt }
         return FileIssue(url: url, state: state, message: error.localizedDescription, underlyingDomain: value.domain, underlyingCode: value.code)
     }

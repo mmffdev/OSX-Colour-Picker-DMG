@@ -34,7 +34,7 @@ enum FileRecoveryPresenter {
         let modal = SwissFocusModal(title: "Files Need Attention", message: "Your current work and file references have been retained. Recover the affected files before saving this catalogue.")
         modal.content(fileManagementDetails(report.root.path + "\n\n" + report.issues.map { ($0.errorDescription ?? $0.message) + "\n" + $0.url.path }.joined(separator: "\n\n")), height: 180)
         modal.button("Retry", primary: true) {
-            modal.dismissOverlay(); FileIncidentCoordinator.shared.resolved(report.root); retry()
+            modal.dismissOverlay(); FileIncidentCoordinator.shared.resolved(report.root); FolderAccess.restoreAll(); retry()
         }
         let workspace = Catalogues.standard.root
         let workspaceIssue = report.issues.contains { issue in

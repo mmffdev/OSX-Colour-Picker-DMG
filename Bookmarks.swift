@@ -65,9 +65,12 @@ enum FolderAccess {
         #if APPSTORE
         var all = stored
         for (path, data) in all {
+            if let current = held[path], FileManager.default.isReadableFile(atPath: current.path) { continue }
+            if scoped.remove(path) != nil { held[path]?.stopAccessingSecurityScopedResource() }
+            held[path] = nil
             var stale = false
             let url: URL
-            do { url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) }
+            do { url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale) }
             catch { failed.insert(path); NSLog("FolderAccess: could not resolve the bookmark for %@: %@", path, error.localizedDescription); continue }
             let opened = url.startAccessingSecurityScopedResource()
             if opened { scoped.insert(path) }
