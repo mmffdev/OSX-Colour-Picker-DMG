@@ -1,6 +1,6 @@
 # Architecture — Handler File Management
 
-Status: implemented; final target verification in progress. Baseline reviewed 2026-10-15 on `colorgain-main`, commit `21eac37`; plan committed and pushed first as `e61c06a`. This document records product architecture, source findings and acceptance tests; project working instructions remain in `.Codex/AGENTS.md`.
+Status: implementation and local verification complete; ready for Rick’s acceptance. Baseline reviewed 2026-10-15 on `colorgain-main`, commit `21eac37`; plan committed and pushed first as `e61c06a`. This document records product architecture, source findings and acceptance tests; project working instructions remain in `.Codex/AGENTS.md`.
 
 ## 1. Agreed direction
 
@@ -264,7 +264,7 @@ For each completed item append a dated sign-off entry containing its ID, changed
 - [x] HFM-020 — Add `FileHandlers/`, `Handler_File_Manager`, shared handler protocol and registry, structured issues/results, injectable filesystem/access/time/identity providers. Depends: HFM-011, HFM-012.
 - [x] HFM-021 — Define common header codec and creator settings contract; preserve creation provenance, update successful-save metadata and support development bundle fallbacks. Depends: HFM-020.
 - [x] HFM-022 — Add descriptor/version/capability dispatch tests, unsupported-format preservation and deterministic provenance tests. Depends: HFM-020, HFM-021.
-- [-] HFM-023 — Verify new directory membership in SwiftPM and both Xcode definitions; update XcodeGen inclusion and relevant exclusions without changing target restrictions. Depends: HFM-020.
+- [x] HFM-023 — Verify new directory membership in SwiftPM and both Xcode definitions; update XcodeGen inclusion and relevant exclusions without changing target restrictions. Depends: HFM-020.
 
 ### Stage 2 — First working vertical slice and immediate safety
 
@@ -291,7 +291,7 @@ For each completed item append a dated sign-off entry containing its ID, changed
 - [x] HFM-052 — Replace heuristic destructive reconciliation; validate identities, duplicate conflicts, containment, symlinks, case and Unicode collisions. Depends: HFM-051.
 - [x] HFM-053 — Coalesce watches and queue deferred scans during editing/picking; add stale-write arbitration across windows/processes. Depends: HFM-051, HFM-052.
 - [x] HFM-054 — Route startup, document multi-open, Locate/Grant/Retry/Restore and dismissal through one incident coordinator and existing UI primitives. Depends: HFM-051–053.
-- [ ] HFM-055 — Verify one parent incident, suppressed child alerts, no repeat on unchanged state, preserved session and unaffected work; test sandbox grants and volume recovery. Depends: HFM-054.
+- [x] HFM-055 — Verify one parent incident, suppressed child alerts, no repeat on unchanged state, preserved session and unaffected work; test sandbox grants and volume recovery. Depends: HFM-054.
 
 ### Stage 5 — Recoverable operations
 
@@ -312,8 +312,8 @@ For each completed item append a dated sign-off entry containing its ID, changed
 - [x] HFM-080 — Route remaining sync, setup, share, profile, proof, QR, external adapters and UI persistence entry points through the manager. Document infrastructure exceptions. Depends: HFM-074.
 - [x] HFM-081 — Consolidate Finder declarations, document routing, labels/icons and legacy aliases; test registry/plist parity. Depends: HFM-080.
 - [x] HFM-082 — Remove obsolete direct writers/facades and run static bypass audit; retain explicit migration readers. Depends: HFM-080, HFM-081.
-- [ ] HFM-083 — Run full appropriate build/self-test suites and native regression matrix for both targets; record exact build identities and untested cases. Depends: HFM-082.
-- [ ] HFM-084 — Review completion criteria against evidence, record remaining product decisions and present final results for Rick's acceptance. Depends: HFM-083.
+- [x] HFM-083 — Run full appropriate build/self-test suites and native regression matrix for both targets; record exact build identities and untested cases. Depends: HFM-082.
+- [x] HFM-084 — Review completion criteria against evidence, record remaining product decisions and present final results for Rick's acceptance. Depends: HFM-083.
 
 ### Sign-off ledger
 
@@ -322,7 +322,7 @@ For each completed item append a dated sign-off entry containing its ID, changed
 | 2026-10-15 | HFM-001, HFM-002 | Source review and architecture/format/recovery/provenance/test plan recorded | Runtime failures not reproduced; implementation pending |
 | 2026-10-15 | HFM-003 | Backlog IDs, dependencies and completion evidence rules added; document structure and whitespace checked | Documentation sign-off only; no app build or user acceptance claimed |
 
-Current gate: complete both target builds and record their actual outcomes, then finish the sandbox recovery check and final acceptance record. Earlier test totals below are milestones, not substitutes for the final build results.
+Final gate passed at `e4cf98d`; see the completion record below. Earlier test totals are historical milestones, not the final release results. Agent verification does not imply Rick’s product acceptance.
 
 Implementation evidence — 2026-10-15:
 
@@ -370,3 +370,25 @@ The optional personal-name redaction codec is implemented and tested. Normal exp
 
 
 Post-commit verification at `fbf12d5`: the direct release build/self-test/sign/install succeeded (1,024 passed, 0 failed). The App Store target compiled and its self-test passed (1,020 passed, 0 failed; four direct-helper checks are excluded). A separate signed sandbox test identity verified denied external workspace access, explicit folder grant, persisted access after relaunch, precise missing-palette recovery and a return to Ready. The restored header reported that test app's bundle ID, version 3.0 and save commit `fbf12d5`. QA launchers/fixtures used separate identities and preferences; no production workspace or existing trial was reset. Startup bookmark resolution is additionally being hardened to suppress system UI/automatic mounting, followed by the final missing-bookmark relaunch check.
+
+
+### Final completion record — 2026-10-15
+
+Implementation commits: `fbf12d5` (shared handlers and recovery), `53e3193` (silent, retryable bookmark recovery), `e4cf98d` (registered catalogue identity guard). The final guard refuses open/save/Bin when a registered path contains a different catalogue UUID; detach still removes the intended registration and retains disk files.
+
+| Items | Signed-off evidence | Boundary |
+|---|---|---|
+| HFM-010–042 | Disposable fixtures, fifteen-handler codec/header matrix, legacy provenance, unknown-field retention, future versions, stale revisions, Finder/registry parity; full release suite below | Standard external formats retain their standard bytes |
+| HFM-050–055 | Grouped recovery, multi-file selection, Locate/restore, conditional grant, nested Escape and scrolling; signed sandbox folder grant persists across relaunch; deleted saved bookmark relaunches silently | Physical removable-volume and production expired-bookmark cases remain the external checks listed above |
+| HFM-060–074 | Revision-bound plans, journal recovery/conflicts, cancellation, archive verification, relocation, detach/transfer/Bin boundaries; native existing-target schema review and transfer | Unknown/unowned files retained; transfer archive-only payloads disclosed |
+| HFM-020–023, HFM-080–084 | SwiftPM and XcodeGen source membership; both generated target definitions; static writer review; native routing and UI review; both release builds and signatures verified | Optional export privacy control and new image ownership contract remain future extensions |
+
+Final source verification at `e4cf98d`:
+
+- Debug self-test: **1,029 passed, 0 failed**.
+- Direct release: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer OPEN=0 ./build.sh` succeeded; **1,029 passed, 0 failed**; Developer ID signature verified and app installed in `/Applications/MMFFDev Colour 3.app`.
+- Store release: `xcodebuild` on `Colorgain Store.xcodeproj`, scheme `Colorgain`, Release, isolated derived-data path and local ad-hoc signing succeeded; **1,025 passed, 0 failed**. Four direct-helper checks are intentionally absent. Strict signature verification passed.
+- The Store product was copied to a separate Developer ID-signed QA identity with sandbox entitlements and isolated preferences. It reopened the granted fixture normally, selected First/Second catalogues, and showed no OS alert despite a genuinely deleted saved file-bookmark target. No production workspace or trial was reset.
+- Direct and Store native UI checks cover the recovery/removal/reconciliation journeys and sizes recorded above. Final acceptance remains Rick’s; this ledger signs off implementation and the stated local checks only.
+
+Local diagnostic logs are `/tmp/colorgain-handler-{debug,release-build,store-build,tests,store-tests}.log`; they are transient machine-local evidence. A subsequent documentation-only commit is rebuilt to keep the installed footer aligned with HEAD; the source verification identity above remains unchanged.
