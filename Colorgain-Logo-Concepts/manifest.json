@@ -1,0 +1,245 @@
+{
+  "method": "Built-in image_gen",
+  "concepts": [
+    {
+      "number": "01",
+      "name": "Orbit",
+      "brief": "A compact bold circular C formed of three rounded flowing lobes surrounding a clean open white centre; distinctive asymmetric opening on right. Symbol above small neutral lowercase wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-bc9b182c-38d3-4259-b19a-92c68a738c27.png",
+      "file": "01-orbit.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 01 — Orbit. A compact bold circular C formed of three rounded flowing lobes surrounding a clean open white centre; distinctive asymmetric opening on right. Symbol above small neutral lowercase wordmark."
+    },
+    {
+      "number": "02",
+      "name": "Bloom",
+      "brief": "Five broad rounded petals radiate around a pentagonal negative space, one subtly cut to suggest C; solid chunky shapes, no fine lines. Symbol above small neutral wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-5ec648c4-5e63-41a9-b590-10b4046c814e.png",
+      "file": "02-bloom.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 02 — Bloom. Five broad rounded petals radiate around a pentagonal negative space, one subtly cut to suggest C; solid chunky shapes, no fine lines. Symbol above small neutral wordmark."
+    },
+    {
+      "number": "03",
+      "name": "Confluence",
+      "brief": "Three flowing circular nodes merge through concave necks into a compact triangular symbol, with a circular negative-space centre. Different from a recycling symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-9e4120b4-aee6-4127-890c-d484548d3182.png",
+      "file": "03-confluence.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 03 — Confluence. Three flowing circular nodes merge through concave necks into a compact triangular symbol, with a circular negative-space centre. Different from a recycling symbol."
+    },
+    {
+      "number": "04",
+      "name": "Aperture",
+      "brief": "An almost circular solid black disc with one elegantly curving white channel carving a lowercase g into it; substantial rounded silhouette.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-8a670f3a-a450-411d-9a7e-92fa12e053cd.png",
+      "file": "04-aperture.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 04 — Aperture. An almost circular solid black disc with one elegantly curving white channel carving a lowercase g into it; substantial rounded silhouette."
+    },
+    {
+      "number": "05",
+      "name": "Phase",
+      "brief": "Two thick rounded crescent shapes interlock to suggest C and G without forming a chain link. Compact balanced symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-b36b542b-823c-4a6e-993a-7b36cdfaa897.png",
+      "file": "05-phase.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 05 — Phase. Two thick rounded crescent shapes interlock to suggest C and G without forming a chain link. Compact balanced symbol."
+    },
+    {
+      "number": "06",
+      "name": "Relay",
+      "brief": "Four circular terminals connected by a single smooth diagonal flowing bridge; distinctive compact square composition with large clean negative spaces.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-a48ba97e-895e-47cb-b6c4-162703e1d7ac.png",
+      "file": "06-relay.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 06 — Relay. Four circular terminals connected by a single smooth diagonal flowing bridge; distinctive compact square composition with large clean negative spaces."
+    },
+    {
+      "number": "07",
+      "name": "Focus",
+      "brief": "A thick open rounded ring around one offset solid dot, with a sculpted inward bar suggesting G. Bold precise minimal silhouette.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-99a1862f-345f-497a-9b1e-f3845c65023e.png",
+      "file": "07-focus.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 07 — Focus. A thick open rounded ring around one offset solid dot, with a sculpted inward bar suggesting G. Bold precise minimal silhouette."
+    },
+    {
+      "number": "08",
+      "name": "Gain",
+      "brief": "Three rising capsule-like masses fuse at their base with concave smooth valleys; a bold abstract growth motif, not a bar chart.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-139df1b5-664f-4216-8960-5d65c595b108.png",
+      "file": "08-gain.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 08 — Gain. Three rising capsule-like masses fuse at their base with concave smooth valleys; a bold abstract growth motif, not a bar chart."
+    },
+    {
+      "number": "09",
+      "name": "Continuum",
+      "brief": "A single thick flowing ribbon curls into an open C with a short internal rounded return suggesting G. No gradients or overlap shading.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-e3a912b9-2472-43df-bb1a-8a603fbfd1e2.png",
+      "file": "09-continuum.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 09 — Continuum. A single thick flowing ribbon curls into an open C with a short internal rounded return suggesting G. No gradients or overlap shading."
+    },
+    {
+      "number": "10",
+      "name": "Prism",
+      "brief": "Three rounded triangular lobes arranged in a rotational pinwheel, with white curved channels and a generous central opening. Flat black solid symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-6ebfaab7-d9ae-4f32-8bbd-21c87f68ebd6.png",
+      "file": "10-prism.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 10 — Prism. Three rounded triangular lobes arranged in a rotational pinwheel, with white curved channels and a generous central opening. Flat black solid symbol."
+    },
+    {
+      "number": "11",
+      "name": "Soft Grotesk",
+      "brief": "Pure lowercase colorgain wordmark, custom very bold rounded geometric sans. Circular o letters, single storey a and g, precise open counters. No separate symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-c7cf74bc-2cd1-4a7e-a7eb-65cf8143c539.png",
+      "file": "11-soft-grotesk.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 11 — Soft Grotesk. Pure lowercase colorgain wordmark, custom very bold rounded geometric sans. Circular o letters, single storey a and g, precise open counters. No separate symbol. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "12",
+      "name": "Ligature",
+      "brief": "Pure lowercase colorgain wordmark, sculpted geometric letters, unique smooth joined r-g transition while remaining completely legible. Bold curves and flat terminals.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-1e3493be-754f-4333-8cf3-6b9077884b2d.png",
+      "file": "12-ligature.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 12 — Ligature. Pure lowercase colorgain wordmark, sculpted geometric letters, unique smooth joined r-g transition while remaining completely legible. Bold curves and flat terminals. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "13",
+      "name": "Open Counter",
+      "brief": "Pure colorgain wordmark with precisely matching open cut-outs in c, o and g; circular geometry and thick stems, highly legible. No symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-d045af4f-e903-4f77-9927-4c3b11f10639.png",
+      "file": "13-open-counter.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 13 — Open Counter. Pure colorgain wordmark with precisely matching open cut-outs in c, o and g; circular geometry and thick stems, highly legible. No symbol. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "14",
+      "name": "Continuous",
+      "brief": "Pure colorgain wordmark with thick softly flowing custom connected letterforms, editorial modern not handwriting; consistent stroke weight and open spacing.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-0251a219-97cf-444a-a702-78aa129ebab5.png",
+      "file": "14-continuous.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 14 — Continuous. Pure colorgain wordmark with thick softly flowing custom connected letterforms, editorial modern not handwriting; consistent stroke weight and open spacing. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "15",
+      "name": "Gain Underline",
+      "brief": "Pure bold geometric lowercase colorgain wordmark with g descender extending as a short decisive rounded underline under gain. Strong editorial character.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-dc9a0c68-76c3-4649-85ac-f48eebcccabe.png",
+      "file": "15-gain-underline.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 15 — Gain Underline. Pure bold geometric lowercase colorgain wordmark with g descender extending as a short decisive rounded underline under gain. Strong editorial character. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "16",
+      "name": "Circular Ink",
+      "brief": "Pure lowercase colorgain wordmark, extra bold almost bubble-like but disciplined, tight optical spacing, circular bowls, deep white counters, adult premium design.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-9d659d9f-6987-4061-b780-43961fba0cd6.png",
+      "file": "16-circular-ink.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 16 — Circular Ink. Pure lowercase colorgain wordmark, extra bold almost bubble-like but disciplined, tight optical spacing, circular bowls, deep white counters, adult premium design. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "17",
+      "name": "Precision",
+      "brief": "Pure uppercase COLORGAIN wordmark, extended geometric letterforms with rounded outer corners and precise flat cuts, medium bold, strong architecture, no symbol.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-9b588135-4dbc-4a31-a9bb-67127cfcca14.png",
+      "file": "17-precision.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 17 — Precision. Pure uppercase COLORGAIN wordmark, extended geometric letterforms with rounded outer corners and precise flat cuts, medium bold, strong architecture, no symbol. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "18",
+      "name": "Split Weight",
+      "brief": "Pure lowercase colorgain wordmark: color medium geometric weight, gain very bold, perfectly integrated continuous baseline and tight kerning. Bespoke single-storey g.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-cbe03d49-6963-452e-99a5-5898bf7a218f.png",
+      "file": "18-split-weight.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 18 — Split Weight. Pure lowercase colorgain wordmark: color medium geometric weight, gain very bold, perfectly integrated continuous baseline and tight kerning. Bespoke single-storey g. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "19",
+      "name": "Stack",
+      "brief": "Two-line compact typographic logo reading color on first line and gain on second, left-aligned, bold rounded custom geometric letters; integrated purposeful square composition.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-7718956f-a086-489f-a428-c5c57692facd.png",
+      "file": "19-stack.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 19 — Stack. Two-line compact typographic logo reading color on first line and gain on second, left-aligned, bold rounded custom geometric letters; integrated purposeful square composition. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "20",
+      "name": "Ink Trap",
+      "brief": "Pure lowercase colorgain wordmark, solid bold grotesk letters with generous rounded outside corners and subtle distinctive angular white cuts at junctions; clear readability.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-ec2808bc-7db6-42fe-b52a-85d301bede0d.png",
+      "file": "20-ink-trap.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 20 — Ink Trap. Pure lowercase colorgain wordmark, solid bold grotesk letters with generous rounded outside corners and subtle distinctive angular white cuts at junctions; clear readability. Make typography itself distinctive, not a generic font paired with an icon."
+    },
+    {
+      "number": "21",
+      "name": "CG Seal",
+      "brief": "Compact monogram CG made from one bold rounded black square silhouette with white negative-space C and G channels; beside a crisp custom lowercase colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-7a05c999-f657-42ae-bc6d-4d7f9c6ddce8.png",
+      "file": "21-cg-seal.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 21 — CG Seal. Compact monogram CG made from one bold rounded black square silhouette with white negative-space C and G channels; beside a crisp custom lowercase colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "22",
+      "name": "Twin Orbit",
+      "brief": "Two offset circular forms joined by a flowing rounded waist, white cuts create c and g; symbol left of bold lowercase colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-7413f437-4a7a-4391-89ed-b484bfd8e388.png",
+      "file": "22-twin-orbit.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 22 — Twin Orbit. Two offset circular forms joined by a flowing rounded waist, white cuts create c and g; symbol left of bold lowercase colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "23",
+      "name": "Bloom Lockup",
+      "brief": "Four rounded black petals with concave shoulders around a white centre, diagonal opening makes a C; symbol left of lowercase colorgain, tightly balanced horizontal lockup.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-3d41b508-d711-4da4-90d1-22908351ce8d.png",
+      "file": "23-bloom-lockup.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 23 — Bloom Lockup. Four rounded black petals with concave shoulders around a white centre, diagonal opening makes a C; symbol left of lowercase colorgain, tightly balanced horizontal lockup. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "24",
+      "name": "Registration",
+      "brief": "A bold round G symbol with a small detached circular registration dot at upper right; paired with a low wide custom lowercase colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-439cfcf8-820d-4fe9-a512-163348922a55.png",
+      "file": "24-registration.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 24 — Registration. A bold round G symbol with a small detached circular registration dot at upper right; paired with a low wide custom lowercase colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "25",
+      "name": "Channel",
+      "brief": "A single folded rounded black ribbon forming a lowercase g with generous negative-space channel; next to a soft geometric colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-da7d1770-edd9-4463-b273-1a1f454324c2.png",
+      "file": "25-channel.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 25 — Channel. A single folded rounded black ribbon forming a lowercase g with generous negative-space channel; next to a soft geometric colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "26",
+      "name": "Field",
+      "brief": "A compact two-by-two arrangement of rounded solid forms with a continuous white S-shaped gap, subtly combining C and G; beside crisp lowercase colorgain.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-e937492c-e44e-44f8-9988-4565f8624c29.png",
+      "file": "26-field.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 26 — Field. A compact two-by-two arrangement of rounded solid forms with a continuous white S-shaped gap, subtly combining C and G; beside crisp lowercase colorgain. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "27",
+      "name": "Crown",
+      "brief": "Three rounded ink lobes share a broad curved base, open centre gives C shape, paired with a custom solid lowercase colorgain wordmark. Avoid royal heraldry.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-d58583ed-ef69-4140-b700-4c7c0ee761dd.png",
+      "file": "27-crown.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 27 — Crown. Three rounded ink lobes share a broad curved base, open centre gives C shape, paired with a custom solid lowercase colorgain wordmark. Avoid royal heraldry. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "28",
+      "name": "Pulse",
+      "brief": "A sculpted thick rounded C that ends in two circular terminals and a small inner bar, paired with compact lowercase colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-576aa1b1-8e77-4d8d-b447-fb26a884caf4.png",
+      "file": "28-pulse.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 28 — Pulse. A sculpted thick rounded C that ends in two circular terminals and a small inner bar, paired with compact lowercase colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "29",
+      "name": "Counterform",
+      "brief": "An oversized abstract lowercase g built of two heavy circular bowls and a diagonal white separation, balanced with refined geometric lowercase colorgain wordmark.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-637320c6-bf00-400a-85ed-0880ae410df5.png",
+      "file": "29-counterform.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 29 — Counterform. An oversized abstract lowercase g built of two heavy circular bowls and a diagonal white separation, balanced with refined geometric lowercase colorgain wordmark. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    },
+    {
+      "number": "30",
+      "name": "Master",
+      "brief": "Bold rounded square symbol with a circular white aperture and asymmetrical black core suggesting both C and G; premium neutral lowercase colorgain wordmark beside it.",
+      "source": "/Users/rick/.codex/generated_images/01a12178-99d7-7fa3-8cc6-c7fb4eae87ce/exec-ebbd5076-d948-4719-8120-dc11256609e9.png",
+      "file": "30-master.png",
+      "prompt": "Use case: logo-brand. Create ONE original monochrome logo concept for Colorgain, an enterprise colour management and proofing app. Reference aesthetic: bold Swiss modernist geometry, rounded lobes, circular modules, smooth concave joins, distinctive negative space, typographic confidence. Must be original, not a copy of another brand. Strict flat black on pure white, no colour, gradients, shadows, texture, 3D or mockups. A polished vector-like identity exploration, generous whitespace, horizontal landscape canvas. Show ONE large main logo centred occupying most width, with a tiny simple concept number and name at top left. Exact brand spelling 'colorgain' (c o l o r g a i n), or uppercase when specified. Designed to be viable in an app header, business card, website and poster; robust silhouettes and readable counters. Do not add taglines, trademark signs, explanatory prose or extra logos. Concept 30 — Master. Bold rounded square symbol with a circular white aperture and asymmetrical black core suggesting both C and G; premium neutral lowercase colorgain wordmark beside it. Keep symbol optically balanced with wordmark, and a truly distinctive original compact silhouette."
+    }
+  ]
+}

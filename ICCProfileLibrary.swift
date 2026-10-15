@@ -131,8 +131,11 @@ final class ICCProfileLibrary {
         let url=Self.resolvedURL(profile)
         lock.lock();defer{lock.unlock()}
         guard let values=try? url.resourceValues(forKeys:[.contentModificationDateKey,.fileSizeKey]),let modified=values.contentModificationDate,let size=values.fileSize,size <= Self.maximumBytes else{cache[profile.id]=nil;return nil}
-        if let cached=cache[profile.id],cached.0 == modified,cached.1 == size{return cached.2}
-        guard let data=try? Data(contentsOf:url),Sharing.sha256(data) == profile.id,let space=CGColorSpace(iccData:data as CFData) else{cache[profile.id]=nil;return nil}
+        // URL metadata can be cached, and replacement files can retain size/date.
+        // Validate the linked identity before reusing its expensive colour transform.
+        guard let data=try? Data(contentsOf:url),data.count <= Self.maximumBytes,Sharing.sha256(data) == profile.id else{cache[profile.id]=nil;return nil}
+        if let cached=cache[profile.id]{return cached.2}
+        guard let space=CGColorSpace(iccData:data as CFData) else{cache[profile.id]=nil;return nil}
         cache[profile.id]=(modified,size,space);return space
     }
     func needsLocate(_ profile:Profile)->Bool {
