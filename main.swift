@@ -251,7 +251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let open=NSMenuItem(title:"Open Workspace…",action:#selector(runSetupAssistant),keyEquivalent:"o")
         open.target=self;menu.addItem(open);menu.addItem(.separator())
         menu.addItem(withTitle:"Quit \(Brand.name)",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
-        item.submenu=menu;bar.addItem(item);bar.addItem(developmentMenu());NSApp.mainMenu=bar
+        item.submenu=menu;bar.addItem(item)
+        let helpItem=NSMenuItem();let helpMenu=Help_Handler.shared.menu();helpItem.submenu=helpMenu;bar.addItem(helpItem);NSApp.helpMenu=helpMenu
+        bar.addItem(developmentMenu());NSApp.mainMenu=bar
     }
 
     private func developmentMenu() -> NSMenuItem {
@@ -491,13 +493,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Zoom", #selector(NSWindow.performZoom(_:)))
             NSApp.windowsMenu = m
         }
-        menu("Help") { m in
-            NSApp.helpMenu = m
-            let guide = NSMenuItem(title: "Colorgain Help", action: nil, keyEquivalent: "")
-            guide.isEnabled = false
-            guide.toolTip = "The macOS Help book is being prepared."
-            m.addItem(guide)
-        }
+        let helpItem=NSMenuItem();let helpMenu=Help_Handler.shared.menu()
+        helpItem.submenu=helpMenu;bar.addItem(helpItem);NSApp.helpMenu=helpMenu
         bar.addItem(developmentMenu())
         return bar
     }

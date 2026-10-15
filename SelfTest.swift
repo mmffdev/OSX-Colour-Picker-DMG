@@ -34,6 +34,7 @@ func runSelfTest() -> Never {
     runFileHandlerFormatMatrix(check: check)
     runPickerCacheTests(check: check)
     runWorkspaceStartupTests(check: check)
+    runHelpHandlerTests(check:check)
     runLibraryAssignmentTests(check: check)
     runPaletteSelectionAndClaimDeletionTests(check: check)
     do {
@@ -3420,4 +3421,20 @@ private func runPaletteSelectionAndClaimDeletionTests(check: (Bool, String) -> V
     lib.deleteAssignedPalettes([copied], removeClaimed: true, catalogue: "A")
     check(lib.swatch(copied) == nil && lib.swatch(claim) == nil && lib.swatch(source) != nil && lib.colours.contains { $0.hex == "#123456" },
         "project palette deletion removes only its associated claimed copy and preserves the original and colours")
+}
+
+
+private func runHelpHandlerTests(check:(Bool,String)->Void){
+    let resources=URL(fileURLWithPath:#filePath).deletingLastPathComponent().appendingPathComponent("Help/Resources")
+    check(Set(Help_Handler.pages.map(\.id)).count == Help_Handler.pages.count,"Help topics have unique route identities")
+    for page in Help_Handler.pages {
+        let source=(try? String(contentsOf:resources.appendingPathComponent(page.file+".html"),encoding:.utf8)) ?? ""
+        check(!source.isEmpty && source.contains("<h1>"),"Help resource exists for "+page.title)
+        if Bundle.main.bundleURL.pathExtension == "app" {check(Help_Handler.resource(page) != nil,"Installed bundle contains help for "+page.title)}
+        check(page.sections.allSatisfy{source.contains("id=\""+$0+"\"")},"Help section anchors exist for "+page.title)
+    }
+    let panel=Help_HexButton.frame(width:360,height:34),section=Help_HexButton.frame(width:360,height:28)
+    check(panel.midX == section.midX && panel.midY == 17 && section.midY == 14,"Panel and section help align without changing header heights")
+    let library=(try? String(contentsOf:resources.appendingPathComponent("Help_Library.html"),encoding:.utf8)) ?? ""
+    check(library.contains("<svg") && library.contains("aria-label") && library.contains(".coldata"),"Library help bundles accessible graphical explanations and workspace guidance")
 }

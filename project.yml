@@ -28,7 +28,7 @@ targets:
     sources:
       - path: .
         name: Sources
-        includes: ["*.swift", "FileHandlers/**/*.swift"]
+        includes: ["*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
         excludes:
           - Package.swift
           - project.yml
@@ -38,7 +38,7 @@ targets:
           - "helper/**"
           - vendor
           - tools
-          - help
+          - Help/Resources
           - design
           - assets
           - icons
@@ -52,6 +52,9 @@ targets:
           - Claude outputs
       - path: ProofingResources
         name: Proofing Reference Data
+        buildPhase: resources
+      - path: Help/Resources
+        name: Help Articles
         buildPhase: resources
       - path: AppIcon.icns
         buildPhase: resources

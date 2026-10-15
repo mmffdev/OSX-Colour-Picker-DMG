@@ -148,7 +148,7 @@ Page colour hover halos dismiss immediately on scrolling, forward the gesture to
 
 Saved print settings, palette Delta controls and .colpro exchange use the shared [.coldata profile workflow](c_print_profiles.md). Dropdown values and menu rows use the 13-point body style.
 
-Header background presses use native window dragging after control hit tests. Tab hit areas cover only the icon/label band, leaving space above and below draggable. Header utility glyphs share the 18-point `HeaderUtilityIcon` square and optical centre. Help sits immediately before Settings; entry collapses Rail 1 and closes the other rails, restoring preceding rail goals on exit. Initial help content is bundled Markdown in `HelpResources`, rendered by `StudioHelpPage`; both build targets must include these resources.
+Header background presses use native window dragging after control hit tests. Tab hit areas cover only the icon/label band, leaving space above and below draggable. Header utility glyphs share the 18-point `HeaderUtilityIcon` square and optical centre. Help sits immediately before Settings; entry collapses Rail 1 and closes the other rails, restoring preceding rail goals on exit. Help code and bundled articles live under `Help/`; see [Help system](c_help.md). `Help_Handler` supplies one page registry for panel/section hex buttons, the app help index and the Help menubar. Both targets must include `Help/Resources`.
 
 The `osx-full-app` branch trials the canvas-centred Library shell. Its current region names, dimensions, integration and prototype boundaries are in [c_full_app.md](c_full_app.md); explicit new workspace instructions supersede the old rail/page allocation for this shell.
 

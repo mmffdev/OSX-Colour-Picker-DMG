@@ -1,0 +1,13 @@
+# Contextual Help
+
+`Help/Help_Handler.swift` owns the topic registry, bundled resource resolution, help menu and shared reader. `Help/Resources/Help_<Panel>.html` owns article content; Library includes accessible diagrams and stable section IDs. Older reference documents remain in Resources/Legacy and are not presented as current panel articles. `StudioHelpPage` links the same registry from the existing app help route.
+
+`Help_HexButton.frame` owns the trailing centre (20 pt inset), 28 pt hit slot and vertical centring. Main WorkspacePanel headers remain 34 pt; expandable WorkspaceSectionHeader rows remain 28 pt. Main headers place Help after the grip; section actions, including the Catalogue plus, sit one slot left. Keep title/trailing-control reservations and catalogue row sliders aligned with those slots. Section buttons route to their parent page plus a validated anchor, never a separate duplicate article. Section accessibility custom actions expose Help alongside the disclosure.
+
+Resources ship in both direct and Store targets. Direct build.sh copies them into the bundle; Xcode target membership is specified by project.yml and appstore/project.yml. SwiftPM excludes resource content from its source scan. Add each panel topic to Help_Handler.pages, create its article, and test source/bundle presence and section anchors. No remote content is loaded today.
+
+Future hosting recommendation: publish the same articles and diagrams as static HTTPS pages under a versioned path (for example /help/v3/library#folders). Keep IDs/anchors stable. Correct prose within a version; create a new version for changed UI. Add an online source adapter to Help_Handler, with bundled offline fallback and explicit app-version mapping. Cache only help content; opening help must not transmit catalogue paths or asset data. A hosted site is not configured or deployed by the current implementation.
+
+## Local verification — 2026-10-16
+
+Debug suite: 1,051 passed, 0 failed. Checks cover topic identity, source resources, section anchors, shared 34/28 pt header geometry and accessible Library diagrams. Bundled app self-tests additionally require every registered help article in the installed resources. Native isolated Studio verified aligned headers, Library overview/diagrams, same-document Folders link and actual Folders header anchor, indexed Help menu and Cmd+W close. Focused finish review found and resolved the top-level Help index route. Mechanical article scan reported no findings. Other panel articles are concise introductions; Library is the fully illustrated guide. Remote hosting is a recommendation, not an enabled feature.

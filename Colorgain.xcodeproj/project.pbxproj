@@ -187,6 +187,8 @@
 		FC8E61513180E99AA0C54C0A /* PrePress.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_296A7726-8C9C-4B37-A42B-D8A566CFFA18" /* PrePress.swift */; };
 		FCFADF3E71842B3CF07F98BA /* Handler_File_Information.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A8529AB9652182569BEA23 /* Handler_File_Information.swift */; };
 		FE61C7CA0B86B9F0525ED007 /* StartupSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_C9921F79-BD14-4A09-AC15-C5B5A5F5EC43" /* StartupSetup.swift */; };
+		583CF44F4AD4407881203683 /* Help_Handler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65CF9481A15C47388087D293; };
+		FF6F94F7BAA84555AF445E2D /* HelpResources in Resources */ = {isa = PBXBuildFile; fileRef = ABEAE210861E4836B73BFFF7; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -384,6 +386,8 @@
 		"TEMP_FADAE1ED-B461-41A3-9A6B-0FC0AC71671B" /* SplashBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashBuild.swift; sourceTree = "<group>"; };
 		"TEMP_FEC0456C-7387-469E-8E54-929C1BB0F14F" /* AppData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppData.swift; sourceTree = "<group>"; };
 		"TEMP_FFCBB1A6-523F-4435-8EAF-978568607844" /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		65CF9481A15C47388087D293 /* Help_Handler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Help/Help_Handler.swift; sourceTree = "<group>"; };
+		ABEAE210861E4836B73BFFF7 /* HelpResources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Help/Resources; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -402,6 +406,8 @@
 			isa = PBXGroup;
 			children = (
 				A4EDE6FC3C724E1AAD14F48F /* File Icons */,
+				65CF9481A15C47388087D293 /* Help_Handler.swift */,
+				ABEAE210861E4836B73BFFF7 /* HelpResources */,
 				FA179E9BC59E7CDE8D5EE649 /* FileHandlers */,
 				A0F8DF4E028A734D9400F033 /* Proofing Reference Data */,
 				82DB9851BEC354A92C16A016 /* AppIcon.icns */,
@@ -698,6 +704,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FF6F94F7BAA84555AF445E2D /* HelpResources in Resources */,
 				B3956637F61DBAF44531D4F9 /* AppIcon.icns in Resources */,
 				F26936E449951E8F650A155C /* FOGRA39_MW3_Subset.txt in Resources */,
 				20795D3CF84D3800375E1970 /* FOGRA51_MW3_Subset.txt in Resources */,
@@ -752,6 +759,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				583CF44F4AD4407881203683 /* Help_Handler.swift in Sources */,
 				6C0524F53727913CA3611BAC /* AdobeHelper.swift in Sources */,
 				108C0C9C92AF277DC758BD4E /* AdobeHelperRules.swift in Sources */,
 				B5A512117309826FC0493FEF /* AllSwatchesView.swift in Sources */,

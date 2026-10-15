@@ -36,6 +36,7 @@ private enum WorkspaceFavourites {
 /// A full-width internal section header; disclosure state travels with the app data.
 private final class WorkspaceSectionHeader:NSButton {
     private let preferenceKey:String
+    private let help:Help_HexButton
     private let actionButton=NSButton()
     var trailingControl:NSView? {didSet{oldValue?.removeFromSuperview();if let trailingControl{addSubview(trailingControl)};needsLayout=true}}
     private var headerAction:(()->Void)?
@@ -43,17 +44,22 @@ private final class WorkspaceSectionHeader:NSButton {
     var expanded:Bool {state == .on}
     override var isFlipped:Bool {true}
     init(_ title:String,key:String){
-        preferenceKey=key;super.init(frame:.zero)
+        preferenceKey=key
+        let anchor=key.contains("Catalogues") ? "catalogues":key.contains("Favs") ? "favourites":key.contains("Folders") ? "folders":"my-palettes"
+        help=Help_HexButton(page:"catalogues",section:anchor,title:title)
+        super.init(frame:.zero)
         self.title=title;isBordered=false;setButtonType(.onOff)
         state=AppPreferences.shared.bool(forKey:key) ? .off:.on
         target=self;action=#selector(toggled);setAccessibilityLabel(title+" section")
         actionButton.isBordered=false;actionButton.imagePosition = .imageOnly
         actionButton.target=self;actionButton.action=#selector(runHeaderAction);actionButton.isHidden=true
-        addSubview(actionButton)
+        addSubview(actionButton);addSubview(help)
+        setAccessibilityCustomActions([NSAccessibilityCustomAction(name:"Help: "+title,handler:{ [weak self] in self?.help.performClick(nil);return true })])
     }
     required init?(coder:NSCoder){fatalError()}
     override func mouseDown(with event:NSEvent){
         let point=convert(event.locationInWindow,from:nil)
+        if help.frame.contains(point){help.performClick(nil);return}
         if let control=trailingControl,control.frame.contains(point){control.mouseDown(with:event);return}
         if !actionButton.isHidden,actionButton.frame.contains(point){actionButton.performClick(nil);return}
         super.mouseDown(with:event)
@@ -65,8 +71,9 @@ private final class WorkspaceSectionHeader:NSButton {
     }
     @objc private func runHeaderAction(){headerAction?()}
     override func layout(){
-        super.layout();actionButton.frame=NSRect(x:bounds.width-32,y:2,width:24,height:24);actionButton.contentTintColor=Design.ink
-        trailingControl?.frame=NSRect(x:max(150,bounds.width-160),y:0,width:min(152,max(0,bounds.width-150)),height:28)
+        super.layout();help.frame=Help_HexButton.frame(width:bounds.width,height:28)
+        actionButton.frame=NSRect(x:bounds.width-60,y:2,width:24,height:24);actionButton.contentTintColor=Design.ink
+        trailingControl?.frame=NSRect(x:max(150,bounds.width-188),y:0,width:min(152,max(0,bounds.width-178)),height:28)
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     override func draw(_ dirtyRect:NSRect){
@@ -78,7 +85,7 @@ private final class WorkspaceSectionHeader:NSButton {
             path.move(to:NSPoint(x:15,y:12));path.line(to:NSPoint(x:21,y:16));path.line(to:NSPoint(x:15,y:20))
         }
         path.close();Design.ink.setFill();path.fill()
-        Design.attributed(title,.bodyStrong).draw(x:30,baseline:19,width:max(0,(trailingControl?.frame.minX ?? (bounds.width-(actionButton.isHidden ? 16:40)))-38))
+        Design.attributed(title,.bodyStrong).draw(x:30,baseline:19,width:max(0,(trailingControl?.frame.minX ?? (bounds.width-(actionButton.isHidden ? 44:68)))-38))
     }
 }
 
@@ -793,7 +800,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         let start:CGFloat=showsConnectors ? Self.lane(level(forRow:row))+21:16
         let isPalette:Bool={if let node=item(atRow:row) as? WorkspaceCatalogues.Node,case .palette=node.place{return true};return false}()
         let isCatalogue=(item(atRow:row) as? WorkspaceCatalogues.Node)?.catalogue != nil
-        let trailing=isCatalogue ? 6:(isPalette ? Self.paletteCellTrailingInset:34)
+        let trailing=isCatalogue ? 34:(isPalette ? Self.paletteCellTrailingInset:34)
         return NSRect(x:start,y:box.minY,width:max(0,bounds.width-start-trailing),height:box.height)
     }
     private final class Disclosure:NSButton {

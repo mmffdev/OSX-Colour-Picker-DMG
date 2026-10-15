@@ -4,13 +4,15 @@ import AppKit
 /// The initial article stays native and uses the same readable type as the app.
 final class StudioHelpPage: NSView, PageSection {
     var onResize: (() -> Void)?
+    private let topics=Help_Handler.pages.map{SwissButton($0.title,.quiet)}
     private var blocks: [(text: String, heading: Bool)] = []
     override var isFlipped: Bool { true }
-    override init(frame: NSRect) { super.init(frame: frame); reload() }
+    override init(frame: NSRect) { super.init(frame: frame); for (i,button) in topics.enumerated(){button.tag=i;button.target=self;button.action=#selector(openTopic(_:));addSubview(button)}; reload() }
     convenience init() { self.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError() }
     func reload() {
         let url = Bundle.main.url(forResource: "getting-started", withExtension: "md", subdirectory: "HelpResources")
+            ?? Bundle.main.url(forResource: "getting-started", withExtension: "md", subdirectory: "Resources")
             ?? Bundle.main.url(forResource: "getting-started", withExtension: "md")
         let text = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
             ?? "# Help\n\nHelp articles could not be loaded."
@@ -20,8 +22,7 @@ final class StudioHelpPage: NSView, PageSection {
             let heading = clean.hasPrefix("#")
             return (heading ? String(clean.drop(while: { $0 == "#" || $0 == " " })) : clean, heading)
         }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
+        setAccessibilityElement(false)
         setAccessibilityLabel(text.replacingOccurrences(of: "#", with: ""))
         needsDisplay = true
         onResize?()
@@ -40,6 +41,12 @@ final class StudioHelpPage: NSView, PageSection {
         }
         return y + Design.App.unit
     }
-    func height(forWidth width: CGFloat) -> CGFloat { render(width: width, draw: false) }
+    @objc private func openTopic(_ sender:NSButton){Help_Handler.shared.open(Help_Handler.pages[sender.tag].id)}
+    override func layout(){
+        super.layout()
+        let top=render(width:bounds.width,draw:false)
+        for (i,button) in topics.enumerated(){button.frame=NSRect(x:0,y:top+CGFloat(i)*40,width:min(400,bounds.width),height:32)}
+    }
+    func height(forWidth width: CGFloat) -> CGFloat { render(width: width, draw: false)+CGFloat(topics.count)*40+28 }
     override func draw(_ dirtyRect: NSRect) { _ = render(width: bounds.width, draw: true) }
 }

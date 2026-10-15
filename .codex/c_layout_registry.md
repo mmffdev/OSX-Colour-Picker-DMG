@@ -177,3 +177,6 @@ ICC references that are missing, unreadable or changed move into a leading Missi
 
 
 Catalogue rows expose a trailing `slider.horizontal.3` action aligned with the Catalogues header’s plus. `SwissContextMenu` supplies Remove, Backup and Export; `CatalogueRowActions` delegates removal to `FileCatalogueRemovalWizard` and archive publication to `Handler_File_Manager.createCatalogueArchive`. Backup saves a unique checked `.colshr` in app-home Backups/Catalogues; Export asks for a destination. Both retain source files and registration. Folders has no palette filter controls and does not inherit My Palette’s filtering. My Palette’s hides filters when genuinely empty and shows “You have no palettes.”; a filtered-out result retains the controls and explains the mismatch.
+
+
+Panel and expandable section help uses the shared outlined `Help_HexButton`, with the furthest-right centre at 20 pt from the panel edge and unchanged header heights. Main headers open the whole panel article; section headers open the same article at a validated anchor. See [Help system](c_help.md).

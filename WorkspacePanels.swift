@@ -132,6 +132,7 @@ final class WorkspacePanel: NSView {
     private let titleButton: NSButton
     private let filledTitle: NSTextField
     private let grip = PanelDragGrip()
+    private let help: Help_HexButton
     private let resizeGrip = PanelResizeGrip()
     private let headerActionButton = NSButton()
     private var headerAction: (() -> Void)?
@@ -143,6 +144,7 @@ final class WorkspacePanel: NSView {
     override var isFlipped: Bool { true }
     init(id: String, title: String, content: NSView, height: CGFloat? = nil, resizable:Bool = true, draggable:Bool = true) {
         panelID = id; self.content = content; preferredHeight = height ?? 0
+        help=Help_HexButton(page:id,title:title)
         self.resizable=resizable;self.draggable=draggable
         contentScroll = content is WorkspaceInspector || content is WorkspaceScrollableContent ? WorkspacePanelScroll() : nil
         titleButton = NSButton(title: title, target: nil, action: nil)
@@ -171,7 +173,7 @@ final class WorkspacePanel: NSView {
         headerActionButton.contentTintColor=Design.quiet
         headerActionButton.target=self; headerActionButton.action=#selector(runHeaderAction)
         addSubview(headerSurface)
-        [disclosure,titleButton,filledTitle,headerActionButton,grip].forEach{headerSurface.addSubview($0)}
+        [disclosure,titleButton,filledTitle,headerActionButton,grip,help].forEach{headerSurface.addSubview($0)}
         addSubview(resizeGrip)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -190,16 +192,17 @@ final class WorkspacePanel: NSView {
         if !headerIsPinned {headerSurface.frame=NSRect(x:0,y:0,width:bounds.width,height:Self.headerHeight)}
         disclosure.frame = NSRect(x: 8, y: 9, width: 16, height: 16)
         let dragSpace:CGFloat=draggable ? 28:0
-        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-42-dragSpace-(headerAction == nil ? 0:28)), height: Self.headerHeight)
-        headerActionButton.frame=NSRect(x:bounds.width-36-dragSpace,y:5,width:24,height:24)
-        grip.frame = NSRect(x: bounds.width-36, y: 0, width: 28, height: Self.headerHeight)
+        help.frame=Help_HexButton.frame(width:bounds.width,height:Self.headerHeight)
+        titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-70-dragSpace-(headerAction == nil ? 0:28)), height: Self.headerHeight)
+        headerActionButton.frame=NSRect(x:bounds.width-64-dragSpace,y:5,width:24,height:24)
+        grip.frame = NSRect(x: bounds.width-64, y: 0, width: 28, height: Self.headerHeight)
         disclosure.isHidden=fillsRail;grip.isHidden=fillsRail || !draggable;titleButton.isHidden=fillsRail;filledTitle.isHidden = !fillsRail
         if fillsRail {
             titleButton.frame=NSRect(x:16,y:0,width:max(20,bounds.width-64),height:Self.headerHeight)
             let labelHeight=filledTitle.intrinsicContentSize.height
-            filledTitle.frame=NSRect(x:16,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-64),height:labelHeight)
+            filledTitle.frame=NSRect(x:16,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-92),height:labelHeight)
             filledTitle.textColor=Design.ink
-            headerActionButton.frame=NSRect(x:bounds.width-36,y:5,width:24,height:24)
+            headerActionButton.frame=NSRect(x:bounds.width-64,y:5,width:24,height:24)
         }
         let closed=collapsed && !fillsRail
         content.isHidden = closed; contentScroll?.isHidden=closed; resizeGrip.isHidden = closed || resizeFooterHeight == 0

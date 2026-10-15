@@ -27,12 +27,12 @@ targets:
     sources:
       - path: ..
         name: Sources
-        includes: ["*.swift", "FileHandlers/**/*.swift"]
-        excludes: ["Package.swift", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html", "appstore", "helper", "vendor", "tools", "help", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
+        includes: ["*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
+        excludes: ["Package.swift", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html", "appstore", "helper", "vendor", "tools", "Help/Resources", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
       - path: ../ProofingResources
         name: Proofing Reference Data
         buildPhase: resources
-      - path: ../HelpResources
+      - path: ../Help/Resources
         name: Help Articles
         buildPhase: resources
       - path: ../AppIcon.icns
