@@ -10,6 +10,8 @@ import Foundation
 struct ImportedPalette: Equatable {
     var name: String
     var colours: [ExportColour]
+    var review:PaletteReview? = nil
+    var asset:PaletteDocument? = nil
 }
 
 /// What a merge did, for the footer.
@@ -43,9 +45,9 @@ enum PaletteImport {
 
     /// A .colpalette: the palette and the colours it uses, each named as it was there.
     static func paletteDocument(_ data: Data) -> ImportedPalette? {
-        guard let doc = try? ColourFiles.decoder().decode(PaletteDocument.self, from: data), doc.format == "colour-palette" else { return nil }
+        guard let doc = try? PaletteAssetHandler.read(data), doc.format == "colour-palette" else { return nil }
         let colours = doc.palette.entries.map { ExportColour(name: $0.name ?? colourName($0.hex), hex: $0.hex) }
-        return ImportedPalette(name: doc.palette.name, colours: colours)
+        return ImportedPalette(name: doc.palette.name, colours: colours,review:doc.palette.review,asset:doc)
     }
 
     /// W3C Design Tokens: a colour token is any object with "$type": "color", or a "$value" that reads as a colour.
@@ -193,7 +195,7 @@ extension Library {
     @discardableResult
     mutating func merge(_ imported: [ImportedPalette], into project: UUID?, at date: Date = Date()) -> ImportOutcome {
         var outcome = ImportOutcome()
-        for incoming in imported where !incoming.colours.isEmpty {
+        for incoming in imported where !incoming.colours.isEmpty || incoming.asset != nil {
             let wanted = incoming.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let id: UUID
             if let there = palettes(in: project).first(where: { !$0.isTypography && $0.name.caseInsensitiveCompare(wanted) == .orderedSame }) {
@@ -204,7 +206,15 @@ extension Library {
                 if let project = project { move(id, to: project, index: Int.max, at: date) }
                 activeSwatchID = keep   // an import does not redirect picks
                 outcome.palettesMade += 1
+                if let asset=incoming.asset,let i=swatches.firstIndex(where:{$0.id == id}),
+                   let whole=try? PaletteAssetHandler.adopting(asset,id:id,project:project,name:swatches[i].name) {
+                    swatches[i]=whole
+                    for colour in asset.colours where !colours.contains(where:{$0.hex == colour.hex}){colours.append(colour)}
+                    outcome.added+=whole.entries.count
+                    continue
+                }
             }
+            if let i=swatches.firstIndex(where:{$0.id == id}) {swatches[i].review=PaletteAssetHandler.mergedReview(swatches[i].review,incoming.review)}
             for colour in incoming.colours {
                 guard let entries = swatch(id)?.entries else { break }
                 if entries.contains(where: { $0.hex == colour.hex }) { outcome.skipped += 1; continue }

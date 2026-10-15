@@ -37,6 +37,7 @@ private enum WorkspaceFavourites {
 private final class WorkspaceSectionHeader:NSButton {
     private let preferenceKey:String
     private let actionButton=NSButton()
+    var trailingControl:NSView? {didSet{oldValue?.removeFromSuperview();if let trailingControl{addSubview(trailingControl)};needsLayout=true}}
     private var headerAction:(()->Void)?
     var changed:(()->Void)?
     var expanded:Bool {state == .on}
@@ -51,6 +52,12 @@ private final class WorkspaceSectionHeader:NSButton {
         addSubview(actionButton)
     }
     required init?(coder:NSCoder){fatalError()}
+    override func mouseDown(with event:NSEvent){
+        let point=convert(event.locationInWindow,from:nil)
+        if let control=trailingControl,control.frame.contains(point){control.mouseDown(with:event);return}
+        if !actionButton.isHidden,actionButton.frame.contains(point){actionButton.performClick(nil);return}
+        super.mouseDown(with:event)
+    }
     @objc private func toggled(){AppPreferences.shared.set(!expanded,forKey:preferenceKey);changed?()}
     func setAction(symbol:String,title:String,run:@escaping()->Void){
         headerAction=run;actionButton.image=NSImage(systemSymbolName:symbol,accessibilityDescription:title)
@@ -59,6 +66,7 @@ private final class WorkspaceSectionHeader:NSButton {
     @objc private func runHeaderAction(){headerAction?()}
     override func layout(){
         super.layout();actionButton.frame=NSRect(x:bounds.width-32,y:2,width:24,height:24);actionButton.contentTintColor=Design.ink
+        trailingControl?.frame=NSRect(x:max(150,bounds.width-160),y:0,width:min(152,max(0,bounds.width-150)),height:28)
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     override func draw(_ dirtyRect:NSRect){
@@ -70,7 +78,7 @@ private final class WorkspaceSectionHeader:NSButton {
             path.move(to:NSPoint(x:15,y:12));path.line(to:NSPoint(x:21,y:16));path.line(to:NSPoint(x:15,y:20))
         }
         path.close();Design.ink.setFill();path.fill()
-        Design.attributed(title,.bodyStrong).draw(x:30,baseline:19,width:max(0,bounds.width-(actionButton.isHidden ? 46:70)))
+        Design.attributed(title,.bodyStrong).draw(x:30,baseline:19,width:max(0,(trailingControl?.frame.minX ?? (bounds.width-(actionButton.isHidden ? 16:40)))-38))
     }
 }
 
@@ -117,9 +125,35 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     var onFilter:((String)->Void)?
     var onFavourite:((UUID)->Void)?
     var onDrop:((UUID,LibraryRail.DropDestination)->Void)?
+    var onRename:((UUID,String)->Void)?
+    var onTarget:((UUID)->Void)?
+    var onRating:((UUID,Int)->Void)?
+    var onFlag:((UUID,PaletteReview.Flag?)->Void)?
+    var onHalo:((UUID,NSView,NSRect)->Void)?
+    private var assets=Library()
+    private let orderControl=PaletteOrderControl(frame:.zero)
+    private let folderOrderControl=PaletteOrderControl(frame:.zero)
+    private var order:PaletteAssetHandler.Order {PaletteAssetHandler.Order(rawValue:AppPreferences.shared.string(forKey:"Workspace.Library.PaletteOrder") ?? "") ?? .newest}
+    func configureAssets(_ library:Library){assets=library}
+
     override var isFlipped:Bool {true}
     override init(frame:NSRect){
         super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
+        orderControl.value=order;folderOrderControl.value=order
+        orderControl.setAccessibilityLabel("Order My Palettes");folderOrderControl.setAccessibilityLabel("Order Owned Palettes")
+        myPalettesHeading.trailingControl=orderControl;foldersHeading.trailingControl=folderOrderControl
+        for control in [orderControl,folderOrderControl] {control.onChange={ [weak self] order in
+            guard let self else{return}
+            AppPreferences.shared.set(order.rawValue,forKey:"Workspace.Library.PaletteOrder")
+            self.orderControl.value=order;self.folderOrderControl.value=order
+            self.rebuilding=true
+            for tree in [self.outline,self.myPalettes,self.favourites]{
+                let key=(tree.item(atRow:tree.selectedRow) as? Node)?.key
+                self.sortPalettes();tree.reloadData()
+                if let key,let row=(0..<tree.numberOfRows).first(where:{(tree.item(atRow:$0) as? Node)?.key == key}){tree.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}
+            }
+            self.rebuilding=false;self.refreshExtent()
+        }}
         myPalettes.showsConnectors=false;favourites.showsConnectors=false;catalogueList.showsConnectors=false
         for (tree,name) in [(favourites,"Library Favourites"),(catalogueList,"Catalogue List"),(outline,"Catalogue Library Tree"),(myPalettes,"My Palettes")] {
             let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(name))
@@ -187,7 +221,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                 case .palette(let palette):
                     // A leaf belongs under its real schema bucket. Selecting it opens the
                     // palette in the centre canvas; it never introduces another palette rail.
-                    node=Node("palette:" + palette.id.uuidString,palette.name,count:palette.count,place:.palette(palette.id),symbol:"square.grid.2x2");level=palette.indent+1
+                    node=Node("palette:" + palette.id.uuidString,palette.name,count:palette.count,place:.palette(palette.id),symbol:"swatchpalette");level=palette.indent+1
                     node.colours=palette.colours
                     if let project=palette.project {node.destination=LibraryRail.DropDestination(project:project,bucket:palette.bucket)}
                 case .group(let title,let key):
@@ -215,6 +249,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             if case .palette=$0.place {return true};return false
         }
         roots=root.children.filter{!["favourites","palettes","claimed"].contains($0.key)}
+        sortPalettes()
         for tree in [catalogueList,favourites,outline,myPalettes] {tree.reloadData()}
         if let index=catalogueRoots.firstIndex(where:{$0.catalogue == active}) {
             catalogueList.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false)
@@ -232,6 +267,21 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             }
         }
     }
+    private func sortPalettes(){
+        func sorted(_ nodes:[Node])->[Node]{
+            let palettes=nodes.compactMap{node->Swatch? in if case .palette(let id)=node.place{return assets.swatch(id)};return nil}
+            let ranks=Dictionary(uniqueKeysWithValues:PaletteAssetHandler.ordered(palettes,by:order,in:assets).enumerated().map{($0.element.id,$0.offset)})
+            let ordered=nodes.filter{if case .palette=$0.place{return true};return false}.sorted{a,b in
+                guard case .palette(let x)=a.place,case .palette(let y)=b.place else{return false};return (ranks[x] ?? 0) < (ranks[y] ?? 0)
+            }
+            var index=0
+            return nodes.map{node in
+                node.children=sorted(node.children)
+                if case .palette=node.place{defer{index+=1};return ordered[index]};return node
+            }
+        }
+        roots=sorted(roots);myPaletteRoots=sorted(myPaletteRoots);favouriteRoots=sorted(favouriteRoots)
+    }
     private func roots(for tree:NSOutlineView)->[Node]{tree === catalogueList ? catalogueRoots:(tree === favourites ? favouriteRoots:(tree === myPalettes ? myPaletteRoots:roots))}
     func outlineView(_ tree:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int {(item as? Node)?.children.count ?? roots(for:tree).count}
     func outlineView(_ tree:NSOutlineView,child index:Int,ofItem item:Any?)->Any {(item as? Node)?.children[index] ?? roots(for:tree)[index]}
@@ -244,17 +294,31 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         let cell=WorkspaceBranchTree.Cell(frame:NSRect(x:0,y:0,width:tree.tableColumns[0].width,height:34))
         cell.symbol=node.symbol
         let isPalette:Bool={if case .palette=node.place{return true};return false}()
-        let label=NSTextField(labelWithString:node.title+(!isPalette && node.count > 0 ? "   \(node.count)":""))
+        let label=NSTextField(labelWithString:node.title)
+        cell.countLabel.stringValue=String(node.count);cell.countLabel.isHidden = !isPalette && node.count == 0
         label.font=Design.Text.body.font();label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
         cell.addSubview(label);cell.textField=label;cell.toolTip=node.title
         if case .palette(let id)=node.place {
+            cell.isPalette=true
+            cell.renamePalette={ [weak self] name in self?.onRename?(id,name) }
+            if let palette=assets.swatch(id){
+                let value=PaletteAssetHandler.presentation(palette,in:assets)
+                cell.review.configure(value)
+                cell.target.active=value.isTarget
+                cell.target.symbol="scope"
+                cell.target.setAccessibilityLabel((value.isTarget ? "Stop Targeting ":"Target New Picks To ")+palette.name)
+                cell.target.toolTip=value.isTarget ? "New Picks Go Here":"Target For New Picks"
+                cell.target.run={ [weak self] in self?.onTarget?(id) }
+                cell.review.onRating={ [weak self] rating in self?.onRating?(id,rating) }
+                cell.review.onFlag={ [weak self] flag in self?.onFlag?(id,flag) }
+                cell.review.onHalo={ [weak self] view,rect in self?.onHalo?(id,view,rect) }
+            }
             cell.paletteDrag=(id,node.title,node.colours)
             cell.selectPalette={ [weak tree] in
                 guard let tree else{return};tree.window?.makeFirstResponder(tree);let row=tree.row(forItem:node)
                 if row >= 0 {tree.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}
             }
             cell.dragChanged={ [weak self] active in self?.outline.paletteDragActive=active }
-            cell.countLabel.stringValue=String(node.count);cell.countLabel.isHidden=false
             cell.star.favourite=favouriteRoots.contains{$0.place == .palette(id)}
             cell.star.setAccessibilityLabel((cell.star.favourite ? "Remove Favourite: ":"Add Favourite: ")+node.title)
             cell.star.run={ [weak self] in self?.onFavourite?(id) }
@@ -359,14 +423,36 @@ final class WorkspaceFilmstrip:NSView {
             reflectScrolledClipView(contentView)
         }
     }
-    final class Strip:NSView {
+    final class Strip:NSView,NSDraggingSource {
+        private var pressedPalette:Swatch?
+        private var press:(NSPoint,TimeInterval)=(.zero,0)
         var palettes:[Swatch]=[] {didSet{needsDisplay=true}}
         var selected:UUID? {didSet{needsDisplay=true}}
         var displayColours: [String:NSColor] = [:]
         var onPick:((UUID)->Void)?
         override var isFlipped:Bool{true}
         override func draw(_ dirtyRect:NSRect){for (i,palette) in palettes.enumerated(){let box=NSRect(x:CGFloat(i)*112+8,y:8,width:96,height:48);guard box.insetBy(dx:-8,dy:-8).intersects(dirtyRect) else{continue};let colours=palette.entries;for (j,c) in colours.enumerated(){fill(NSRect(x:box.minX+CGFloat(j)*box.width/CGFloat(max(1,colours.count)),y:box.minY,width:box.width/CGFloat(max(1,colours.count))+0.5,height:box.height),displayColours[c.hex] ?? Design.hex(c.hex))};if selected==palette.id{Design.ink.setStroke();let path=NSBezierPath(rect:box.insetBy(dx:-3,dy:-3));path.lineWidth=2;path.stroke()};Design.attributed(palette.name,.body).draw(x:box.minX,baseline:76,width:96)}}
-        override func mouseDown(with event:NSEvent){let point=convert(event.locationInWindow,from:nil);let index=Int(point.x/112);if palettes.indices.contains(index){onPick?(palettes[index].id)}}
+        private func palette(at point:NSPoint)->Swatch? {
+            guard bounds.contains(point) else{return nil}
+            let index=Int(point.x/112)
+            return palettes.indices.contains(index) ? palettes[index]:nil
+        }
+        override func mouseDown(with event:NSEvent){
+            pressedPalette=palette(at:convert(event.locationInWindow,from:nil))
+            press=(event.locationInWindow,event.timestamp)
+        }
+        override func mouseDragged(with event:NSEvent){
+            guard let palette=pressedPalette,PaletteDrag.counts(event,from:press) else{return}
+            pressedPalette=nil
+            PaletteDrag.begin(palette.id,name:palette.name,colours:palette.entries.map{displayColours[$0.hex] ?? Design.hex($0.hex)},event:event,in:self)
+        }
+        override func mouseUp(with event:NSEvent){
+            defer{pressedPalette=nil}
+            guard let pressedPalette,!PaletteDrag.counts(event,from:press),
+                  palette(at:convert(event.locationInWindow,from:nil))?.id == pressedPalette.id else{return}
+            onPick?(pressedPalette.id)
+        }
+        func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation {.copy}
     }
     private let scroll=CarouselScroll(),strip=Strip()
     var onPick:((UUID)->Void)?
@@ -480,6 +566,7 @@ final class WorkspaceTextActionControl:NSView {
 /// The Page's fixed tool rows stay independent of rail panels and the global carousel.
 final class WorkspaceViewportBar:NSView {
     static let actionbarHeight:CGFloat=52
+    static let footerHeight:CGFloat=42
     private let isFooter:Bool
     private let gridButton=NSButton(),listButton=NSButton()
     private let appearancePresets=AppearancePresetControl()
@@ -536,7 +623,7 @@ final class WorkspaceViewportBar:NSView {
             imageFilter.onChange={[weak self] segment in self?.onImageFilter?(segment == 1)}
             importLinkChoice.onChange={[weak self] segment in self?.onImportLinking?(segment == 1)}
             imageCount.font=Design.Text.body.font();imageCount.textColor=Design.quiet;imageCount.alignment = .right
-            [importButton,appearancePresets,channels,allImages,imageFilter,imageCount,metadataFilterButton,importLinkChoice].forEach(addSubview)
+            [importButton,appearancePresets,allImages,imageFilter,imageCount,metadataFilterButton,importLinkChoice].forEach(addSubview)
             setIntakeMode(false)
         }
     }
@@ -548,7 +635,7 @@ final class WorkspaceViewportBar:NSView {
     func offerPhotographyImport(_ offered:Bool){offersImport=offered;importButton.isHidden = !offered || intake;needsLayout=true}
     func setIntakeMode(_ active:Bool,linking:Bool=false){
         intake=active;self.linking=linking
-        channels.isHidden=active;appearancePresets.isHidden=active
+        appearancePresets.isHidden=active
         importLinkChoice.isHidden = !active
         importButton.isHidden = !offersImport || active
         allImages.isHidden = !active;imageFilter.isHidden = !active;imageCount.isHidden = !active
@@ -599,7 +686,6 @@ final class WorkspaceViewportBar:NSView {
         imageCount.frame=NSRect(x:bounds.width-rightInset-300,y:6,width:284,height:20)
         importButton.frame=NSRect(x:12,y:2,width:78,height:28)
         importLinkChoice.frame=NSRect(x:leftInset+550,y:2,width:160,height:28)
-        channels.frame=NSRect(x:offersImport ? 100:leftInset,y:2,width:min(440,max(80,bounds.width-272)),height:28)
         appearancePresets.frame=NSRect(x:bounds.width-156,y:2,width:140,height:28)
         if isFooter {
             metadataFilterButton.isHidden=true;metadataFilterButton.frame = .zero
@@ -616,10 +702,8 @@ final class WorkspaceViewportBar:NSView {
             c.view.frame=NSRect(x:right-width,y:((bounds.height-c.height)/2).rounded(),width:width,height:c.height)
             right-=width+c.gap
         }
-        if !isFooter {
-            for view in subviews {
-                var frame=view.frame;frame.origin.y=((bounds.height-frame.height)/2).rounded();view.frame=frame
-            }
+        for view in subviews {
+            var frame=view.frame;frame.origin.y=((bounds.height-frame.height)/2).rounded();view.frame=frame
         }
     }
     override func draw(_ dirtyRect:NSRect){
@@ -702,6 +786,12 @@ private final class WorkspaceBranchTree: NSOutlineView {
     }
     final class Cell:NSTableCellView,NSDraggingSource {
         let star=Star()
+        let target=PaletteAssetIcon(frame:.zero)
+        let review=PaletteReviewControls(frame:.zero)
+        var isPalette=false {didSet{target.isHidden = !isPalette;review.isHidden = !isPalette;needsLayout=true}}
+        var renamePalette:((String)->Void)?
+        private var editingName=false
+        override var isFlipped:Bool{true}
         var paletteDrag:(UUID,String,[NSColor])?
         var selectPalette:(()->Void)?
         var dragChanged:((Bool)->Void)?
@@ -709,11 +799,13 @@ private final class WorkspaceBranchTree: NSOutlineView {
         override func hitTest(_ point:NSPoint)->NSView? {
             let hit=super.hitTest(point)
             guard paletteDrag != nil,let hit else{return hit}
-            if hit === star || hit === colourButton {return hit}
+            if hit === star || hit === colourButton || hit === target || hit.isDescendant(of:review) || hit is InlineName {return hit}
             return self
         }
         override func mouseDown(with event:NSEvent){
+            if activate(at:convert(event.locationInWindow,from:nil)){press=nil;return}
             guard paletteDrag != nil else{super.mouseDown(with:event);return}
+            if event.clickCount == 2,beginRenaming(with:event){return}
             press=(event.locationInWindow,event.timestamp)
         }
         override func mouseDragged(with event:NSEvent){
@@ -724,6 +816,20 @@ private final class WorkspaceBranchTree: NSOutlineView {
         override func mouseUp(with event:NSEvent){
             defer{press=nil}
             if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {selectPalette?()}
+        }
+        func activate(at point:NSPoint)->Bool {
+            for button in [star,colourButton,target] as [NSButton] where !button.isHidden && button.frame.contains(point){button.performClick(nil);return true}
+            if isPalette,review.frame.contains(point){return review.activate(at:convert(point,to:review))}
+            return false
+        }
+        @discardableResult func beginRenaming(with event:NSEvent)->Bool {
+            let point=convert(event.locationInWindow,from:nil)
+            guard isPalette,let field=textField,field.frame.contains(point),!editingName else{return false}
+            editingName=true;field.isHidden=true;press=nil
+            InlineName.edit(field.stringValue,style:.body,in:self,x:field.frame.minX,baseline:bounds.midY+5,width:field.frame.width,at:point,colour:field.textColor ?? Design.ink){ [weak self,weak field] value in
+                self?.editingName=false;field?.isHidden=false
+                if let value {self?.renamePalette?(value)}
+            };return true
         }
         func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation {.copy}
         func draggingSession(_ session:NSDraggingSession,endedAt screenPoint:NSPoint,operation:NSDragOperation){dragChanged?(false)}
@@ -746,6 +852,7 @@ private final class WorkspaceBranchTree: NSOutlineView {
         var symbol:String? {didSet{needsLayout=true;needsDisplay=true}}
         override init(frame:NSRect){
             super.init(frame:frame);addSubview(star);addSubview(colourButton);colourButton.isHidden=true
+            addSubview(target);addSubview(review);target.isHidden=true;review.isHidden=true
             countLabel.font=Design.Text.body.font();countLabel.alignment = .right;countLabel.isHidden=true;addSubview(countLabel)
         }
         required init?(coder:NSCoder){fatalError()}
@@ -754,11 +861,15 @@ private final class WorkspaceBranchTree: NSOutlineView {
             let height=textField?.intrinsicContentSize.height ?? 18
             let inset:CGFloat=symbol == nil ? 0:24
             let countWidth:CGFloat=countLabel.isHidden ? 0:max(24,countLabel.intrinsicContentSize.width+8)
-            let trailing:CGFloat=(colourButton.isHidden ? 24:46)+countWidth
-            textField?.frame=NSRect(x:inset,y:(bounds.height-height)/2,width:max(0,bounds.width-inset-trailing),height:height)
-            star.frame=NSRect(x:bounds.width-22,y:0,width:22,height:bounds.height)
-            countLabel.frame=NSRect(x:bounds.width-22-countWidth,y:(bounds.height-height)/2,width:max(0,countWidth-4),height:height)
-            colourButton.frame=NSRect(x:bounds.width-44-countWidth,y:0,width:22,height:bounds.height)
+            let reviewWidth=PaletteReviewControls.width
+            let nameStart:CGFloat=isPalette ? inset+44+(colourButton.isHidden ? 0:22):inset
+            let trailing:CGFloat=countLabel.isHidden ? 0:reviewWidth+countWidth+4
+            textField?.frame=NSRect(x:nameStart,y:(bounds.height-height)/2,width:max(0,bounds.width-nameStart-trailing),height:height)
+            star.frame=NSRect(x:isPalette ? inset+(colourButton.isHidden ? 0:22):bounds.width-22,y:0,width:22,height:bounds.height)
+            target.frame=NSRect(x:star.frame.maxX,y:0,width:22,height:bounds.height)
+            review.frame=NSRect(x:bounds.width-reviewWidth,y:0,width:reviewWidth,height:bounds.height)
+            countLabel.frame=NSRect(x:review.frame.minX-countWidth-4,y:(bounds.height-height)/2,width:max(0,countWidth-4),height:height)
+            colourButton.frame=NSRect(x:inset,y:0,width:22,height:bounds.height)
         }
         override func draw(_ dirtyRect:NSRect){
             super.draw(dirtyRect)
@@ -790,8 +901,13 @@ private final class WorkspaceBranchTree: NSOutlineView {
         super.keyDown(with:event)
     }
     override func mouseDown(with event:NSEvent) {
-        window?.makeFirstResponder(self)
         let point=convert(event.locationInWindow,from:nil),index=row(at:point)
+        if index >= 0,let cell=view(atColumn:0,row:index,makeIfNecessary:false) as? Cell {
+            let local=cell.convert(event.locationInWindow,from:nil)
+            if cell.activate(at:local){return}
+            if event.clickCount == 2,cell.beginRenaming(with:event){return}
+        }
+        window?.makeFirstResponder(self)
         let node=index >= 0 ? item(atRow:index):nil
         let expanded=node.map{isItemExpanded($0)} ?? false
         let disclosure=index >= 0 && (frameOfOutlineCell(atRow:index).contains(point) || point.x >= bounds.width-56)
@@ -835,6 +951,8 @@ private final class WorkspaceBranchTree: NSOutlineView {
             cell.colourButton.colour=Design.card
         }
         cell.star.contentTintColor=cell.textField?.textColor;cell.star.needsDisplay=true
+        cell.target.ink=cell.textField?.textColor ?? Design.ink;cell.review.ink=cell.textField?.textColor ?? Design.ink
+        cell.countLabel.font=cell.textField?.font
         cell.countLabel.textColor=cell.textField?.textColor
         cell.needsDisplay=true
     }

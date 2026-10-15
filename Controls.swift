@@ -197,13 +197,16 @@ final class SwissDropdown: NSView, Overlay {
         func configure(disabled: Set<Int>, submenus: Set<Int> = []) {
             for (i, row) in menuRows.enumerated() { row.enabled = !disabled.contains(i); row.hasSubmenu = submenus.contains(i); row.setAccessibilityElement(true); row.setAccessibilityRole(.menuItem); row.setAccessibilityLabel(row.accessibleTitle) }
         }
+        func setLeadingSymbols(_ symbols:[Int:(String,NSColor)]) {
+            for (index,row) in menuRows.enumerated(){row.leadingSymbol=symbols[index];row.needsDisplay=true}
+        }
         func highlight(_ index: Int) { for (i, row) in menuRows.enumerated() { row.setHover(i == index) }; if menuRows.indices.contains(index) { menuRows[index].scrollToVisible(menuRows[index].bounds) } }
         func trailingPoint(forRow index: Int) -> NSPoint {
             guard menuRows.indices.contains(index) else { return NSPoint(x: frame.maxX, y: frame.maxY) }
             let row = menuRows[index]
             return convertPoint(toScreen: row.convert(NSPoint(x: row.bounds.maxX, y: row.bounds.maxY), to: nil))
         }
-        init(items: [String], chosen: String, width: CGFloat, literalItems: Bool = false, spectra: [[NSColor]] = [], preview: ((String) -> Void)? = nil, pick: @escaping (Int) -> Void) {
+        init(items: [String], chosen: String, width: CGFloat, literalItems: Bool = false, spectra: [[NSColor]] = [], preview: ((String) -> Void)? = nil, chosenIndex:Int? = nil, pick: @escaping (Int) -> Void) {
             let rowHeight: CGFloat = 30, thin: CGFloat = 12
             let heights = items.enumerated().map { i, title in !literalItems && MenuPanel.kind(title) == 1 ? thin : (spectra.indices.contains(i) && !spectra[i].isEmpty ? 48 : rowHeight) }
             let h = heights.reduce(0, +) + 12
@@ -227,7 +230,7 @@ final class SwissDropdown: NSView, Overlay {
             var y = h - 6
             for (i, s) in items.enumerated() {
                 y -= heights[i]
-                let r = Row(title: s, chosen: s == chosen, frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
+                let r = Row(title: s, chosen: chosenIndex.map{$0 == i} ?? (s == chosen), frame: NSRect(x: 0, y: y, width: width, height: heights[i])) { pick(i) }
                 r.spectrum = spectra.indices.contains(i) ? spectra[i] : []
                 r.literalTitle = literalItems
                 r.preview = { [weak self] in preview?(s); self?.onPreviewIndex?(i) }
@@ -270,6 +273,7 @@ final class SwissDropdown: NSView, Overlay {
             private let title: String, chosen: Bool
             private var hover = false
             var spectrum: [NSColor] = []
+            var leadingSymbol:(String,NSColor)?
             var literalTitle = false
             var hasSubmenu = false
             var enabled = true { didSet { needsDisplay = true } }
@@ -296,7 +300,11 @@ final class SwissDropdown: NSView, Overlay {
                 if hover { Design.mist.setFill(); bounds.fill() }
                 let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
                 if !spectrum.isEmpty { SwissDropdown.drawSpectrum(spectrum, in: NSRect(x: 14, y: 8, width: max(0, bounds.width - 44), height: 7)) }
-                t.draw(x: 14, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender + (spectrum.isEmpty ? 0 : 6), width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
+                if let (name,colour)=leadingSymbol {
+                    let image=RowMark.image(name,colour:colour),size=image.size
+                    image.draw(in:NSRect(x:14,y:(bounds.height-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+                }
+                t.draw(x: leadingSymbol == nil ? 14:36, baseline: (bounds.height - t.size().height) / 2 + t.baselineFont.ascender + (spectrum.isEmpty ? 0 : 6), width: bounds.width - 28 - (chosen || hasSubmenu ? 16 : 0))
                 if hasSubmenu {
                     let arrow = Design.attributed("›", .bodyStrong, colour: enabled ? Design.ink : Design.soft)
                     arrow.draw(at: NSPoint(x: bounds.width - 24, y: (bounds.height - arrow.size().height) / 2))
@@ -752,14 +760,14 @@ final class InlineName: NSTextField, NSTextFieldDelegate {
     private var finished = false
 
     /// `baseline` is the line the host draws the name on, in the host's flipped coordinates; `at` is the click, so the cursor lands in the word under it.
-    static func edit(_ name: String, style: Design.Text, in host: NSView, x: CGFloat, baseline: CGFloat, width: CGFloat, at p: NSPoint, then: @escaping (String?) -> Void) {
+    static func edit(_ name: String, style: Design.Text, in host: NSView, x: CGFloat, baseline: CGFloat, width: CGFloat, at p: NSPoint, colour:NSColor=Design.ink, then: @escaping (String?) -> Void) {
         let f = InlineName(string: name)
         f.done = then
         f.isBordered = false
         f.drawsBackground = false
         f.focusRingType = .none
         f.font = style.font()
-        f.textColor = Design.ink
+        f.textColor = colour
         f.cell?.wraps = false
         f.cell?.isScrollable = true
         f.delegate = f
@@ -769,7 +777,7 @@ final class InlineName: NSTextField, NSTextFieldDelegate {
         host.addSubview(f)
         host.window?.makeFirstResponder(f)
         if let tv = f.currentEditor() as? NSTextView {
-            tv.insertionPointColor = Design.ink
+            tv.insertionPointColor = colour
             // Selected words are paper on ink, not the system's blue.
             tv.selectedTextAttributes = [.backgroundColor: Design.ink, .foregroundColor: Design.paper]
             let i = tv.characterIndexForInsertion(at: tv.convert(p, from: host))

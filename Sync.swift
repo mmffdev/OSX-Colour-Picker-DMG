@@ -112,6 +112,7 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    copiedFrom: l?.copiedFrom ?? r?.copiedFrom,
                                    bucketID: ((l?.placedAt ?? .distantPast) >= (r?.placedAt ?? .distantPast) ? l ?? r : r ?? l)?.bucketID,
                                    claim: l?.claim ?? r?.claim))
+        out.swatches[out.swatches.count - 1].review = PaletteAssetHandler.mergedReview(l?.review,r?.review)
         // The colour profile: the newer choice.
         let pick = (l?.profileChangedAt ?? .distantPast) >= (r?.profileChangedAt ?? .distantPast) ? l ?? r : r ?? l
         out.swatches[out.swatches.count - 1].profile = pick?.profile

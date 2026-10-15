@@ -23,6 +23,7 @@ func runSelfTest() -> Never {
     preferences.set(savedCatalogue, forKey: Catalogues.currentKey)
     preferences.set(savedCatalogueID, forKey: "currentCatalogueID")
 
+    runPaletteAssetTests(check: check)
     runPickerCacheTests(check: check)
     runWorkspaceStartupTests(check: check)
     runLibraryAssignmentTests(check: check)
@@ -2575,6 +2576,10 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     check(GroupHeaderView.text(bySource[0]) == "Hex (sRGB)  \u{00B7}  4", "a group's title carries its count")
 
     print("histograms")
+    check(WorkspaceChannelControls.previewTitle(ProfileChannel(space:ProfileChannel.print,press:"FOGRA39")) == "CMYK · FOGRA39" && WorkspaceChannelControls.previewTitle(ProfileChannel(space:RGBSpace.srgb.rawValue)) == "sRGB",
+          "Viewport output previews name the actual CMYK profile or RGB space")
+    check([ColourFormat.cmyk,.lab,.xyz,.linear].allSatisfy{StudioPage.models.contains($0)} && StudioPage.valueFormatTitle(.linear) == "Linear RGB (sRGB)",
+          "Colour value formats remain separate from output preview channels")
     check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255]).count == 2 && WorkspaceHistogramPane.findings(type:.rgb,values:[16,128,235]).isEmpty,
           "Histogram findings match inclusive RGB guard bands")
     check(WorkspaceHistogramPane.findings(type:.ycbcr,values:[940,960,961]).count == 1 && WorkspaceHistogramPane.findings(type:.cmyk,values:[0,2,96,50]).count == 2,

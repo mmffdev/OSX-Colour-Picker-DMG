@@ -218,6 +218,7 @@ enum CatalogueTree {
     }
     static func read<T: Decodable>(_ type: T.Type, at url: URL) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
+        if type == PaletteDocument.self {return (try? PaletteAssetHandler.read(data)) as? T}
         return try? decoder().decode(type, from: data)
     }
     /// The one document of a folder of an earlier layout: "Acme/Acme.colworkgroup", or whichever file of that kind is there.
@@ -758,7 +759,7 @@ enum CatalogueTree {
                 let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere)
                 fileTaken[home.path] = takenHere
                 paletteAt[palette.id] = url
-                written.append((url, try e.encode(paletteDocument(palette, in: lib, member: p.id, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+                written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: p.id, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
                 links.append(link(palette, at: url))
             }
             // Its information pack, in its Information group, or in its own folder when its schema has none.
@@ -785,7 +786,7 @@ enum CatalogueTree {
             let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere)
             poolTaken[home.path] = takenHere
             paletteAt[palette.id] = url
-            written.append((url, try e.encode(paletteDocument(palette, in: lib, member: nil, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+            written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: nil, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
             libraryLinks.append(link(palette, at: url))
         }
         let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
@@ -846,14 +847,7 @@ enum CatalogueTree {
 
     /// The palette's file: the palette whole, settings and all, with the colours it uses, the member it sits in and the catalogue.
     static func paletteDocument(_ palette: Swatch, in lib: Library, member: UUID?, file: String, catalogue: UUID? = nil) -> PaletteDocument {
-        let keys = Set(palette.entries.map { $0.hex } + (palette.styles ?? []).flatMap { [$0.ink, $0.paper] })
-        var plain = palette
-        // The purpose a member's palette is turned to is the member's to say.
-        if member != nil { plain.purpose = nil; plain.purposeChangedAt = nil }
-        var doc = PaletteDocument(project: member, palette: plain, colours: lib.colours.filter { keys.contains($0.hex) }, file: file)
-        doc.catalogue = catalogue
-        if palette.isTypography { doc.format = "colour-typography" }
-        return doc
+        PaletteAssetHandler.document(palette,in:lib,member:member,file:file,catalogue:catalogue)
     }
 
     /// Takes the thing out: to the Bin in the app, outright in the self-test.

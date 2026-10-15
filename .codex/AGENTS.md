@@ -108,7 +108,7 @@ Rail 1 adapts Design 08 Indexed into two-row entries: favourite before the name,
 
 A palette dropped from Rail 2 into the library tree must not navigate to its destination. Pass `reveal: false` to the controller's copy/move path; preserve this through the optional notes prompt as well as the immediate-copy path. Rail 2 remains on its source list.
 
-Header navigation aligns with the Rail 2 title inset (half a gutter beyond the expanded Rail 1 divider), with the picker and rectangle-picker icons immediately before Library. Copy format lives left of Search in the header; the footer retains copied-swatch history and status only.
+Library’s icon starts exactly on the expanded Rail1 right divider. The eyedropper and rectangle picker form a pair centred horizontally in the full header and use the same 18 pt renderer as the right-side utility icons. Library, Palettes and Designer are primary, at 20 pt; the header wordmark is 30 pt. Lab, Contrast, Projects, PrePress, Appbridge and Import live in the More Tools grid-icon menu immediately after Search. Import opens the thumbnail intake workflow. The grouped Colour Proofing selector has its label inline on the left and sits in the main header, ending exactly above Rail2’s left divider; Colour Value Format remains in the viewport footer. Copy format lives left of Search in the header; the footer retains copied-swatch history and status only.
 
 Rail 2 Overview routes carry both project and schema-node IDs. Repeated Overview rows must never share selection or rollover identity; opening a project selects only its first Overview.
 

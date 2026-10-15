@@ -76,21 +76,6 @@ struct TurnedPalette: Codable, Equatable {
     var changedAt: Date
 }
 
-/// "Brand.colpalette": one palette and the library's record of each colour it uses.
-struct PaletteDocument: Codable, Equatable {
-    var format = "colour-palette"
-    var version = 1
-    var generator = ColourFiles.generator
-    /// The project it sits in; nil for a palette on its own.
-    var project: UUID?
-    var palette: Swatch
-    var colours: [Colour]
-    /// The name the file was written under, without its extension: a file found under another name was renamed in Finder.
-    var file: String? = nil
-    /// The catalogue it was written in.
-    var catalogue: UUID? = nil
-}
-
 /// "Brand.colprint": a palette's settings for one purpose.
 struct PurposeDocument: Codable, Equatable {
     var format = "colour-purpose"
@@ -234,7 +219,7 @@ enum ProjectFiles {
         var palettes: [Swatch] = [], colours: [Colour] = [], seen = Set<String>(), settings: [UUID: [PurposeConfig]] = [:]
         func files(_ dir: URL) -> [URL] { ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent } }
         for url in files(folder) where url.pathExtension.lowercased() == ColourFiles.legacyPalette {
-            guard let found = try? Data(contentsOf: url), let p = try? d.decode(PaletteDocument.self, from: found), p.project == project else { continue }
+            guard let found = try? Data(contentsOf: url), let p = try? PaletteAssetHandler.read(found), p.project == project else { continue }
             palettes.append(p.palette)
             for colour in p.colours where seen.insert(colour.hex).inserted { colours.append(colour) }
         }

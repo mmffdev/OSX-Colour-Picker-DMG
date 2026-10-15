@@ -226,7 +226,7 @@ struct GlobalAssets {
         guard cat.version == 3 else { throw failure("The global Assets index is not supported.") }
         var lib = Library(); lib.tagInfo = cat.tags; lib.deleted = cat.deleted; lib.activeSwatchID = cat.activePalette
         for link in cat.libraryAssets {
-            let doc = try ColourFiles.decoder().decode(PaletteDocument.self, from: Data(contentsOf: root.appendingPathComponent(link.file)))
+            let doc = try PaletteAssetHandler.read(root.appendingPathComponent(link.file))
             var palette = doc.palette; palette.projectID = nil; lib.swatches.append(palette)
             for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
         }

@@ -310,38 +310,84 @@ final class WorkspaceExpandedPanel: NSView, NSTableViewDataSource, NSTableViewDe
     override func draw(_ dirtyRect:NSRect){Design.card.setFill();bounds.fill();Design.rule.setFill();NSRect(x:(bounds.width*0.20).rounded()-1,y:0,width:1,height:bounds.height).fill()}
 }
 
-final class WorkspaceChannelControls:NSView {
-    private let profile=AnalysisMenu("Viewport Channel Profile",[])
-    private let channel=AnalysisMenu("Viewport Preview Channel",[])
-    private var profiles:[ColourProfile]=[]
-    private var channels:[ProfileChannel]=[]
+final class WorkspaceChannelControls:NSView,Overlay {
+    private struct Choice {let profile:UUID?;let channel:ProfileChannel?;let group:String}
+    private let button=DropdownButton()
+    private var items:[String]=[],choices:[Choice?]=[]
+    private var chosenIndex=0
+    private var proofMenu:SwissDropdown.MenuPanel?
+    private var preview:ProfileChannel?
+    private var selectionTitle="Master Colours"
     var onChange:(()->Void)?
-    var selectedChannel:ProfileChannel? {
-        let i=channel.indexOfSelectedItem-1
-        guard channels.indices.contains(i) else{return nil}
-        return channels[i].isPrint ? ((try? SavedPrintProfiles.load().current.channel) ?? channels[i]) : channels[i]
-    }
+    var selectedChannel:ProfileChannel? {preview}
+    var overlayWindows:[NSWindow] {proofMenu.map{[$0]} ?? []}
+    func dismissOverlay(){if let proofMenu {proofMenu.parent?.removeChildWindow(proofMenu);proofMenu.orderOut(nil)};proofMenu=nil;Overlays.closed(self)}
+    override var isFlipped:Bool{true}
     override init(frame:NSRect){
-        super.init(frame:frame);addSubview(profile);addSubview(channel)
-        profile.changed={ [weak self] i in guard let self else{return};AppPreferences.shared.set(i > 0 ? self.profiles[i-1].id.uuidString:nil,forKey:"workspace.channelProfile");AppPreferences.shared.set(nil,forKey:"workspace.previewChannel");self.onChange?() }
-        channel.changed={ [weak self] i in guard let self else{return};AppPreferences.shared.set(i > 0 ? self.channels[i-1].space:nil,forKey:"workspace.previewChannel");self.onChange?() }
+        super.init(frame:frame);addSubview(button)
+        button.title=selectionTitle;button.target=self;button.action=#selector(openMenu)
+        button.setAccessibilityLabel("Colour Proofing");button.font=Design.Text.body.font()
     }
     required init?(coder:NSCoder){fatalError()}
+    static func previewTitle(_ channel:ProfileChannel)->String {
+        channel.isPrint ? "CMYK · "+(channel.press ?? PressProfiles.generic):channel.name
+    }
     func configure(library:Library,palette:UUID?){
-        profiles=ColourProfiles.load()
-        let saved=AppPreferences.shared.string(forKey:"workspace.channelProfile")
-        let index=profiles.firstIndex{$0.id.uuidString==saved}
-        profile.options(["Palette Channels"]+profiles.map(\.name),selected:index.map{$0+1} ?? 0)
-        let effective=index.map{profiles[$0]} ?? library.profile(forPalette:palette,house:profiles,houseDefault:ColourProfiles.houseDefault).profile
-        channels=effective.channels
-        let selected=AppPreferences.shared.string(forKey:"workspace.previewChannel")
-        channel.options(["Master Colours"]+channels.map{$0.isPrint ? "Print Prediction":$0.name},selected:channels.firstIndex{$0.space==selected}.map{$0+1} ?? 0)
+        let profiles=ColourProfiles.load()
+        let effective=library.profile(forPalette:palette,house:profiles,houseDefault:ColourProfiles.houseDefault).profile
+        let printChannel=(try? SavedPrintProfiles.load().current.channel)
+        items=["Master Colours"];choices=[Choice(profile:nil,channel:nil,group:"")]
+        func section(_ title:String,_ id:UUID?,_ channels:[ProfileChannel]){
+            items += [SwissDropdown.MenuPanel.divider,SwissDropdown.MenuPanel.heading(title)];choices += [nil,nil]
+            for original in channels {
+                let channel=original.isPrint ? (printChannel ?? original):original
+                items.append(Self.previewTitle(channel));choices.append(Choice(profile:id,channel:channel,group:title))
+            }
+        }
+        section("Palette Channels · "+effective.name,nil,effective.channels)
+        for profile in profiles {section(profile.name,profile.id,profile.channels)}
+        let savedProfile=AppPreferences.shared.string(forKey:"workspace.channelProfile").flatMap(UUID.init(uuidString:))
+        let space=AppPreferences.shared.string(forKey:"workspace.previewChannel")
+        chosenIndex=space == nil ? 0:(choices.firstIndex{ $0?.profile == savedProfile && $0?.channel?.space == space } ?? 0)
+        let selected=choices[chosenIndex]
+        preview=selected?.channel
+        selectionTitle=preview.map{(selected?.group ?? "")+" · "+Self.previewTitle($0)} ?? "Master Colours"
+        button.title=selectionTitle;button.toolTip="Colour Proofing · "+selectionTitle
+        needsDisplay=true
+    }
+    @objc private func openMenu(){
+        guard let win=window else{return}
+        if let proofMenu,proofMenu.isVisible {dismissOverlay();return}
+        dismissOverlay()
+        let snapshot=choices,width=max(320,bounds.width)
+        let panel=SwissDropdown.MenuPanel(items:items,chosen:"",width:width,chosenIndex:chosenIndex){[weak self] index in
+            guard let self,snapshot.indices.contains(index),let choice=snapshot[index] else{return}
+            self.dismissOverlay()
+            AppPreferences.shared.set(choice.profile?.uuidString,forKey:"workspace.channelProfile")
+            AppPreferences.shared.set(choice.channel?.space,forKey:"workspace.previewChannel")
+            self.onChange?()
+        }
+        panel.configure(disabled:Set(choices.indices.filter{choices[$0] == nil}))
+        let anchor=win.convertToScreen(convert(bounds,to:nil))
+        panel.place(below:NSPoint(x:anchor.maxX-width,y:anchor.minY-4))
+        win.addChildWindow(panel,ordered:.above);proofMenu=panel;Overlays.opened(self)
     }
     func reportUnavailable(_ count:Int){
-        if count>0,let item=channel.selectedItem {item.title += " · Unavailable";channel.toolTip="Some channel previews are unavailable. Those colours retain their master display; check the installed ICC profile.";channel.needsDisplay=true}
-        else {channel.toolTip="Viewport Preview Channel"}
+        button.title=selectionTitle+(count > 0 ? " · Unavailable":"")
+        button.toolTip=count > 0 ? "Colour Proofing · Some previews are unavailable; those colours retain their master display. Check the installed ICC profile.":"Colour Proofing · "+selectionTitle
     }
-    override func layout(){super.layout();let w=max(40,(bounds.width-8)/2);profile.frame=NSRect(x:0,y:2,width:w,height:24);channel.frame=NSRect(x:w+8,y:2,width:w,height:24)}
+    private var labelTitle:String {bounds.width < 240 ? "Proofing":"Colour Proofing"}
+    private var labelWidth:CGFloat {Design.attributed(labelTitle,.bodyStrong).size().width}
+    override func layout(){
+        super.layout()
+        let left=labelWidth+12
+        button.frame=NSRect(x:left,y:(bounds.height-28)/2,width:max(0,bounds.width-left),height:28)
+    }
+    override func draw(_ dirtyRect:NSRect){
+        let font=Design.Text.bodyStrong.font()
+        let baseline=bounds.midY+(font.ascender+font.descender)/2
+        Design.attributed(labelTitle,.bodyStrong).draw(x:0,baseline:baseline,width:labelWidth)
+    }
 }
 
 private final class AnalysisButton:NSButton {

@@ -174,6 +174,9 @@ struct Swatch: Codable, Equatable {
     var purpose: Purpose? = nil
     var purposeChangedAt: Date? = nil
 
+    /// Portable palette-asset review state, saved in its .colpal file.
+    var review:PaletteReview? = nil
+
     var isTypography: Bool { styles != nil }
 
     var favourite: Bool { isFavourite ?? false }
@@ -614,6 +617,7 @@ extension Library {
             if !withNotes { e.note = nil; e.noteChangedAt = nil }
             return e
         })
+        copy.review = source.review
         copy.isCustom = source.isCustom
         if let styles = source.styles {
             copy.styles = styles.map { TypeStyle(id: UUID(), name: $0.name, ink: $0.ink, paper: $0.paper, heading: $0.heading,

@@ -896,21 +896,12 @@ final class LibraryController: NSObject {
 
     func duplicate(_ id: UUID) {
         guard let s = library.swatch(id) else { return }
-        if let styles = s.styles {
-            // A Typography palette is copied with its pairings, each under a new id.
-            var copy: UUID?
-            apply("Duplicate Palette") { lib in
-                let new = lib.createTypography(named: "\(s.name) copy", in: s.projectID)
-                for style in styles {
-                    lib.setStyle(TypeStyle(id: UUID(), name: style.name, ink: style.ink, paper: style.paper, heading: style.heading,
-                                           body: style.body, headingFont: style.headingFont, bodyFont: style.bodyFont), in: new)
-                }
-                copy = new
-            }
-            if let copy = copy { onShow?(.palette(copy), false) }
-            return
+        var duplicate:UUID?
+        apply("Duplicate Palette") { lib in
+            duplicate=lib.copyPalette(id,to:s.projectID,withNotes:true)
+            if let duplicate {lib.renameSwatch(duplicate,to:s.name+" copy")}
         }
-        createPalette(named: "\(s.name) copy", hexes: library.hexes(inSwatch: id, by: .oldest), custom: s.custom)
+        if let duplicate {onShow?(.palette(duplicate),false)}
     }
 
     /// A copy of the palette in another project (or loose), independent from then on. The original stays.
@@ -1738,7 +1729,7 @@ extension LibraryController {
         return try palettes.map { palette in
             let name = uniqueName(filesystemName(palette.name), among: taken)
             taken.append(name)
-            return (name: name + "." + CatalogueTree.fileExtension(of: palette), data: try ColourFiles.encoder().encode(CatalogueTree.paletteDocument(palette, in: library, member: nil, file: name)))
+            return (name: name + "." + CatalogueTree.fileExtension(of: palette), data: try PaletteAssetHandler.data(CatalogueTree.paletteDocument(palette, in: library, member: nil, file: name)))
         }
     }
 }

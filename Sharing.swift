@@ -305,7 +305,7 @@ enum Sharing {
         if level == .palette {
             guard let s = sub.swatches.first else { throw ShareFault.notAShare("there is no palette to share") }
             let doc = CatalogueTree.paletteDocument(s, in: sub, member: nil, file: filesystemName(s.name))
-            return [Zip.Entry(path: filesystemName(s.name) + "." + CatalogueTree.fileExtension(of: s), data: try e.encode(doc))]
+            return [Zip.Entry(path: filesystemName(s.name) + "." + CatalogueTree.fileExtension(of: s), data: try PaletteAssetHandler.data(doc))]
         }
         let name = level == .catalogue ? catalogueName : tree(level: level, subject: subject, in: lib, schema: schema, catalogueName: catalogueName).name
         let dir = stagingRoot.appendingPathComponent("Out-" + UUID().uuidString).appendingPathComponent(filesystemName(name))
@@ -559,7 +559,7 @@ enum Sharing {
     /// bookkeeping do not turn an otherwise identical asset into different content.
     static func contentKey(_ palette: Swatch, in lib: Library) -> String {
         let doc = CatalogueTree.paletteDocument(palette, in: lib, member: nil, file: "")
-        guard let data = try? e.encode(doc), var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "" }
+        guard let data = try? PaletteAssetHandler.data(doc), var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "" }
         if var p = object["palette"] as? [String: Any] { p.removeValue(forKey: "name"); object["palette"] = p }
         func clean(_ value: Any) -> Any {
             if let list = value as? [Any] { return list.map(clean) }
@@ -812,6 +812,7 @@ extension Sharing {
     /// The same palette under a new id, its pairings renewed with it, so it stands beside the one it came from.
     private static func renamedCopy(_ s: Swatch, date: Date) -> Swatch {
         var p = Swatch(id: UUID(), name: s.name, createdAt: s.createdAt, entries: s.entries)
+        p.review = s.review
         p.nameChangedAt = s.nameChangedAt; p.isFavourite = s.isFavourite; p.favouriteChangedAt = s.favouriteChangedAt; p.isCustom = s.isCustom
         p.bucketID = s.bucketID; p.claim = s.claim
         p.projectID = s.projectID; p.position = s.position; p.placedAt = s.placedAt; p.tags = s.tags; p.tagsChangedAt = s.tagsChangedAt
