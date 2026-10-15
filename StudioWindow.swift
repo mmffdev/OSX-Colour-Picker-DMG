@@ -5271,6 +5271,11 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     // and default/active catalogue references consistently, and explicitly ask whether
     // the .colplt and .colswa files should remain on disk before removing anything.
     // Verify the actual asset extensions/storage paths; preserve files when requested.
+    // Also handle folders deleted outside the app: stale .coldata references must show
+    // one Catalogue Unavailable recovery prompt (Locate Folder / Remove From List /
+    // Cancel), not cascading missing .colpal and mismatched filter-data alerts.
+    // Reproduced with Cookra Design Test 1 and its migration backup after Rick
+    // deliberately deleted their content folders. Do not recreate/overwrite missing data.
     // Current behaviour below retains the existing whole-folder Bin confirmation.
     private func askToRemove(_ e: String) {
         guard names.contains(e) else { return }
