@@ -4569,6 +4569,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     private var lineHits: [(NSRect, Item)] = [], lineActionHits: [(NSRect, Item, Int)] = [], barHits: [(NSRect, Int)] = [], addHits: [(NSRect, UUID, String)] = []
     private var spectrum = NSRect.zero
     private var dropped: SwissDropdown.MenuPanel?
+    private var removeButtons: [String: SwissButton] = [:]
     private let openButton = SwissButton("Open Catalogue\u{2026}", .primary)
     private let newButton = SwissButton("New Catalogue", .secondary)
     private let finderButton = SwissButton("Show In Finder", .secondary)
@@ -4641,6 +4642,18 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
 
     func reload() {
         names = library?.availableCatalogues() ?? []
+        for name in Array(removeButtons.keys) where !names.contains(name) {
+            removeButtons.removeValue(forKey: name)?.removeFromSuperview()
+        }
+        for name in names where removeButtons[name] == nil {
+            let button = SwissButton("Remove…", .secondary)
+            button.identifier = NSUserInterfaceItemIdentifier(name)
+            button.target = self; button.action = #selector(removeCataloguePressed(_:))
+            button.setAccessibilityLabel("Remove Catalogue \(name)")
+            button.toolTip = "Review removal of \(name)"
+            removeButtons[name] = button
+            addSubview(button)
+        }
         if let e = expanded, !names.contains(e) { expanded = nil; picking = false; openness = [:] }
         loadContents()
         refresh()
@@ -4797,6 +4810,14 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
             b.frame = NSRect(x: x, y: SettingsSheet.contentStart + Self.u + Self.lineY - 22, width: w, height: 32)
             x += w + 12
         }
+        var rowY = rowsTop + 1
+        for name in names {
+            if let button = removeButtons[name] {
+                let width = button.intrinsicContentSize.width
+                button.frame = NSRect(x: bounds.width - width, y: rowY, width: width, height: Self.row)
+            }
+            rowY += Self.row + panelHeight(for: name)
+        }
         let open = expanded.map { openness[$0] ?? 0 } ?? 0
         aboutScroll.isHidden = open < 1
         if let e = expanded {
@@ -4832,7 +4853,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
             Design.ink.setStroke()
             let edge = NSBezierPath(rect: sq.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
             let nx = Self.activeWidth + Self.step
-            Design.attributed(n, active ? .bodyStrong : .body).draw(x: nx, baseline: b, width: bounds.width - nx)
+            Design.attributed(n, active ? .bodyStrong : .body).draw(x: nx, baseline: b, width: max(0, bounds.width - nx - (removeButtons[n]?.intrinsicContentSize.width ?? 90) - 16))
             let open = openness[n] ?? 0
             // A shut row ends on its divider; an open one is a container, and the divider moves down to close it.
             if open == 0 { hairline(x: 0, y: y + Self.row - 1, width: bounds.width, Design.mist) }
@@ -5235,8 +5256,24 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         reload(); onChange?()
     }
 
+    @objc private func removeCataloguePressed(_ sender: SwissButton) {
+        guard let name = sender.identifier?.rawValue else { return }
+        saveAbout()
+        askToRemove(name)
+    }
+
     private func askToRemove() {
-        guard let e = expanded else { return }
+        guard let name = expanded else { return }
+        askToRemove(name)
+    }
+
+    // TODO (Rick, next session): catalogue removal must update the .coldata registry
+    // and default/active catalogue references consistently, and explicitly ask whether
+    // the .colplt and .colswa files should remain on disk before removing anything.
+    // Verify the actual asset extensions/storage paths; preserve files when requested.
+    // Current behaviour below retains the existing whole-folder Bin confirmation.
+    private func askToRemove(_ e: String) {
+        guard names.contains(e) else { return }
         if names.count == 1 {
             SwissConfirm.tell(over: window, title: "The Only Catalogue",
                               note: "Colorgain keeps one catalogue open, and this is the only one. Make another with New Catalogue first; then this one can go.")
@@ -5244,7 +5281,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         }
         let lib = libraryFor(e)
         let held = lib.map { "\(e) holds \(plural($0.projects.count, "member")), \(plural($0.swatches.count, "palette")) and \(plural($0.colours.count, "colour")). " } ?? ""
-        let targets = others
+        let targets = names.filter { $0 != e }
         SwissConfirm.ask(over: window, title: "Remove Catalogue",
                          note: "You are about to remove \(e). " + held + "The catalogue's folder goes to the Bin with everything still in it, and it comes off the list. Choose where its contents go, then slide across.",
                          commit: "Remove",
@@ -5255,15 +5292,15 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
                 let picked = self.gather(all, in: lib)
                 do { try self.move(projects: picked.projects, palettes: picked.palettes, from: e, to: targets[choice - 1], in: lib) } catch { self.library?.show(error); return }
             }
-            self.removeExpanded()
+            self.removeCatalogue(e)
         }
     }
 
     /// Moves the catalogue to the Bin and takes it off the list, Main like any other; the open one hands over to another first.
-    private func removeExpanded() {
-        guard let e = expanded, let lib = library, names.count > 1 else { return }
+    private func removeCatalogue(_ e: String) {
+        guard let lib = library, names.contains(e), names.count > 1 else { return }
         if lib.catalogue == e, let other = names.first(where: { $0 != e }) { lib.open(catalogue: other) }
-        do { try Catalogues.standard.bin(e) } catch { lib.show(error) }
+        do { try Catalogues.standard.bin(e) } catch { lib.show(error); reload(); onChange?(); return }
         var all = Self.colours; all[e] = nil; Self.colours = all
         expanded = nil
         reload(); onChange?()
