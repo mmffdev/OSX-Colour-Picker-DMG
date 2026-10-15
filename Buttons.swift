@@ -77,9 +77,9 @@ enum ActionButtonSkin {
         let x=luminance(a),y=luminance(b)
         return (max(x,y)+0.05)/(min(x,y)+0.05)
     }
-    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor? = nil) {
+    static func draw(_ title: String, in bounds: NSRect, enabled: Bool, hover: Bool, pressed: Bool, focus: Bool = false, baseInk: NSColor? = nil, background: NSColor? = nil) {
         let active = enabled && pressed, hovered = enabled && hover
-        let ground=Design.card
+        let ground=background ?? Design.card
         let customInk = (active ? Prefs.buttonActiveText : hovered ? Prefs.buttonHoverText : nil).flatMap(colorFromHex)
         let candidate=(customInk ?? baseInk ?? Design.ink).withAlphaComponent(1)
         let readable=contrast(candidate,ground) >= 4.5 ? candidate:ThemedButton.readable(on:ground)
@@ -110,7 +110,14 @@ class ActionButton: NSButton {
         self.init(frame: .zero); self.title = title; self.target = target; self.action = action
     }
     required init?(coder: NSCoder) { super.init(coder: coder); configure() }
-    private func configure() { isBordered = false; alignment = .left; font = Design.Text.action.font(); setButtonType(.momentaryChange) }
+    private func configure() {
+        isBordered = false; alignment = .left; font = Design.Text.action.font(); setButtonType(.momentaryChange)
+        watchTheme(self)
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
     override var isFlipped: Bool { true }
     override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
@@ -127,7 +134,9 @@ class ActionButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         let hover = window.map { bounds.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
         ActionButtonSkin.draw(title, in: bounds, enabled: isEnabled, hover: hover, pressed: isHighlighted || state == .on,
-            focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled)
+            focus: window?.firstResponder === self && NSApp.isFullKeyboardAccessEnabled,
+            // Native forms follow the window appearance, independently of the Studio canvas.
+            baseInk: .labelColor, background: window?.backgroundColor ?? .windowBackgroundColor)
     }
 }
 

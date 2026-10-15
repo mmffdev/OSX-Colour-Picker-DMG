@@ -189,10 +189,11 @@ final class WorkspaceStartupController: NSWindowController, NSWindowDelegate {
     required init?(coder:NSCoder) { fatalError() }
     func windowWillClose(_ notification:Notification) { if !finished { cancel() } }
     func finishClosing() { finished=true;close() }
-    func start() {
-        if content.resumeCompletedWorkspace() { return }
+    func start(chooseWorkspace: Bool = false) {
+        if !chooseWorkspace && content.resumeCompletedWorkspace() { return }
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
-        content.start(); NSApp.activate(ignoringOtherApps:true)
+        if chooseWorkspace { content.showWorkspaceSelection() } else { content.start() }
+        NSApp.activate(ignoringOtherApps:true)
     }
 }
 
@@ -266,6 +267,15 @@ final class WorkspaceStartupView: NSView {
             do { try openWorkspace(root) }
             catch { if Catalogues.home != nil || !WorkspaceInventory.isMissing(error as NSError) { fail(error) } }
         }
+    }
+    /// An explicit Open Workspace action must never auto-resume the workspace being replaced.
+    func showWorkspaceSelection() {
+        initialSelection = nil
+        inventory = nil
+        stage = .workspace
+        message = ""
+        needsLayout = true
+        needsDisplay = true
     }
     func resumeCompletedWorkspace() -> Bool {
         guard initialSelection == nil, let inventory = try? WorkspaceInventory.read(root:root), inventory.setupComplete, inventory.lastUsed?.state == .ready, let entry=inventory.lastUsed else { return false }

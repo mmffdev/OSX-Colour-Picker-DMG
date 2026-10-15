@@ -90,12 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Resolve app data and catalogue availability before constructing LibraryController or seeding any catalogue.
-    private func showWorkspaceChooser(selection: URL? = nil) {
+    private func showWorkspaceChooser(selection: URL? = nil, chooseWorkspace: Bool = false) {
         opening=true
         installStartupMenu()
         if let workspaceStartup {
             workspaceStartup.showWindow(nil)
             if let selection { workspaceStartup.content.initialSelection=selection;workspaceStartup.content.start() }
+            else if chooseWorkspace { workspaceStartup.content.showWorkspaceSelection() }
             return
         }
         let args=CommandLine.arguments
@@ -132,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.content.onWorkspaceSelected = { [weak self] root in
             if self?.main == nil && self?.setupWindow == nil { Catalogues.home=root }
         }
-        workspaceStartup=controller;controller.start()
+        workspaceStartup=controller;controller.start(chooseWorkspace: chooseWorkspace)
     }
 
     private func prepareWorkspace(root:URL,name:String) {
@@ -266,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One setup surface: locations, the existing nested choices, then a final review/build.
-    @objc func runSetupAssistant() { showWorkspaceChooser() }
+    @objc func runSetupAssistant() { showWorkspaceChooser(chooseWorkspace: true) }
     @objc func fileCreatorDetails() { if let window = StudioWindowController.shared?.window ?? main?.window { FileRecoveryPresenter.creatorDetails(over: window) } }
     @objc func learnHalo() { SetupAssistant.show(from: SetupAssistant.Step.halo) { _ in } }
 
