@@ -19,6 +19,11 @@ enum FolderAccess {
     private(set) static var held: [String: URL] = [:]
     /// Those of them the sandbox had to be asked to open. A folder already inside the app's own container needs no asking.
     private static var scoped: Set<String> = []
+    private static var failed: Set<String> = []
+    static func requiresRenewal(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        return failed.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
 
     /// Keeps hold of a folder (or file) the user has just chosen in a panel, so it stays reachable after a relaunch.
     static func remember(_ url: URL) {
@@ -37,7 +42,7 @@ enum FolderAccess {
         all[path] = data
         stored = all
         if url.startAccessingSecurityScopedResource() { scoped.insert(path) }
-        held[path] = url
+        held[path] = url; failed.remove(path)
         #endif
     }
 
@@ -63,9 +68,15 @@ enum FolderAccess {
             var stale = false
             let url: URL
             do { url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) }
-            catch { NSLog("FolderAccess: could not resolve the bookmark for %@: %@", path, error.localizedDescription); continue }
-            if url.startAccessingSecurityScopedResource() { scoped.insert(path) }
-            held[path] = url
+            catch { failed.insert(path); NSLog("FolderAccess: could not resolve the bookmark for %@: %@", path, error.localizedDescription); continue }
+            let opened = url.startAccessingSecurityScopedResource()
+            if opened { scoped.insert(path) }
+            guard opened || FileManager.default.isReadableFile(atPath: url.path) else {
+                held[path] = nil; failed.insert(path)
+                NSLog("FolderAccess: folder access needs renewal for %@", path)
+                continue
+            }
+            held[path] = url; failed.remove(path)
             if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
                 all[path] = fresh
             }

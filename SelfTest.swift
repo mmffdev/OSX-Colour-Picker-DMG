@@ -26,6 +26,12 @@ func runSelfTest() -> Never {
     runColourTargetTests(check:check)
     runICCProfileTests(check:check)
     runPaletteAssetTests(check: check)
+    runFileHandlerBaselineTests(check: check)
+    runFileHandlerManagerTests(check: check)
+    runFileRecoveryAndTransactionTests(check: check)
+    runFileCatalogueLifecycleTests(check: check)
+    runFileHandlerCompletionTests(check: check)
+    runFileHandlerFormatMatrix(check: check)
     runPickerCacheTests(check: check)
     runWorkspaceStartupTests(check: check)
     runLibraryAssignmentTests(check: check)
@@ -278,15 +284,12 @@ func runSelfTest() -> Never {
     check(merged == 1 && lib.colours.contains { $0.hex == "#FF0000" }, "re-import from v1 only adds what is missing")
     check((try! Data(contentsOf: v1File)) == v1Before, "the v1 library file is never modified")
 
+    let validLibraryBytes = try! Data(contentsOf: store.url)
     try! "{ this is not json".write(to: store.url, atomically: true, encoding: .utf8)
-    let recovered = try! store.load()
-    check(recovered.colours.count == 3, "an unreadable library is replaced by a fresh one")
-    if let aside = store.quarantinedFile {
-        check((try? String(contentsOf: aside, encoding: .utf8)) == "{ this is not json",
-              "the unreadable file is kept aside, not overwritten")
-    } else {
-        check(false, "the unreadable file is kept aside, not overwritten")
-    }
+    check((try? store.load()) == nil, "an unreadable library requires recovery instead of starting a fresh one")
+    check((try? String(contentsOf: store.url, encoding: .utf8)) == "{ this is not json" && store.quarantinedFile == nil,
+          "the unreadable library stays at its original location without overwriting or quarantine")
+    try! validLibraryBytes.write(to: store.url)
 
 
     print("naming")
@@ -1120,17 +1123,19 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     try! fm.moveItem(at: plusDir, to: projectsDir.appendingPathComponent("Job Alpha"))
     let alphaDir = projectsDir.appendingPathComponent("Job Alpha")
     let afterFinder = try! treeStore.load()
+    try! treeStore.save(afterFinder)
     check(afterFinder.project(jobA)?.name == "Job Alpha" && CatalogueTree.catalogue(in: treeDir)?.collections.first?.members.first { $0.id == jobA }?.folder == "Job Alpha"
           && exists("Projects/Job Alpha/Information/Job Alpha.colinf") && afterFinder.palettes(in: jobA).count == 2,
-          "a member folder renamed in Finder gives the member its new name, keeps its palettes, and the structure file catches up")
+          "a member folder renamed in Finder gives the member its new name, keeps its palettes, and an explicit save updates the structure file")
     var dropped = Swatch(id: UUID(), name: "Dropped", createdAt: tcat, entries: [SwatchEntry(hex: "#ABCDEF", addedAt: tcat)])
     dropped.projectID = nil
     let droppedDoc = PaletteDocument(project: nil, palette: dropped, colours: [Colour(hex: "#ABCDEF", pickedAt: tcat)], file: "Dropped")
     try! ColourFiles.encoder().encode(droppedDoc).write(to: alphaDir.appendingPathComponent("Colourways/Dropped.colpal"))
     let adopted = try! treeStore.load()
+    try! treeStore.save(adopted)
     check(adopted.swatch(dropped.id)?.projectID == jobA && adopted.colours.contains { $0.hex == "#ABCDEF" }
           && CatalogueTree.catalogue(in: treeDir)?.collections.first?.members.first { $0.id == jobA }?.assets.contains { $0.id == dropped.id } == true,
-          "a palette file dropped into a member's folder in Finder is taken in, and the structure file lists it")
+          "a palette file dropped into a member's folder in Finder is taken in, and an explicit save lists it in the structure file")
     // Moved in Finder, out of its client: known by its palettes, it sits where it was put.
     try! fm.moveItem(at: treeDir.appendingPathComponent("Customers/Acme Ltd/Job B"), to: treeDir.appendingPathComponent("Customers/Job B"))
     let afterMove = try! treeStore.load()
@@ -1141,14 +1146,24 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     check(treeStore.schema.collections.map { $0.name } == ["Projects", "Clients Ltd"] && treeStore.schema.collections[1].id == clients.id && afterCollectionRename.project(jobB) != nil
           && treeStore.schema.collections[1].folders.map { $0.name } == ["Acme Ltd"],
           "a collection folder renamed in Finder renames the collection, and everything in it stays")
-    try! fm.removeItem(at: treeDir.appendingPathComponent("Clients Ltd/Job B"))
+    let jobBHome = treeDir.appendingPathComponent("Clients Ltd/Job B")
+    let retainedJobB = root.appendingPathComponent("Retained Job B")
+    let beforeMissingMember = try! Data(contentsOf: treeStore.url)
+    try! fm.moveItem(at: jobBHome, to: retainedJobB)
+    check((try? treeStore.load()) == nil && (try! Data(contentsOf: treeStore.url)) == beforeMissingMember,
+          "a member folder removed in Finder requires recovery and retains its catalogue references")
+    try! fm.moveItem(at: retainedJobB, to: jobBHome)
+    var confirmedRemoval = try! treeStore.load()
+    confirmedRemoval.deleteProject(jobB, at: tcat.addingTimeInterval(8))
+    try! treeStore.save(confirmedRemoval)
     let afterDelete = try! treeStore.load()
-    check(afterDelete.project(jobB) == nil && afterDelete.swatch(inB) == nil && afterDelete.project(jobA) != nil,
-          "a member folder deleted in Finder is gone from the catalogue, with its palettes, and nothing else is touched")
+    check(afterDelete.project(jobB) == nil && afterDelete.swatch(inB)?.projectID == nil && afterDelete.project(jobA) != nil,
+          "explicit member removal retains its palette in the library and leaves unrelated members intact")
     // Added in Finder: a folder in a collection is a new member; a folder at the root is a new collection, its folders its members.
     try! fm.createDirectory(at: treeDir.appendingPathComponent("Clients Ltd/Newco"), withIntermediateDirectories: true)
     try! fm.createDirectory(at: treeDir.appendingPathComponent("Archive/Old Work"), withIntermediateDirectories: true)
     let afterAdd = try! treeStore.load()
+    try! treeStore.save(afterAdd)
     let newco = afterAdd.projects.first { $0.name == "Newco" }, oldWork = afterAdd.projects.first { $0.name == "Old Work" }
     let archive = treeStore.schema.collections.first { $0.name == "Archive" }
     check(newco != nil && oldWork != nil && archive != nil && treeStore.schema.places[newco?.id.uuidString ?? ""]?.collection == clients.id
@@ -1259,6 +1274,8 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let oldMeasure = Migration.measure(oldDir)
     check(Migration.needed(in: oldDir) && !Migration.needed(in: treeDir), "a catalogue in the earlier layout is seen as one to bring across, and one already a tree is not")
     let migratedStore = LibraryStore(directory: oldDir, legacyURL: nil, name: "Earlier")
+    check((try? migratedStore.load()) == nil && Migration.measure(oldDir) == oldMeasure, "Legacy opening remains read-only until migration is explicitly requested")
+    try! Migration.run(root: oldDir, name: "Earlier")
     let brought = try! migratedStore.load()
     let backups = ((try? fm.contentsOfDirectory(atPath: root.appendingPathComponent("tree").path)) ?? []).filter { $0.hasPrefix("Earlier Before Migration ") }
     check(backups.count == 1 && Migration.measure(root.appendingPathComponent("tree").appendingPathComponent(backups[0])) == oldMeasure,
@@ -1280,6 +1297,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let oneDir = root.appendingPathComponent("tree/One")
     try! fm.createDirectory(at: oneDir, withIntermediateDirectories: true)
     try! JSONEncoder.library.encode(oldLib).write(to: oneDir.appendingPathComponent("library.json"))
+    try! Migration.run(root: oneDir, name: "One")
     let oneLib = try! LibraryStore(directory: oneDir, legacyURL: nil, name: "One").load()
     check(oneLib.project(oldJob) != nil && oneLib.swatch(oldPal)?.entries.count == 2 && fm.fileExists(atPath: oneDir.appendingPathComponent("One.colcat").path)
           && !fm.fileExists(atPath: oneDir.appendingPathComponent("library.json").path)
@@ -1317,6 +1335,7 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
     let secondMeasure = Migration.measure(secondDir)
     check(Migration.needed(in: secondDir) && Migration.isVersion2(secondDir), "a version 2 tree, each level with a file of its own, is seen as one to bring across")
     let secondStore = LibraryStore(directory: secondDir, legacyURL: nil, name: "Second")
+    try! Migration.run(root: secondDir, name: "Second")
     let secondLib = try! secondStore.load()
     let secondBackups = ((try? fm.contentsOfDirectory(atPath: root.appendingPathComponent("tree").path)) ?? []).filter { $0.hasPrefix("Second Before Migration ") }
     check(secondBackups.count == 1 && Migration.measure(root.appendingPathComponent("tree").appendingPathComponent(secondBackups[0])) == secondMeasure,
@@ -1626,13 +1645,14 @@ private func runColourTests(in root: URL, check: (Bool, String) -> Void) {
           "renaming the category in Finder preserves its project and nested streams")
 
     print("where catalogues and their members are kept")
-    let homeDir = root.appendingPathComponent("home"), awayDir = root.appendingPathComponent("awayDir")
+    let homeDir = root.appendingPathComponent("catalogueLocationsHome"), awayDir = root.appendingPathComponent("awayDir")
     let cats = Catalogues(root: homeDir, legacyURL: nil)
     let inside = try! cats.create("Inside")
     let outside = try! cats.create("Outside", under: awayDir)
     check(cats.directory(for: inside) == homeDir.appendingPathComponent("Catalogues/Inside") && cats.directory(for: outside) == awayDir.appendingPathComponent("Outside")
           && fm.fileExists(atPath: awayDir.appendingPathComponent("Outside/Outside.colcat").path) && Set(cats.names()).isSuperset(of: ["Inside", "Outside"]),
           "a catalogue is made under Catalogues in the app's home, or under any folder the user chose, and both are listed")
+    try! AppHomeSeed.ensure(at: root.appendingPathComponent("home2"))
     let adoptedName = try! Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).adopt(awayDir.appendingPathComponent("Outside/Outside.colcat"))
     check(adoptedName == "Outside" && Catalogues(root: root.appendingPathComponent("home2"), legacyURL: nil).directory(for: "Outside") == awayDir.appendingPathComponent("Outside"),
           "a .colcat file chosen from anywhere is opened where it is, under its own name, with nothing copied")
@@ -3048,6 +3068,8 @@ private func runAppDataTests(check: (Bool, String) -> Void) {
         let entries = [Catalogues.Entry(name: "Test", path: "/test/catalogue")]
         try ColourFiles.encoder().encode(entries).write(to: legacy)
         let store = AppDataStore(root: root)
+        check((try? store.read()) == nil, "legacy workspace reads do not create a manifest")
+        try store.migrateLegacy()
         let migrated = try store.read()
         check((migrated["catalogues"] as? [[String: String]])?.first?["name"] == "Test", "legacy catalogue index migrates into coldata")
         check(FileManager.default.fileExists(atPath: legacy.path), "migration retains the legacy index backup")
@@ -3067,8 +3089,10 @@ private func runAppDataTests(check: (Bool, String) -> Void) {
         check(try KeyProfiles.read(file).quickKeys["pick"] == "A", "imported quick keys use the event character convention")
         var duplicate = profile; duplicate.quickKeys = ["pick": "A", "newPalette": "A"]
         do { try KeyProfiles.validate(duplicate); check(false, "duplicate quick keys rejected") } catch { check(true, "duplicate quick keys rejected") }
-        var invalid = profile; invalid.version = 99; try KeyProfiles.write(invalid, to: file)
-        do { _ = try KeyProfiles.read(file); check(false, "future key profile rejected") } catch { check(true, "future key profile rejected") }
+        var invalid = profile; invalid.version = 99
+        let validKeys = try Data(contentsOf: file)
+        do { try KeyProfiles.write(invalid, to: file); check(false, "future key profile rejected") }
+        catch { check(try Data(contentsOf: file) == validKeys, "future key profile rejected without replacing valid keys") }
         let broken = Data("broken manifest".utf8); try broken.write(to: store.url)
         do { try store.update { $0["settings"] = [:] }; check(false, "corrupt manifest blocks writes") } catch { check(true, "corrupt manifest blocks writes") }
         check(try Data(contentsOf: store.url) == broken, "corrupt manifest remains untouched")
@@ -3109,7 +3133,9 @@ private func runGlobalAssetsTests(check: (Bool, String) -> Void) {
         let bytes = try Data(contentsOf: GlobalAssets(home: root).index)
         do {
             try AssetTransaction.perform(home: root, catalogue: store.root) {
-                try Data("invalid".utf8).write(to: GlobalAssets(home: root).index)
+                var changedIndex = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
+                changedIndex["about"] = "Injected intermediate save"
+                try Handler_File_Manager.shared.write(JSONSerialization.data(withJSONObject: changedIndex), to: GlobalAssets(home: root).index)
                 throw failure("Injected write failure")
             }
         } catch {}
@@ -3175,9 +3201,10 @@ private func runGlobalAssetsTests(check: (Bool, String) -> Void) {
         var old = Library(); old.swatches = [palette]
         try CatalogueTree.write(old, schema: .init(collections: [], places: [:]), index: legacyRoot.appendingPathComponent("Legacy.colcat"), name: "Legacy")
         try cats.registerChecked("Legacy", at: legacyRoot)
+        let legacyBefore = try FileHandlerFixture.snapshot(legacyRoot)
         _ = try cats.store(for: "Legacy").load()
-        check(fm.fileExists(atPath: legacyRoot.appendingPathComponent("Backups/Before Global Assets/Assets/Palettes/Global Test.colpal").path), "migration preserves a complete original asset backup")
-        check(try CatalogueTree.read(root: legacyRoot).library.palettes(in: nil).isEmpty, "migration removes global assets from catalogue ownership")
+        check(try FileHandlerFixture.snapshot(legacyRoot) == legacyBefore, "Opening an older global-asset layout never performs an implicit migration")
+        check(try CatalogueTree.read(root: legacyRoot).library.palettes(in: nil).count == 1, "Read-only opening retains original catalogue ownership until an explicit save")
     } catch { check(false, "global assets integration: \(error)") }
 }
 

@@ -33,6 +33,7 @@ struct WorkspaceCatalogue {
     var id: UUID?
     var state: State
     var issue: String?
+    var recovery: FileRecoveryReport? = nil
     var canOpen: Bool { state == .ready || state == .migration }
 }
 
@@ -59,18 +60,30 @@ struct WorkspaceInventory {
         return selection.deletingLastPathComponent()
     }
     static func read(root: URL) throws -> WorkspaceInventory {
+        try FileOperationTransaction.recover(home: root)
         let manifestURL = root.appendingPathComponent("colorgain.coldata")
-        let bytes = try Data(contentsOf: manifestURL) // Propagate missing/access/invalid errors; never seed during a read.
+        let bytes = try Handler_File_Manager.shared.read(manifestURL)
         guard bytes.count <= 16 * 1024 * 1024,
               let manifest = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
               manifest["version"] as? Int == 1 else { throw failure("This app-data file is invalid or from a newer version. It has not been changed.") }
         let raw = manifest["catalogues"] ?? []
+        let references = try Handler_File_Manager.shared.handler(for: manifestURL).references(manifest, at: manifestURL)
+        var referenceIssues: [FileIssue] = []
+        for reference in references {
+            do { _ = try Handler_File_Manager.shared.read(reference.url) }
+            catch { referenceIssues.append(FileIssue.wrapping(error, at: reference.url)) }
+        }
+        if !referenceIssues.isEmpty { throw FileRecoveryReport(root: root, issues: referenceIssues) }
         let registry = try JSONDecoder().decode([Catalogues.Entry].self, from: JSONSerialization.data(withJSONObject: raw))
         guard registry.count <= 2000 else { throw failure("The app-data catalogue list is too large.") }
         var entries: [WorkspaceCatalogue] = [], paths = Set<String>(), identities = Set<UUID>()
+        let detached = Set(manifest["detachedCatalogues"] as? [String] ?? [])
+        let detachedIDs = Set((manifest["detachedCatalogueIDs"] as? [String] ?? []).compactMap(UUID.init(uuidString:)))
         func append(_ name: String, _ folder: URL) {
+            guard !detached.contains(folder.standardizedFileURL.path), !detached.contains(folder.resolvingSymlinksInPath().path) else { return }
             guard paths.insert(folder.resolvingSymlinksInPath().path).inserted else { return }
             var entry = probe(name: name, folder: folder)
+            if let id = entry.id, detachedIDs.contains(id) { return }
             let canonical=folder.resolvingSymlinksInPath().path
             if canonical == root.appendingPathComponent("Assets").resolvingSymlinksInPath().path || canonical.hasPrefix(root.appendingPathComponent("Backups").resolvingSymlinksInPath().path+"/") {
                 entry.state = .invalid;entry.issue="This is an internal assets or backup location. Locate the user catalogue itself."
@@ -134,10 +147,12 @@ struct WorkspaceInventory {
                       let header = try JSONSerialization.jsonObject(with: bytes) as? [String: Any], header["format"] as? String == "colour-catalogue" else { throw failure("The catalogue index is invalid.") }
                 guard header["version"] as? Int == 3, let doc = CatalogueTree.decode(bytes) else { throw failure("This catalogue requires a supported version-3 index. Its files have not been changed.") }
                 entry.name = doc.name; entry.id = doc.id; entry.state = .ready
+                try Handler_File_Manager.shared.requireAvailableCatalogue(index)
             } else if files.contains(where: { $0.pathExtension.lowercased() == "colcatalogue" || $0.lastPathComponent == "library.json" }) {
                 entry.state = .migration; entry.issue = "A backup and catalogue update are required before opening."
             } else { entry.state = .missing; entry.issue = "No catalogue index was found here. Locate the folder containing its .colcat file." }
         } catch {
+            if let report = error as? FileRecoveryReport { entry.recovery = report; entry.state = report.issues.allSatisfy { $0.state == .missing } ? .missing : .invalid }
             let error = error as NSError
             if isMissing(error) { entry.state = .missing }
             else if (error.domain == NSCocoaErrorDomain && [NSFileReadNoPermissionError,NSFileWriteNoPermissionError].contains(error.code)) || (error.domain == NSPOSIXErrorDomain && error.code == Int(EACCES)) { entry.state = .access }
@@ -283,10 +298,11 @@ final class WorkspaceStartupView: NSView {
         case .catalogues:
             chooser?.frame=NSRect(x:x,y:y(7),width:w,height:56)
             place(openCat,14);place(locateCat,17);place(createCat,20);place(switchData,23)
-            openCat.isEnabled=inventory?.catalogues.indices.contains(selected) == true && inventory!.catalogues[selected].canOpen
+            openCat.isEnabled=inventory?.catalogues.indices.contains(selected) == true && (inventory!.catalogues[selected].canOpen || inventory!.catalogues[selected].recovery != nil)
             if let inventory,inventory.catalogues.indices.contains(selected) {
                 let entry=inventory.catalogues[selected],pending=CatalogueSetupSession.load()
                 openCat.title = !inventory.setupComplete && pending.createdName == entry.name && pending.createdFolder?.standardizedFileURL == entry.folder.standardizedFileURL ? "Continue Catalogue Setup" : "Open Catalogue"
+                if entry.recovery != nil { openCat.title = "Recover Catalogue…" }
             }
             place(openCat,14)
             newData.title="New Workspace…";place(newData,23)
@@ -333,7 +349,18 @@ final class WorkspaceStartupView: NSView {
         guard let window else { return }
         panel.beginSheetModal(for:window) { [weak self] result in
             guard let self,result == .OK,let selection=panel.url else { return }
-            do { let folder=try WorkspaceInventory.root(for:selection);try FolderAccess.authorize(folder);try self.openWorkspace(folder) } catch { self.fail(error) }
+            do {
+                let folder=try WorkspaceInventory.root(for:selection);try FolderAccess.authorize(folder)
+                if !FileManager.default.fileExists(atPath: folder.appendingPathComponent("colorgain.coldata").path), FileManager.default.fileExists(atPath: folder.appendingPathComponent("catalogues.json").path) {
+                    let modal = SwissFocusModal(title: "Update Legacy Workspace?", message: "Create a current workspace manifest from the legacy catalogue list. The original list and catalogue files are retained.")
+                    modal.button("Update Workspace", primary: true) {
+                        do { try AppDataStore(root: folder).migrateLegacy(); try AppHomeSeed.ensure(at: folder); modal.dismissOverlay(); try self.openWorkspace(folder) }
+                        catch { self.fail(error) }
+                    }
+                    modal.button("Cancel") { modal.dismissOverlay() }; modal.present(over: self); return
+                }
+                try self.openWorkspace(folder)
+            } catch { self.fail(error) }
         }
     }
     @objc private func makeData() {
@@ -371,6 +398,10 @@ final class WorkspaceStartupView: NSView {
     @objc private func openSelected() {
         guard let inventory,inventory.catalogues.indices.contains(selected) else { return }
         let entry=inventory.catalogues[selected],pending=CatalogueSetupSession.load()
+        if let report = entry.recovery, let window {
+            FileRecoveryPresenter.present(report, over: window, retry: { [weak self] in guard let self else { return }; do { try self.openWorkspace(self.root) } catch { self.fail(error) } }, relinked: { [weak self] in guard let self else { return }; do { try self.openWorkspace(self.root) } catch { self.fail(error) } })
+            return
+        }
         if !inventory.setupComplete,pending.createdName == entry.name,pending.createdFolder?.standardizedFileURL == entry.folder.standardizedFileURL {
             create(root,entry.name);return
         }
@@ -389,7 +420,8 @@ final class WorkspaceStartupView: NSView {
             }
             modal.button("Cancel") { [weak modal] in modal?.dismissOverlay() };modal.present(over:self);return
         }
-        _ = try CatalogueTree.read(root:entry.folder) // Validate assets/schema before leaving the chooser.
+        if let index = CatalogueFiles.index(in: entry.folder) { try Handler_File_Manager.shared.requireAvailableCatalogue(index) }
+        _ = try CatalogueTree.read(root:entry.folder)
         try Catalogues(root:root,legacyURL:nil).registerChecked(entry.name,at:entry.folder)
         ready(root,entry)
     }

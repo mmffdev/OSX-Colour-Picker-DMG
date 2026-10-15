@@ -36,6 +36,9 @@ enum Overlays {
             guard !open.isEmpty else { return e }
             // The monitor pattern window owns its exit; returning must preserve its setup modal.
             if e.window is MonitorPatternWindow { return e }
+            // Native file/permission sheets own their clicks and Escape. They must not
+            // dismiss the recovery form beneath them while the user chooses or cancels.
+            if e.window?.sheetParent != nil || (e.window != nil && NSApp.modalWindow === e.window) { return e }
             if e.type == .keyDown {
                 if e.keyCode == 53 { if open.last?.handleOverlayEscape() != true { closeAll() }; return nil }
                 return e
@@ -51,6 +54,7 @@ enum Overlays {
     }
     static func closed(_ o: Overlay) { open.removeAll { $0 === o } }
     static var any: Bool { !open.isEmpty }
+    static func isTop(_ overlay: Overlay) -> Bool { open.last === overlay }
     /// Everything goes, the last opened first.
     static func closeAll() {
         let all = open.reversed()
@@ -63,6 +67,28 @@ enum Overlays {
 /// a chevron at the right. The menu is a Card with a Rule edge under the field, rows with a Mist
 /// hover and a tick on the chosen one, and "Your own word…" turns the value into a field to type in.
 final class SwissDropdown: NSView, Overlay {
+    private var keyboardIndex = 0
+    override var acceptsFirstResponder: Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+    override func accessibilityLabel() -> String? { cap.stringValue }
+    override func accessibilityValue() -> Any? { value.stringValue }
+    override func accessibilityChildren() -> [Any]? { value.isEditable ? [value] : list?.accessibleRows ?? [] }
+    override func accessibilityPerformPress() -> Bool { if list == nil { open() } else { close() }; return true }
+    override func keyDown(with event: NSEvent) {
+        guard !value.isEditable else { super.keyDown(with: event); return }
+        if event.keyCode == 53 { close(); return }
+        if [125, 126].contains(event.keyCode) {
+            if list == nil { open() }
+            keyboardIndex = max(0, min(options.count - 1, keyboardIndex + (event.keyCode == 125 ? 1 : -1)))
+            list?.highlight(keyboardIndex); return
+        }
+        if [36, 49].contains(event.keyCode) {
+            if list == nil { open() }
+            else if options.indices.contains(keyboardIndex) { set(options[keyboardIndex]); close() }
+            return
+        }
+        super.keyDown(with: event)
+    }
     var dismissOnOutsideClick: Bool { true }
     func handleOverlayEscape() -> Bool { dismissOverlay(); return true }
     func containsOverlayEvent(_ event: NSEvent) -> Bool {
@@ -100,6 +126,7 @@ final class SwissDropdown: NSView, Overlay {
         self.options = options
         self.allowsOwn = allowsOwn
         super.init(frame: .zero)
+        setAccessibilityElement(true)
         value.stringValue = v
         value.isBordered = false
         value.drawsBackground = false
@@ -135,11 +162,14 @@ final class SwissDropdown: NSView, Overlay {
 
     override func mouseDown(with event: NSEvent) {
         if value.isEditable { super.mouseDown(with: event); return }
+        window?.makeFirstResponder(self)
         if list != nil { close() } else { open() }
     }
 
     private func open() {
         guard let win = window else { return }
+        window?.makeFirstResponder(self)
+        keyboardIndex = options.firstIndex(of: value.stringValue) ?? 0
         let items = options + (allowsOwn ? ["Your own word\u{2026}"] : [])
         let panel = MenuPanel(items: items, chosen: value.stringValue, width: bounds.width, spectra: spectra, preview: onPreview) { [weak self] i in
             guard let self = self else { return }
@@ -187,6 +217,7 @@ final class SwissDropdown: NSView, Overlay {
         static func kind(_ s: String) -> Int { s == divider ? 1 : s.hasPrefix("#") ? 2 : 0 }
 
         private var menuRows: [Row] = []
+        var accessibleRows: [Any] { menuRows.filter { MenuPanel.kind($0.accessibleTitle) == 0 } }
         private var outsideClickMonitor: Any?
         var onPreviewIndex: ((Int) -> Void)?
         override func orderOut(_ sender: Any?) {
@@ -290,6 +321,7 @@ final class SwissDropdown: NSView, Overlay {
             init(title: String, chosen: Bool, frame: NSRect, act: @escaping () -> Void) {
                 self.title = title; self.chosen = chosen; self.act = act
                 super.init(frame: frame)
+                setAccessibilityElement(true); setAccessibilityRole(.menuItem); setAccessibilityLabel(title)
                 addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
             }
             required init?(coder: NSCoder) { fatalError() }
@@ -297,6 +329,7 @@ final class SwissDropdown: NSView, Overlay {
             override func mouseEntered(with event: NSEvent) { if kind == 0 && enabled { hover = true; needsDisplay = true; preview?() } }
             override func mouseExited(with event: NSEvent) { hover = false; needsDisplay = true }
             override func mouseUp(with event: NSEvent) { if kind == 0 && enabled { act() } }
+            override func accessibilityPerformPress() -> Bool { guard kind == 0 && enabled else { return false }; act(); return true }
             override func draw(_ dirtyRect: NSRect) {
                 if kind == 1 { Design.rule.setFill(); NSRect(x: 14, y: bounds.midY, width: bounds.width - 28, height: 1).fill(); return }
                 if kind == 2 {

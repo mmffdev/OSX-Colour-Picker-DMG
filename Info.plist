@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD Plist 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
@@ -29,29 +29,74 @@
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
-            <key>UTTypeIdentifier</key><string>com.mmffdev.colorgain.print-profile</string>
-            <key>UTTypeDescription</key><string>Colorgain Print Profile</string>
-            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
-            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colpro</string></array><key>public.mime-type</key><string>application/vnd.colorgain.print-profile+json</string></dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colorgain.print-profile</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Print Profile</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colpro</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/vnd.colorgain.print-profile+json</string>
+            </dict>
         </dict>
-
         <dict>
-            <key>UTTypeIdentifier</key><string>com.mmffdev.colour.calibration</string>
-            <key>UTTypeDescription</key><string>Colorgain Proof Configuration</string>
-            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
-            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colcal</string></array></dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.calibration</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Proof Configuration</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colcal</string>
+                </array>
+            </dict>
         </dict>
         <dict>
-            <key>UTTypeIdentifier</key><string>com.mmffdev.colour.coldata</string>
-            <key>UTTypeDescription</key><string>Colorgain App Data</string>
-            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
-            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>coldata</string></array></dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.coldata</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain App Data</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>coldata</string>
+                </array>
+            </dict>
         </dict>
         <dict>
-            <key>UTTypeIdentifier</key><string>com.mmffdev.colour.colkeys</string>
-            <key>UTTypeDescription</key><string>Colorgain Key Profile</string>
-            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
-            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colkeys</string></array></dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.colkeys</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain Key Profile</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colkeys</string>
+                </array>
+            </dict>
         </dict>
         <dict>
             <key>UTTypeIdentifier</key>
@@ -108,25 +153,6 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>colproject</string>
-                </array>
-            </dict>
-        </dict>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.mmffdev.colour.data</string>
-            <key>UTTypeDescription</key>
-            <string>Colour Project Data</string>
-            <key>UTTypeIconFile</key>
-            <string>coldata</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.json</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>coldata</string>
                 </array>
             </dict>
         </dict>
@@ -305,44 +331,6 @@
         </dict>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>com.mmffdev.colour.sync.project</string>
-            <key>UTTypeDescription</key>
-            <string>Colour Project Being Synced</string>
-            <key>UTTypeIconFile</key>
-            <string>colsyncproject</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.json</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>colsyncproject</string>
-                </array>
-            </dict>
-        </dict>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.mmffdev.colour.sync.catalogue</string>
-            <key>UTTypeDescription</key>
-            <string>Colour Catalogue Being Synced</string>
-            <key>UTTypeIconFile</key>
-            <string>colsynccatalogue</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.json</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>colsynccatalogue</string>
-                </array>
-            </dict>
-        </dict>
-        <dict>
-            <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colour.typography</string>
             <key>UTTypeDescription</key>
             <string>Colorgain Typography Palette</string>
@@ -433,6 +421,41 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>colshr</string>
+                    <string>colshare</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.qr</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain XYZ Colour Exchange</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colqr</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mmffdev.colour.ase-registry</string>
+            <key>UTTypeDescription</key>
+            <string>Colorgain ASE Links</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>colase</string>
                 </array>
             </dict>
         </dict>
@@ -466,20 +489,6 @@
             <array>
                 <string>com.mmffdev.colour.space</string>
                 <string>com.mmffdev.colour.project</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Colour Project Data</string>
-            <key>CFBundleTypeIconFile</key>
-            <string>coldata</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.mmffdev.colour.data</string>
             </array>
         </dict>
         <dict>
@@ -610,34 +619,6 @@
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Colour Project Being Synced</string>
-            <key>CFBundleTypeIconFile</key>
-            <string>colsyncproject</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.mmffdev.colour.sync.project</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Colour Catalogue Being Synced</string>
-            <key>CFBundleTypeIconFile</key>
-            <string>colsynccatalogue</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.mmffdev.colour.sync.catalogue</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleTypeName</key>
             <string>Colorgain Typography Palette</string>
             <key>CFBundleTypeIconFile</key>
             <string>colpalette</string>
@@ -704,6 +685,78 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.mmffdev.colour.share</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Workspace</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.coldata</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Keyboard Profile</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.colkeys</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain XYZ Colour Exchange</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.qr</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain ASE Links</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.ase-registry</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Print Profile</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colorgain.print-profile</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Colorgain Proof Configuration</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mmffdev.colour.calibration</string>
             </array>
         </dict>
     </array>

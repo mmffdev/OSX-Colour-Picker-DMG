@@ -5,28 +5,36 @@ struct AppDataStore {
     let root: URL
     var url: URL { root.appendingPathComponent("colorgain.coldata") }
     func read() throws -> [String: Any] {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: url.path) {
-            guard let value = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
-                  value["version"] as? Int == 1 else { throw failure("The app data file is invalid or from a newer version. It has not been overwritten.") }
-            return value
-        }
-        let old = root.appendingPathComponent("catalogues.json")
-        var value: [String: Any] = ["version": 1, "catalogues": [], "settings": [:], "keys": "Keys/default.colkeys"]
-        if fm.fileExists(atPath: old.path) {
-            let entries = try JSONDecoder().decode([Catalogues.Entry].self, from: Data(contentsOf: old))
-            value["catalogues"] = entries.map { ["name": $0.name, "path": $0.path] }
-            try write(value)
-            // Keep the old index intact as a migration backup.
+        guard let value = try JSONSerialization.jsonObject(with: Handler_File_Manager.shared.read(url)) as? [String: Any], value["version"] as? Int == 1 else {
+            throw failure("The app data file is invalid or from a newer version. It has not been changed.")
         }
         return value
     }
+    static func initialManifest() -> [String: Any] {
+        ["version": 1, "catalogues": [], "settings": [:], "keys": "Keys/default.colkeys"]
+    }
+    /// Called only by an explicit legacy-workspace update action; reading never migrates.
+    func migrateLegacy() throws {
+        guard !FileManager.default.fileExists(atPath: url.path) else { throw failure("This workspace already has a manifest.") }
+        let old = root.appendingPathComponent("catalogues.json")
+        let entries = try JSONDecoder().decode([Catalogues.Entry].self, from: Data(contentsOf: old))
+        var value = Self.initialManifest()
+        value["catalogues"] = entries.map { ["name": $0.name, "path": $0.path] }
+        value["legacyMigrationPending"] = true
+        if !entries.isEmpty { value["settings"] = ["assistantDone": true] }
+        try write(value) // Keep catalogues.json intact as the original backup.
+    }
     func write(_ value: [String: Any]) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+        var value = value
+        if value["workspaceID"] == nil {
+            let existing = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            value["workspaceID"] = existing?["workspaceID"] ?? UUID().uuidString
+        }
+        try Handler_File_Manager.shared.write(JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]), to: url)
     }
     func update(_ change: (inout [String: Any]) throws -> Void) throws {
-        var value = try read(); try change(&value); try write(value)
+        try Handler_File_Manager.shared.update(url, change)
     }
     func rememberDefaultCatalogue(_ name: String, id: String? = nil) throws {
         try update { manifest in
@@ -72,7 +80,7 @@ final class AppPreferences {
                 if let blob = value as? [String: String], let b64 = blob["$data"] { return Data(base64Encoded: b64) }
                 return value
             }
-            if let old = preferences.object(forKey: key) { set(old, forKey: key); return old }
+            if let old = preferences.object(forKey: key) { return old }
         } catch { NSLog("App data: %@", error.localizedDescription) }
         return preferences.object(forKey: key)
     }
@@ -86,26 +94,17 @@ final class AppPreferences {
         if CommandLine.arguments.contains("--self-test") { preferences.set(value, forKey: key); return }
         do {
             let store = AppDataStore.current
-            var manifest = try store.read()
-            var settings = manifest["settings"] as? [String: Any] ?? [:]
-            settings[key] = (value as? Data).map { ["$data": $0.base64EncodedString()] } ?? value ?? NSNull()
-            manifest["settings"] = settings
-            let isKeys = key == "shortcuts" || key == "quickKeys"
-            let profileURL = KeyProfiles.activeURL
-            let existed = FileManager.default.fileExists(atPath: profileURL.path)
-            let previous = isKeys && existed ? try Data(contentsOf: profileURL) : nil
-            if isKeys { try KeyProfiles.saveCurrent(settings: settings) }
-            do { try store.write(manifest) }
-            catch {
-                if isKeys {
-                    if let previous { try previous.write(to: profileURL, options: .atomic) }
-                    else { try FileManager.default.removeItem(at: profileURL) }
+            try Handler_File_Manager.shared.withTransaction(home: store.root) {
+                try store.update { manifest in
+                    var settings = manifest["settings"] as? [String: Any] ?? [:]
+                    settings[key] = (value as? Data).map { ["$data": $0.base64EncodedString()] } ?? value ?? NSNull()
+                    if key == "shortcuts" || key == "quickKeys" { try KeyProfiles.saveCurrent(settings: settings) }
+                    manifest["settings"] = settings
                 }
-                throw error
             }
             settingsCache.invalidate()
             preferences.set(value, forKey: key)
-        } catch { NSApp.presentError(error) }
+        } catch { FileIncidentCoordinator.report(error, at: AppDataStore.current.url) }
     }
     func rememberDefaultCatalogue(_ name: String, id: String?) {
         // Like ordinary preferences, self-tests must never reach the user's app manifest.
@@ -118,7 +117,7 @@ final class AppPreferences {
             try AppDataStore.current.rememberDefaultCatalogue(name, id: id)
             settingsCache.invalidate()
             preferences.set(name, forKey: Catalogues.currentKey)
-        } catch { NSApp.presentError(error) }
+        } catch { FileIncidentCoordinator.report(error, at: AppDataStore.current.url) }
     }
 }
 
@@ -138,23 +137,21 @@ enum KeyProfiles {
         return folder.appendingPathComponent(URL(fileURLWithPath: path).lastPathComponent)
     }
     static func ensure() throws {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let manifest = try AppDataStore.current.read()
         let url = folder.appendingPathComponent("default.colkeys")
-        if !FileManager.default.fileExists(atPath: url.path) {
-            let profile = KeyProfile(name: "Default", description: "Your keyboard shortcuts.", shortcuts: Prefs.shortcuts, quickKeys: Prefs.quickKeys)
-            try write(profile, to: url)
+        if !FileManager.default.fileExists(atPath: url.path), manifest["keys"] as? String == "Keys/default.colkeys" {
+            throw FileIssue(url: url, state: .missing, message: "The active key profile is unavailable. Locate or restore it before replacing shortcuts.")
         }
-        try AppDataStore.current.update { if $0["keys"] == nil { $0["keys"] = "Keys/default.colkeys" } }
     }
     static func read(_ url: URL) throws -> KeyProfile {
-        let data = try Data(contentsOf: url)
+        let data = try Handler_File_Manager.shared.read(url)
         guard data.count < 1_000_000 else { throw failure("This key profile is too large.") }
         var value = try JSONDecoder().decode(KeyProfile.self, from: data)
         value.quickKeys = value.quickKeys.mapValues { $0.uppercased() }
         guard value.version == 1, value.name.count <= 120, value.description.count <= 2000, !value.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw failure("This is not a supported key profile.") }
         return value
     }
-    static func write(_ profile: KeyProfile, to url: URL) throws { try ColourFiles.encoder().encode(profile).write(to: url, options: .atomic) }
+    static func write(_ profile: KeyProfile, to url: URL) throws { try Handler_File_Manager.shared.write(ColourFiles.encoder().encode(profile), to: url) }
     static func list() throws -> [(URL, KeyProfile)] {
         try ensure()
         return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -164,11 +161,11 @@ enum KeyProfiles {
     }
     static func saveCurrent(settings supplied: [String: Any]? = nil) throws {
         // Do not call ensure here: legacy preference migration may still be reading the other key map.
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(folder)
         let settings = try supplied ?? (AppDataStore.current.read()["settings"] as? [String: Any] ?? [:])
         var profile: KeyProfile
         if FileManager.default.fileExists(atPath: activeURL.path) { profile = try read(activeURL) }
-        else { profile = KeyProfile(name: "Default", description: "Your keyboard shortcuts.", shortcuts: [:], quickKeys: [:]) }
+        else { throw FileIssue(url: activeURL, state: .missing, message: "The active keyboard profile is unavailable. Restore it or select another profile before saving shortcuts.") }
         profile.shortcuts = settings["shortcuts"] as? [String: String] ?? preferences.dictionary(forKey: "shortcuts") as? [String: String] ?? [:]
         profile.quickKeys = settings["quickKeys"] as? [String: String] ?? preferences.dictionary(forKey: "quickKeys") as? [String: String] ?? [:]
         try write(profile, to: activeURL)
@@ -221,8 +218,13 @@ struct GlobalAssets {
     var root: URL { home.appendingPathComponent("Assets") }
     var index: URL { root.appendingPathComponent("Assets.colcat") }
     func load() throws -> Library {
-        guard FileManager.default.fileExists(atPath: index.path) else { return Library() }
-        let cat = try ColourFiles.decoder().decode(CatalogueFile.self, from: Data(contentsOf: index))
+        guard FileManager.default.fileExists(atPath: index.path) else {
+            if FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path),
+               (try AppDataStore(root: home).read())["assets"] != nil { throw FileIssue(url: index, state: .missing, message: "The global assets index is unavailable. Its contents have not been recreated.") }
+            return Library()
+        }
+        try Handler_File_Manager.shared.requireAvailableCatalogue(index)
+        let cat = try ColourFiles.decoder().decode(CatalogueFile.self, from: Handler_File_Manager.shared.read(index))
         guard cat.version == 3 else { throw failure("The global Assets index is not supported.") }
         var lib = Library(); lib.tagInfo = cat.tags; lib.deleted = cat.deleted; lib.activeSwatchID = cat.activePalette
         for link in cat.libraryAssets {
@@ -231,10 +233,10 @@ struct GlobalAssets {
             for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
         }
         if let file = cat.swatches {
-            let doc = try ColourFiles.decoder().decode(SwatchesDocument.self, from: Data(contentsOf: root.appendingPathComponent(file)))
+            let doc = try ColourFiles.decoder().decode(SwatchesDocument.self, from: Handler_File_Manager.shared.read(root.appendingPathComponent(file)))
             for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
         }
-        if let file = cat.profiles { lib.colourProfiles = try ColourFiles.decoder().decode(ProfilesDocument.self, from: Data(contentsOf: root.appendingPathComponent(file))).profiles }
+        if let file = cat.profiles { lib.colourProfiles = try ColourFiles.decoder().decode(ProfilesDocument.self, from: Handler_File_Manager.shared.read(root.appendingPathComponent(file))).profiles }
         return lib
     }
     func save(_ lib: Library) throws {
@@ -280,32 +282,18 @@ enum AssetTransaction {
         return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).filter { !protected.contains($0.lastPathComponent) }
     }
     static func recover(home: URL) throws {
-        let fm = FileManager.default, dir = directory(home), file = directory(home).appendingPathComponent("journal.json")
-        guard fm.fileExists(atPath: file.path) else { return }
-        let journal = try JSONDecoder().decode(Journal.self, from: Data(contentsOf: file))
-        let root = URL(fileURLWithPath: journal.catalogue), assets = home.appendingPathComponent("Assets")
-        for item in try items(root, home: home) { try fm.removeItem(at: item) }
-        for item in try fm.contentsOfDirectory(at: dir.appendingPathComponent("Catalogue"), includingPropertiesForKeys: nil) { try fm.copyItem(at: item, to: root.appendingPathComponent(item.lastPathComponent)) }
-        if fm.fileExists(atPath: assets.path) { try fm.removeItem(at: assets) }
-        if journal.globalExisted { try fm.copyItem(at: dir.appendingPathComponent("Assets"), to: assets) }
-        try fm.removeItem(at: file) // Recovery completed; leftover snapshots are now disposable.
-        try fm.removeItem(at: dir)
+        let file = directory(home).appendingPathComponent("journal.json")
+        if FileManager.default.fileExists(atPath: file.path) {
+            throw FileRecoveryReport(root: home, issues: [FileIssue(url: directory(home), state: .ambiguous,
+                message: "An older recovery snapshot needs review. Current files and the snapshot have both been retained; automatic whole-folder replacement is disabled.")])
+        }
+        try FileOperationTransaction.recover(home: home)
     }
     static func perform(home: URL, catalogue: URL, _ operation: () throws -> Void) throws {
-        let fm = FileManager.default, dir = directory(home)
         try recover(home: home)
-        if fm.fileExists(atPath: dir.path) { try fm.removeItem(at: dir) }
-        try fm.createDirectory(at: catalogue, withIntermediateDirectories: true)
-        try fm.createDirectory(at: dir.appendingPathComponent("Catalogue"), withIntermediateDirectories: true)
-        let assets = home.appendingPathComponent("Assets"), exists = fm.fileExists(atPath: assets.path)
-        for item in try items(catalogue, home: home) { try fm.copyItem(at: item, to: dir.appendingPathComponent("Catalogue").appendingPathComponent(item.lastPathComponent)) }
-        if exists { try fm.copyItem(at: assets, to: dir.appendingPathComponent("Assets")) }
-        try JSONEncoder().encode(Journal(catalogue: catalogue.path, home: home.path, globalExisted: exists)).write(to: dir.appendingPathComponent("journal.json"), options: .atomic)
-        do { try operation() }
-        catch { try recover(home: home); throw error }
-        try fm.removeItem(at: dir.appendingPathComponent("journal.json")) // Commit before deleting any snapshot.
-        try? fm.removeItem(at: dir)
+        try Handler_File_Manager.shared.withTransaction(home: home, operation)
     }
+
 }
 
 
@@ -313,7 +301,22 @@ enum AssetTransaction {
 enum AppHomeSeed {
     static func ensure(at root: URL) throws {
         let fm = FileManager.default
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = AppDataStore(root: root)
+        let creating = !fm.fileExists(atPath: store.url.path)
+        if creating {
+            if fm.fileExists(atPath: root.appendingPathComponent("Assets").path) || CatalogueFiles.anyIndex(in: root) != nil || fm.fileExists(atPath: root.appendingPathComponent("catalogues.json").path) {
+                throw FileIssue(url: store.url, state: .missing, message: "Existing workspace files were found without their manifest. Locate/restore app data or explicitly update a legacy workspace; no fresh manifest was created.")
+            }
+            try Handler_File_Manager.shared.createDirectory(root)
+            try store.write(AppDataStore.initialManifest())
+        }
+        let migrating = (try store.read())["legacyMigrationPending"] as? Bool == true
+        let seeding = creating || migrating
+        if !seeding {
+            let manifest = try store.read()
+            for reference in try Handler_File_App_Data().references(manifest, at: store.url) { _ = try Handler_File_Manager.shared.read(reference.url) }
+            return
+        }
         try AppDataStore(root: root).update { value in
             value["assets"] = "Assets/Assets.colcat"
             value["history"] = "Global.colhis"
@@ -322,11 +325,15 @@ enum AppHomeSeed {
         let keys = root.appendingPathComponent("Keys")
         try fm.createDirectory(at: keys, withIntermediateDirectories: true)
         let key = keys.appendingPathComponent("default.colkeys")
-        if !fm.fileExists(atPath: key.path) { try KeyProfiles.write(KeyProfile(name: "Default", description: "Your keyboard shortcuts.", shortcuts: [:], quickKeys: [:]), to: key) }
+        if !fm.fileExists(atPath: key.path) && seeding { try KeyProfiles.write(KeyProfile(name: "Default", description: "Your keyboard shortcuts.", shortcuts: [:], quickKeys: [:]), to: key) }
         let assets = GlobalAssets(home: root)
-        if !fm.fileExists(atPath: assets.index.path) { try assets.save(Library()) }
+        if !fm.fileExists(atPath: assets.index.path) {
+            guard seeding else { throw FileIssue(url: assets.index, state: .missing, message: "The global assets index is unavailable. It has not been recreated.") }
+            try assets.save(Library())
+        }
         let history = root.appendingPathComponent("Global.colcat")
-        if !fm.fileExists(atPath: HistoryStore.url(beside: history).path) { try HistoryStore.save(StepHistory(), beside: history) }
-        try fm.createDirectory(at: root.appendingPathComponent("Catalogues"), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: HistoryStore.url(beside: history).path) && seeding { try HistoryStore.save(StepHistory(), beside: history) }
+        try Handler_File_Manager.shared.createDirectory(root.appendingPathComponent("Catalogues"))
+        if migrating { try store.update { $0.removeValue(forKey: "legacyMigrationPending") } }
     }
 }

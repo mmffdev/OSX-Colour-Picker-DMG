@@ -63,8 +63,8 @@ final class PrintProfileSelector:NSView,Overlay {
         modal.button("Keep Profile"){[weak modal] in modal?.dismissOverlay()};modal.present(over:self)
     }
     private var fileType:UTType{UTType(filenameExtension:"colpro") ?? UTType(exportedAs:"com.mmffdev.colorgain.print-profile",conformingTo:.json)}
-    private func importFile(){let panel=NSOpenPanel();panel.allowedContentTypes=[fileType];panel.allowsMultipleSelection=false;panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0;guard size<=65536 else{throw failure("Choose a .colpro profile under 64 KB.")};try SavedPrintProfiles.importProfile(Data(contentsOf:url))}catch{NSApp.presentError(error)}}}
-    private func exportFile(){let p=selected ?? SavedPrintProfile(name:"Current Print Settings",description:"",settings:document.current);let panel=NSSavePanel();panel.allowedContentTypes=[fileType];panel.nameFieldStringValue=filesystemName(p.name)+".colpro";panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{try SavedPrintProfiles.export(p).write(to:url,options:.atomic)}catch{NSApp.presentError(error)}}}
+    private func importFile(){let panel=NSOpenPanel();panel.allowedContentTypes=[fileType];panel.allowsMultipleSelection=false;panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0;guard size<=65536 else{throw failure("Choose a .colpro profile under 64 KB.")};try SavedPrintProfiles.importProfile(Handler_File_Manager.shared.read(url))}catch{NSApp.presentError(error)}}}
+    private func exportFile(){let p=selected ?? SavedPrintProfile(name:"Current Print Settings",description:"",settings:document.current);let panel=NSSavePanel();panel.allowedContentTypes=[fileType];panel.nameFieldStringValue=filesystemName(p.name)+".colpro";panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{try Handler_File_Manager.shared.write(SavedPrintProfiles.export(p),to:url)}catch{NSApp.presentError(error)}}}
 }
 private final class PrintProfileValueButton:NSButton {
     var compact=false

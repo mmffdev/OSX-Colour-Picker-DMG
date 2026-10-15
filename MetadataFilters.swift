@@ -83,25 +83,15 @@ struct MetadataFilterStore {
     func read(catalogueID: UUID) throws -> [MetadataFilterPreset] {
         guard let file=CatalogueTree.catalogue(in:catalogueURL.deletingLastPathComponent()),file.id == catalogueID else {throw failure("The catalogue filter data could not be matched to this catalogue.")}
         let filters=file.metadataFilters ?? []
-        let key=catalogueID.uuidString
-        let manifest=try appData.read()
-        let byCatalogue=manifest["metadataFiltersByCatalogue"] as? [String:Any] ?? [:]
-        let portable=try JSONSerialization.data(withJSONObject:filters.map{try ColourFiles.encoder().encode($0).jsonObject},options:[.sortedKeys])
-        let mirror=try JSONSerialization.data(withJSONObject:byCatalogue[key] ?? [],options:[.sortedKeys])
-        if portable != mirror {try updateMirror(filters,catalogueID:catalogueID)}
         return filters
     }
 
     func write(_ filters:[MetadataFilterPreset],catalogueID:UUID) throws {
         guard var file=CatalogueTree.catalogue(in:catalogueURL.deletingLastPathComponent()),file.id == catalogueID else{throw failure("The catalogue filter data could not be matched to this catalogue.")}
-        let before=try Data(contentsOf:catalogueURL)
         file.metadataFilters=filters
-        do {
-            try ColourFiles.encoder().encode(file).write(to:catalogueURL,options:.atomic)
+        try Handler_File_Manager.shared.withTransaction(home: appData.root) {
+            try Handler_File_Manager.shared.write(ColourFiles.encoder().encode(file), to: catalogueURL)
             try updateMirror(filters,catalogueID:catalogueID)
-        } catch {
-            try? before.write(to:catalogueURL,options:.atomic)
-            throw error
         }
     }
 
@@ -189,7 +179,7 @@ final class MetadataFilterPanel:NSView {
         self.records=records
         if self.catalogueID != catalogueID || self.store?.catalogueURL != store?.catalogueURL {
             self.catalogueID=catalogueID;self.store=store;selectedPresetID=nil
-            do{presets=try store?.read(catalogueID:catalogueID) ?? []}catch{presets=[];NSApp.presentError(error)}
+            do{presets=try store?.read(catalogueID:catalogueID) ?? []}catch{presets=[];FileIncidentCoordinator.report(error,at:store?.catalogueURL ?? URL(fileURLWithPath:"Catalogue.colcat"))}
             presetControl.title=presets.isEmpty ? "Saved Filters" : "Select Filter"
         }
         valuesNeedRefresh = true
@@ -256,7 +246,7 @@ final class MetadataFilterPanel:NSView {
         let alert=NSAlert();alert.messageText="Remove \(presets[index].name)?";alert.informativeText="This removes the saved filter from this catalogue.";alert.addButton(withTitle:"Remove");alert.addButton(withTitle:"Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else{return};presets.remove(at:index);selectedPresetID=nil;presetControl.title="Saved Filters";persist()
     }
-    private func persist(){guard let store,let catalogueID else{return};do{try store.write(presets,catalogueID:catalogueID)}catch{NSApp.presentError(error)}}
+    private func persist(){guard let store,let catalogueID else{return};do{try store.write(presets,catalogueID:catalogueID)}catch{FileIncidentCoordinator.report(error,at:store.catalogueURL)}}
     private func refreshValues(){
         refreshRevision += 1
         let revision=refreshRevision, snapshot=records, columnSnapshot=columns

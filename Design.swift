@@ -481,6 +481,7 @@ extension Design {
 enum DropdownSkin {
     static let arrowWidth:CGFloat = 28
     static func draw(in bounds:NSRect,hover:Bool=false,up:Bool=false,flipped:Bool=true) {
+        guard bounds.width.isFinite, bounds.height.isFinite, bounds.width >= arrowWidth, bounds.height >= 2 else { return }
         let r=bounds.insetBy(dx:0.5,dy:0.5)
         let outline=NSBezierPath(roundedRect:r,xRadius:4,yRadius:4)
         if hover { Design.mist.setFill();outline.fill() }

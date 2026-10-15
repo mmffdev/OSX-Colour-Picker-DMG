@@ -352,14 +352,32 @@ enum HistoryStore {
     static func url(beside index: URL) -> URL { index.deletingPathExtension().appendingPathExtension(ColourFiles.history) }
 
     static func load(beside index: URL) -> StepHistory {
-        guard let data = try? Data(contentsOf: url(beside: index)), let f = try? ColourFiles.decoder().decode(File.self, from: data), f.format == "colour-history", f.version >= 2 else { return StepHistory() }
-        return StepHistory(steps: f.steps, current: min(f.current, f.steps.count - 1))
+        let file = url(beside: index)
+        do {
+            let data = try Handler_File_Manager.shared.read(file)
+            let f = try ColourFiles.decoder().decode(File.self, from: data)
+            return StepHistory(steps: f.steps, current: min(f.current, f.steps.count - 1))
+        } catch {
+            // Missing history is optional only until it is explicitly recorded in the owning index.
+            let reference = (try? Handler_File_Manager.shared.read(index)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["history"] as? String
+            if reference != nil || FileManager.default.fileExists(atPath: file.path) { FileIncidentCoordinator.report(error, at: file) }
+            return StepHistory()
+        }
     }
 
     static func encoded(_ history: StepHistory) throws -> Data {
         try ColourFiles.encoder().encode(File(steps: history.steps, current: history.current))
     }
     static func save(_ history: StepHistory, beside index: URL) throws {
-        try encoded(history).write(to: url(beside: index), options: .atomic)
+        let manager = Handler_File_Manager.shared
+        let file = url(beside: index)
+        try manager.withTransaction(home: index.deletingLastPathComponent()) {
+            if index.pathExtension.lowercased() == "colcat", FileManager.default.fileExists(atPath: index.path) {
+                let object = try JSONSerialization.jsonObject(with: manager.read(index)) as? [String: Any]
+                if object?["history"] != nil, !FileManager.default.fileExists(atPath: file.path) { throw FileIssue(url: file, state: .missing, message: "The recorded history is unavailable. Restore it before saving a replacement.") }
+                try manager.write(encoded(history), to: file)
+                try manager.update(index) { $0["history"] = file.lastPathComponent }
+            } else { try manager.write(encoded(history), to: file) }
+        }
     }
 }

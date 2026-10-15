@@ -71,14 +71,14 @@ enum CatalogueFiles {
 
     /// The catalogue's notes, from its index.
     static func about(index: URL) -> String {
-        (try? Data(contentsOf: index)).flatMap { CatalogueTree.decode($0) }?.about ?? ""
+        (try? Handler_File_Manager.shared.read(index)).flatMap { CatalogueTree.decode($0) }?.about ?? ""
     }
 
     /// Writes the catalogue's notes into its index, touching nothing else in it.
     static func setAbout(_ text: String, index: URL) throws {
-        guard let data = try? Data(contentsOf: index), var doc = CatalogueTree.decode(data) else { return }
+        guard let data = try? Handler_File_Manager.shared.read(index), var doc = CatalogueTree.decode(data) else { return }
         doc.about = text.isEmpty ? nil : text
-        try ColourFiles.encoder().encode(doc).write(to: index, options: .atomic)
+        try Handler_File_Manager.shared.write(ColourFiles.encoder().encode(doc), to: index)
     }
 
     /// Loads a catalogue: the index, then every project it lists, then Unfiled, joined into one library.

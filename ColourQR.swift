@@ -56,7 +56,9 @@ enum ColourQR {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let bytes = try encoder.encode(XYZFile(type:d.type,name:d.name,colours:d.colours.map{$0.master}))
         guard bytes.count <= limit else { throw failure("This exchange is too large. Use the catalogue export instead.") }
-        return bytes
+        let output = try Handler_File_Manager.shared.documentBytes(bytes, extension: "colqr")
+        guard output.count <= limit else { throw failure("This exchange is too large. Use the catalogue export instead.") }
+        return output
     }
     static func document(_ bytes: Data) throws -> Document {
         guard bytes.count <= limit else { throw failure("This colour exchange exceeds the import limit.") }
@@ -65,6 +67,12 @@ enum ColourQR {
             return try fromXYZ(type:file.type,name:file.name,masters:file.colours)
         }
         let d = try JSONDecoder().decode(Document.self, from:bytes); try validate(d); return d
+    }
+    static func knownDocumentBytes(_ bytes: Data) throws -> Data {
+        let value = try document(bytes)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        if let file = try? JSONDecoder().decode(XYZFile.self, from: bytes) { return try encoder.encode(file) }
+        return try encoder.encode(value)
     }
     @discardableResult static func insert(_ d:Document, into lib:inout Library, target:UUID? = nil) throws -> UUID {
         try validate(d)

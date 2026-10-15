@@ -287,7 +287,7 @@ enum ProofConfigurationStore {
             guard values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? Int.max) <= 40_000_000 else { throw ProofError.invalid("Invalid calibration file: " + file.lastPathComponent) }
             total += values.fileSize ?? 0
             guard total <= 200_000_000 else { throw ProofError.invalid("Calibration collection exceeds 200 MB.") }
-            let data = try Data(contentsOf: file), config = try ProofConfiguration.decode(data)
+            let data = try Handler_File_Manager.shared.read(file), config = try ProofConfiguration.decode(data)
             guard ids.insert(config.id).inserted else { throw ProofError.invalid("Duplicate calibration identifier.") }
             entries.append(Zip.Entry(path: folder + "/" + config.id.uuidString + ".colcal", data: data))
         }
@@ -302,12 +302,12 @@ enum ProofConfigurationStore {
         if existing.contains(where: { $0.id == copy.id }) { copy.id = UUID() }
         try copy.validate()
         let dir = root.appendingPathComponent(folder)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(dir)
         guard dir.resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().appendingPathComponent(folder).path else { throw ProofError.invalid("Calibration folders cannot be symbolic links.") }
         let data = try JSONEncoder().encode(copy)
         _ = try ProofConfiguration.decode(data)
         guard try entries(root: root).reduce(data.count, { $0 + $1.data.count }) <= 200_000_000 else { throw ProofError.invalid("Calibration collection exceeds 200 MB.") }
-        try data.write(to: dir.appendingPathComponent(copy.id.uuidString + ".colcal"), options: .withoutOverwriting)
+        try Handler_File_Manager.shared.write(data, to: dir.appendingPathComponent(copy.id.uuidString + ".colcal"), createOnly: true)
         return copy
     }
 }

@@ -40,6 +40,10 @@ func runPickMode() -> Never {
 // ---------- The app ----------
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        if main != nil { library.finishWorkspaceSession() }
+        FileHandlerNativeQA.cleanup()
+    }
     lazy var library = LibraryController()
     /// Sparkle: checks the feed named in Info.plist once a day and offers what it finds. Only started inside
     /// a bundle; the bare binary Xcode runs from the build folder has no feed and no bundle to update.
@@ -54,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var opening = true
     private var workspaceStartup: WorkspaceStartupController?
     private var pendingWorkspace: URL?
+    private var pendingDocuments: [URL] = []
     private var didLaunch = false
 
     /// The standard About panel, with the credit the colour name list's licence asks for.
@@ -79,7 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
         didLaunch=true
-        showWorkspaceChooser(selection:pendingWorkspace)
+        let initialWorkspace = pendingWorkspace; pendingWorkspace = nil
+        showWorkspaceChooser(selection: initialWorkspace)
         NSApp.activate(ignoringOtherApps:true)
     }
 
@@ -174,9 +180,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application:NSApplication,open urls:[URL]) {
-        guard let url=urls.first else { return }
-        pendingWorkspace=url
-        if didLaunch { showWorkspaceChooser(selection:url) }
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            if ["coldata", "colcat"].contains(url.pathExtension.lowercased()) || values?.isDirectory == true {
+                if pendingWorkspace == nil { pendingWorkspace = url }
+                else { pendingDocuments.append(url) }
+            } else { pendingDocuments.append(url) }
+        }
+        if didLaunch {
+            if let url = pendingWorkspace { pendingWorkspace = nil; showWorkspaceChooser(selection: url) }
+            else { openPendingDocument() }
+        }
+    }
+
+    @objc private func openPendingDocument() {
+        guard let window = StudioWindowController.shared?.window ?? main?.window, let view = window.contentView,
+              let url = pendingDocuments.first else { return }
+        let modal = SwissFocusModal(title: "Open Document", message: "\(url.lastPathComponent)\n\(pendingDocuments.count) document(s) waiting. Remaining files stay queued under Open Remaining Documents in the app menu.")
+        modal.button("Review Document", primary: true) {
+            self.pendingDocuments.removeFirst(); modal.dismissOverlay()
+            do {
+                let ext = url.pathExtension.lowercased()
+                if ["colshr", "colshare", "zip"].contains(ext) { StudioWindowController.shared?.frame.startImport(url: url) }
+                else if ext == "colqr" { QRSharing.review(try ColourQR.document(Handler_File_Manager.shared.read(url)), library: self.library, over: view) }
+                else if ["colcat", "coldata"].contains(ext) || (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { self.showWorkspaceChooser(selection: url) }
+                else if ["colpal", "colpalette", "coltyp", "colswatch"].contains(ext) {
+                    let bytes = try Handler_File_Manager.shared.read(url)
+                    let imported: ImportedPalette
+                    if ext == "colswatch" {
+                        let document = try SwatchDocument.read(bytes)
+                        let swatch = Swatch(id: UUID(), name: document.name, createdAt: Date(), entries: [document.entry])
+                        let palette = PaletteDocument(project: nil, palette: swatch, colours: [document.colour])
+                        guard let decoded = PaletteImport.paletteDocument(try ColourFiles.encoder().encode(palette)) else { throw failure("This swatch could not be decoded.") }
+                        imported = decoded
+                    } else {
+                        guard let decoded = PaletteImport.paletteDocument(bytes) else { throw failure("This palette could not be decoded.") }
+                        imported = decoded
+                    }
+                    let confirm = SwissFocusModal(title: "Import Palette?", message: "Add “\(imported.name)” with \(imported.colours.count) colours to the current catalogue. The original file is retained.")
+                    confirm.button("Import Palette", primary: true) {
+                        if self.library.apply("Import Palette", { _ = $0.merge([imported], into: nil) }) { confirm.dismissOverlay(); self.openPendingDocument() }
+                    }
+                    confirm.button("Cancel") { confirm.dismissOverlay(); self.openPendingDocument() }; confirm.present(over: view)
+                } else if ["colpro", "colcal", "colkeys"].contains(ext) {
+                    let bytes = try Handler_File_Manager.shared.read(url)
+                    let confirm = SwissFocusModal(title: "Import Document?", message: "Add “\(url.lastPathComponent)” to this workspace. The original is retained. A keyboard profile is added without changing your active shortcuts.")
+                    confirm.button("Import Document", primary: true) {
+                        do {
+                            try Handler_File_Manager.shared.withTransaction(home: Catalogues.standard.root) {
+                                if ext == "colpro" { _ = try SavedPrintProfiles.importProfile(bytes) }
+                                else if ext == "colcal" { _ = try ProofConfigurationStore.save(ProofConfiguration.decode(bytes), root: self.library.store.root) }
+                                else { _ = try KeyProfiles.copyIn(ColourFiles.decoder().decode(KeyProfile.self, from: bytes)) }
+                            }
+                            confirm.dismissOverlay(); self.openPendingDocument()
+                        } catch { FileRecoveryPresenter.showFailure(error, over: window) }
+                    }
+                    confirm.button("Cancel") { confirm.dismissOverlay(); self.openPendingDocument() }; confirm.present(over: view)
+                } else {
+                    throw failure("This file is managed inside a catalogue. Use its matching Import or Locate action in Colorgain. The original is unchanged: " + url.path)
+                }
+            } catch { FileRecoveryPresenter.showFailure(error, over: window) }
+        }
+        modal.button("Skip This Document") { self.pendingDocuments.removeFirst(); modal.dismissOverlay(); self.openPendingDocument() }
+        modal.button("Keep For Later") { modal.dismissOverlay() }; modal.present(over: view)
     }
 
     private func installStartupMenu() {
@@ -201,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One setup surface: locations, the existing nested choices, then a final review/build.
     @objc func runSetupAssistant() { showWorkspaceChooser() }
+    @objc func fileCreatorDetails() { if let window = StudioWindowController.shared?.window ?? main?.window { FileRecoveryPresenter.creatorDetails(over: window) } }
     @objc func learnHalo() { SetupAssistant.show(from: SetupAssistant.Step.halo) { _ in } }
 
     private func showSetupJourney(workspacePrepared:Bool = false,createdCatalogue:String? = nil) {
@@ -252,6 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else if !Prefs.setupDone, let w = main.window, w.isVisible { SetupWindowController.show(over: w) }   // the old window only, never dragged into view for a sheet
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
         rehearse(main)
+        openPendingDocument()
+        FileHandlerNativeQA.present(library: library, window: StudioWindowController.shared?.window ?? main.window)
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
@@ -351,6 +420,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu(Brand.name) { m in
             add(m, "About \(Brand.name)", #selector(showAbout), "", self)
             add(m, "Open Workspace\u{2026}", #selector(runSetupAssistant), "", self)
+            add(m, "Open Remaining Documents\u{2026}", #selector(openPendingDocument), "", self)
+            add(m, "File Creator Details\u{2026}", #selector(fileCreatorDetails), "", self)
             add(m, "Learn The Halo\u{2026}", #selector(learnHalo), "", self)
             #if !APPSTORE
             add(m, "Check for Updates\u{2026}", #selector(SPUStandardUpdaterController.checkForUpdates(_:)), "", updater)
@@ -433,6 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // ---------- Entry point ----------
 
+FileHandlerNativeQA.prepare()
+
 // --new-user: a first open, clean, as a brand-new user sees it. Tick it in Xcode under Product ▸
 // Scheme ▸ Edit Scheme ▸ Run ▸ Arguments; tools/open.sh new passes it to the installed app. A throwaway
 // home and settings of its own, wiped on every such launch, so your own catalogues are never touched.
@@ -486,4 +559,6 @@ if CommandLine.arguments.contains("--self-test") {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.run()
+    delegate.library.finishWorkspaceSession()
+    FileHandlerNativeQA.cleanup()
 }

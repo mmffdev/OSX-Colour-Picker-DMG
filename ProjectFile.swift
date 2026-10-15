@@ -116,10 +116,10 @@ struct SwatchDocument: Codable, Equatable {
     }
 
     static func fileName(_ name: String) -> String { filesystemName(name) + "." + ColourFiles.swatch }
-    func data() throws -> Data { try ColourFiles.encoder().encode(self) }
+    func data() throws -> Data { try Handler_File_Manager.shared.documentBytes(ColourFiles.encoder().encode(self), extension: ColourFiles.swatch) }
     static func read(_ data: Data) throws -> SwatchDocument {
         let doc = try ColourFiles.decoder().decode(SwatchDocument.self, from: data)
-        guard doc.format == "colour-swatch" else { throw CocoaError(.fileReadCorruptFile) }
+        guard doc.format == "colour-swatch", doc.version == 1 else { throw CocoaError(.fileReadCorruptFile) }
         return doc
     }
 }

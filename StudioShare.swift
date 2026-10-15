@@ -204,9 +204,10 @@ final class SharePage: NSView, PageSection, Overlay {
     }
 
     /// Import: the wizard opens on Choose; the file is asked for on Next.
-    func beginImport() {
+    func beginImport(url: URL? = nil) {
         clear()
         mode = .bringIn
+        if let url { inspectImport(url) }
         refresh()
     }
 
@@ -660,6 +661,11 @@ final class SharePage: NSView, PageSection, Overlay {
         if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }
     }
 
+    private func inspectImport(_ url: URL) {
+        do { inspection = try Sharing.inspect(url); chosenFile = url; buildTree() }
+        catch { problem = error.localizedDescription; inspection = nil; chosenFile = nil }
+    }
+
     private func chooseFile() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
@@ -670,12 +676,7 @@ final class SharePage: NSView, PageSection, Overlay {
         panel.message = "Catalogues open independently. Individual collections and assets import into the current catalogue."
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let url = panel.url else { return }
-            do {
-                let i = try Sharing.inspect(url)
-                self.inspection = i
-                self.chosenFile = url
-                self.buildTree()
-            } catch { self.problem = error.localizedDescription; self.inspection = nil; self.chosenFile = nil }
+            self.inspectImport(url)
             self.refresh()
         }
         if let w = window { panel.beginSheetModal(for: w, completionHandler: done) } else { done(panel.runModal()) }

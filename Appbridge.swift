@@ -154,7 +154,7 @@ enum ASERegistry {
     static func read(_ root: URL) throws -> Document {
         let file = url(in: root)
         guard FileManager.default.fileExists(atPath: file.path) else { return Document() }
-        let data = try Data(contentsOf: file)
+        let data = try Handler_File_Manager.shared.read(file)
         guard data.count <= 4 * 1024 * 1024 else { throw failure("The ASE registry is too large.") }
         let value = try JSONDecoder().decode(Document.self, from: data)
         guard value.version == 1, value.sources.count <= 2000,
@@ -178,15 +178,15 @@ enum ASERegistry {
             return value
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(Document(sources: portable, legacyMigrated: (try? read(root))?.legacyMigrated)).write(to: url(in: root, name: name), options: .atomic)
+        try Handler_File_Manager.shared.write(encoder.encode(Document(sources: portable, legacyMigrated: (try? read(root))?.legacyMigrated)), to: url(in: root, name: name))
     }
     static func seed(_ root: URL, name: String? = nil) throws {
         let fm = FileManager.default
-        try fm.createDirectory(at: root.appendingPathComponent(directory), withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(root.appendingPathComponent(directory))
         if !fm.fileExists(atPath: url(in: root).path) { try write([], root: root, name: name) }
         if let name {
             let existing = url(in: root), named = url(in: root, name: name)
-            if existing != named, !fm.fileExists(atPath: named.path) { try fm.moveItem(at: existing, to: named) }
+            if existing != named, !fm.fileExists(atPath: named.path) { try Handler_File_Manager.shared.move(existing, to: named) }
         }
         // Preserve older bundled files. Never remove or replace the old directory.
         let old = root.appendingPathComponent("AppBridge/ASE")
@@ -208,7 +208,7 @@ enum ASERegistry {
             try write(sources, root: root)
             var document = try read(root); document.legacyMigrated = true
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(document).write(to: url(in: root), options: .atomic)
+            try Handler_File_Manager.shared.write(encoder.encode(document), to: url(in: root))
         }
     }
     static func harvest(root: URL, selected: Set<UUID>) throws -> [Zip.Entry] {
@@ -226,7 +226,7 @@ enum ASERegistry {
             exported.append(copy)
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        entries.append(.init(path: url(in: root).lastPathComponent, data: try encoder.encode(Document(sources: exported))))
+        entries.append(.init(path: url(in: root).lastPathComponent, data: try Handler_File_Manager.shared.documentBytes(encoder.encode(Document(sources: exported)), extension: "colase")))
         return entries
     }
 }
@@ -888,7 +888,7 @@ extension AppbridgeStore {
             if let i = updated.firstIndex(where: { !$0.folder && $0.path == file.url.path }) { updated[i].path = url.path; updated[i].originalPath = nil }
             else { updated.append(Source(path: url.path, folder: false)) }
             try save(updated); files.removeAll { $0.id == file.id }; scan(); onChange?(); completion()
-        } catch { report(error.localizedDescription); NSApp.presentError(error) }
+        } catch { report(error.localizedDescription); if let window = NSApp.keyWindow { FileRecoveryPresenter.showFailure(error, over: window) } }
     }
 }
 

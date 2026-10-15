@@ -6,6 +6,7 @@ func runPrintProfileTests(check:(Bool,String)->Void){
     defer{try? FileManager.default.removeItem(at:root)}
     let store=AppDataStore(root:root)
     do{
+        try store.write(AppDataStore.initialManifest())
         try store.update{$0["settings"]=["existingSetting":"Retained"]; $0["catalogues"]=[["name":"Existing","path":"/fixture"]]}
         let settings=PrintProfileSettings(press:"Uninstalled Customer ICC",intent:.absolute,blackPoint:true,tolerance:1.5)
         let saved=try SavedPrintProfiles.save(.init(name:"Packaging",description:"Customer carton",settings:settings),in:store)

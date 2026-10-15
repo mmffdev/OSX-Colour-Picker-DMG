@@ -194,7 +194,7 @@ enum CatalogueTree {
         return decode(data)
     }
     static func decode(_ data: Data) -> CatalogueFile? {
-        guard let doc = try? decoder().decode(CatalogueFile.self, from: data), doc.format == "colour-catalogue", doc.version >= 3 else { return nil }
+        guard let doc = try? decoder().decode(CatalogueFile.self, from: data), doc.format == "colour-catalogue", doc.version == 3 else { return nil }
         return doc
     }
     /// Whether a folder holds a catalogue laid out as this version lays it out.
@@ -229,7 +229,9 @@ enum CatalogueTree {
     }
     /// A path under the root, with "/" between its parts.
     static func relative(_ url: URL, to root: URL) -> String {
-        Array(url.pathComponents.dropFirst(root.pathComponents.count)).joined(separator: "/")
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        let file = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        return Array(file.dropFirst(base.count)).joined(separator: "/")
     }
     /// The file extension a palette is written under: typography palettes have their own.
     static func fileExtension(of palette: Swatch) -> String { palette.isTypography ? ColourFiles.typography : ColourFiles.palette }
@@ -438,7 +440,9 @@ enum CatalogueTree {
     /// `palettes` false reads only the shape, for the schema alone.
     static func read(root: URL, palettes wantPalettes: Bool = true) throws -> TreeLoaded {
         guard let indexURL = CatalogueFiles.index(in: root) else { throw TreeError.noIndex(root) }
-        guard let data = try? Data(contentsOf: indexURL), let cat = decode(data) else { throw TreeError.notThisVersion(indexURL) }
+        try Handler_File_Manager.shared.requireAvailableCatalogue(indexURL)
+        let data = try Handler_File_Manager.shared.read(indexURL)
+        guard let cat = decode(data) else { throw TreeError.notThisVersion(indexURL) }
         let assets = scanAssets(root: root)
         let res = resolve(root: root, catalogue: cat, assets: assets)
         var notes = res.notes
@@ -533,7 +537,7 @@ enum CatalogueTree {
             for a in palettesFound {
                 let (found, member) = owner(of: a.url)
                 guard found else { notes.append("\(a.url.lastPathComponent) sits outside any member and was left alone"); continue }
-                guard let doc = read(PaletteDocument.self, at: a.url) else { notes.append("Could not read \(a.url.lastPathComponent)"); continue }
+                let doc = try PaletteAssetHandler.read(a.url)
                 guard seenPalettes.insert(doc.palette.id).inserted else { notes.append("\(a.url.lastPathComponent) is a second copy of a palette already read and was left alone"); continue }
                 var p = doc.palette
                 p.projectID = member
@@ -616,7 +620,7 @@ enum CatalogueTree {
         // A member always has a home: with no collection at all, the first one is made for it.
         if !lib.projects.isEmpty && schema.collections.isEmpty { schema.collections = SchemaTrial.SchemaFile.fresh.collections }
         let root = indexURL.deletingLastPathComponent()
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(root)
         if poolDirectory != "" { try ASERegistry.seed(root, name: name ?? indexURL.deletingPathExtension().lastPathComponent) }
         let old = catalogue(in: root) ?? carry
         let found = scanAssets(root: root)
@@ -777,7 +781,7 @@ enum CatalogueTree {
 
         // The Library: palettes in no member, colours no palette holds, the profiles.
         let library = root.appendingPathComponent(poolDirectory)
-        if createEmptyPools { for pool in TreeFiles.pools { try fm.createDirectory(at: library.appendingPathComponent(pool), withIntermediateDirectories: true) } }
+        if createEmptyPools { for pool in TreeFiles.pools { try Handler_File_Manager.shared.createDirectory(library.appendingPathComponent(pool)) } }
         var libraryLinks: [AssetLink] = []
         var poolTaken: [String: Set<String>] = [:]
         for palette in lib.palettes(in: nil) {
@@ -801,8 +805,8 @@ enum CatalogueTree {
 
         // Everything written, each file only when what it holds has changed.
         for (url, data) in written {
-            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if (try? Data(contentsOf: url)) != data { try data.write(to: url, options: .atomic) }
+            try Handler_File_Manager.shared.createDirectory(url.deletingLastPathComponent())
+            try Handler_File_Manager.shared.write(data, to: url)
         }
 
         // What the app listed and no longer has: palettes and members it deleted.
@@ -839,10 +843,10 @@ enum CatalogueTree {
         var sameDate = file
         sameDate.changedAt = before?.changedAt ?? now
         if sameDate != before {
-            do { try e.encode(file).write(to: indexURL, options: .atomic) } catch { throw StoreError.saveFailed(indexURL, error) }
+            do { try Handler_File_Manager.shared.write(e.encode(file), to: indexURL) } catch { throw StoreError.saveFailed(indexURL, error) }
         }
 
-        for url in removing.sorted(by: { $0.path.count > $1.path.count }) where fm.fileExists(atPath: url.path) { remove(url) }
+        for url in removing.sorted(by: { $0.path.count > $1.path.count }) where fm.fileExists(atPath: url.path) { try remove(url) }
     }
 
     /// The palette's file: the palette whole, settings and all, with the colours it uses, the member it sits in and the catalogue.
@@ -851,15 +855,18 @@ enum CatalogueTree {
     }
 
     /// Takes the thing out: to the Bin in the app, outright in the self-test.
-    static func remove(_ url: URL) {
-        if TreeFiles.removedGoesToBin, (try? fm.trashItem(at: url, resultingItemURL: nil)) != nil { return }
-        try? fm.removeItem(at: url)
+    static func remove(_ url: URL) throws {
+        if TreeFiles.removedGoesToBin { try Handler_File_Manager.shared.trash(url) }
+        else {
+            guard CommandLine.arguments.contains("--self-test") else { throw failure("Permanent removal is restricted to isolated self-tests.") }
+            try fm.removeItem(at: url)
+        }
     }
 
     /// Puts a folder at `parent/<wanted>`, or the first free variant of it, moving the one that holds the same thing if it
     /// is somewhere else or under another name. `taken` is every name already claimed in `parent`.
     private static func settle(existing: URL?, wanted: String, in parent: URL, taken: inout Set<String>) throws -> URL {
-        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(parent)
         if let e = existing, e.deletingLastPathComponent().standardizedFileURL == parent.standardizedFileURL {
             let have = e.lastPathComponent
             // Kept where it is under the name it has, when that is the name wanted, or a variant of it that keeps clear of another.
@@ -868,14 +875,14 @@ enum CatalogueTree {
         let others = Set(((try? fm.contentsOfDirectory(atPath: parent.path)) ?? []).filter { $0 != existing?.lastPathComponent || existing?.deletingLastPathComponent().standardizedFileURL != parent.standardizedFileURL }.map { $0.lowercased() })
         let name = uniqueName(wanted, among: Array(taken) + Array(others))
         let dest = parent.appendingPathComponent(name)
-        if let e = existing { try move(e, to: dest) } else { try fm.createDirectory(at: dest, withIntermediateDirectories: true) }
+        if let e = existing { try move(e, to: dest) } else { try Handler_File_Manager.shared.createDirectory(dest) }
         taken.insert(name)
         return dest
     }
 
     /// The same for a file: `parent/<wanted>.<ext>`, moving the file that holds the same thing, and changing its extension when an earlier version gave it another.
     private static func settleFile(existing: URL?, wanted: String, extension ext: String, in parent: URL, taken: inout Set<String>) throws -> URL {
-        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(parent)
         if let e = existing, e.deletingLastPathComponent().standardizedFileURL == parent.standardizedFileURL, e.pathExtension.lowercased() == ext {
             let have = e.deletingPathExtension().lastPathComponent
             if have == wanted || (taken.contains(wanted) && isVariant(have, of: wanted)) { taken.insert(have); return e }
@@ -897,13 +904,13 @@ enum CatalogueTree {
     /// A move that also works when only the case of the name changes, which a case-insensitive disk refuses in one step.
     private static func move(_ from: URL, to: URL) throws {
         guard from.standardizedFileURL != to.standardizedFileURL else { return }
-        try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Handler_File_Manager.shared.createDirectory(to.deletingLastPathComponent())
         if from.path.lowercased() == to.path.lowercased() {
             let temp = to.deletingLastPathComponent().appendingPathComponent(".moving-\(UUID().uuidString)")
-            try fm.moveItem(at: from, to: temp)
-            try fm.moveItem(at: temp, to: to)
+            try Handler_File_Manager.shared.move(from, to: temp)
+            try Handler_File_Manager.shared.move(temp, to: to)
         } else {
-            try fm.moveItem(at: from, to: to)
+            try Handler_File_Manager.shared.move(from, to: to)
         }
     }
 

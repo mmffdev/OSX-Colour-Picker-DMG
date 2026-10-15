@@ -287,17 +287,32 @@ struct Catalogues {
     /// remembers the new home. The folder must be empty or not yet there. Anything that will not
     /// move stays where it was and is reported.
     static func moveHome(to dest: URL) throws {
-        let fm = FileManager.default, from = standard.root
-        guard from != dest else { return }
-        if fm.fileExists(atPath: dest.path) {
-            guard ((try? fm.contentsOfDirectory(atPath: dest.path)) ?? []).filter({ !$0.hasPrefix(".") }).isEmpty else { throw CatalogueError.notEmpty(dest) }
-        } else {
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-        }
-        for item in (try? fm.contentsOfDirectory(atPath: from.path)) ?? [] where !item.hasPrefix(".") {
-            try fm.moveItem(at: from.appendingPathComponent(item), to: dest.appendingPathComponent(item))
-        }
+        try relocateHome(from: standard.root, to: dest)
         home = dest
+    }
+
+    /// A verified relocation retains the old workspace as a recovery copy. External links keep their locations.
+    static func relocateHome(from: URL, to dest: URL) throws {
+        let manager = Handler_File_Manager.shared
+        let source = from.resolvingSymlinksInPath().standardizedFileURL, target = dest.resolvingSymlinksInPath().standardizedFileURL
+        guard source != target else { return }
+        guard !source.path.hasPrefix(target.path + "/"), !target.path.hasPrefix(source.path + "/") else { throw failure("Choose a separate folder outside the current workspace.") }
+        _ = try AppDataStore(root: source).read()
+        let revision = try manager.copySnapshot(source)
+        if FileManager.default.fileExists(atPath: target.path), !(try manager.filesystem.list(target)).isEmpty { throw CatalogueError.notEmpty(target) }
+        try manager.withTransaction(home: source) {
+            try manager.copyVerified(source, to: target)
+            guard try manager.copySnapshot(source) == revision else { throw failure("The source workspace changed during relocation. Retry after other operations finish. The original remains in place.") }
+            try AppDataStore(root: target).update { manifest in
+                func rebased(_ path: String) -> String { path == source.path ? target.path : path.hasPrefix(source.path + "/") ? target.path + path.dropFirst(source.path.count) : path }
+                var rows = manifest["catalogues"] as? [[String: Any]] ?? []
+                for index in rows.indices { if let path = rows[index]["path"] as? String { rows[index]["path"] = rebased(URL(fileURLWithPath: path).resolvingSymlinksInPath().path) } }
+                manifest["catalogues"] = rows
+                manifest["detachedCatalogues"] = (manifest["detachedCatalogues"] as? [String] ?? []).map(rebased)
+            }
+            let manifest = try AppDataStore(root: target).read()
+            for reference in try Handler_File_App_Data().references(manifest, at: AppDataStore(root: target).url) { _ = try manager.read(reference.url) }
+        }
     }
 
     // MARK: Where each catalogue is
@@ -306,6 +321,7 @@ struct Catalogues {
     struct Entry: Codable, Equatable {
         var name: String
         var path: String
+        var id: UUID? = nil
     }
 
     var registryURL: URL { AppDataStore(root: root).url }
@@ -317,25 +333,36 @@ struct Catalogues {
             } catch { NSLog("Catalogue index: %@", error.localizedDescription); return [] }
         }
         nonmutating set {
-            do { try writeRegistry(newValue) } catch { NSApp.presentError(error) }
+            do { try writeRegistry(newValue) } catch { FileIncidentCoordinator.report(error, at: registryURL) }
         }
     }
     private func writeRegistry(_ entries: [Entry]) throws {
-        try AppDataStore(root: root).update { $0["catalogues"] = entries.map { ["name": $0.name, "path": $0.path] } }
+        try AppDataStore(root: root).update { manifest in
+            let previous = manifest["catalogues"] as? [[String: Any]] ?? []
+            manifest["catalogues"] = entries.map { entry -> [String: Any] in
+                var row = previous.first { $0["path"] as? String == entry.path || $0["name"] as? String == entry.name } ?? [:]
+                row["name"] = entry.name; row["path"] = entry.path
+                if let id = entry.id { row["id"] = id.uuidString }
+                return row
+            }
+            let activeIDs = Set(entries.compactMap(\.id))
+            manifest["detachedCatalogueIDs"] = (manifest["detachedCatalogueIDs"] as? [String] ?? []).filter { UUID(uuidString: $0).map { !activeIDs.contains($0) } ?? true }
+            let activePaths = Set(entries.flatMap { [URL(fileURLWithPath: $0.path).standardizedFileURL.path, URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path] })
+            manifest["detachedCatalogues"] = (manifest["detachedCatalogues"] as? [String] ?? []).filter { !activePaths.contains($0) }
+        }
     }
 
     /// Puts a catalogue that lives in `dir` on the list under `name`, replacing an entry of that name.
     func register(_ name: String, at dir: URL) {
         var all = registry.filter { $0.name != name }
-        all.append(Entry(name: name, path: dir.path))
+        all.append(Entry(name: name, path: dir.path, id: CatalogueTree.catalogue(in: dir)?.id))
         registry = all
     }
 
     /// Setup must know that the catalogue's location was saved before proceeding.
     func registerChecked(_ name: String, at dir: URL) throws {
         var all = registry.filter { $0.name != name }
-        all.append(Entry(name: name, path: dir.path))
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        all.append(Entry(name: name, path: dir.path, id: CatalogueTree.catalogue(in: dir)?.id))
         try writeRegistry(all)
     }
 
@@ -378,19 +405,16 @@ struct Catalogues {
                             previousURL: fresh ? previousURL : nil, name: name, assetsHome: root)
     }
 
-    private var hasMain: Bool { Catalogues.holdsCatalogue(root) }
+    private var detachedRoots: Set<String> { Set((try? AppDataStore(root: root).read()["detachedCatalogues"] as? [String]) ?? []) }
+    private var detachedIDs: Set<UUID> { Set(((try? AppDataStore(root: root).read()["detachedCatalogueIDs"] as? [String]) ?? []).compactMap(UUID.init(uuidString:))) }
+    private var hasMain: Bool { !detachedRoots.contains(root.standardizedFileURL.path) && !detachedRoots.contains(root.resolvingSymlinksInPath().path) && !(CatalogueTree.catalogue(in: root).map { detachedIDs.contains($0.id) } ?? false) && Catalogues.holdsCatalogue(root) }
     /// No catalogue on this Mac at all: nothing at the root, nothing under Catalogues, nothing registered.
     var isEmpty: Bool { !hasMain && others().isEmpty }
 
     /// Takes away a Main at the root that holds nothing: no colours, palettes or members. Anything in it stays.
     func dropEmptyMain() {
         guard hasMain, let lib = try? store(for: Catalogues.mainName).load(), lib.colours.isEmpty, lib.swatches.isEmpty, lib.projects.isEmpty else { return }
-        let fm = FileManager.default
-        let index = CatalogueFiles.index(in: root)
-        var items = [index?.lastPathComponent, index.map { HistoryStore.url(beside: $0).lastPathComponent }, "library.json", TreeFiles.library, TreeFiles.templates].compactMap { $0 }
-        // The collections' folders, which hold no members.
-        items += (CatalogueTree.catalogue(in: root)?.collections.map { $0.folder }) ?? []
-        for item in items { try? fm.removeItem(at: root.appendingPathComponent(item)) }
+        // Empty catalogues still own user folders. Removing them uses the same explicit retention workflow.
     }
 
     /// What at the app's home belongs to the catalogue kept there, Main: its index and history, its Library and Templates, its
@@ -417,10 +441,15 @@ struct Catalogues {
 
     /// Every catalogue but Main: those found under Catalogues, and those registered elsewhere whose folder is reachable.
     private func others() -> [String] {
-        var names = Catalogues.subfoldersHoldingLibraries(in: folder)
+        let detached = detachedRoots
+        let excludedIDs = detachedIDs
+        var names = Catalogues.subfoldersHoldingLibraries(in: folder).filter {
+            let url = folder.appendingPathComponent($0)
+            return !detached.contains(url.standardizedFileURL.path) && !detached.contains(url.resolvingSymlinksInPath().path) && !(CatalogueTree.catalogue(in: url).map { excludedIDs.contains($0.id) } ?? false)
+        }
         // A registered name for a folder already on the list, under Catalogues or by another entry, is a ghost: one folder, one name.
         var dirs = Set(names.map { folder.appendingPathComponent(filesystemName($0)).standardizedFileURL.path })
-        for entry in registry where Catalogues.holdsCatalogue(URL(fileURLWithPath: entry.path)) && !names.contains(entry.name) {
+        for entry in registry where !detached.contains(URL(fileURLWithPath: entry.path).standardizedFileURL.path) && !names.contains(entry.name) {
             let dir = URL(fileURLWithPath: entry.path).standardizedFileURL.path
             guard !dirs.contains(dir) else { continue }
             dirs.insert(dir); names.append(entry.name)
@@ -432,31 +461,16 @@ struct Catalogues {
     /// Main first (while it exists), then the rest alphabetically. A fresh install has just Main.
     func names() -> [String] {
         let rest = others()
-        return hasMain || rest.isEmpty ? [Catalogues.mainName] + rest : rest
+        return hasMain || rest.isEmpty && !FileManager.default.fileExists(atPath: registryURL.path) ? [Catalogues.mainName] + rest : rest
     }
 
     /// Moves a catalogue to the Bin and takes it off the list. Main keeps its files at the home's root,
     /// so they are gathered into a folder of their own under Catalogues first and that folder goes; the
     /// home itself, and a folder another listed catalogue still points at, are never binned.
     func bin(_ name: String) throws {
-        let fm = FileManager.default
-        let home = root.standardizedFileURL
-        var dir = directory(for: name).standardizedFileURL
-        if dir == home {
-            var dest = folder.appendingPathComponent(filesystemName(name))
-            var n = 2
-            while fm.fileExists(atPath: dest.path) { dest = folder.appendingPathComponent(filesystemName(name) + " \(n)"); n += 1 }
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            for item in Catalogues.catalogueItems(at: root) {
-                let from = root.appendingPathComponent(item)
-                if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
-            }
-            dir = dest.standardizedFileURL
-        }
-        let shared = names().contains { $0 != name && directory(for: $0).standardizedFileURL == dir }
-        unregister(name)
-        guard dir != home, !home.path.hasPrefix(dir.path + "/"), !shared, Catalogues.holdsCatalogue(dir) else { return }
-        try fm.trashItem(at: dir, resultingItemURL: nil)
+        let manager = Handler_File_Manager.shared
+        let plan = try manager.prepareCatalogueRemoval(name: name, catalogues: self)
+        try manager.executeCatalogueRemoval(plan, outcome: .binOwnedFiles)
     }
 
     /// Moves the catalogue's folder. Main lives at the root, so renaming it moves its files into a
@@ -466,40 +480,42 @@ struct Catalogues {
         let new = filesystemName(raw)
         guard names().contains(old) else { throw CatalogueError.missing(old) }
         guard new.lowercased() != old.lowercased() else { return old }
-        guard !names().contains(where: { $0.lowercased() == new.lowercased() }) else { throw CatalogueError.nameTaken(new) }
-        let fm = FileManager.default
-        let dest = directory(for: new)
-        if old == Catalogues.mainName {
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            for item in Catalogues.catalogueItems(at: root) {
-                let from = root.appendingPathComponent(item)
-                if fm.fileExists(atPath: from.path) { try fm.moveItem(at: from, to: dest.appendingPathComponent(item)) }
-            }
-        } else if let own = registry.first(where: { $0.name == old }) {
-            // Kept somewhere of its own: the folder is renamed where it is.
-            let was = URL(fileURLWithPath: own.path), now = was.deletingLastPathComponent().appendingPathComponent(new)
-            try fm.moveItem(at: was, to: now)
-            unregister(old)
-            register(new, at: now)
-        } else {
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            try fm.moveItem(at: directory(for: old), to: dest)
-        }
-        // The catalogue's file carries the catalogue's name, and the history beside it follows, or it would be left behind unread.
-        if let index = CatalogueFiles.index(in: directory(for: new)) {
-            let dest = directory(for: new)
+        guard !new.isEmpty, !names().contains(where: { $0.lowercased() == new.lowercased() }) else { throw CatalogueError.nameTaken(new) }
+        let manager = Handler_File_Manager.shared, from = directory(for: old)
+        guard let originalIndex = CatalogueFiles.index(in: from) else { throw CatalogueError.missing(old) }
+        try manager.requireAvailableCatalogue(originalIndex)
+        let dest = from.standardizedFileURL == root.standardizedFileURL ? folder.appendingPathComponent(new) : from.deletingLastPathComponent().appendingPathComponent(new)
+        guard !FileManager.default.fileExists(atPath: dest.path) else { throw CatalogueError.notEmpty(dest) }
+        return try manager.withTransaction(home: root) {
+            if from.standardizedFileURL == root.standardizedFileURL {
+                try manager.createDirectory(dest)
+                for item in Catalogues.catalogueItems(at: root) where item != "Backups" {
+                    let source = root.appendingPathComponent(item)
+                    if FileManager.default.fileExists(atPath: source.path) { try manager.move(source, to: dest.appendingPathComponent(item)) }
+                }
+            } else { try manager.move(from, to: dest) }
+            guard let index = CatalogueFiles.index(in: dest) else { throw CatalogueError.missing(old) }
             let named = dest.appendingPathComponent(new + "." + ColourFiles.catalogue)
-            if index.lastPathComponent != named.lastPathComponent {
-                let history = HistoryStore.url(beside: index), historyNamed = HistoryStore.url(beside: named)
-                try? fm.moveItem(at: index, to: named)
-                if fm.fileExists(atPath: history.path), !fm.fileExists(atPath: historyNamed.path) { try? fm.moveItem(at: history, to: historyNamed) }
+            let history = HistoryStore.url(beside: index), historyNamed = HistoryStore.url(beside: named)
+            if index != named { try manager.move(index, to: named) }
+            if history != historyNamed, FileManager.default.fileExists(atPath: history.path) {
+                try manager.move(history, to: historyNamed)
+                try manager.update(named) { if $0["history"] != nil { $0["history"] = historyNamed.lastPathComponent } }
             }
+            let identity = try ColourFiles.decoder().decode(CatalogueFile.self, from: manager.read(named)).id
+            try AppDataStore(root: root).update { manifest in
+                var rows = manifest["catalogues"] as? [[String: Any]] ?? []
+                var row = rows.first { $0["name"] as? String == old } ?? [:]
+                rows.removeAll { $0["name"] as? String == old }
+                row["name"] = new; row["path"] = dest.path; row["id"] = identity.uuidString; rows.append(row)
+                manifest["catalogues"] = rows
+                var settings = manifest["settings"] as? [String: Any] ?? [:]
+                if settings[Catalogues.currentKey] as? String == old { settings[Catalogues.currentKey] = new; manifest["settings"] = settings }
+                if var selected = manifest["defaultCatalogue"] as? [String: Any], selected["name"] as? String == old { selected["name"] = new; manifest["defaultCatalogue"] = selected }
+            }
+            try ASERegistry.seed(dest, name: new)
+            return new
         }
-        try ASERegistry.seed(directory(for: new), name: new)
-        if Catalogues.currentName == old || AppPreferences.shared.string(forKey: Catalogues.currentKey) == old {
-            Catalogues.currentName = new
-        }
-        return new
     }
 
     static func subfoldersHoldingLibraries(in dir: URL) -> [String] {
@@ -514,16 +530,14 @@ struct Catalogues {
     func create(_ raw: String, holding library: Library = Library(), under parent: URL? = nil) throws -> String {
         try AppHomeSeed.ensure(at: root)
         let name = uniqueName(filesystemName(raw), among: names())
-        if let parent = parent {
-            let dir = parent.appendingPathComponent(name)
-            guard !Catalogues.holdsCatalogue(dir) else { throw CatalogueError.nameTaken(name) }
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            register(name, at: dir)
+        let dir = parent.map { $0.appendingPathComponent(name) } ?? directory(for: name)
+        guard !Catalogues.holdsCatalogue(dir) else { throw CatalogueError.nameTaken(name) }
+        return try Handler_File_Manager.shared.withTransaction(home: root) {
+            try Handler_File_Manager.shared.createDirectory(dir)
+            try LibraryStore(directory: dir, legacyURL: nil, name: name, assetsHome: root).save(library)
+            try registerChecked(name, at: dir)
+            return name
         }
-        let dir = directory(for: name)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try store(for: name).save(library)
-        return name
     }
 
     /// Opens a catalogue where it is: the folder holding a .colcatalogue file is put on the list
@@ -532,6 +546,7 @@ struct Catalogues {
     func adopt(_ index: URL) throws -> String {
         let dir = index.deletingLastPathComponent()
         guard Catalogues.holdsCatalogue(dir) else { throw SyncError.unreadable(index) }
+        if index.pathExtension.lowercased() == "colcat" { try Handler_File_Manager.shared.requireAvailableCatalogue(index) }
         // Already on the list, by the registry or by sitting under Catalogues: that name, not a second one for the same folder.
         if let already = names().first(where: { directory(for: $0).standardizedFileURL == dir.standardizedFileURL }) { return already }
         let name = uniqueName(filesystemName(index.deletingPathExtension().lastPathComponent), among: names())
@@ -811,6 +826,7 @@ final class SyncEngine {
 /// forget its catalogue and its projects folder; it reads the installed app's domain instead.
 let selfTestPreferencesDomain = "com.mmffdev.mmffdevcolour3.selftest." + UUID().uuidString
 let preferences: UserDefaults = {
+    if let suite = ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_QA_PREFERENCES"], suite.hasPrefix("com.mmffdev.mmffdevcolour3.qa.") { return UserDefaults(suiteName: suite)! }
     if CommandLine.arguments.contains("--self-test") {
         return UserDefaults(suiteName: selfTestPreferencesDomain)!
     }

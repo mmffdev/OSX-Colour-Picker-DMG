@@ -559,7 +559,7 @@ enum Sharing {
     /// bookkeeping do not turn an otherwise identical asset into different content.
     static func contentKey(_ palette: Swatch, in lib: Library) -> String {
         let doc = CatalogueTree.paletteDocument(palette, in: lib, member: nil, file: "")
-        guard let data = try? PaletteAssetHandler.data(doc), var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "" }
+        guard let data = try? ColourFiles.encoder().encode(doc), var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return "" }
         if var p = object["palette"] as? [String: Any] { p.removeValue(forKey: "name"); object["palette"] = p }
         func clean(_ value: Any) -> Any {
             if let list = value as? [Any] { return list.map(clean) }
@@ -849,9 +849,10 @@ extension Sharing {
         }
         try ASERegistry.write(links, root: temp, name: chosen)
         _ = try CatalogueTree.read(root: temp)
-        try fm.moveItem(at: temp, to: dest)
-        do { try catalogues.registerChecked(chosen, at: dest) }
-        catch { try? fm.removeItem(at: dest); throw error }
-        return chosen
+        return try Handler_File_Manager.shared.withTransaction(home: catalogues.root) {
+            try Handler_File_Manager.shared.move(temp, to: dest)
+            try catalogues.registerChecked(chosen, at: dest)
+            return chosen
+        }
     }
 }

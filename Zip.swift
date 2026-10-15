@@ -29,7 +29,12 @@ enum Zip {
     // MARK: Writing
 
     /// Writes the entries, in order, as a zip file.
-    static func write(_ entries: [Entry], to url: URL, at date: Date = Date()) throws {
+    static func write(_ entries: [Entry], to url: URL, at date: Date = Date(), manager: Handler_File_Manager = .shared) throws {
+        var entries = entries
+        guard entries.count <= 20_000, entries.allSatisfy({ $0.path.utf8.count <= 65_535 && $0.data.count <= 40 * 1024 * 1024 }), entries.reduce(0, { $0 + $1.data.count }) <= 256 * 1024 * 1024 else { throw Fault.damaged("the archive exceeds supported limits") }
+        if let index = entries.firstIndex(where: { $0.path == ShareManifest.fileName }) {
+            entries[index] = Entry(path: ShareManifest.fileName, data: try manager.documentBytes(entries[index].data, extension: "colmanifest"))
+        }
         var out = Data()
         var directory = Data()
         let (time, day) = dosStamp(date)
@@ -54,7 +59,8 @@ enum Zip {
         out.append(directory)
         out.append(le32(0x06054b50)); out.append(le16(0)); out.append(le16(0)); out.append(le16(UInt16(entries.count))); out.append(le16(UInt16(entries.count)))
         out.append(le32(UInt32(directory.count))); out.append(le32(start)); out.append(le16(0))
-        try out.write(to: url, options: .atomic)
+        if ["colshr", "colshare"].contains(url.pathExtension.lowercased()) { try manager.write(out, to: url) }
+        else { try manager.publishRaw(out, to: url) }
     }
 
     // MARK: Reading
@@ -62,7 +68,11 @@ enum Zip {
     /// Reads every entry of a zip file, in the order the directory lists them.
     static func read(_ url: URL) throws -> [Entry] {
         let data: Data
-        do { data = try Data(contentsOf: url) } catch { throw Fault.notAZip(url) }
+        do {
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= 256 * 1024 * 1024 else { throw Fault.notAZip(url) }
+            data = try Data(contentsOf: url)
+        } catch { throw Fault.notAZip(url) }
         return try read(data: data, name: url)
     }
 
@@ -78,12 +88,15 @@ enum Zip {
         }
         guard let end = endAt else { throw Fault.notAZip(url) }
         let count = Int(u16(data, end + 10)), dirSize = Int(u32(data, end + 12)), dirStart = Int(u32(data, end + 16))
-        guard dirStart + dirSize <= end else { throw Fault.damaged("the directory is out of place") }
+        guard count <= 20_000, data.count <= 256 * 1024 * 1024, dirStart + dirSize <= end else { throw Fault.damaged("the directory is out of place or exceeds supported limits") }
         var entries: [Entry] = []
+        var expandedBytes = 0
         var at = dirStart
         for _ in 0..<count {
             guard at + 46 <= end, u32(data, at) == 0x02014b50 else { throw Fault.damaged("a directory record is missing") }
             let method = u16(data, at + 10), crc = u32(data, at + 16), packedSize = Int(u32(data, at + 20)), size = Int(u32(data, at + 24))
+            expandedBytes += size
+            guard size <= 40 * 1024 * 1024, expandedBytes <= 256 * 1024 * 1024 else { throw Fault.damaged("the expanded archive exceeds supported limits") }
             let nameLen = Int(u16(data, at + 28)), extraLen = Int(u16(data, at + 30)), commentLen = Int(u16(data, at + 32))
             let offset = Int(u32(data, at + 42))
             guard at + 46 + nameLen <= end, let path = String(data: data[(at + 46)..<(at + 46 + nameLen)], encoding: .utf8) else { throw Fault.damaged("a name could not be read") }

@@ -1,6 +1,6 @@
 # Architecture — Handler File Management
 
-Status: proposed execution plan; implementation has not started. Reviewed 2026-10-15 on `colorgain-main`, commit `21eac37`. This document records product architecture, source findings and acceptance tests; project working instructions remain in `.Codex/AGENTS.md`.
+Status: implemented; final target verification in progress. Baseline reviewed 2026-10-15 on `colorgain-main`, commit `21eac37`; plan committed and pushed first as `e61c06a`. This document records product architecture, source findings and acceptance tests; project working instructions remain in `.Codex/AGENTS.md`.
 
 ## 1. Agreed direction
 
@@ -12,7 +12,7 @@ Retain the folder-based architecture, current extensions, colour precision and u
 
 ## 2. Review scope and evidence
 
-Reviewed production Swift sources for disk reads/writes, enumeration, moves, copies, deletion, file panels, alerts, bookmarks, watches, import/export and registry updates. Reviewed format models, existing self-test coverage, `Info.plist`, `Package.swift`, build scripts and Store source configuration. Generated build products were excluded. Source inspection is evidence of implementation paths, not proof of runtime safety; no failure-injection or native QA was run for this documentation task.
+Reviewed production Swift sources for disk reads/writes, enumeration, moves, copies, deletion, file panels, alerts, bookmarks, watches, import/export and registry updates. Reviewed format models, existing self-test coverage, `Info.plist`, `Package.swift`, build scripts and Store source configuration. Generated build products were excluded. Sections 2–4 retain the original source findings. Implementation, failure-injection and native verification evidence appears in the sign-off ledger and section 14.
 
 ### Persistence and lifecycle touch points
 
@@ -255,63 +255,63 @@ For each completed item append a dated sign-off entry containing its ID, changed
 
 ### Stage 0 — Reproducible baseline
 
-- [ ] HFM-010 — Establish isolated workspace/preferences/access fixtures and byte/identity snapshots. Include two distinct catalogue schemas, global assets and linked dependencies. Depends: HFM-003.
-- [ ] HFM-011 — Reproduce the missing-parent/child alert cascade and record which entry points emit each incident. Verify no real workspace is used. Depends: HFM-010.
-- [ ] HFM-012 — Capture current-format/legacy round trips and identify tests that encode superseded Finder deletion assumptions. Record baseline suite results. Depends: HFM-010.
+- [x] HFM-010 — Establish isolated workspace/preferences/access fixtures and byte/identity snapshots. Include two distinct catalogue schemas, global assets and linked dependencies. Depends: HFM-003.
+- [x] HFM-011 — Reproduce the missing-parent/child alert cascade and record which entry points emit each incident. Verify no real workspace is used. Depends: HFM-010.
+- [x] HFM-012 — Capture current-format/legacy round trips and identify tests that encode superseded Finder deletion assumptions. Record baseline suite results. Depends: HFM-010.
 
 ### Stage 1 — Manager, contracts and metadata
 
-- [ ] HFM-020 — Add `FileHandlers/`, `Handler_File_Manager`, shared handler protocol and registry, structured issues/results, injectable filesystem/access/time/identity providers. Depends: HFM-011, HFM-012.
-- [ ] HFM-021 — Define common header codec and creator settings contract; preserve creation provenance, update successful-save metadata and support development bundle fallbacks. Depends: HFM-020.
-- [ ] HFM-022 — Add descriptor/version/capability dispatch tests, unsupported-format preservation and deterministic provenance tests. Depends: HFM-020, HFM-021.
-- [ ] HFM-023 — Verify new directory membership in SwiftPM and both Xcode definitions; update XcodeGen inclusion and relevant exclusions without changing target restrictions. Depends: HFM-020.
+- [x] HFM-020 — Add `FileHandlers/`, `Handler_File_Manager`, shared handler protocol and registry, structured issues/results, injectable filesystem/access/time/identity providers. Depends: HFM-011, HFM-012.
+- [x] HFM-021 — Define common header codec and creator settings contract; preserve creation provenance, update successful-save metadata and support development bundle fallbacks. Depends: HFM-020.
+- [x] HFM-022 — Add descriptor/version/capability dispatch tests, unsupported-format preservation and deterministic provenance tests. Depends: HFM-020, HFM-021.
+- [-] HFM-023 — Verify new directory membership in SwiftPM and both Xcode definitions; update XcodeGen inclusion and relevant exclusions without changing target restrictions. Depends: HFM-020.
 
 ### Stage 2 — First working vertical slice and immediate safety
 
-- [ ] HFM-030 — Adapt app-data, catalogue and palette handlers; retain compatibility facades with one writer per format. Depends: HFM-022, HFM-023.
-- [ ] HFM-031 — Make inspect/open inventory read-only; separate explicit create, migrate and repair plans from loading. Prevent failed/degraded loads from recreating or rewriting missing data. Depends: HFM-030.
-- [ ] HFM-032 — Remove permanent-delete fallback and prevent registration removal before successful chosen outcome. Cover Bin failure and registration-write failure with preservation tests. Depends: HFM-030.
-- [ ] HFM-033 — Route first missing-parent flow through grouped incidents; stop dependent reload/history/completion work after a failed load. Depends: HFM-031.
-- [ ] HFM-034 — Verify normal palette read/save, missing-parent/child cases, cancellation and byte-identical retained data. Gate further conversion on these results. Depends: HFM-031–033.
+- [x] HFM-030 — Adapt app-data, catalogue and palette handlers; retain compatibility facades with one writer per format. Depends: HFM-022, HFM-023.
+- [x] HFM-031 — Make inspect/open inventory read-only; separate explicit create, migrate and repair plans from loading. Prevent failed/degraded loads from recreating or rewriting missing data. Depends: HFM-030.
+- [x] HFM-032 — Remove permanent-delete fallback and prevent registration removal before successful chosen outcome. Cover Bin failure and registration-write failure with preservation tests. Depends: HFM-030.
+- [x] HFM-033 — Route first missing-parent flow through grouped incidents; stop dependent reload/history/completion work after a failed load. Depends: HFM-031.
+- [x] HFM-034 — Verify normal palette read/save, missing-parent/child cases, cancellation and byte-identical retained data. Gate further conversion on these results. Depends: HFM-031–033.
 
 ### Stage 3 — Complete format ownership
 
-- [ ] HFM-040 — Adapt typography, loose swatches, single swatch and information handlers; preserve schema-bucket and claim provenance. Depends: HFM-034.
-- [ ] HFM-041 — Adapt colour profiles, print profiles and proof handlers; retain exact ICC dependencies and scientific/session metadata. Depends: HFM-034.
-- [ ] HFM-042 — Adapt history, key-profile and ASE-registry handlers; preserve failed history and unavailable links. Depends: HFM-034.
-- [ ] HFM-043 — Adapt share/manifest and QR handlers; explicitly test current XYZ exchange fidelity and legacy decoding. Depends: HFM-040–042.
-- [ ] HFM-044 — Consolidate legacy migration readers, supported-version rules, header adoption and unknown-field preservation/read-only policies. No bulk startup rewrite. Depends: HFM-040–043.
-- [ ] HFM-045 — Route metadata-filter mirrors, global asset composition and persistence caches through handlers; remove read-side mirror writes. Depends: HFM-040–044.
-- [ ] HFM-046 — Pass the format/version/provenance matrix for all registered formats, including preserved colour source/master precision. Depends: HFM-044, HFM-045.
+- [x] HFM-040 — Adapt typography, loose swatches, single swatch and information handlers; preserve schema-bucket and claim provenance. Depends: HFM-034.
+- [x] HFM-041 — Adapt colour profiles, print profiles and proof handlers; retain exact ICC dependencies and scientific/session metadata. Depends: HFM-034.
+- [x] HFM-042 — Adapt history, key-profile and ASE-registry handlers; preserve failed history and unavailable links. Depends: HFM-034.
+- [x] HFM-043 — Adapt share/manifest and QR handlers; explicitly test current XYZ exchange fidelity and legacy decoding. Depends: HFM-040–042.
+- [x] HFM-044 — Consolidate legacy migration readers, supported-version rules, header adoption and unknown-field preservation/read-only policies. No bulk startup rewrite. Depends: HFM-040–043.
+- [x] HFM-045 — Route metadata-filter mirrors, global asset composition and persistence caches through handlers; remove read-side mirror writes. Depends: HFM-040–044.
+- [x] HFM-046 — Pass the format/version/provenance matrix for all registered formats, including preserved colour source/master precision. Depends: HFM-044, HFM-045.
 
 ### Stage 4 — Disk reconciliation and graceful recovery
 
-- [ ] HFM-050 — Migrate catalogue registration identity to UUID with name/path compatibility; preserve unknown manifest fields and active/default references. Depends: HFM-046.
-- [ ] HFM-051 — Implement complete/incomplete inventory and typed availability; handle missing, denied, expired, offline, corrupt, unsupported and mismatched states. Depends: HFM-050.
-- [ ] HFM-052 — Replace heuristic destructive reconciliation; validate identities, duplicate conflicts, containment, symlinks, case and Unicode collisions. Depends: HFM-051.
-- [ ] HFM-053 — Coalesce watches and queue deferred scans during editing/picking; add stale-write arbitration across windows/processes. Depends: HFM-051, HFM-052.
-- [ ] HFM-054 — Route startup, document multi-open, Locate/Grant/Retry/Restore and dismissal through one incident coordinator and existing UI primitives. Depends: HFM-051–053.
+- [x] HFM-050 — Migrate catalogue registration identity to UUID with name/path compatibility; preserve unknown manifest fields and active/default references. Depends: HFM-046.
+- [x] HFM-051 — Implement complete/incomplete inventory and typed availability; handle missing, denied, expired, offline, corrupt, unsupported and mismatched states. Depends: HFM-050.
+- [x] HFM-052 — Replace heuristic destructive reconciliation; validate identities, duplicate conflicts, containment, symlinks, case and Unicode collisions. Depends: HFM-051.
+- [x] HFM-053 — Coalesce watches and queue deferred scans during editing/picking; add stale-write arbitration across windows/processes. Depends: HFM-051, HFM-052.
+- [x] HFM-054 — Route startup, document multi-open, Locate/Grant/Retry/Restore and dismissal through one incident coordinator and existing UI primitives. Depends: HFM-051–053.
 - [ ] HFM-055 — Verify one parent incident, suppressed child alerts, no repeat on unchanged state, preserved session and unaffected work; test sandbox grants and volume recovery. Depends: HFM-054.
 
 ### Stage 5 — Recoverable operations
 
-- [ ] HFM-060 — Implement immutable revision-bound plans and per-operation journals for source, destination, global assets and manifest. Depends: HFM-055.
-- [ ] HFM-061 — Implement staged publish, verified cross-volume copy, conflict-aware/idempotent restart recovery and honest partial Bin outcomes. Preserve unrelated external changes. Depends: HFM-060.
-- [ ] HFM-062 — Inject failures/crashes at every transaction phase, including registration finalization and cleanup; verify no lost updates or unrelated deletion. Depends: HFM-061.
+- [x] HFM-060 — Implement immutable revision-bound plans and per-operation journals for source, destination, global assets and manifest. Depends: HFM-055.
+- [x] HFM-061 — Implement staged publish, verified cross-volume copy, conflict-aware/idempotent restart recovery and honest partial Bin outcomes. Preserve unrelated external changes. Depends: HFM-060.
+- [x] HFM-062 — Inject failures/crashes at every transaction phase, including registration finalization and cleanup; verify no lost updates or unrelated deletion. Depends: HFM-061.
 
 ### Stage 6 — Catalogue removal wizard
 
-- [ ] HFM-070 — Build inventory summaries with verified/last-known counts, ownership, dependencies, unknown files and unique-byte estimates. Resolve image ownership before offering image moves/deletion. Depends: HFM-062.
-- [ ] HFM-071 — Implement detach/leave, existing/new-catalogue transfer, verified archive/detach and explicit owned-file Bin choices. Depends: HFM-070.
-- [ ] HFM-072 — Implement source-to-target schema mapping, duplicate/identity choices, linked/global asset retention and history/profile policy. Depends: HFM-070.
-- [ ] HFM-073 — Implement review/progress/completion overlays using the same plans; finalize registry/default/active state only after the selected outcome succeeds. Depends: HFM-071, HFM-072.
-- [ ] HFM-074 — Verify every outcome, cancellation boundary, target failure, incomplete archive and active/last catalogue removal; inspect native layout/accessibility at minimum/reference sizes. Depends: HFM-073.
+- [x] HFM-070 — Build inventory summaries with verified/last-known counts, ownership, dependencies, unknown files and unique-byte estimates. Resolve image ownership before offering image moves/deletion. Depends: HFM-062.
+- [x] HFM-071 — Implement detach/leave, existing/new-catalogue transfer, verified archive/detach and explicit owned-file Bin choices. Depends: HFM-070.
+- [x] HFM-072 — Implement source-to-target schema mapping, duplicate/identity choices, linked/global asset retention and history/profile policy. Depends: HFM-070.
+- [x] HFM-073 — Implement review/progress/completion overlays using the same plans; finalize registry/default/active state only after the selected outcome succeeds. Depends: HFM-071, HFM-072.
+- [x] HFM-074 — Verify every outcome, cancellation boundary, target failure, incomplete archive and active/last catalogue removal; inspect native layout/accessibility at minimum/reference sizes. Depends: HFM-073.
 
 ### Stage 7 — Consolidation and release readiness
 
-- [ ] HFM-080 — Route remaining sync, setup, share, profile, proof, QR, external adapters and UI persistence entry points through the manager. Document infrastructure exceptions. Depends: HFM-074.
-- [ ] HFM-081 — Consolidate Finder declarations, document routing, labels/icons and legacy aliases; test registry/plist parity. Depends: HFM-080.
-- [ ] HFM-082 — Remove obsolete direct writers/facades and run static bypass audit; retain explicit migration readers. Depends: HFM-080, HFM-081.
+- [x] HFM-080 — Route remaining sync, setup, share, profile, proof, QR, external adapters and UI persistence entry points through the manager. Document infrastructure exceptions. Depends: HFM-074.
+- [x] HFM-081 — Consolidate Finder declarations, document routing, labels/icons and legacy aliases; test registry/plist parity. Depends: HFM-080.
+- [x] HFM-082 — Remove obsolete direct writers/facades and run static bypass audit; retain explicit migration readers. Depends: HFM-080, HFM-081.
 - [ ] HFM-083 — Run full appropriate build/self-test suites and native regression matrix for both targets; record exact build identities and untested cases. Depends: HFM-082.
 - [ ] HFM-084 — Review completion criteria against evidence, record remaining product decisions and present final results for Rick's acceptance. Depends: HFM-083.
 
@@ -322,4 +322,48 @@ For each completed item append a dated sign-off entry containing its ID, changed
 | 2026-10-15 | HFM-001, HFM-002 | Source review and architecture/format/recovery/provenance/test plan recorded | Runtime failures not reproduced; implementation pending |
 | 2026-10-15 | HFM-003 | Backlog IDs, dependencies and completion evidence rules added; document structure and whitespace checked | Documentation sign-off only; no app build or user acceptance claimed |
 
-Next implementation item: HFM-010. Update its status before beginning and append evidence at completion. Do not mark an entire stage complete while a dependent test or required native check remains outstanding.
+Current gate: complete both target builds and record their actual outcomes, then finish the sandbox recovery check and final acceptance record. Earlier test totals below are milestones, not substitutes for the final build results.
+
+Implementation evidence — 2026-10-15:
+
+- HFM-010–012: `FileHandlerFixture` uses a unique temporary root, two different schemas, global Assets, external ASE links and byte snapshots. Baseline suite: 908 passed, 0 failed. Headless reproduction produces six repeated parent/filter errors; original native alert cascade remains a native QA case.
+- HFM-020, HFM-022: manager registry, per-format classes, filesystem/metadata injection, typed issues and provenance codec are present. Manager tests cover duplicate/unknown types, immutable creation metadata, no-op saves, nested unknown fields, stale writes, future versions, legacy unknown provenance, path traversal, share redaction and injected disk-full failure. Foundation suite: 923 passed, 0 failed.
+- HFM-030, HFM-033, HFM-040–042: app-data/catalogue/palette adapters and remaining domain codecs are connected; read preflight prevents inferred missing-member deletion, failed reload returns immediately, repeated incidents deduplicate, native storage writes preserve metadata. Latest full debug self-test: 924 passed, 0 failed. Updated former destructive-recovery expectations deliberately. History and full graceful UI are still part of later checks, not signed off by this result.
+- Debug builds use `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` because the selected Command Line Tools lack the existing AppKit preview macro plugin. Initial required release build was interrupted by a source edit and must be rerun; no successful installation is claimed yet.
+
+
+## 14. Implemented behavior and verification boundaries
+
+- `Handler_File_Manager` owns native read/write dispatch, metadata adoption, unknown-field retention, stale-write checks, coordinated publication and recoverable mutations. Fifteen format classes implement the registered native formats; compatibility facades retain domain-facing APIs.
+- Existing catalogue opens and metadata-filter reads are read-only. A missing expected parent, child, key profile, global index or manifest never becomes an empty successful scan or a newly seeded replacement. Explicit legacy migration remains available through startup. Finder additions/moves produce revision-bound reconciliation proposals; editing and automatic sync wait for acceptance.
+- Native headers carry application bundle ID/name/version/build/commit, UTC save/create timestamps, document identity and creator/account details. Existing creation facts survive saves; legacy facts stay unknown. The creator name is configurable in File Creator Details. Personal-name redaction is available in the codec. QR keeps its existing XYZ exchange contract. ASE/ICC, images and other standard formats retain their standard bytes.
+- Incidents coalesce by root and state. Recovery offers Retry, eligible file restore, catalogue Locate, conditional folder access, detach and dismissal. Multiple eligible files have a selector. External ASE/ICC links retain their existing dedicated reconnect workflows. Archive bytes are not offered to the JSON restore action.
+- The removal wizard inventories verified versus last-known counts, approximate unique bytes, ownership, unknown files and schema mapping. Detach retains originals. Transfers preserve source schemas alongside the destination, create independent conflicting copies and retain non-model payloads in a verified archive. Archive writes a checked share before detaching. Bin applies only to planned owned files; external/global originals and unowned artwork stay in place. A shared catalogue root cannot be binned through one alias.
+- Plans bind source/index/manifest revisions and inventory membership; existing destination indices are checked against the mapping review. Per-operation journals retain only touched paths. Restart recovery is idempotent and preserves external conflicts. Workspace locks prevent simultaneous managed operations. Verified relocation rebases internal catalogue paths and retains the old workspace as a recovery copy. Copies are bounded to 256 MB per file; archives remain 40 MB per file/256 MB total.
+- Cancellation is checked before execution and at mutation/commit boundaries. Successful output/registry changes commit together. A failed cleanup leaves a committed journal for later cleanup, never a rollback of committed user work. Failed Bin operations may leave recoverable duplicate copies in the system Bin while restoring originals.
+- Finder multi-open keeps all supplied URLs in a queue. Workspaces/catalogues use startup validation; shares enter staged import; palettes, swatches, QR, print profiles, proofs and keyboard profiles have review/import routes. Internal support files explain their managed workflow. Finder declarations now have one current owner per native extension; unused sync registrations were retired and current aliases retained.
+
+### Evidence recorded during implementation
+
+| Area | Evidence |
+|---|---|
+| Native codec matrix | All fifteen handlers have creator/application headers and future-version preservation checks; canonical Finder extension ownership is checked. Existing scientific/QR suites retain source/master fidelity assertions. |
+| Recovery and reconciliation | Missing child/parent, denied enumeration, deduplication, unchanged manifest/filter reads, explicit restore, wrong identity, read-only opens and accepted Finder reconciliation use disposable fixtures. |
+| Operations | Tests cover stale plans, new files during review, detach/re-attach, archive verification/reopening, new-target transfer/schema preservation, Bin/finalization rollback, successful owned-file Bin, last catalogue detach, cancellation after archive publication, revision conflicts, restart/idempotency and verified workspace relocation. |
+| Native UI | Isolated app/preferences/workspace; inventory → destination → schema mapping → review → existing-target transfer; missing-palette Locate/restore; reference 1440×900, Studio 1200×800 and classic 800×460. Keyboard focus/scrolling, nested restore Escape, parent recovery retention and toolbar restoration inspected. |
+| UI review | Impeccable finish review and focused recheck; original six findings addressed. Archive eligibility was corrected after recheck. Native testing then found and fixed file-sheet dismissal of the parent recovery form. |
+
+### Deliberate infrastructure/compatibility exceptions
+
+Legacy readers in `Migration`, `LegacyTree` and `ProjectFile` read historical bytes only for explicit conversion. Legacy cloud transport/backups still use `library.json`; they are not advertised as new native document formats. ZIP extraction writes only to private staging directories; archive/journal snapshot infrastructure preserves existing bytes. Bookmark storage, diagnostics, transient form memory, bundled help/reference reads, scientific transforms, image sampling/rendering, system colour lists and the direct-download Adobe helper remain their established infrastructure rather than parallel `.col*` writers. Whole-catalogue import publication and registration now use the shared transaction instead of recursive failure deletion.
+
+Images currently have no catalogue-owned editable asset contract. They remain unowned files, may be retained in an archive and are never offered as app-owned Bin assets. Individual linked ASE files can be materialized in portable archives; monitored ASE folder links require explicit conversion to individual files first. ICC dependencies remain references unless already embedded in proof configurations. History/proof/ASE and unknown source files retained by transfer are labelled archive-only, rather than immediately adopted into the target's active model. Hidden files, root Backups, other catalogues and app-wide Assets remain at their original locations; an archive is refused if this inventory cannot include an indexed asset.
+
+### External verification limits
+
+Actual removable-volume unplug/replug, expired production bookmarks, power loss and another computer's cloud provider are not claimed as physically exercised. Denied/missing paths, process locking, interrupted publication, conflicts and restart recovery are exercised using isolated fixtures. App Store distribution/archive submission and notarization are outside this local implementation verification. Build target/signature/self-test results are recorded below only after they complete.
+
+
+Implementation sign-off before release builds: debug compilation succeeded and the full suite passed **1,024 checks, 0 failures**. This includes alias-safe containment, escaping-symlink rejection, stable-identity preservation of unknown colour metadata, source identity for independent palette copies, production-facade legacy provenance and UUID-based detach persistence after Finder renames. Native Finder reconciliation was accepted and its new collection verified in the saved index. Release builds and the corrected Store missing-file flow remain the final gate at this commit.
+
+The optional personal-name redaction codec is implemented and tested. Normal exports retain the creator details Rick requested; a dedicated export privacy preview/control remains a future UX extension rather than an enabled preference. No claim of anonymising arbitrary asset content is made.

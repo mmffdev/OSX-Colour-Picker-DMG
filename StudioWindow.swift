@@ -1261,9 +1261,9 @@ final class StudioFrame: NSView {
         sharePage.beginExport(level: level, subject: subject, name: name)
         go(.share)
     }
-    func startImport() {
+    func startImport(url: URL? = nil) {
         shareReturn = place
-        sharePage.beginImport()
+        sharePage.beginImport(url: url)
         go(.share)
     }
     private func exportFromPage() {
@@ -4870,7 +4870,7 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
             }
         }
         y += Self.u
-        Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed. Tick what a catalogue holds to relocate it to another catalogue or remove it; Remove on the catalogue moves its whole folder to the Bin.", .caption, colour: Design.quiet, lineHeight: true)
+        Design.attributed("A catalogue is a separate library with its own colours, palettes and projects. Open Catalogue puts one on the list where it is, from its .colcatalogue file, or makes one from a library.json; nothing is copied or changed. Tick what a catalogue holds to relocate it to another catalogue or remove it; Remove opens a guided choice to detach, archive, transfer or bin owned files.", .caption, colour: Design.quiet, lineHeight: true)
             .draw(in: NSRect(x: 0, y: y, width: min(bounds.width, 560), height: 3 * Self.u))
     }
 
@@ -5267,48 +5267,17 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
         askToRemove(name)
     }
 
-    // TODO (Rick, next session): catalogue removal must update the .coldata registry
-    // and default/active catalogue references consistently, and explicitly ask whether
-    // the .colplt and .colswa files should remain on disk before removing anything.
-    // Verify the actual asset extensions/storage paths; preserve files when requested.
-    // Also handle folders deleted outside the app: stale .coldata references must show
-    // one Catalogue Unavailable recovery prompt (Locate Folder / Remove From List /
-    // Cancel), not cascading missing .colpal and mismatched filter-data alerts.
-    // Reproduced with Cookra Design Test 1 and its migration backup after Rick
-    // deliberately deleted their content folders. Do not recreate/overwrite missing data.
-    // Current behaviour below retains the existing whole-folder Bin confirmation.
-    private func askToRemove(_ e: String) {
-        guard names.contains(e) else { return }
-        if names.count == 1 {
-            SwissConfirm.tell(over: window, title: "The Only Catalogue",
-                              note: "Colorgain keeps one catalogue open, and this is the only one. Make another with New Catalogue first; then this one can go.")
-            return
-        }
-        let lib = libraryFor(e)
-        let held = lib.map { "\(e) holds \(plural($0.projects.count, "member")), \(plural($0.swatches.count, "palette")) and \(plural($0.colours.count, "colour")). " } ?? ""
-        let targets = names.filter { $0 != e }
-        SwissConfirm.ask(over: window, title: "Remove Catalogue",
-                         note: "You are about to remove \(e). " + held + "The catalogue's folder goes to the Bin with everything still in it, and it comes off the list. Choose where its contents go, then slide across.",
-                         commit: "Remove",
-                         options: ["Bin Everything With The Folder"] + targets.map { "Move Everything To \($0)" }) { [weak self] choice in
-            guard let self = self else { return }
-            if choice > 0, let lib = lib {
-                let all = Set(lib.projects.map { Item.project($0.id) } + lib.palettes(in: nil).map { Item.palette($0.id) })
-                let picked = self.gather(all, in: lib)
-                do { try self.move(projects: picked.projects, palettes: picked.palettes, from: e, to: targets[choice - 1], in: lib) } catch { self.library?.show(error); return }
+    private func askToRemove(_ name: String) {
+        guard let window else { return }
+        FileCatalogueRemovalWizard(name: name, window: window) { [weak self] success in
+            guard let self, success else { return }
+            let available = Catalogues.standard.names()
+            if let library = self.library, library.catalogue == name {
+                if let next = available.first { library.open(catalogue: next) }
+                else { (NSApp.delegate as? AppDelegate)?.runSetupAssistant() }
             }
-            self.removeCatalogue(e)
-        }
-    }
-
-    /// Moves the catalogue to the Bin and takes it off the list, Main like any other; the open one hands over to another first.
-    private func removeCatalogue(_ e: String) {
-        guard let lib = library, names.contains(e), names.count > 1 else { return }
-        if lib.catalogue == e, let other = names.first(where: { $0 != e }) { lib.open(catalogue: other) }
-        do { try Catalogues.standard.bin(e) } catch { lib.show(error); reload(); onChange?(); return }
-        var all = Self.colours; all[e] = nil; Self.colours = all
-        expanded = nil
-        reload(); onChange?()
+            self.expanded = nil; self.reload(); self.onChange?()
+        }.start()
     }
 
     @objc private func openCatalogue() {

@@ -45,7 +45,7 @@ enum PaletteImport {
 
     /// A .colpalette: the palette and the colours it uses, each named as it was there.
     static func paletteDocument(_ data: Data) -> ImportedPalette? {
-        guard let doc = try? PaletteAssetHandler.read(data), doc.format == "colour-palette" else { return nil }
+        guard let doc = try? PaletteAssetHandler.read(data), ["colour-palette", "colour-typography"].contains(doc.format) else { return nil }
         let colours = doc.palette.entries.map { ExportColour(name: $0.name ?? colourName($0.hex), hex: $0.hex) }
         return ImportedPalette(name: doc.palette.name, colours: colours,review:doc.palette.review,asset:doc)
     }

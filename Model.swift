@@ -1103,6 +1103,8 @@ enum StoreError: LocalizedError {
 final class LibraryStore {
     let assetsHome: URL?
     private var globalAtLoad: Library?
+    var pendingReconciliation: FileCatalogueReconciliationPlan?
+    private var expectedCatalogue: Bool
     /// The catalogue's index, "Rick 001.colcatalogue"; the tree is the folder round it.
     let url: URL
     var root: URL { url.deletingLastPathComponent() }
@@ -1127,9 +1129,18 @@ final class LibraryStore {
     /// `name` is the catalogue's, which its file is named for.
     init(directory: URL, legacyURL: URL?, previousURL: URL? = nil, name: String? = nil, assetsHome: URL? = nil) {
         self.assetsHome = assetsHome
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // The structure file is "<name>.colcat"; an earlier version's index beside it gives the name until it is brought across.
         let found = CatalogueFiles.anyIndex(in: directory)
+        expectedCatalogue = found != nil
+        if let home = assetsHome, let data = try? Data(contentsOf: AppDataStore(root: home).url),
+           let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let rows = manifest["catalogues"] as? [[String: Any]] {
+            expectedCatalogue = expectedCatalogue || rows.contains { row in
+                guard let path = row["path"] as? String else { return false }
+                let location = path.hasPrefix("/") ? URL(fileURLWithPath: path) : home.appendingPathComponent(path)
+                return location.standardizedFileURL == directory.standardizedFileURL
+            }
+        }
         let base = found?.deletingPathExtension().lastPathComponent ?? filesystemName(name ?? directory.lastPathComponent)
         self.url = directory.appendingPathComponent(base + "." + ColourFiles.catalogue)
         self.name = name ?? found?.deletingPathExtension().lastPathComponent ?? directory.lastPathComponent
@@ -1160,18 +1171,23 @@ final class LibraryStore {
     /// Reads the tree. A catalogue laid out by an earlier version is brought across first, with a backup beside it.
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
-        let fm = FileManager.default, stamp = Int(Date().timeIntervalSince1970)
         if let home = assetsHome { try AssetTransaction.recover(home: home) }
-        if Migration.needed(in: root) { try Migration.run(root: root, name: name) }
+        else { try FileOperationTransaction.recover(home: root) }
+        if expectedCatalogue && CatalogueFiles.index(in: root) == nil && !Migration.needed(in: root) {
+            throw FileRecoveryReport(root: root, issues: [FileIssue(url: url, state: .missing, message: "The catalogue index or containing folder is unavailable. Locate it before continuing.")])
+        }
+        if Migration.needed(in: root) { throw FileIssue(url: url, state: .unsupportedVersion, message: "This catalogue needs an explicit legacy migration. Open it through the workspace chooser to review and migrate it.") }
         if let index = CatalogueFiles.index(in: root) {
-            try ASERegistry.seed(root, name: name)
+            let observed = Handler_File_Manager.shared.inspectCatalogue(index)
+            guard observed.complete else { throw FileRecoveryReport(root: root, issues: observed.issues) }
             do {
                 let loaded = try CatalogueTree.read(root: root)
                 schema = loaded.schema
+                expectedCatalogue = true
                 notes = loaded.notes
                 SchemaTrial.adopt(loaded.schema, for: root)
                 // The disk said something the files had not: the files catch up.
-                if loaded.dirty { try? CatalogueTree.write(loaded.library, schema: loaded.schema, index: url, name: name) }
+                // Finder changes are reflected in memory; only an explicit save publishes reconciliation.
                 if let home = assetsHome {
                     let assets = GlobalAssets(home: home)
                     let existing = try assets.load()
@@ -1183,44 +1199,16 @@ final class LibraryStore {
                     }
                     let combined = GlobalAssets.joined(incoming, existing)
                     globalAtLoad = existing
-                    let split = GlobalAssets.split(loaded.library)
-                    if !split.global.swatches.isEmpty || !split.global.colours.isEmpty || split.global.colourProfiles.count > split.local.colourProfiles.count || !FileManager.default.fileExists(atPath: assets.index.path) {
-                        // Preserve the original catalogue before moving its unassigned work to app scope.
-                        let backup = root.appendingPathComponent("Backups/Before Global Assets")
-                        if !fm.fileExists(atPath: backup.path) {
-                            try fm.createDirectory(at: backup, withIntermediateDirectories: true)
-                            for item in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where item.lastPathComponent != "Backups" && item.lastPathComponent != "Catalogues" && !(item.lastPathComponent == "Assets" && root.standardizedFileURL == home.standardizedFileURL) {
-                                try fm.copyItem(at: item, to: backup.appendingPathComponent(item.lastPathComponent))
-                            }
-                        }
-                        try save(combined, schema: loaded.schema)
-                        for relative in [loaded.catalogue.swatches, loaded.catalogue.profiles].compactMap({ $0 }) {
-                            let old = root.appendingPathComponent(relative)
-                            if relative.hasPrefix("Library/") || (relative.hasPrefix("Assets/") && root.standardizedFileURL != home.standardizedFileURL) {
-                                if fm.fileExists(atPath: old.path) { try fm.removeItem(at: old) }
-                            }
-                        }
-                        for dir in ["Library", "Assets"] where dir != "Assets" || root.standardizedFileURL != home.standardizedFileURL {
-                            for pool in TreeFiles.pools {
-                                let folder = root.appendingPathComponent(dir).appendingPathComponent(pool)
-                                if (try? fm.contentsOfDirectory(atPath: folder.path).isEmpty) == true { try fm.removeItem(at: folder) }
-                            }
-                            let folder = root.appendingPathComponent(dir)
-                            if (try? fm.contentsOfDirectory(atPath: folder.path).isEmpty) == true { try fm.removeItem(at: folder) }
-                        }
-                    }
                     globalAtLoad = GlobalAssets.split(combined).global
+                    pendingReconciliation = loaded.dirty ? try FileCatalogueReconciliationPlan(library: combined, schema: loaded.schema, notes: loaded.notes, inventory: observed) : nil
                     return combined
                 }
+                pendingReconciliation = loaded.dirty ? try FileCatalogueReconciliationPlan(library: loaded.library, schema: loaded.schema, notes: loaded.notes, inventory: observed) : nil
                 return loaded.library
             } catch {
                 Diagnostics.log("store", "could not read \(index.path): \(error.localizedDescription)")
-                if assetsHome != nil { throw error }
+                throw error
             }
-            // Never overwrite a file we could not read: move it aside for recovery.
-            let aside = root.appendingPathComponent("unreadable-\(stamp)." + ColourFiles.catalogue + ".txt")
-            try? fm.moveItem(at: index, to: aside)
-            quarantinedFile = aside
         }
         var lib = loadPrevious() ?? Library()
         lib.mergeLegacy(loadLegacy())
@@ -1233,8 +1221,13 @@ final class LibraryStore {
     func save(_ lib: Library) throws { try save(lib, schema: SchemaTrial.schema(for: root) ?? schema) }
 
     func save(_ lib: Library, schema f: SchemaTrial.SchemaFile) throws {
+        if expectedCatalogue { try Handler_File_Manager.shared.requireAvailableCatalogue(url) }
         do {
             if let home = assetsHome {
+                if expectedCatalogue && !FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path) {
+                    throw FileIssue(url: AppDataStore(root: home).url, state: .missing, message: "The workspace manifest is unavailable. Restore or locate the workspace before saving.")
+                }
+                if !expectedCatalogue && !FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path) { try AppHomeSeed.ensure(at: home) }
                 let parts = GlobalAssets.split(lib)
                 let current = try GlobalAssets(home: home).load()
                 let next = globalAtLoad.map { LibraryDelta.between($0, parts.global).applied(to: current) } ?? GlobalAssets.joined(parts.global, current)
@@ -1243,13 +1236,18 @@ final class LibraryStore {
                     try CatalogueTree.write(parts.local, schema: f, index: url, name: name, poolDirectory: "Support", createEmptyPools: false)
                 }
                 globalAtLoad = next
-            } else { try CatalogueTree.write(lib, schema: f, index: url, name: name) }
+            } else {
+                try Handler_File_Manager.shared.createDirectory(root)
+                try Handler_File_Manager.shared.withTransaction(home: root) { try CatalogueTree.write(lib, schema: f, index: url, name: name) }
+            }
         } catch let error as StoreError {
             throw error
         } catch {
             throw StoreError.saveFailed(url, error)
         }
+        pendingReconciliation = nil
         schema = f
+        expectedCatalogue = true
         SchemaTrial.adopt(f, for: root)
     }
 

@@ -17,14 +17,18 @@ enum SwissModalStyle {
 final class SwissFocusModal: NSView, Overlay {
     private final class Card: NSView { override var isFlipped: Bool { true } }
     let card: NSView = Card()
+    private let form = Card()
+    private var formScroll: FittedScrollView?
     private let background = NSImageView()
     private weak var previous: NSResponder?
     private var actions: [() -> Void] = []
     private var nextY: CGFloat = 28
     private var cardHeight: CGFloat = 280
     private var monitor: Any?
+    private var hidToolbar = false
     private var customContent: NSView?
     var fillsWorkspace = false
+    var onDismiss: (() -> Void)?
     private var preferredSize = NSSize(width: 504, height: 560)
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     override var isFlipped: Bool { true }
@@ -34,6 +38,7 @@ final class SwissFocusModal: NSView, Overlay {
         card.frame = NSRect(x: 0, y: 0, width: 504, height: 560)
         background.imageScaling = .scaleAxesIndependently; addSubview(background)
         SwissModalStyle.apply(to: card); addSubview(card)
+        form.frame = card.bounds; card.addSubview(form)
         addText(title, style: .header, height: 28)
         addText(message, style: .body, height: 56)
     }
@@ -50,7 +55,7 @@ final class SwissFocusModal: NSView, Overlay {
         let label = Design.text(text, style)
         label.maximumNumberOfLines = 0; label.lineBreakMode = .byWordWrapping
         label.frame = NSRect(x: 28, y: nextY, width: 448, height: height)
-        label.autoresizingMask = [.width]; card.addSubview(label); nextY += height
+        label.autoresizingMask = [.width]; form.addSubview(label); nextY += height
     }
     func field(_ label: String, value: String) -> NSTextField {
         addText(label, style: .caption, height: 28)
@@ -59,24 +64,26 @@ final class SwissFocusModal: NSView, Overlay {
         field.backgroundColor = Design.card; field.isBordered = false; field.focusRingType = .none
         field.setAccessibilityLabel(label)
         field.frame = NSRect(x: 28, y: nextY, width: 448, height: 28); field.autoresizingMask = [.width]
-        card.addSubview(field)
+        form.addSubview(field)
         let line = Design.hairline(Design.rule); line.frame = NSRect(x: 28, y: nextY + 27, width: 448, height: 1)
-        line.autoresizingMask = [.width]; card.addSubview(line)
+        line.autoresizingMask = [.width]; form.addSubview(line)
         nextY += 56; return field
     }
     func button(_ title: String, primary: Bool = false, run: @escaping () -> Void) {
         let button = SwissButton(title, primary ? .primary : .secondary, target: self, action: #selector(tapped(_:)))
         button.tag = actions.count; actions.append(run)
         button.frame = NSRect(x: 28, y: nextY, width: 448, height: 32)
-        button.autoresizingMask = [.width]; card.addSubview(button); nextY += 44
+        button.autoresizingMask = [.width]; form.addSubview(button); nextY += 44
     }
     func content(_ view: NSView, height: CGFloat) {
         view.frame = NSRect(x: 28, y: nextY, width: 448, height: height)
-        view.autoresizingMask = [.width]; card.addSubview(view); nextY += height + 16
+        view.autoresizingMask = [.width]; form.addSubview(view); nextY += height + 16
     }
     @objc private func tapped(_ sender: NSButton) { actions[sender.tag]() }
     func present(over view: NSView) {
         guard let root = view.window?.contentView else { return }
+        if let toolbar = view.window?.toolbar, toolbar.isVisible { toolbar.isVisible = false; hidToolbar = true }
+        root.layoutSubtreeIfNeeded()
         previous = root.window?.firstResponder
         frame = root.bounds; autoresizingMask = [.width, .height]
         if let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) {
@@ -90,10 +97,11 @@ final class SwissFocusModal: NSView, Overlay {
         cardHeight = nextY + 16
         root.addSubview(self, positioned: .above, relativeTo: nil)
         needsLayout = true; layoutSubtreeIfNeeded(); Overlays.opened(self)
-        window?.makeFirstResponder(card.subviews.first { $0 is NSTextField && ($0 as! NSTextField).isEditable } ?? self)
+        window?.makeFirstResponder(focusableViews.first ?? self)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === self.window else { return event }
+            guard let self, event.window === self.window, Overlays.isTop(self) else { return event }
             if event.keyCode == 53 { self.dismissOverlay(); return nil }
+            if event.keyCode == 48 { self.advanceFocus(backwards: event.modifierFlags.contains(.shift)); return nil }
             // Keep app command shortcuts from navigating behind a form.
             if event.modifierFlags.contains(.command), !["c", "v", "x", "a", "z"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") { return nil }
             return event
@@ -113,13 +121,46 @@ final class SwissFocusModal: NSView, Overlay {
             content.frame = card.bounds.insetBy(dx: 28, dy: 28)
             return
         }
-        card.frame = NSRect(x: (bounds.width - width) / 2, y: max(28, (bounds.height - cardHeight) / 2), width: width, height: cardHeight)
+        let height = min(cardHeight, max(100, bounds.height - 56))
+        card.frame = NSRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
+        if height < cardHeight {
+            if formScroll == nil {
+                let scroll = FittedScrollView(); scroll.drawsBackground = false
+                scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+                form.removeFromSuperview(); card.addSubview(scroll); scroll.documentView = form; formScroll = scroll
+            }
+            formScroll?.frame = card.bounds
+            form.frame = NSRect(x: 0, y: 0, width: formScroll?.contentSize.width ?? width, height: cardHeight)
+        } else {
+            if let scroll = formScroll { form.removeFromSuperview(); scroll.removeFromSuperview(); formScroll = nil; card.addSubview(form) }
+            form.frame = card.bounds
+        }
+    }
+    private var focusableViews: [NSView] {
+        func collect(_ view: NSView) -> [NSView] {
+            guard !view.isHidden else { return [] }
+            if let control = view as? NSControl, !control.isEnabled { return [] }
+            if view is SwissDropdown || view is NSButton || (view as? NSTextField)?.isEditable == true { return [view] }
+            return view.subviews.flatMap(collect)
+        }
+        return collect(card)
+    }
+    private func advanceFocus(backwards: Bool) {
+        let controls = focusableViews
+        guard !controls.isEmpty else { return }
+        let responder = (window?.firstResponder as? NSTextView)?.delegate as? NSView ?? window?.firstResponder as? NSView
+        let current = controls.firstIndex { $0 === responder }
+        let next = current.map { ($0 + (backwards ? controls.count - 1 : 1)) % controls.count } ?? (backwards ? controls.count - 1 : 0)
+        window?.makeFirstResponder(controls[next]); controls[next].scrollToVisible(controls[next].bounds)
     }
     func handleOverlayEscape() -> Bool { dismissOverlay(); return true }
     func dismissOverlay() {
+        let callback = onDismiss; onDismiss = nil; callback?()
         let win = window; Overlays.closed(self)
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
-        removeFromSuperview(); win?.makeFirstResponder(previous)
+        removeFromSuperview()
+        if hidToolbar { win?.toolbar?.isVisible = true; hidToolbar = false }
+        win?.makeFirstResponder(previous)
         actions.removeAll()
     }
     override func mouseDown(with event: NSEvent) {}

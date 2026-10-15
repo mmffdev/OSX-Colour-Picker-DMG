@@ -45,9 +45,13 @@ final class HistoryFileCache {
     func save(_ history: StepHistory, beside index: URL) throws {
         let url = HistoryStore.url(beside: index).standardizedFileURL
         let data = try HistoryStore.encoded(history)
-        try data.write(to: url, options: .atomic)
+        try HistoryStore.save(history, beside: index)
         let stamp = FileVersion.read(url)
-        guard (try? Data(contentsOf: url)) == data else { location = nil; return }
+        guard let read = try? Handler_File_Manager.shared.read(url),
+              var actual = try? JSONSerialization.jsonObject(with: read) as? [String: Any],
+              let intended = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { location = nil; return }
+        actual.removeValue(forKey: "header")
+        guard NSDictionary(dictionary: actual).isEqual(to: intended) else { location = nil; return }
         location = url; version = stamp; value = history
     }
 }

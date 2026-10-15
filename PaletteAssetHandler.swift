@@ -56,9 +56,9 @@ enum PaletteAssetHandler {
         let asset=try ColourFiles.decoder().decode(Asset.self,from:data)
         try validate(asset);return asset
     }
-    static func read(_ url:URL)throws->Asset {try read(Data(contentsOf:url))}
-    static func data(_ asset:Asset)throws->Data {try validate(asset);return try ColourFiles.encoder().encode(asset)}
-    static func store(_ asset:Asset,at url:URL)throws {try data(asset).write(to:url,options:.atomic)}
+    static func read(_ url:URL)throws->Asset {try read(Handler_File_Manager.shared.read(url))}
+    static func data(_ asset:Asset)throws->Data {try validate(asset);return try Handler_File_Manager.shared.documentBytes(ColourFiles.encoder().encode(asset),extension:asset.format == "colour-typography" ? "coltyp" : "colpal")}
+    static func store(_ asset:Asset,at url:URL)throws {try Handler_File_Manager.shared.write(data(asset),to:url)}
     static func document(_ palette:Swatch,in library:Library,member:UUID?,file:String,catalogue:UUID?=nil)->Asset {
         let keys=Set(palette.entries.map(\.hex)+(palette.styles ?? []).flatMap{[$0.ink,$0.paper]})
         var portable=palette

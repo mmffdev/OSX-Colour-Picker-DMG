@@ -35,7 +35,7 @@ enum SavedPrintProfiles {
         var current=PrintProfileSettings()
         var selected:UUID? = nil
     }
-    private struct Exchange:Codable {
+    struct Exchange:Codable {
         var format="colorgain.print-profile"
         var version=1
         var profile:SavedPrintProfile
@@ -81,7 +81,7 @@ enum SavedPrintProfiles {
         let d=try load(from:store);guard var p=d.profiles.first(where:{$0.id==id}) else{throw failure("Select a saved profile first.")}
         p.id=UUID();p.name += " Copy";p.createdAt=Date();return try save(p,in:store)
     }
-    static func export(_ p:SavedPrintProfile) throws -> Data {try p.validate();let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys];return try encoder.encode(Exchange(profile:p))}
+    static func export(_ p:SavedPrintProfile) throws -> Data {try p.validate();return try Handler_File_Manager.shared.documentBytes(JSONEncoder().encode(Exchange(profile:p)),extension:"colpro")}
     @discardableResult static func importProfile(_ data:Data,in store:AppDataStore = .current) throws -> SavedPrintProfile {
         guard data.count<=65536 else{throw failure("Choose a .colpro profile under 64 KB.")}
         let exchange=try JSONDecoder().decode(Exchange.self,from:data)

@@ -81,6 +81,10 @@ final class LibraryController: NSObject {
         SchemaTrial.use(store: store)
         SchemaTrial.library = { [unowned self] dir in dir.standardizedFileURL == self.store.root.standardizedFileURL ? self.library : nil }
         NotificationCenter.default.addObserver(forName: .schemaDidChange, object: nil, queue: .main) { [weak self] n in self?.schemaChanged(n) }
+        NotificationCenter.default.addObserver(forName: .fileManagementIssue, object: nil, queue: .main) { [weak self] note in
+            guard let self, let error = note.userInfo?["error"] as? Error else { return }
+            self.show(error)
+        }
     }
 
     // MARK: Reading
@@ -106,7 +110,8 @@ final class LibraryController: NSObject {
     // MARK: Loading and saving
 
     func reload() {
-        do { library = try store.load() } catch { show(error) }
+        do { library = try store.load(); FileIncidentCoordinator.shared.resolved(store.root) }
+        catch { show(error); return }
         loadedStamp = store.modificationDate
         loadHistory()
         for note in store.notes { Diagnostics.log("tree", note) }
@@ -120,8 +125,7 @@ final class LibraryController: NSObject {
             present(a)
         }
         watchTree()
-        // Once per catalogue: every colour known only by its hex gets its source and linear master, written back as one step.
-        if library.colours.contains(where: { $0.source == nil }) { apply("Complete Colour Records") { $0.completeColourRecords() } }
+        if store.pendingReconciliation != nil { presentDiskReconciliation() }
         changed()
         if let aside = store.quarantinedFile, aside != reportedQuarantine {
             reportedQuarantine = aside
@@ -131,6 +135,25 @@ final class LibraryController: NSObject {
             a.informativeText = "It has been kept at \(aside.path) and a fresh library was started."
             present(a)
         }
+    }
+
+    private var reconciliationPresented = false
+    private func presentDiskReconciliation() {
+        guard !reconciliationPresented, let plan = store.pendingReconciliation, let window, let root = window.contentView else { return }
+        reconciliationPresented = true
+        let modal = SwissFocusModal(title: "Review Changes On Disk", message: "Finder changes have been read without changing your files. Accept the observed structure before editing this catalogue.")
+        let text = Design.text(plan.notes.isEmpty ? "New or relocated files and folders were found." : plan.notes.joined(separator: "\n"), .body)
+        text.maximumNumberOfLines = 0; text.lineBreakMode = .byWordWrapping
+        let scroll = FittedScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true
+        text.frame = NSRect(x: 0, y: 0, width: 424, height: max(180, CGFloat(plan.notes.count) * 56)); scroll.documentView = text
+        modal.content(scroll, height: 180)
+        modal.onDismiss = { [weak self] in self?.reconciliationPresented = false }
+        modal.button("Update Catalogue References", primary: true) { [weak self] in
+            guard let self else { return }
+            do { try self.store.acceptDiskReconciliation(); modal.dismissOverlay(); self.reload() }
+            catch { FileRecoveryPresenter.showFailure(error, over: window) }
+        }
+        modal.button("Keep Files And Close") { modal.dismissOverlay() }; modal.present(over: root)
     }
 
     /// Picks up changes made by the hotkey process or another Mac while the window was in the background.
@@ -150,6 +173,7 @@ final class LibraryController: NSObject {
     /// A change to anything in a locked project is refused before it is saved.
     @discardableResult
     func apply(_ title: String = "Change", schema: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) -> Void) -> Bool {
+        if store.pendingReconciliation != nil { presentDiskReconciliation(); return false }
         let before = library
         do {
             library = try store.mutate(schema: schema) { lib in
@@ -204,13 +228,15 @@ final class LibraryController: NSObject {
     }
 
     private func saveHistory() {
-        guard historyEnabled else { return }
+        guard historyEnabled, store.pendingReconciliation == nil else { return }
         do { try HistoryStore.save(history, beside: store.url) } catch { flash("Could not save the history: \(error.localizedDescription)") }
     }
 
     /// Flush the old catalogue before its app-data root changes; pending callbacks must not write into the new home.
     func finishWorkspaceSession() {
+        deferredFileScan?.cancel(); deferredFileScan = nil
         stopPicking(); historyTimer?.invalidate(); historyTimer=nil; saveHistory()
+        watch?.stop(); assetsWatch?.stop()
         onShow=nil; onPrompt=nil; onAsk=nil
     }
 
@@ -221,15 +247,12 @@ final class LibraryController: NSObject {
             globalHistory = StepHistory(steps: history.steps.map { HistoryStep(id: $0.id, date: $0.date, title: "\(catalogue): " + $0.title, project: $0.project, delta: $0.delta) }, current: history.current)
         }
         if history.isEmpty, historyEnabled { history.record("Opened", library: GlobalAssets.split(library).local, before: nil, limit: Prefs.historySteps) }
-        do {
-            if historyEnabled { try HistoryStore.save(history, beside: store.url) }
-            try globalHistoryCache.save(globalHistory, beside: globalHistoryIndex)
-        } catch { flash("Could not initialise history: \(error.localizedDescription)") }
         NotificationCenter.default.post(name: .historyDidChange, object: self)
     }
 
     /// Takes the library back (or forward) to a step, the schema with it, and writes the tree as it was then. Not a step itself.
     func goToStep(_ index: Int) {
+        if store.pendingReconciliation != nil { presentDiskReconciliation(); return }
         guard let then = history.go(to: index, from: library, schema: SchemaTrial.schema(for: store.root) ?? store.schema) else { return }
         do { let restored = then.library; try store.save(restored, schema: then.schema); library = restored; loadedStamp = store.modificationDate } catch { show(error); return }
         NotificationCenter.default.post(name: .schemaDidChange, object: nil)
@@ -286,6 +309,7 @@ final class LibraryController: NSObject {
 
     private var watch: CatalogueWatch?
     private var assetsWatch: CatalogueWatch?
+    private var deferredFileScan: DispatchWorkItem?
 
     /// Keeps the watch on the open catalogue's folder, and takes the tree as it stands as the app's own doing.
     private func watchTree() {
@@ -303,7 +327,14 @@ final class LibraryController: NSObject {
 
     /// Finder, or another app, changed the tree: it is read again, unless a name is being typed or a pick is under way.
     private func treeChangedOutside() {
-        if window?.firstResponder is NSText || picking { watch?.settle(); assetsWatch?.settle(); return }
+        if window?.firstResponder is NSText || picking || Handler_File_Manager.shared.isBusy {
+            deferredFileScan?.cancel()
+            let pending = DispatchWorkItem { [weak self] in self?.treeChangedOutside() }
+            deferredFileScan = pending
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: pending)
+            return
+        }
+        deferredFileScan?.cancel(); deferredFileScan = nil
         reload()
         flash("The catalogue changed in Finder and was read again")
     }
@@ -325,7 +356,27 @@ final class LibraryController: NSObject {
         NotificationCenter.default.post(name: .statusMessage, object: self, userInfo: ["text": text])
     }
 
-    func show(_ error: Error) { Diagnostics.log("library", error: error); present(NSAlert(error: error)) }
+    func show(_ error: Error) {
+        Diagnostics.log("library", error: error)
+        if case StoreError.saveFailed(_, let underlying) = error { show(underlying); return }
+        let report: FileRecoveryReport
+        if let report = error as? FileRecoveryReport {
+            guard FileIncidentCoordinator.shared.shouldPresent(root: report.root, issues: report.issues) else { return }
+            if let window, window.contentView != nil {
+                FileRecoveryPresenter.present(report, over: window, retry: { [weak self] in self?.reload() }, relinked: { [weak self] in
+                    guard let self else { return }; self.open(catalogue: self.catalogue); self.reload()
+                }); return
+            }
+            return // Before a window exists, startup inventory owns presentation.
+        } else if let issue = error as? FileIssue {
+            guard FileIncidentCoordinator.shared.shouldPresent(root: store.root, issues: [issue]) else { return }
+            report = FileRecoveryReport(root: store.root, issues: [issue])
+        } else {
+            if let window { FileRecoveryPresenter.showFailure(error, over: window) }
+            return
+        }
+        if let window { FileRecoveryPresenter.present(report, over: window, retry: { [weak self] in self?.reload() }, relinked: { [weak self] in self?.reload() }) }
+    }
 
     private func present(_ alert: NSAlert, then: ((NSApplication.ModalResponse) -> Void)? = nil) {
         // Only a window that is on screen takes the sheet: a sheet brings its window up, and an error before
@@ -1467,9 +1518,12 @@ final class LibraryController: NSObject {
     /// Runs after launch, on returning to the window, and after every change.
     /// `loud` reports problems in a sheet; otherwise they only show in the status bar.
     func sync(loud: Bool = false) {
+        if store.pendingReconciliation != nil { presentDiskReconciliation(); return }
         guard let engine = engine(), !syncAsking, !picking, !syncPaused || loud else { return }
         do {
-            switch try engine.check() {
+            let state = try engine.check()
+            if store.pendingReconciliation != nil { presentDiskReconciliation(); return }
+            switch state {
             case .renamed(let new):
                 followRename(to: new)
             case .firstSync:
@@ -1660,7 +1714,8 @@ extension LibraryController {
             guard let self = self, r == .OK, !panel.urls.isEmpty else { return }
             var imported: [ImportedPalette] = [], unread: [String] = []
             for url in panel.urls {
-                let found = (try? Data(contentsOf: url)).map { PaletteImport.read($0, fallback: url.deletingPathExtension().lastPathComponent) } ?? []
+                let bytes = kind == .paletteFiles ? try? Handler_File_Manager.shared.read(url) : try? Data(contentsOf: url)
+                let found = bytes.map { PaletteImport.read($0, fallback: url.deletingPathExtension().lastPathComponent) } ?? []
                 if found.isEmpty { unread.append(url.lastPathComponent) } else { imported += found }
             }
             guard !imported.isEmpty else { self.flash("No colours found in \(unread.joined(separator: ", "))"); return }
@@ -1689,7 +1744,7 @@ extension LibraryController {
             guard let self = self, r == .OK, let url = panel.url else { return }
             do {
                 guard let file = try self.paletteFiles([s]).first else { return }
-                try file.data.write(to: url, options: .atomic)
+                try Handler_File_Manager.shared.write(file.data, to: url)
                 self.flash("Exported \(url.lastPathComponent)")
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch { self.show(error) }
@@ -1713,7 +1768,7 @@ extension LibraryController {
                 var written: [URL] = []
                 for file in try self.paletteFiles(palettes) {
                     let url = folder.appendingPathComponent(file.name)
-                    try file.data.write(to: url, options: .atomic)
+                    try Handler_File_Manager.shared.write(file.data, to: url)
                     written.append(url)
                 }
                 self.flash("Exported \(plural(written.count, "palette file", "palette files")) to \(folder.lastPathComponent)")
