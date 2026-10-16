@@ -20,3 +20,4 @@ appstore/*.xcodeproj/
 .env.forum
 .playwright-mcp/
 .env.docs
+.env.releases
