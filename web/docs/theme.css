@@ -1,0 +1,60 @@
+/* docs.colorgain.com: the design guide's tokens over Wiki.js's default theme (Vuetify).
+   Pushed into Administration > Theme > CSS Injection by apply-theme.sh. Ink on warm paper, Helvetica Neue,
+   big light titles over dense body, no shadows, no rounded corners, one light look. */
+:root { --cg-paper:#EEEDEA; --cg-card:#F8F7F5; --cg-mist:#E3E2DE; --cg-rule:#CFCDC7; --cg-soft:#A3A19B; --cg-quiet:#6B6964; --cg-ink:#161616; --cg-orange:#EC7A3C; }
+
+.v-application, .v-application [class*="text-"], .v-application .headline, .v-application .title, .v-application .subtitle-1, .v-application .subtitle-2,
+.v-application .caption, .v-application .overline, .v-application .body-1, .v-application .body-2, .v-application .v-btn, .v-application .v-list-item__title {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important; -webkit-font-smoothing: antialiased; }
+
+/* Header: card, hairline, ink. The wordmark is the one bold. Wiki.js nests three inner toolbars with Vuetify's black class. */
+.v-application .nav-header-inner.v-toolbar.v-sheet.black, .v-application .nav-header-inner.v-toolbar.v-sheet, .v-application .nav-header-inner { background: var(--cg-card) !important; background-color: var(--cg-card) !important; border-color: var(--cg-card) !important; }
+.v-application .v-app-bar.v-toolbar.v-sheet.nav-header, .v-application .v-app-bar.v-toolbar.v-sheet.black, .v-application .v-app-bar.v-toolbar.v-sheet, .v-application .v-app-bar.v-toolbar.v-sheet .v-toolbar__content { background: var(--cg-card) !important; background-color: var(--cg-card) !important; color: var(--cg-ink) !important; box-shadow: none !important; border-bottom: 1px solid var(--cg-rule); border-color: var(--cg-rule) !important; }
+.v-application .nav-header .v-toolbar__title, .v-application .nav-header .v-toolbar__title .title { color: var(--cg-ink) !important; font-weight: 700 !important; letter-spacing: -0.01em; }
+.v-application .nav-header .v-icon, .v-application .nav-header .v-btn, .v-application .nav-header .v-btn .v-icon { color: var(--cg-ink) !important; }
+.v-application .nav-header .v-text-field .v-input__slot, .v-application .nav-header .v-input__control > .v-input__slot { background: var(--cg-paper) !important; border-radius: 0 !important; box-shadow: none !important; border: 1px solid var(--cg-rule); }
+.v-application .nav-header input, .v-application .nav-header .v-label, .v-application .nav-header input::placeholder { color: var(--cg-quiet) !important; }
+
+/* Sidebar: card, no blue. The strip holding Home and Browse is a blue darken-3 box. */
+.v-application .v-navigation-drawer .blue.darken-3, .v-application .v-navigation-drawer .blue, .v-application .v-navigation-drawer .d-flex.blue { background: var(--cg-card) !important; background-color: var(--cg-card) !important; border-color: var(--cg-rule) !important; border-bottom: 1px solid var(--cg-rule); }
+.v-application nav.v-navigation-drawer, .v-application .v-navigation-drawer.primary, .v-application .v-navigation-drawer.theme--dark { border-right: 1px solid var(--cg-rule) !important; }
+.v-application nav.v-navigation-drawer, .v-application .v-navigation-drawer.primary, .v-application .v-navigation-drawer.theme--dark, .v-application .v-navigation-drawer .v-navigation-drawer__content, .v-application .v-navigation-drawer .v-sheet.primary, .v-application .v-navigation-drawer .primary,
+.v-application .v-navigation-drawer .v-list.v-sheet, .v-application .v-navigation-drawer .v-list-item, .v-application .v-navigation-drawer .v-sheet { background: var(--cg-card) !important; background-color: var(--cg-card) !important; color: var(--cg-ink) !important; border-color: var(--cg-rule) !important; }
+.v-application .v-navigation-drawer .v-btn.v-btn.v-btn, .v-application .v-navigation-drawer .v-btn.v-btn.primary, .v-application .v-navigation-drawer .v-btn.v-btn.v-btn--depressed { background: var(--cg-mist) !important; background-color: var(--cg-mist) !important; color: var(--cg-ink) !important; border-color: var(--cg-mist) !important; box-shadow: none !important; border-radius: 0 !important; }
+.v-application .v-navigation-drawer .v-list-item__title, .v-application .v-navigation-drawer .v-icon, .v-application .v-navigation-drawer .v-btn .v-icon { color: var(--cg-ink) !important; font-size: 13px; }
+.v-application .v-navigation-drawer .v-list-item--active, .v-application .v-navigation-drawer .v-list-item--active::before { background: var(--cg-mist) !important; opacity: 1; }
+.v-application .v-navigation-drawer .v-divider { border-color: var(--cg-rule) !important; }
+.v-application .v-navigation-drawer .v-navigation-drawer__border { background: var(--cg-rule) !important; }
+
+/* Ground: paper everywhere, including behind the fixed header and the drawer. */
+html, body, .v-application.theme--dark, .v-application.theme--light, .v-application .v-application--wrap, .v-application .v-main, .v-application .v-main__wrap, .v-application .grey.lighten-3, .v-application .grey.lighten-4, .v-application .grey.lighten-5,
+.v-application .page-header-section, .v-application .v-breadcrumbs, .v-application .page-col-sd, .v-application .page-col-content { background: var(--cg-paper) !important; background-image: none !important; }
+.v-application .page-header-section { box-shadow: none !important; border-bottom: 1px solid var(--cg-rule); }
+.v-application .v-breadcrumbs { border-bottom: 1px solid var(--cg-rule); }
+.v-application .v-breadcrumbs li, .v-application .v-breadcrumbs a, .v-application .v-breadcrumbs .v-icon { color: var(--cg-quiet) !important; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* Title 300 over Caption; Headline 400 for sections; Heading 500 below; Body 15 at 60 characters. */
+.v-application .page-header-section .headline { font-weight: 300 !important; font-size: 48px !important; line-height: 1 !important; letter-spacing: -0.03em !important; color: var(--cg-ink) !important; }
+.v-application .page-header-section .caption { color: var(--cg-quiet) !important; font-size: 13px !important; margin-top: 8px; }
+.v-application .contents h1, .v-application .contents h2 { font-weight: 400 !important; font-size: 30px !important; line-height: 1.1 !important; letter-spacing: -0.018em !important; color: var(--cg-ink) !important; border-bottom: 0 !important; margin-top: 2.5rem; }
+.v-application .contents h3 { font-weight: 500 !important; font-size: 17px !important; letter-spacing: -0.005em !important; color: var(--cg-ink) !important; }
+.v-application .contents p, .v-application .contents li { font-size: 15px !important; line-height: 1.55 !important; color: var(--cg-ink) !important; max-width: 60ch; }
+.v-application .contents a { color: var(--cg-ink) !important; text-decoration: underline; text-decoration-color: var(--cg-soft); text-underline-offset: 3px; }
+.v-application .contents a:hover { text-decoration-color: var(--cg-ink); }
+.v-application .contents strong { font-weight: 500; }
+.v-application .contents code { background: var(--cg-mist) !important; color: var(--cg-ink) !important; border-radius: 0 !important; font-family: inherit; }
+
+/* Cards: card on paper, hairline, square. Labels in the Label style. */
+.v-application .v-card, .v-application .v-sheet:not(.v-navigation-drawer):not(.v-app-bar):not(.v-toolbar) { background: var(--cg-card) !important; box-shadow: none !important; border: 1px solid var(--cg-rule); border-radius: 0 !important; }
+.v-application .overline, .v-application .v-card .overline.primary--text, .v-application .overline.primary--text, .v-application .overline.blue--text { font-size: 11px !important; font-weight: 500 !important; letter-spacing: 0.06em !important; color: var(--cg-quiet) !important; }
+.v-application .v-card .v-list-item__title, .v-application .v-card .body-2, .v-application .v-card .body-1 { color: var(--cg-ink) !important; font-size: 13px !important; }
+.v-application .v-card .caption { color: var(--cg-quiet) !important; }
+.v-application .v-card .v-icon { color: var(--cg-quiet) !important; }
+
+/* Controls: square, ink, no shouting capitals. Focus is the one accent. */
+.v-application .v-btn { border-radius: 0 !important; text-transform: none !important; letter-spacing: 0 !important; font-weight: 500 !important; box-shadow: none !important; }
+.v-application .v-btn.primary, .v-application .v-btn.blue, .v-application .v-btn.blue.darken-2 { background: var(--cg-ink) !important; color: var(--cg-card) !important; }
+.v-application .primary--text, .v-application .blue--text, .v-application .v-card .primary--text, .v-application .v-list .primary--text { color: var(--cg-ink) !important; caret-color: var(--cg-ink) !important; }
+.v-application .v-speed-dial .v-btn--fab { background: var(--cg-ink) !important; color: var(--cg-card) !important; border-radius: 0 !important; }
+.v-application :focus-visible { outline: 2px solid var(--cg-orange); outline-offset: 2px; }
+.v-application .v-divider { border-color: var(--cg-rule) !important; }
