@@ -67,6 +67,7 @@
 		451789CD68F8194DB18EB131 /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97088A7B77A529EA78D0F1BC /* SettingsWindow.swift */; };
 		4584A1BF834D7D1A0819E561 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 4C00FF1D8467FD3E60361012 /* AppIcon.icns */; };
 		4859982A1B790717211C0E72 /* StartupSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4940100B132B2EBE38FCB5F1 /* StartupSetup.swift */; };
+		4A9578490D6EA96CF8489618 /* ColorgainLogo.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 7D49976409A1C2770BFB838F /* ColorgainLogo.pdf */; };
 		4AE92B323AE691451D1B534A /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87514F33C98513F82B40D77 /* Controller.swift */; };
 		4BF72051B6E8983483FCB14B /* Importers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79D2A0F4B8CF72C6D64B9101 /* Importers.swift */; };
 		4C317F096CECF62C7031D2DC /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9AE751B148A2C0FB3F418CA /* Palette.swift */; };
@@ -128,6 +129,8 @@
 		A2449169CFA18108AF4EFA82 /* add-palettes-to-adobe-apps.md in Resources */ = {isa = PBXBuildFile; fileRef = E67CABF87DE1BAB9F57B11AE /* add-palettes-to-adobe-apps.md */; };
 		A36B4A3C654573EB30CB5A88 /* Help_Image_Source.html in Resources */ = {isa = PBXBuildFile; fileRef = 76C849190DDA9009E1BC4F40 /* Help_Image_Source.html */; };
 		A5254D2D2983E0344C621E23 /* PaletteAssetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6ACCCEC3E2DD300CA2B8B0 /* PaletteAssetTests.swift */; };
+		A5A415FB80707756F47765D7 /* WorkspaceLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5884F1679167ECBF6D725198 /* WorkspaceLayouts.swift */; };
+		A5E9A21136335EE01B10BC5D /* ColorgainLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = ECFE235A8E98AC033E6B78CE /* ColorgainLogo.png */; };
 		A6951463F684C558A547BB91 /* Handler_File_Information.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67189C424AC3C0E8CFE39773 /* Handler_File_Information.swift */; };
 		A8BE2FFA751423ACFA965F78 /* AdobeHelperRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B4BA58AEE17247E05E354A /* AdobeHelperRules.swift */; };
 		A8FB9207723D9F9E82260CE8 /* Sampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4F42875F4003FC6ECCC72C /* Sampler.swift */; };
@@ -259,6 +262,7 @@
 		581539DFFC316C5829ACE15C /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
 		583EDACD2A9725C3B1FE6519 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		585BACFBCA28C412C0A1A66D /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
+		5884F1679167ECBF6D725198 /* WorkspaceLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLayouts.swift; sourceTree = "<group>"; };
 		5888933CE4EE83C57C19B29C /* PaletteGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteGroups.swift; sourceTree = "<group>"; };
 		59BAD2B19D0BE432B66A768E /* Handler_File_Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_Header.swift; sourceTree = "<group>"; };
 		5BBEA023B2488BC62EA6BA3E /* Help_Index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = Help_Index.html; sourceTree = "<group>"; };
@@ -292,6 +296,7 @@
 		79D2A0F4B8CF72C6D64B9101 /* Importers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Importers.swift; sourceTree = "<group>"; };
 		7A221FF503D1EC6C24EDB1A1 /* Handler_File_QR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_QR.swift; sourceTree = "<group>"; };
 		7B67B48CEF728DAEAC956CB4 /* StudioMonitorSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioMonitorSetup.swift; sourceTree = "<group>"; };
+		7D49976409A1C2770BFB838F /* ColorgainLogo.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = ColorgainLogo.pdf; sourceTree = "<group>"; };
 		7F11E1966A15547D03FF9DFE /* FOGRA39_MW3_Subset.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = FOGRA39_MW3_Subset.txt; sourceTree = "<group>"; };
 		838E1CF56DFF8D433E7883F5 /* colproject.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colproject.icns; sourceTree = "<group>"; };
 		83F1F67B07B471E97C4CD3CE /* SplashTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashTree.swift; sourceTree = "<group>"; };
@@ -379,6 +384,7 @@
 		E60169F3A62E3C9491767150 /* StepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCards.swift; sourceTree = "<group>"; };
 		E67CABF87DE1BAB9F57B11AE /* add-palettes-to-adobe-apps.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "add-palettes-to-adobe-apps.md"; sourceTree = "<group>"; };
 		E7C342CDEC5AB340D69E2CAC /* Handler_File_Inventory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_Inventory.swift; sourceTree = "<group>"; };
+		ECFE235A8E98AC033E6B78CE /* ColorgainLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = ColorgainLogo.png; sourceTree = "<group>"; };
 		EE86A4AE38CB2617A2DFA515 /* PermissionGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGate.swift; sourceTree = "<group>"; };
 		EFC66C04B84B9DF16CC3681E /* ColourFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourFormats.swift; sourceTree = "<group>"; };
 		EFDE55F3B14F17EECA34B49E /* MMFFDev Colour 3.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MMFFDev Colour 3.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -511,6 +517,8 @@
 				3796E31E53DF1C96D86A64AD /* CatalogueOpen.swift */,
 				CF432AA3C31AFEDF27BA8AF6 /* CatalogueTree.swift */,
 				CC575DE2D5BE598297D1ABCE /* CatalogueWatch.swift */,
+				7D49976409A1C2770BFB838F /* ColorgainLogo.pdf */,
+				ECFE235A8E98AC033E6B78CE /* ColorgainLogo.png */,
 				FA64E8FACD17BFE0A7BE0281 /* ColourEngine.swift */,
 				EFC66C04B84B9DF16CC3681E /* ColourFormats.swift */,
 				445C2FCB0BE9A3D0EC3D14EE /* ColourIdentity.swift */,
@@ -622,6 +630,7 @@
 				D0B1255E7434A75BC3B8B90A /* TileHoverHalo.swift */,
 				583EDACD2A9725C3B1FE6519 /* Typography.swift */,
 				6A70D17F31F6822CFBAFD448 /* WorkspaceAnalysis.swift */,
+				5884F1679167ECBF6D725198 /* WorkspaceLayouts.swift */,
 				942A1199A7D6CB9AF884BB73 /* WorkspacePanels.swift */,
 				3CA74757DEEC16E4E5B8CAA9 /* WorkspacePanelUITest.swift */,
 				CA1A35084AD0B80913667FCA /* WorkspaceStartup.swift */,
@@ -724,6 +733,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				4584A1BF834D7D1A0819E561 /* AppIcon.icns in Resources */,
+				4A9578490D6EA96CF8489618 /* ColorgainLogo.pdf in Resources */,
+				A5E9A21136335EE01B10BC5D /* ColorgainLogo.png in Resources */,
 				F9A79775ABD8025C148FEA9E /* FOGRA39_MW3_Subset.txt in Resources */,
 				3B8111512911867F65919021 /* FOGRA51_MW3_Subset.txt in Resources */,
 				062C06AC55F924EF34D2B067 /* FOGRA52_MW3_Subset.txt in Resources */,
@@ -942,6 +953,7 @@
 				020AB5ABB63C8F257C78AAEB /* TileHoverHalo.swift in Sources */,
 				63DA199EFE37BFF61BA77393 /* Typography.swift in Sources */,
 				BD02D6975B65E2BD4EF55A29 /* WorkspaceAnalysis.swift in Sources */,
+				A5A415FB80707756F47765D7 /* WorkspaceLayouts.swift in Sources */,
 				C220077172DDE31B09651D01 /* WorkspacePanelUITest.swift in Sources */,
 				E02225800AA16801164566CD /* WorkspacePanels.swift in Sources */,
 				0C788097BAAACEEEC25E076A /* WorkspaceStartup.swift in Sources */,

@@ -12,6 +12,41 @@ import AppKit
 
 final class Logo: NSView {
     static let size: CGFloat = 18
+    private static let headerLockup: NSImage? = {
+#if SWIFT_PACKAGE
+        let bundle = Bundle.module
+#else
+        let bundle = Bundle.main
+#endif
+        guard let url = bundle.url(forResource: "ColorgainLogo", withExtension: "pdf") ?? bundle.url(forResource: "ColorgainLogo", withExtension: "png") else { return nil }
+        return NSImage(contentsOf: url)
+    }()
+
+    /// The selected Confluence lockup, centred in the expanded header at the wordmark's grid origin.
+    static func headerSidePadding(over railWidth:CGFloat,height:CGFloat=46)->CGFloat {
+        let width=headerLockup.map{height*$0.size.width/$0.size.height} ?? attributed.size().width
+        return max(0,(railWidth-width)/2)
+    }
+    static func drawHeader(centredOver railWidth:CGFloat,centreY:CGFloat,height:CGFloat=46){
+        drawHeader(x:headerSidePadding(over:railWidth,height:height),centreY:centreY,height:height)
+    }
+    static func drawHeader(x: CGFloat, centreY: CGFloat, height: CGFloat = 46) {
+        guard let image = headerLockup else {
+            draw(x: x, baseline: centreY + Design.Text.headline.size / 2, size: Design.Text.headline.size)
+            return
+        }
+        let width = height * image.size.width / image.size.height
+        let rect=NSRect(x:x,y:centreY-height/2,width:width,height:height)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect:rect).addClip()
+        let context=NSGraphicsContext.current?.cgContext
+        context?.beginTransparencyLayer(auxiliaryInfo:nil)
+        image.draw(in:rect,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        Design.ink.setFill();rect.fill(using:.sourceIn)
+        context?.endTransparencyLayer()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     static var font: NSFont { Design.font(size, .bold) }
     static var attributed: NSAttributedString {
         NSAttributedString(string: Brand.wordmark, attributes: [.font: font, .foregroundColor: Design.ink, .kern: -0.4])

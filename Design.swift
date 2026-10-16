@@ -209,11 +209,11 @@ enum Design {
         static func span(_ from: Int, _ to: Int) -> CGFloat { CGFloat(to - from + 1) * columnWidth + CGFloat(to - from) * gutter }
     }
     /// The app window's grid (c_c_c_design_grid_app.md): twelve columns inside 24 margins with 16 gutters,
-    /// a 64 header and a 48 footer. The window resizes, so every measure takes the width it is at.
+    /// a 94 header and a 48 footer. The window resizes, so every measure takes the width it is at.
     enum App {
         /// The height is chosen so the rows, from under the areas' rule to the footer, come to whole units: 25 at first, 17 at least.
-        static let size = NSSize(width: 1440, height: 893)      // 64 + 1 + 80, then 25 units, then 48
-        static let least = NSSize(width: 1120, height: 669)     // the same with 17 units
+        static let size = NSSize(width: 1440, height: 923)      // 94 + 1 + 80, then 25 units, then 48
+        static let least = NSSize(width: 1120, height: 699)     // the same with 17 units
         /// Shared expanded width for Rail1 and Rail2 across workspaces.
         static let railWidth:CGFloat = 360
         static let margin: CGFloat = 24
@@ -224,7 +224,7 @@ enum Design {
         static let wideAfter = [3, 5, 8]
         static var extra: CGFloat { areaGutter - gutter }
         static let columns = 12
-        static let header: CGFloat = 64
+        static let header: CGFloat = 94
         static let footer: CGFloat = 48
         /// The page's clear space above its title.
         static let pageTop: CGFloat = 34

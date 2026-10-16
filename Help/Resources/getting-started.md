@@ -17,3 +17,7 @@ Open PrePress, then Will It Print? Select a palette and printing condition to se
 ## Share Colours
 
 Use QR from a swatch or palette halo. Import accepts a QR from an image, the clipboard or an allowed camera. Review the colours before importing them.
+
+## Contact Support
+
+Email support@colorgain.com for questions or assistance. Help → Contact Support opens your email app; Help → Copy Support Email copies the address.

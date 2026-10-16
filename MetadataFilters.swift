@@ -145,6 +145,7 @@ private final class MetadataFilterColumnView:NSView {
 }
 
 final class MetadataFilterPanel:NSView {
+    var layoutColumns:[MetadataFilterColumn]{get{columns}set{columns=newValue}}
     private static weak var activeMenuOwner:MetadataFilterPanel?
     var onFiltered:(([TileGrid.Item])->Void)?
     private var records:[TileGrid.Item]=[]

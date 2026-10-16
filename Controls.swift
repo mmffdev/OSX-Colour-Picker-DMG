@@ -232,6 +232,8 @@ final class SwissDropdown: NSView, Overlay {
         func setLeadingSymbols(_ symbols:[Int:(String,NSColor)]) {
             for (index,row) in menuRows.enumerated(){row.leadingSymbol=symbols[index];row.needsDisplay=true}
         }
+        /// Compact tool menus keep their spoken names and hover hints while showing only icons.
+        func setIconsOnly(){for row in menuRows{row.iconsOnly=true;row.toolTip=row.accessibleTitle;row.needsDisplay=true}}
         func highlight(_ index: Int) { for (i, row) in menuRows.enumerated() { row.setHover(i == index) }; if menuRows.indices.contains(index) { menuRows[index].scrollToVisible(menuRows[index].bounds) } }
         func trailingPoint(forRow index: Int) -> NSPoint {
             guard menuRows.indices.contains(index) else { return NSPoint(x: frame.maxX, y: frame.maxY) }
@@ -310,6 +312,7 @@ final class SwissDropdown: NSView, Overlay {
             private var hover = false
             var spectrum: [NSColor] = []
             var leadingSymbol:(String,NSColor)?
+            var iconsOnly=false
             var warning=false
             var literalTitle = false
             var hasSubmenu = false
@@ -338,6 +341,11 @@ final class SwissDropdown: NSView, Overlay {
                     return
                 }
                 if hover { Design.mist.setFill(); bounds.fill() }
+                if iconsOnly,let (name,colour)=leadingSymbol {
+                    let image=RowMark.image(name,colour:enabled ? colour:Design.soft),size=image.size
+                    image.draw(in:NSRect(x:(bounds.width-size.width)/2,y:(bounds.height-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+                    return
+                }
                 let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
                 if !spectrum.isEmpty { SwissDropdown.drawSpectrum(spectrum, in: NSRect(x: 14, y: 8, width: max(0, bounds.width - 44), height: 7)) }
                 if warning {

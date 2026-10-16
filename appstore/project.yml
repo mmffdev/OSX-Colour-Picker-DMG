@@ -37,6 +37,10 @@ targets:
         buildPhase: resources
       - path: ../AppIcon.icns
         buildPhase: resources
+      - path: ../ColorgainLogo.png
+        buildPhase: resources
+      - path: ../ColorgainLogo.pdf
+        buildPhase: resources
       - path: ../icons
         name: File Icons
         buildPhase: resources

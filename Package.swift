@@ -31,6 +31,7 @@ let package = Package(
                 "Colour Management App Product Vision and Feature Deep Dive.md", "Research Software.md",
                 "MMFFDev-Colour-3.dmg", "MMFFDev-Colour-3.pkg",
             ],
+            resources: [.process("ColorgainLogo.png"), .process("ColorgainLogo.pdf")],
             swiftSettings: [
                 .unsafeFlags(["-F", sparkle]),
             ],

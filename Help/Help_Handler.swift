@@ -8,6 +8,8 @@ final class Help_Handler: NSObject {
         let id: String, title: String, file: String, sections: [String]
     }
     static let shared = Help_Handler()
+    static let supportEmail = "support@colorgain.com"
+    static var supportURL: URL { URL(string: "mailto:" + supportEmail)! }
     static let pages: [Page] = [
         .init(id:"index",title:"Overview",file:"Help_Index",sections:[]),
         .init(id:"catalogues",title:"Library",file:"Help_Library",sections:["catalogues","favourites","folders","my-palettes"]),
@@ -38,8 +40,22 @@ final class Help_Handler: NSObject {
             let item=NSMenuItem(title:page.title,action:#selector(showPage(_:)),keyEquivalent:"")
             item.target=self;item.representedObject=page.id;menu.addItem(item)
         }
+        menu.addItem(.separator())
+        let contact=NSMenuItem(title:"Contact Support…",action:#selector(contactSupport),keyEquivalent:"")
+        contact.target=self;menu.addItem(contact)
+        let copy=NSMenuItem(title:"Copy Support Email",action:#selector(copySupportEmail),keyEquivalent:"")
+        copy.target=self;menu.addItem(copy)
         return menu
     }
+    @objc fileprivate func contactSupport(){
+        if !NSWorkspace.shared.open(Self.supportURL) {
+            let alert=NSAlert();alert.messageText="Contact Support"
+            alert.informativeText="Email \(Self.supportEmail). No email app could be opened."
+            alert.addButton(withTitle:"Copy Email Address");alert.addButton(withTitle:"Close")
+            if alert.runModal() == .alertFirstButtonReturn {copySupportEmail()}
+        }
+    }
+    @objc private func copySupportEmail(){NSPasteboard.general.clearContents();NSPasteboard.general.setString(Self.supportEmail,forType:.string)}
     @objc private func showIndex(){open()}
     @objc private func showPage(_ sender:NSMenuItem){if let id=sender.representedObject as? String{open(id)}}
 }
@@ -123,6 +139,9 @@ private final class Help_Reader: NSWindowController, WKNavigationDelegate {
         guard let url=action.request.url else{decisionHandler(.cancel);return}
         if url.scheme == "help",let id=url.host {Help_Handler.shared.open(id,section:url.fragment);decisionHandler(.cancel)}
         else if url.scheme == "about" {decisionHandler(.allow)}
+        else if action.navigationType == .linkActivated,url == Help_Handler.supportURL {
+            Help_Handler.shared.contactSupport();decisionHandler(.cancel)
+        }
         else {if action.navigationType == .linkActivated,url.scheme == "https" {NSWorkspace.shared.open(url)};decisionHandler(.cancel)}
     }
 }

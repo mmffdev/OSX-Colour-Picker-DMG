@@ -42,6 +42,7 @@ private final class WorkspaceSectionHeader:NSButton {
     private var headerAction:(()->Void)?
     var changed:(()->Void)?
     var expanded:Bool {state == .on}
+    func restoreLayoutPreference(){state=AppPreferences.shared.bool(forKey:preferenceKey) ? .off:.on;changed?()}
     override var isFlipped:Bool {true}
     init(_ title:String,key:String){
         preferenceKey=key
@@ -91,6 +92,7 @@ private final class WorkspaceSectionHeader:NSButton {
 
 /// The full-app shell uses the existing catalogue model; these views own presentation only.
 final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, WorkspaceRailAwareContent, WorkspacePanelContentMetrics {
+    func restoreLayoutPreferences(){expanded=Set(AppPreferences.shared.stringArray(forKey:expandedKey) ?? []);for heading in [cataloguesHeading,favsHeading,foldersHeading,myPalettesHeading]{heading.restoreLayoutPreference()}}
     var scrollbarOnLeft=false
     var panelContentPadding:CGFloat {myPalettesHeading.expanded ? 16:0}
     private func contentHeight(_ tree:NSOutlineView)->CGFloat {tree.numberOfRows == 0 ? 0:tree.rect(ofRow:tree.numberOfRows-1).maxY}
@@ -710,6 +712,8 @@ final class WorkspaceViewportBar:NSView {
     var leadingControls:[(view:NSView,width:CGFloat,height:CGFloat,gap:CGFloat)]=[] {didSet{needsLayout=true}}
     var leftInset:CGFloat=16 { didSet{needsLayout=true;needsDisplay=true} }
     var rightInset:CGFloat=16 { didSet{needsLayout=true} }
+    /// Leading actions claim their actual width before filters are positioned.
+    var leadingContentInset:CGFloat {leftInset+(!isFooter && !importButton.isHidden ? importButton.intrinsicContentSize.width+16:0)}
     override func layout(){
         super.layout();gridButton.frame=NSRect(x:leftInset,y:4,width:28,height:24);listButton.frame=NSRect(x:leftInset+32,y:4,width:28,height:24)
         intakeView.frame=NSRect(x:leftInset,y:2,width:128,height:28)
@@ -717,7 +721,7 @@ final class WorkspaceViewportBar:NSView {
         allImages.frame=NSRect(x:leftInset,y:3,width:136,height:26)
         imageFilter.frame=NSRect(x:leftInset+148,y:2,width:226,height:28)
         imageCount.frame=NSRect(x:bounds.width-rightInset-300,y:6,width:284,height:20)
-        importButton.frame=NSRect(x:12,y:2,width:78,height:28)
+        importButton.frame=NSRect(x:leftInset,y:2,width:importButton.intrinsicContentSize.width,height:32)
         importLinkChoice.frame=NSRect(x:leftInset+550,y:2,width:160,height:28)
         appearancePresets.frame=NSRect(x:bounds.width-156,y:2,width:140,height:28)
         if isFooter {
@@ -735,7 +739,7 @@ final class WorkspaceViewportBar:NSView {
             c.view.frame=NSRect(x:right-width,y:((bounds.height-c.height)/2).rounded(),width:width,height:c.height)
             right-=width+c.gap
         }
-        var left=leftInset
+        var left=leadingContentInset
         for c in leadingControls {
             c.view.frame=NSRect(x:left,y:((bounds.height-c.height)/2).rounded(),width:c.width,height:c.height)
             left+=c.width+c.gap
@@ -800,7 +804,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         let start:CGFloat=showsConnectors ? Self.lane(level(forRow:row))+21:16
         let isPalette:Bool={if let node=item(atRow:row) as? WorkspaceCatalogues.Node,case .palette=node.place{return true};return false}()
         let isCatalogue=(item(atRow:row) as? WorkspaceCatalogues.Node)?.catalogue != nil
-        let trailing=isCatalogue ? 34:(isPalette ? Self.paletteCellTrailingInset:34)
+        let trailing=isCatalogue ? 6:(isPalette ? Self.paletteCellTrailingInset:34)
         return NSRect(x:start,y:box.minY,width:max(0,bounds.width-start-trailing),height:box.height)
     }
     private final class Disclosure:NSButton {
@@ -1536,4 +1540,425 @@ final class WorkspaceImageDestinationPane:NSView,WorkspaceScrollableContent {
             Design.attributed("This previews the catalogue destination.",.body,colour:Design.quiet).draw(x:16,baseline:166,width:bounds.width-32)
         }
     }
+}
+
+/// Stable pane/tab identities address views independently of the catalogue assets they display.
+final class LibraryPageLayout:NSView {
+    static let tabDragType=NSPasteboard.PasteboardType("com.colorgain.workspace-tab")
+    let id=UUID()
+    final class Content:NSView {
+        var paintsGround=true
+        var arrange:(()->Void)?
+        override var isFlipped:Bool{true}
+        override func layout(){super.layout();arrange?()}
+        override func draw(_ dirtyRect:NSRect){if paintsGround{Design.card.setFill();bounds.fill()}}
+    }
+    final class Tab {
+        var id=UUID()
+        var route:StudioFrame.Place?
+        var source:StudioFrame.Place = .catalogue
+        var controller:StudioFrame?
+        var content:NSView
+        init(content:NSView=Content(frame:.zero)){self.content=content}
+    }
+    private final class Divider:NSSplitView,NSSplitViewDelegate {
+        override var isFlipped:Bool{true}
+        override init(frame:NSRect){super.init(frame:frame);delegate=self;autoresizingMask=[.width,.height]}
+        required init?(coder:NSCoder){fatalError()}
+        func splitView(_ splitView:NSSplitView,constrainMinCoordinate p:CGFloat,ofSubviewAt index:Int)->CGFloat {p+min(160,max(0,(isVertical ? bounds.width:bounds.height)/2-1))}
+        func splitView(_ splitView:NSSplitView,constrainMaxCoordinate p:CGFloat,ofSubviewAt index:Int)->CGFloat {p-min(160,max(0,(isVertical ? bounds.width:bounds.height)/2-1))}
+    }
+    fileprivate enum Zone {case centre,left,right,top,bottom}
+    fileprivate final class DropShade:NSView {
+        override func hitTest(_ point:NSPoint)->NSView?{nil}
+        override func draw(_ dirtyRect:NSRect){Design.houseYellow.withAlphaComponent(0.2).setFill();bounds.fill();Design.houseYellow.setStroke();NSBezierPath(rect:bounds.insetBy(dx:1,dy:1)).stroke()}
+    }
+    fileprivate final class TabScroll:FittedScrollView {
+        var tabWidth:CGFloat=0
+        override func tile(){super.tile();documentView?.setFrameSize(NSSize(width:max(tabWidth,contentView.bounds.width),height:32))}
+        override func scrollWheel(with event:NSEvent){
+            let delta=event.scrollingDeltaX == 0 ? event.scrollingDeltaY:event.scrollingDeltaX
+            let x=max(0,min(max(0,tabWidth-contentSize.width),contentView.bounds.minX-delta))
+            contentView.scroll(to:NSPoint(x:x,y:0));reflectScrolledClipView(contentView)
+        }
+    }
+    /// One contour follows the raised title tabs, the low middle span and the mirrored control tab.
+    fileprivate final class HeaderContour:NSView {
+        weak var pane:Pane?
+        override var isFlipped:Bool{true}
+        override func hitTest(_ point:NSPoint)->NSView?{nil}
+        override func draw(_ dirtyRect:NSRect){
+            guard let pane else{return}
+            let top:CGFloat=0.5,bottom=bounds.height-0.5
+            let trigger=pane.moreButton.isHidden ? pane.newButton:pane.moreButton
+            let foot=max(0,trigger.frame.minX-28),crest=max(0,trigger.frame.minX-4)
+            let end=min(pane.strip.frame.maxX,max(0,pane.strip.tabWidth-pane.strip.contentView.bounds.minX))
+            let controls=NSBezierPath();controls.move(to:NSPoint(x:foot,y:bottom))
+            controls.curve(to:NSPoint(x:crest,y:top),controlPoint1:NSPoint(x:foot+12,y:bottom),controlPoint2:NSPoint(x:crest-12,y:top))
+            controls.line(to:NSPoint(x:bounds.width,y:top))
+            let ground=controls.copy() as! NSBezierPath;ground.line(to:NSPoint(x:bounds.width,y:bottom));ground.close();Design.card.setFill();ground.fill()
+            let border=NSBezierPath()
+            border.move(to:NSPoint(x:min(end,foot),y:bottom));border.line(to:NSPoint(x:foot,y:bottom));border.append(controls)
+            border.lineWidth=1;Design.rule.setStroke();border.stroke()
+        }
+    }
+    final class Pane:NSView,Overlay {
+        static let compactControlsWidth:CGFloat=420
+        var id=UUID()
+        fileprivate weak var owner:LibraryPageLayout?
+        fileprivate var tabs:[Tab]=[]
+        fileprivate var selected:UUID?
+        fileprivate var selectedTab:Tab?{tabs.first{$0.id == selected}}
+        var controller:StudioFrame?{selectedTab?.controller}
+        var route:StudioFrame.Place{selectedTab?.controller?.place ?? selectedTab?.route ?? selectedTab?.source ?? .catalogue}
+        let newButton=PaletteAssetIcon(frame:.zero),splitButton=PaletteAssetIcon(frame:.zero),belowButton=PaletteAssetIcon(frame:.zero),closeButton=PaletteAssetIcon(frame:.zero)
+        fileprivate let moreButton=PaletteAssetIcon(frame:.zero)
+        private var toolMenu:SwissDropdown.MenuPanel?
+        var overlayWindows:[NSWindow]{toolMenu.map{[$0]} ?? []}
+        var dismissOnOutsideClick:Bool{true}
+        func dismissOverlay(){if let menu=toolMenu{menu.parent?.removeChildWindow(menu);menu.orderOut(nil)};toolMenu=nil;Overlays.closed(self)}
+        override func viewDidMoveToWindow(){super.viewDidMoveToWindow();if window == nil{dismissOverlay()}}
+        private func openTools(){
+            if toolMenu != nil{dismissOverlay();return}
+            guard let window else{return}
+            let buttons=owner?.root is Pane ? [newButton,splitButton,belowButton]:[newButton,splitButton,belowButton,closeButton]
+            let menu=SwissDropdown.MenuPanel(items:buttons.map{$0.toolTip ?? "Panel Action"},chosen:"",width:44,literalItems:true){ [weak self] index in
+                self?.dismissOverlay();guard buttons.indices.contains(index) else{return};buttons[index].run?()
+            }
+            menu.setLeadingSymbols(Dictionary(uniqueKeysWithValues:buttons.enumerated().map{($0.offset,($0.element.symbol,Design.ink))}));menu.setIconsOnly()
+            menu.place(anchoredTo:window.convertToScreen(moreButton.convert(moreButton.bounds,to:nil)),within:window)
+            window.addChildWindow(menu,ordered:.above);toolMenu=menu;Overlays.opened(self)
+        }
+        fileprivate let strip=TabScroll(),document=Content(frame:.zero)
+        fileprivate let contour=HeaderContour(frame:.zero)
+        private var revealSelection=true,lastStripWidth:CGFloat = -1
+        fileprivate var labels:[TabButton]=[]
+        fileprivate let shade=DropShade(frame:.zero)
+        fileprivate var zone=Zone.centre
+        override init(frame:NSRect){
+            super.init(frame:frame)
+            strip.drawsBackground=false;strip.contentView.drawsBackground=false;document.paintsGround=false;strip.hasVerticalScroller=false;strip.hasHorizontalScroller=false;strip.documentView=document
+            contour.pane=self;addSubview(contour);addSubview(strip);for b in [newButton,splitButton,belowButton,closeButton,moreButton]{addSubview(b)}
+            moreButton.symbol="chevron.down";moreButton.toolTip="Panel Actions";moreButton.setAccessibilityLabel("Panel Actions");moreButton.run={ [weak self] in self?.openTools() }
+            registerForDraggedTypes([LibraryPageLayout.tabDragType]);setAccessibilityIdentifier("library-pane-"+id.uuidString)
+        }
+        required init?(coder:NSCoder){fatalError()}
+        override var isFlipped:Bool{true}
+        fileprivate func render(){
+            dismissOverlay()
+            for view in subviews where view !== strip && view !== newButton && view !== splitButton && view !== belowButton && view !== closeButton && view !== moreButton && view !== shade && view !== contour{view.removeFromSuperview()}
+            if let tab=selectedTab {tab.content.removeFromSuperview();addSubview(tab.content,positioned:.below,relativeTo:contour)}
+            labels.forEach{$0.removeFromSuperview()};labels=[]
+            for tab in tabs {let label=TabButton(tab:tab,pane:self);document.addSubview(label);labels.append(label)}
+            revealSelection=true;needsLayout=true
+        }
+        override func layout(){
+            super.layout();selectedTab?.content.frame=bounds
+            let compact=bounds.width < Self.compactControlsWidth
+            if moreButton.isHidden == compact{dismissOverlay()}
+            moreButton.isHidden = !compact
+            for button in [newButton,splitButton,belowButton]{button.isHidden=compact}
+            closeButton.isHidden=compact || owner?.root is Pane
+            let buttons=compact ? [moreButton]:(closeButton.isHidden ? [newButton,splitButton,belowButton]:[newButton,splitButton,belowButton,closeButton])
+            let controlsWidth=CGFloat(buttons.count)*36
+            strip.frame=NSRect(x:0,y:AreaHeader.headingBaseline-21,width:max(0,bounds.width-20-controlsWidth-28),height:32)
+            contour.frame=NSRect(x:0,y:strip.frame.minY,width:bounds.width,height:32)
+            var x:CGFloat=0
+            for label in labels {label.updateTitle();let width=min(480,max(72,Design.attributed(label.name,.bodyStrong).size().width+36+8+TabButton.curve));label.frame=NSRect(x:x,y:0,width:width,height:32);x+=width;label.needsDisplay=true}
+            strip.tabWidth=x;document.frame=NSRect(x:0,y:0,width:max(x,strip.contentSize.width),height:32)
+            if lastStripWidth != strip.frame.width{lastStripWidth=strip.frame.width;revealSelection=true}
+            if revealSelection,let label=labels.first(where:{$0.tab.id == selected}){label.scrollToVisible(label.bounds);revealSelection=false}
+            for (i,b) in buttons.enumerated(){b.ink=Design.ink;b.frame=NSRect(x:bounds.width-16-controlsWidth+CGFloat(i)*36,y:AreaHeader.headingBaseline-21,width:32,height:32)}
+            contour.needsDisplay=true
+        }
+        override func draw(_ dirtyRect:NSRect){Design.card.setFill();bounds.fill()}
+        override func draggingEntered(_ sender:NSDraggingInfo)->NSDragOperation{draggingUpdated(sender)}
+        override func draggingUpdated(_ sender:NSDraggingInfo)->NSDragOperation{
+            guard let owner,let (source,_)=owner.draggedTab(sender.draggingPasteboard) else{return []}
+            let p=convert(sender.draggingLocation,from:nil)
+            zone=owner.dropZone(p,in:self)
+            if source === self,tabs.count == 1,zone != .centre{shade.removeFromSuperview();return []}
+            let r:NSRect
+            switch zone {
+            case .centre:r=NSRect(x:0,y:0,width:bounds.width,height:p.y < AreaHeader.rule ? AreaHeader.rule:bounds.height)
+            case .left:r=NSRect(x:0,y:0,width:bounds.width/2,height:bounds.height)
+            case .right:r=NSRect(x:bounds.width/2,y:0,width:bounds.width/2,height:bounds.height)
+            case .top:r=NSRect(x:0,y:0,width:bounds.width,height:bounds.height/2)
+            case .bottom:r=NSRect(x:0,y:bounds.height/2,width:bounds.width,height:bounds.height/2)
+            }
+            shade.frame=r;if shade.superview == nil{addSubview(shade)};return .move
+        }
+        override func draggingExited(_ sender:NSDraggingInfo?){shade.removeFromSuperview()}
+        override func performDragOperation(_ sender:NSDraggingInfo)->Bool{
+            shade.removeFromSuperview();guard let owner,let (source,tab)=owner.draggedTab(sender.draggingPasteboard) else{return false}
+            let p=convert(sender.draggingLocation,from:nil)
+            return owner.move(tab,from:source,to:self,zone:zone,index:p.y < AreaHeader.rule ? insertionIndex(p.x):tabs.count)
+        }
+        fileprivate func insertionIndex(_ x:CGFloat)->Int{let local=x+strip.contentView.bounds.minX;return labels.firstIndex{local < $0.frame.midX} ?? tabs.count}
+    }
+    fileprivate final class TabButton:NSView,NSDraggingSource {
+        static let curve:CGFloat=28
+        let tab:Tab
+        weak var pane:Pane?
+        private var start:NSPoint?,dragged=false,hovered=false
+        private var announcedName=""
+        private var announcedClosable:Bool?
+        var name:String{pane?.owner?.name(of:tab) ?? "New Panel"}
+        init(tab:Tab,pane:Pane){self.tab=tab;self.pane=pane;super.init(frame:.zero);setAccessibilityElement(true);setAccessibilityRole(.button);setAccessibilityIdentifier("library-tab-"+tab.id.uuidString);setAccessibilityLabel("Tab: "+name);toolTip=name
+            setAccessibilityCustomActions([NSAccessibilityCustomAction(name:"Close Tab",handler:{ [weak self] in guard let self,let pane=self.pane,let owner=pane.owner,owner.canCloseTab(in:pane) else{return false};owner.close(self.tab,in:pane);return true })])
+        }
+        func updateTitle(){
+            if announcedName != name{announcedName=name;setAccessibilityLabel("Tab: "+name);toolTip=name}
+            let canClose=pane.map{$0.owner?.canCloseTab(in:$0) == true} ?? false
+            if announcedClosable != canClose{announcedClosable=canClose;setAccessibilityCustomActions(canClose ? [NSAccessibilityCustomAction(name:"Close Tab",handler:{ [weak self] in guard let self,let pane=self.pane,let owner=pane.owner,owner.canCloseTab(in:pane) else{return false};owner.close(self.tab,in:pane);return true })]:[])}
+        }
+        required init?(coder:NSCoder){fatalError()}
+        override var isFlipped:Bool{true}
+        override var acceptsFirstResponder:Bool{true}
+        override func accessibilityPerformPress()->Bool{guard let pane else{return false};pane.owner?.select(tab,in:pane);return true}
+        override func draw(_ dirtyRect:NSRect){
+            let selected=pane?.selected == tab.id
+            let edge=NSBezierPath(),h=bounds.height-0.5,w=bounds.width-0.5,c=Self.curve
+            edge.move(to:NSPoint(x:0,y:0.5));edge.line(to:NSPoint(x:w-c,y:0.5))
+            edge.curve(to:NSPoint(x:w,y:h),controlPoint1:NSPoint(x:w-c/2,y:0.5),controlPoint2:NSPoint(x:w-c/2,y:h))
+            let ground=edge.copy() as! NSBezierPath;ground.line(to:NSPoint(x:0,y:h));ground.close();(selected ? Design.card:Design.mist).setFill();ground.fill()
+            edge.lineWidth=1;Design.rule.setStroke();edge.stroke()
+            let symbol:String
+            switch tab.controller?.place ?? tab.route {
+            case .some(.palette),.some(.palettes):symbol="swatchpalette"
+            case nil:symbol="plus"
+            default:symbol="folder"
+            }
+            RowMark.image(symbol,colour:Design.quiet).draw(in:NSRect(x:16,y:9,width:14,height:14),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+            Design.attributed(name,selected ? .bodyStrong:.body).draw(x:36,baseline:21,width:max(0,bounds.width-36-Self.curve-8))
+        }
+        override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
+        override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
+        override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
+        override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
+        override func mouseDown(with event:NSEvent){start=convert(event.locationInWindow,from:nil);dragged=false;window?.makeFirstResponder(self)}
+        override func mouseUp(with event:NSEvent){
+            defer{start=nil};guard !dragged,let pane,let owner=pane.owner else{return}
+            owner.select(tab,in:pane);if event.clickCount == 2{owner.rename(tab,from:self)}
+        }
+        override func keyDown(with event:NSEvent){if event.keyCode == 36 || event.keyCode == 49{_ = accessibilityPerformPress()}else{super.keyDown(with:event)}}
+        override func mouseDragged(with event:NSEvent){
+            guard !dragged,let start,let pane,let owner=pane.owner else{return}
+            let p=convert(event.locationInWindow,from:nil);guard hypot(p.x-start.x,p.y-start.y)>=8 else{return}
+            dragged=true
+            let payload=NSPasteboardItem();payload.setString(owner.id.uuidString+"|"+tab.id.uuidString,forType:LibraryPageLayout.tabDragType)
+            let item=NSDraggingItem(pasteboardWriter:payload),image=NSImage(size:bounds.size)
+            image.lockFocus();draw(bounds);image.unlockFocus();item.setDraggingFrame(bounds,contents:image)
+            beginDraggingSession(with:[item],event:event,source:self)
+        }
+        func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation{context == .withinApplication ? .move:[]}
+    }
+    let primary=Pane(frame:.zero)
+    let primaryContent=Content(frame:.zero)
+    private let initialTab:Tab
+    private(set) var active:Pane
+    private var root:NSView
+    private var monitor:Any?
+    var makePage:((StudioFrame.Place)->StudioFrame)?
+    var currentPlace:(()->StudioFrame.Place)?
+    var titleForPlace:((StudioFrame.Place)->String)?
+    var navigatePrimary:((StudioFrame.Place)->Void)?
+    var renamePrimary:((String)->Void)?
+    var onActivate:((StudioFrame?)->Void)?
+    var capturePrimary:(()->WorkspaceLayoutTemplate.Page)?
+    var restorePrimary:((WorkspaceLayoutTemplate.Page)->Void)?
+    var resolveRoute:((StudioFrame.Place)->StudioFrame.Place)?
+    override var isFlipped:Bool{true}
+    override init(frame:NSRect){
+        initialTab=Tab(content:primaryContent);initialTab.route = .catalogue
+        active=primary;root=primary
+        super.init(frame:frame);primary.tabs=[initialTab];primary.selected=initialTab.id;configure(primary);addSubview(root);primary.render()
+    }
+    required init?(coder:NSCoder){fatalError()}
+    deinit{if let monitor{NSEvent.removeMonitor(monitor)}}
+    override func viewDidMoveToWindow(){
+        super.viewDidMoveToWindow();if let monitor{NSEvent.removeMonitor(monitor);self.monitor=nil};guard window != nil else{return}
+        monitor=NSEvent.addLocalMonitorForEvents(matching:[.leftMouseDown,.keyDown]){ [weak self] event in
+            guard let self,event.window === self.window,!self.isHidden else{return event}
+            if event.type == .keyDown {DispatchQueue.main.async { [weak self] in guard let self else{return};var view=self.window?.firstResponder as? NSView;if let editor=view as? NSTextView,let field=editor.delegate as? NSView{view=field};self.activateAncestor(of:view)}}
+            else{self.activateAncestor(of:self.hitTest(self.convert(event.locationInWindow,from:nil)))}
+            return event
+        }
+    }
+    private func configure(_ pane:Pane){
+        pane.owner=self
+        for (b,s,label) in [(pane.newButton,"plus","New Tab"),(pane.splitButton,"rectangle.split.2x1","Split Side By Side"),(pane.belowButton,"rectangle.split.1x2","Split Top And Bottom"),(pane.closeButton,"xmark","Close Panel")] {b.symbol=s;b.toolTip=label;b.setAccessibilityLabel(label)}
+        pane.newButton.run={ [weak self,weak pane] in guard let self,let pane else{return};self.newTab(in:pane,source:pane.route) }
+        pane.splitButton.run={ [weak self,weak pane] in guard let self,let pane else{return};self.activate(pane);_ = self.split(pane,vertical:true,before:false) }
+        pane.belowButton.run={ [weak self,weak pane] in guard let self,let pane else{return};self.activate(pane);_ = self.split(pane,vertical:false,before:false) }
+        pane.closeButton.run={ [weak self,weak pane] in guard let self,let pane else{return};self.remove(pane) }
+    }
+    private func panes(_ view:NSView?=nil)->[Pane]{let view=view ?? root;if let pane=view as? Pane{return [pane]};return view.subviews.flatMap{panes($0)}}
+    var paneIDs:[UUID]{panes().map{$0.id}}
+    var activeTabID:UUID?{active.selected}
+    func selectedTabID(in paneID:UUID)->UUID?{panes().first(where:{$0.id == paneID})?.selected}
+    func tabIDs(in paneID:UUID)->[UUID]{panes().first(where:{$0.id == paneID})?.tabs.map{$0.id} ?? []}
+    @discardableResult func closeTab(_ tabID:UUID,in paneID:UUID)->Bool{
+        guard let pane=panes().first(where:{$0.id == paneID}),canCloseTab(in:pane),let tab=pane.tabs.first(where:{$0.id == tabID}) else{return false};close(tab,in:pane);return true
+    }
+    @discardableResult func moveTab(_ tabID:UUID,to paneID:UUID,at index:Int?=nil)->Bool{
+        guard let destination=panes().first(where:{$0.id == paneID}),let source=panes().first(where:{$0.tabs.contains(where:{$0.id == tabID})}),let tab=source.tabs.first(where:{$0.id == tabID}) else{return false}
+        return move(tab,from:source,to:destination,zone:.centre,index:index ?? destination.tabs.count)
+    }
+    func refreshTabTitles(){for pane in panes(){pane.needsLayout=true;for label in pane.labels{label.updateTitle();label.needsDisplay=true}}}
+    func updatePrimary(_ place:StudioFrame.Place){initialTab.route=place;refreshTabTitles()}
+    fileprivate func name(of tab:Tab)->String{guard let place=tab.controller?.place ?? tab.route else{return "New Panel"};return titleForPlace?(place) ?? "Library"}
+    private func activateAncestor(of hit:NSView?){var view=hit;while let candidate=view{if let pane=candidate as? Pane{activate(pane);return};view=candidate.superview}}
+    private func activate(_ pane:Pane){active.layer?.borderWidth=0;active=pane;pane.wantsLayer=true;pane.layer?.borderWidth=1;pane.layer?.borderColor=Design.houseYellow.cgColor;onActivate?(pane.controller)}
+    fileprivate func select(_ tab:Tab,in pane:Pane){pane.selected=tab.id;pane.render();activate(pane);needsLayout=true}
+    func refreshPages(){for pane in panes(){for tab in pane.tabs{tab.controller?.reload()};pane.needsLayout=true}}
+    func snapshot()->WorkspaceLayoutTemplate.Node {
+        func node(_ view:NSView)->WorkspaceLayoutTemplate.Node {
+            if let pane=view as? Pane {
+                let tabs=pane.tabs.map{tab in WorkspaceLayoutTemplate.Tab(id:tab.id,primary:tab === initialTab,route:tab === initialTab ? currentPlace?():tab.controller?.place ?? tab.route,source:tab.source,view:tab === initialTab ? capturePrimary?():tab.controller?.captureLayoutPage())}
+                return .pane(id:pane.id,primary:pane === primary,selected:pane.selected,tabs:tabs)
+            }
+            let split=view as! NSSplitView,children=split.arrangedSubviews
+            let length=split.isVertical ? split.bounds.width:split.bounds.height
+            let first=split.isVertical ? children[0].frame.width:children[0].frame.height
+            return .split(vertical:split.isVertical,ratio:Double(first/max(1,length-split.dividerThickness)),first:node(children[0]),second:node(children[1]))
+        }
+        return node(root)
+    }
+    /// Page templates carry the currently focused tab into the first slot; other slots start empty.
+    func restore(_ saved:WorkspaceLayoutTemplate.Node,activePane:UUID,pageOnly:Bool)throws {
+        guard saved.paneCount > 0,saved.paneCount <= 32,saved.tabCount > 0,saved.tabCount <= 128 else{throw failure("This layout has too many panels or tabs.")}
+        let carried=active.selectedTab ?? initialTab
+        var seenPanes=Set<UUID>(),seenTabs=Set<UUID>(),primaryPanes=0,primaryTabs=0
+        func validate(_ node:WorkspaceLayoutTemplate.Node,depth:Int)throws {
+            guard depth < 16 else{throw failure("This layout is nested too deeply.")}
+            switch node {
+            case .pane(let id,let isPrimary,let selected,let tabs):
+                guard seenPanes.insert(id).inserted,!tabs.isEmpty,tabs.contains(where:{$0.id == selected}) else{throw failure("This layout has an invalid panel.")}
+                if isPrimary{primaryPanes+=1};for tab in tabs{guard seenTabs.insert(tab.id).inserted else{throw failure("This layout has repeated tabs.")};if tab.primary{primaryTabs+=1}}
+            case .split(_,let ratio,let a,let b):guard ratio.isFinite,ratio > 0,ratio < 1 else{throw failure("This layout has an invalid split.")};try validate(a,depth:depth+1);try validate(b,depth:depth+1)
+            }
+        }
+        try validate(saved,depth:0);guard primaryPanes <= 1,primaryTabs <= 1 else{throw failure("This layout is missing its main view.")}
+        for pane in panes(){pane.dismissOverlay();pane.tabs.forEach{$0.content.removeFromSuperview()};pane.tabs=[]}
+        choices=[:];root.removeFromSuperview();var ratios:[(Divider,Double)]=[],firstSlot=true,viewRestores:[()->Void]=[]
+        func build(_ node:WorkspaceLayoutTemplate.Node)->NSView {
+            switch node {
+            case .split(let vertical,let ratio,let a,let b):
+                let split=Divider(frame:bounds);split.isVertical=vertical;split.dividerStyle = .thin;split.addArrangedSubview(build(a));split.addArrangedSubview(build(b));ratios.append((split,ratio));return split
+            case .pane(let id,let isPrimary,let selected,let records):
+                let pane=isPrimary ? primary:Pane(frame:.zero);pane.id=id;configure(pane)
+                for record in records {
+                    let tab:Tab
+                    if pageOnly && firstSlot{tab=carried;firstSlot=false}
+                    else if !pageOnly && record.primary{tab=initialTab}
+                    else{tab=Tab()}
+                    if !pageOnly{tab.id=record.id};tab.source=resolveRoute?(record.source) ?? record.source
+                    pane.tabs.append(tab)
+                    if pageOnly && tab === carried {continue}
+                    if !pageOnly,let route=record.route {
+                        let route=resolveRoute?(route) ?? route;tab.route=route
+                        if tab === initialTab{navigatePrimary?(route);if let view=record.view{viewRestores.append{[weak self] in self?.restorePrimary?(view)}}}
+                        else{tab.controller=makePage?(route);if let controller=tab.controller{tab.content=controller;if let view=record.view{viewRestores.append{[weak controller] in controller?.restoreLayoutPage(view)}}}}
+                    }else{tab.route=nil;chooser(tab,in:pane)}
+                }
+                pane.selected=pageOnly ? pane.tabs.first?.id:selected;pane.render();return pane
+            }
+        }
+        root=build(saved);addSubview(root);root.frame=bounds
+        func position(_ view:NSView){guard let split=view as? Divider else{return};split.adjustSubviews();if let ratio=ratios.first(where:{$0.0 === split})?.1{split.setPosition((split.isVertical ? split.bounds.width-split.dividerThickness:split.bounds.height-split.dividerThickness)*ratio,ofDividerAt:0)};split.arrangedSubviews.forEach(position)}
+        position(root)
+        let target=pageOnly ? panes().first:panes().first{$0.id == activePane}
+        if let target=target ?? panes().first{activate(target)};needsLayout=true;layoutSubtreeIfNeeded();viewRestores.forEach{$0()}
+    }
+    /// Explicit destinations let tree navigation, tools and future integrations address a stable pane.
+    @discardableResult func show(_ place:StudioFrame.Place,in paneID:UUID,newTab:Bool=false)->Bool{
+        guard Self.supports(place),let pane=panes().first(where:{$0.id == paneID}) else{return false};activate(pane)
+        if newTab{self.newTab(in:pane,source:place)}
+        if pane.selectedTab === initialTab{navigatePrimary?(place);return true}
+        load(pane,place:place);return true
+    }
+    private static func supports(_ place:StudioFrame.Place)->Bool {
+        switch place{case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:return true;default:return false}
+    }
+    func navigate(_ place:StudioFrame.Place)->Bool{guard active.selectedTab !== initialTab else{return false};load(active,place:place);return true}
+    private func load(_ pane:Pane,place:StudioFrame.Place){
+        guard let tab=pane.selectedTab else{return};tab.route=place
+        if let controller=tab.controller{controller.go(place);pane.needsLayout=true;return}
+        guard let controller=makePage?(place) else{return};choices.removeValue(forKey:tab.id);tab.controller=controller;tab.content=controller;pane.render();activate(pane)
+    }
+    private func newTab(in pane:Pane,source:StudioFrame.Place){let tab=Tab();tab.source=source;pane.tabs.append(tab);pane.selected=tab.id;chooser(tab,in:pane);pane.render();activate(pane)}
+    @discardableResult private func split(_ old:Pane,vertical:Bool,before:Bool)->Pane{
+        let new=Pane(frame:.zero),divider=Divider(frame:old.frame),parent=old.superview
+        configure(new);divider.isVertical=vertical;divider.dividerStyle = .thin
+        if root === old{old.removeFromSuperview();root=divider;addSubview(divider)}
+        else if let parent=parent as? NSSplitView,let index=parent.arrangedSubviews.firstIndex(where:{$0 === old}){parent.removeArrangedSubview(old);old.removeFromSuperview();parent.insertArrangedSubview(divider,at:index)}
+        divider.addArrangedSubview(before ? new:old);divider.addArrangedSubview(before ? old:new)
+        newTab(in:new,source:old.controller?.place ?? (old.selectedTab === initialTab ? currentPlace?() ?? old.route:old.route))
+        needsLayout=true;layoutSubtreeIfNeeded();divider.adjustSubviews();divider.setPosition((vertical ? divider.bounds.width:divider.bounds.height)/2,ofDividerAt:0);return new
+    }
+    private final class Choice:NSObject {let run:()->Void;init(_ run:@escaping()->Void){self.run=run};@objc func press(){run()}}
+    private var choices:[UUID:[Choice]]=[:]
+    private func chooser(_ tab:Tab,in pane:Pane){
+        guard let content=tab.content as? Content else{return}
+        let scroll=FittedScrollView(),document=Content(frame:.zero);scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=false;scroll.documentView=document;content.addSubview(scroll)
+        let actions:[(String,()->Void)]=[
+            ("Library Palettes",{ [weak self,weak pane] in guard let pane else{return};self?.load(pane,place:.palettes) }),
+            ("Open Current View Here",{ [weak self,weak pane,weak tab] in guard let pane,let tab else{return};self?.load(pane,place:tab.source) }),
+            ("Browse Library…",{ [weak self,weak pane] in guard let pane else{return};self?.load(pane,place:.catalogue) }),
+            ("Split Side By Side",{ [weak self,weak pane] in guard let self,let pane else{return};_ = self.split(pane,vertical:true,before:false) }),
+            ("Split Top And Bottom",{ [weak self,weak pane] in guard let self,let pane else{return};_ = self.split(pane,vertical:false,before:false) }),
+            ("Close Panel",{ [weak self,weak pane] in guard let pane else{return};self?.remove(pane) })]
+        var targets:[Choice]=[]
+        let buttons=actions.map{title,run -> SwissButton in let b=SwissButton(title,.secondary),target=Choice(run);targets.append(target);b.target=target;b.action=#selector(Choice.press);document.addSubview(b);return b}
+        choices[tab.id]=targets
+        content.arrange={ [weak content,weak pane] in guard let content else{return};scroll.frame=NSRect(x:0,y:AreaHeader.rule+1,width:content.bounds.width,height:max(0,content.bounds.height-AreaHeader.rule-1));document.frame=NSRect(x:0,y:0,width:scroll.contentSize.width,height:max(288,scroll.contentSize.height));for (i,b) in buttons.enumerated(){b.isHidden = i == buttons.count-1 && (pane?.owner?.root is Pane);b.frame=NSRect(x:16,y:16+CGFloat(i)*44,width:max(0,min(b.intrinsicContentSize.width,content.bounds.width-48)),height:32)} }
+    }
+    fileprivate func canCloseTab(in pane:Pane)->Bool{pane.tabs.count > 1 || !(root is Pane)}
+    fileprivate func close(_ tab:Tab,in pane:Pane){
+        guard canCloseTab(in:pane) else{return}
+        let oldIndex=pane.tabs.firstIndex(where:{$0 === tab}) ?? 0
+        pane.tabs.removeAll{$0 === tab};choices.removeValue(forKey:tab.id);tab.content.removeFromSuperview()
+        if pane.tabs.isEmpty{remove(pane)}else{select(pane.selectedTab ?? pane.tabs[min(oldIndex,pane.tabs.count-1)],in:pane)}
+    }
+    private func remove(_ pane:Pane){
+        guard let split=pane.superview as? NSSplitView else{return}
+        guard let survivor=split.arrangedSubviews.first(where:{$0 !== pane}) else{return}
+        pane.tabs.forEach{choices.removeValue(forKey:$0.id);$0.content.removeFromSuperview()};pane.tabs=[];pane.selected=nil
+        pane.labels.forEach{$0.removeFromSuperview()};pane.labels=[]
+        pane.removeFromSuperview();survivor.removeFromSuperview()
+        if root === split{split.removeFromSuperview();root=survivor;addSubview(survivor)}
+        else if let parent=split.superview as? NSSplitView,let index=parent.arrangedSubviews.firstIndex(where:{$0 === split}){let rect=split.frame;parent.removeArrangedSubview(split);split.removeFromSuperview();parent.insertArrangedSubview(survivor,at:index);survivor.frame=rect;survivor.autoresizingMask=[.width,.height]}
+        if let next=panes(survivor).first{activate(next)};needsLayout=true
+    }
+    fileprivate func rename(_ tab:Tab,from view:TabButton){
+        let save=tab.controller?.page.onRenamePalette ?? (tab === initialTab ? renamePrimary:nil)
+        guard let save else{return}
+        let closeWidth:CGFloat=0
+        InlineName.edit(name(of:tab),style:.bodyStrong,in:view,x:36,baseline:21,width:max(0,view.bounds.width-36-TabButton.curve-8-closeWidth),at:NSPoint(x:36,y:16)){ [weak self,weak view] value in if let value{save(value)};view?.needsDisplay=true;self?.needsLayout=true }
+    }
+    private func dropZone(_ point:NSPoint,in pane:Pane)->Zone{
+        if point.y < AreaHeader.rule{return .centre}
+        let edge=min(80,pane.bounds.width*0.2)
+        if point.x < edge{return .left};if point.x > pane.bounds.width-edge{return .right}
+        if point.y < AreaHeader.rule+60{return .top};if point.y > pane.bounds.height-min(80,pane.bounds.height*0.2){return .bottom};return .centre
+    }
+    private func draggedTab(_ pasteboard:NSPasteboard)->(Pane,Tab)?{
+        guard let text=pasteboard.string(forType:Self.tabDragType) else{return nil};let parts=text.split(separator:"|");guard parts.count == 2,parts[0] == id.uuidString,let tabID=UUID(uuidString:String(parts[1])) else{return nil}
+        for pane in panes(){if let tab=pane.tabs.first(where:{$0.id == tabID}){return (pane,tab)}};return nil
+    }
+    private func move(_ tab:Tab,from source:Pane,to target:Pane,zone:Zone,index:Int)->Bool{
+        if source === target,source.tabs.count == 1,zone != .centre{return false}
+        let destination:Pane
+        if zone == .centre{destination=target}else{destination=split(target,vertical:zone == .left || zone == .right,before:zone == .left || zone == .top);destination.tabs.forEach{choices.removeValue(forKey:$0.id)};destination.tabs=[]}
+        let originalIndex=source.tabs.firstIndex(where:{$0 === tab}) ?? 0
+        source.tabs.removeAll{$0 === tab};tab.content.removeFromSuperview()
+        let insertion=min(destination.tabs.count,max(0,index-(source === destination && originalIndex < index ? 1:0)));destination.tabs.insert(tab,at:insertion)
+        if tab.route == nil{tab.content=Content(frame:.zero);chooser(tab,in:destination)}
+        select(tab,in:destination)
+        if source !== destination {if source.tabs.isEmpty{remove(source);activate(destination)}else{if source.selectedTab == nil{source.selected=source.tabs[min(originalIndex,source.tabs.count-1)].id};source.render()}}
+        return true
+    }
+    override func layout(){super.layout();root.frame=bounds;if let split=root as? NSSplitView{split.adjustSubviews()};for pane in panes(){pane.needsLayout=true}}
+    override func draw(_ dirtyRect:NSRect){Design.card.setFill();bounds.fill()}
 }

@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A133C0219F634C1C9E820005 /* ColorgainLogo.pdf in Resources */ = {isa = PBXBuildFile; fileRef = A133C0219F634C1C9E820006 /* ColorgainLogo.pdf */; };
+		A133C0219F634C1C9E820001 /* ColorgainLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = A133C0219F634C1C9E820002 /* ColorgainLogo.png */; };
+		A133C0219F634C1C9E820003 /* WorkspaceLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A133C0219F634C1C9E820004 /* WorkspaceLayouts.swift */; };
 		03C2184B095CC9329962366F /* PageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_093FF4E3-FA50-4190-8650-CD816CBF1D79" /* PageHeader.swift */; };
 		03E8EF40633C51D58DDA82D7 /* StudioHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_5D2AD513-3818-45A4-99E1-A265123591FF" /* StudioHelp.swift */; };
 		047C23A8453660C5FF02C9E7 /* ColourNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = "TEMP_B70EEAA5-5233-4C35-B1A6-1211D576BB1D" /* ColourNames.swift */; };
@@ -206,6 +209,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A133C0219F634C1C9E820006 /* ColorgainLogo.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = ColorgainLogo.pdf; sourceTree = "<group>"; };
+		A133C0219F634C1C9E820002 /* ColorgainLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = ColorgainLogo.png; sourceTree = "<group>"; };
+		A133C0219F634C1C9E820004 /* WorkspaceLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLayouts.swift; sourceTree = "<group>"; };
 		04EF5B180ED8AD2E57FA1156 /* Handler_File_Copy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_Copy.swift; sourceTree = "<group>"; };
 		0C6BD29327D794821983C21F /* Handler_File_Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_Tests.swift; sourceTree = "<group>"; };
 		14B21DBE5FD667B8A34D668C /* Handler_File_QR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_QR.swift; sourceTree = "<group>"; };
@@ -537,6 +543,9 @@
 				"TEMP_C1E2C568-FA4E-477B-81D9-6E613C78236B" /* PaletteView.swift */,
 				"TEMP_BDF2893C-3F2D-43C9-8526-1C912F5BF4BB" /* Purposes.swift */,
 				"TEMP_D137E302-F2A5-45F6-802E-0D99040B2FD6" /* Logo.swift */,
+				A133C0219F634C1C9E820002 /* ColorgainLogo.png */,
+				A133C0219F634C1C9E820006 /* ColorgainLogo.pdf */,
+				A133C0219F634C1C9E820004 /* WorkspaceLayouts.swift */,
 				"TEMP_2E293150-FE1C-41C7-B09D-78DD1B6442C3" /* StudioMonitorSetup.swift */,
 				"TEMP_2B6FB00B-0212-401D-8E23-AE83FB92FDC0" /* ContextRail.swift */,
 				"TEMP_614846F2-2D2C-434D-B8C3-DB8B5C920364" /* ColourScience.swift */,
@@ -706,6 +715,8 @@
 			files = (
 				FF6F94F7BAA84555AF445E2D /* HelpResources in Resources */,
 				B3956637F61DBAF44531D4F9 /* AppIcon.icns in Resources */,
+				A133C0219F634C1C9E820001 /* ColorgainLogo.png in Resources */,
+				A133C0219F634C1C9E820005 /* ColorgainLogo.pdf in Resources */,
 				F26936E449951E8F650A155C /* FOGRA39_MW3_Subset.txt in Resources */,
 				20795D3CF84D3800375E1970 /* FOGRA51_MW3_Subset.txt in Resources */,
 				A2EB8AAAF4823D0578412326 /* FOGRA52_MW3_Subset.txt in Resources */,
@@ -842,6 +853,7 @@
 				77AC8DD24571ACA909F0AB12 /* LegacyTree.swift in Sources */,
 				30F9DE0933769DC38E102901 /* Lighthouse.swift in Sources */,
 				EFDCCDA94DE1C2E5FD11F2B7 /* Logo.swift in Sources */,
+				A133C0219F634C1C9E820003 /* WorkspaceLayouts.swift in Sources */,
 				7CCFD52F6F948523F7CC6E31 /* MainWindow.swift in Sources */,
 				A180CEC8943D78F2A1D701D1 /* MenubarPaletteNameBar.swift in Sources */,
 				53EA4864D13B8FD087B0B0B0 /* MetadataFilters.swift in Sources */,

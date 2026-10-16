@@ -1310,6 +1310,9 @@ enum SwatchMenu {
                                           description: "Back to \(colourName(hex))") { library.rename(swatch: hex, in: id, to: nil) }, at: 2)
             }
         }
+        if let i=actions.firstIndex(where:{$0.id == "add-to"}),let children=actions[i].children {
+            actions[i].destinationGallery={HaloGalleryRequest.destinations(children(),title:"Add To Palette",source:colourName(hex)+" · "+ColourFormat.hex.text(hex),commit:"Add Here",library:library,sourceColours:[library.library.definition(of:hex)?.master.display ?? Design.hex(hex)])}
+        }
         actions.append(HaloAction(id: "delete", label: "Delete from Library", symbol: "trash") { library.deleteFromLibrary([hex]) })
         return actions
     }

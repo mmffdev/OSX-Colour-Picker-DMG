@@ -8,7 +8,7 @@ Adapted from `.claude/CLAUDE.md`, `c_design_guide.md`, `c_c_c_design_grid_app.md
 
 ## App grid
 
-Use `Design.App`, never approximate its columns. Reference window 1440 × 900: 12 columns, outer margins 24, column gutters 16, header 64, footer 48. Area gutters are 32 after columns 3, 5 and 8; history's gutter remains 16. Page columns come from `Design.App.pageColumns`.
+Use `Design.App`, never approximate its columns. Reference window 1440 × 923: 12 columns, outer margins 24, column gutters 16, header 94, footer 48. Area gutters are 32 after columns 3, 5 and 8; history's gutter remains 16. Page columns come from `Design.App.pageColumns`.
 
 Rail1 occupies columns 1–3, Rail2 4–5, page 6–10, history 11–12 (expanded workspace; settings collapses Rail1). Closed rails give their space to the page. Do not alter protected header/divider positions. Align overlay edges to their owning control and underlying columns. Derive geometry from the current window, not screenshot pixels.
 
@@ -144,7 +144,7 @@ Fullscreen retains reference-width rails and a fixed header navigation origin; a
 
 App Store Apple Menubar uses one native status item, shared picker controllers, `ColourCopies` history and `Prefs.copyFormat`. Its Swiss settings, sound scoping and print bloom chart are described in [c_apple_menubar.md](c_apple_menubar.md). Do not introduce a second colour conversion, sample or sound pipeline.
 
-Page colour hover halos dismiss immediately on scrolling, forward the gesture to their owning page scroll view, and remain suppressed until a real pointer move. Shared QR exchange details live in [c_qr_sharing.md](c_qr_sharing.md).
+Palette and swatch tiles have no inner hover halo. Their caption halo mark opens the main HaloMenu: View and Print are first-ring actions, alongside existing Copy and QR; palettes also offer Open Swatches. Print toggles the matching tile’s local preview without changing the global Delta preference. Shared QR exchange details live in [c_qr_sharing.md](c_qr_sharing.md).
 
 Saved print settings, palette Delta controls and .colpro exchange use the shared [.coldata profile workflow](c_print_profiles.md). Dropdown values and menu rows use the 13-point body style.
 
@@ -155,3 +155,5 @@ The `osx-full-app` branch trials the canvas-centred Library shell. Its current r
 ## Working with Rick
 
 Use a warm, supportive, personable voice. Be a candid collaborator: offer a clear design opinion and explain why it helps, disagree constructively when needed, and acknowledge progress naturally. Avoid nicknames or familiar forms of address such as “buddy”, “mate” or “dude”; conversational warmth should come from the wording itself. Keep updates concise and human; avoid stiff ceremony, empty praise, and repetitive build narration.
+
+Halo destination actions use `HaloDestinationGallery` in TileHoverHalo.swift over the dial, clamped to the visible screen. `HaloAction.destinationGallery` adapts the existing destination callbacks through `HaloGalleryRequest`: named palette/member tiles show actual spectra, parent context and counts. Search/filter precedes 100-item pagination; `FittedScrollView`, `QuietScroller`, `SwissButton` and `SwissDropdown` own controls. Escape/Back restores the first ring; commit closes both and calls the existing controller operation once. Never turn destination lists into unbounded radial rings.

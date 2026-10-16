@@ -26,6 +26,7 @@ func runSelfTest() -> Never {
     runColourTargetTests(check:check)
     runICCProfileTests(check:check)
     runPaletteAssetTests(check: check)
+    runLibraryPageLayoutTests(check:check)
     runFileHandlerBaselineTests(check: check)
     runFileHandlerManagerTests(check: check)
     runFileRecoveryAndTransactionTests(check: check)
@@ -3438,4 +3439,87 @@ private func runHelpHandlerTests(check:(Bool,String)->Void){
     let libraryURL=Help_Handler.page("catalogues").flatMap{Help_Handler.resource($0)} ?? resources.appendingPathComponent("Help_Library.html")
     let library=(try? String(contentsOf:libraryURL,encoding:.utf8)) ?? ""
     check(library.contains("<svg") && library.contains("aria-label") && library.contains(".coldata"),"Library help bundles accessible graphical explanations and workspace guidance")
+}
+
+
+/// Layout-only checks: no catalogue/controller construction and no user data access.
+private func runLibraryPageLayoutTests(check:(Bool,String)->Void){
+    let layout=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
+    layout.currentPlace={.palettes};layout.layoutSubtreeIfNeeded()
+    let icons=layout.primary.subviews.compactMap{$0 as? PaletteAssetIcon}
+    let side=icons.first{$0.symbol == "rectangle.split.2x1"}
+    let below=icons.first{$0.symbol == "rectangle.split.1x2"}
+    let close=icons.first{$0.symbol == "xmark"}
+    check(side != nil && below != nil && close != nil,"each VP-Header exposes both split arrangements and close")
+    side?.run?()
+    let outer=layout.subviews.compactMap{$0 as? NSSplitView}.first
+    check(outer?.isVertical == true && outer?.arrangedSubviews.count == 2,"side-by-side creates two page groups")
+    check(layout.active !== layout.primary && layout.active.bounds.width > 100,"new split activates a visible chooser")
+    layout.active.belowButton.run?()
+    check(outer?.arrangedSubviews.count == 2 && outer?.arrangedSubviews.first === layout.primary && (outer?.arrangedSubviews.last as? NSSplitView)?.isVertical == false,"nested top/bottom split preserves sibling order")
+    layout.active.closeButton.run?()
+    check(outer?.arrangedSubviews.count == 2 && outer?.arrangedSubviews.first === layout.primary && outer?.arrangedSubviews.last is LibraryPageLayout.Pane,"closing nested chooser preserves the surviving page group")
+    layout.active.closeButton.run?()
+    check(layout.active === layout.primary && layout.primary.superview === layout,"closing the neighbouring group restores the original page")
+    layout.primary.splitButton.run?()
+    let pair=layout.subviews.compactMap{$0 as? NSSplitView}.first
+    layout.primary.belowButton.run?()
+    check(pair?.arrangedSubviews.count == 2 && pair?.arrangedSubviews.first is NSSplitView && pair?.arrangedSubviews.last is LibraryPageLayout.Pane,"original pane can split independently while its neighbour is active")
+    layout.active.closeButton.run?()
+    check(pair?.arrangedSubviews.first === layout.primary && pair?.arrangedSubviews.count == 2,"closing an original-pane nested split retains left/right ordering")
+    let tabs=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
+    tabs.layoutSubtreeIfNeeded()
+    let paneID=tabs.primary.id,firstTab=tabs.activeTabID!
+    check(!tabs.closeTab(firstTab,in:paneID) && tabs.tabIDs(in:paneID) == [firstTab],"the final pane and tab cannot be closed")
+    tabs.primary.newButton.run?()
+    let added=tabs.activeTabID!
+    check(added != firstTab && tabs.tabIDs(in:paneID).count == 2,"new tabs receive independent stable identities")
+    tabs.primary.splitButton.run?()
+    let otherID=tabs.active.id
+    check(otherID != paneID && tabs.moveTab(added,to:otherID) && tabs.tabIDs(in:otherID).contains(added),"moving a tab addresses its destination pane and preserves tab identity")
+    check(tabs.tabIDs(in:paneID) == [firstTab],"moving a view retains the source pane's other tabs")
+    check(tabs.show(.palettes,in:otherID) && tabs.active.id == otherID && tabs.activeTabID == added && tabs.active.route == .palettes,"explicit pane navigation targets the selected tab without changing its identity")
+    check(!tabs.show(.palettes,in:UUID()),"unknown pane destinations are rejected")
+    check(tabs.closeTab(added,in:otherID) && tabs.paneIDs.count == 2,"closing one tab retains the pane while another tab remains")
+    let ordering=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
+    ordering.layoutSubtreeIfNeeded();let original=ordering.activeTabID!
+    ordering.primary.newButton.run?();ordering.primary.newButton.run?();let selected=ordering.activeTabID!
+    ordering.primary.splitButton.run?();let destination=ordering.active.id
+    check(ordering.moveTab(original,to:destination) && ordering.selectedTabID(in:ordering.primary.id) == selected,"moving an inactive tab preserves the source pane's selected tab")
+    check(!ordering.show(.settings,in:destination),"pane navigation rejects routes owned by another workspace")
+    let snapshot=ordering.snapshot(),activeID=ordering.active.id
+    do {
+        let state=WorkspaceLayoutTemplate.State(tree:snapshot,activePane:activeID)
+        var record=WorkspaceLayoutTemplate(name:"Test Workspace",state:state);record.updatedAt=Date(timeIntervalSince1970:1_700_000_000)
+        let decoded=try ColourFiles.decoder().decode(WorkspaceLayoutTemplate.self,from:ColourFiles.encoder().encode(record))
+        check(decoded == record,"workspace templates round-trip stable pane/tab identities and split structure")
+        try Layout_Handler.validate(decoded.state)
+        try ordering.restore(snapshot,activePane:activeID,pageOnly:false)
+        check(ordering.snapshot() == snapshot && ordering.active.id == activeID,"full workspace restore preserves tab ordering, selected tabs and active pane")
+        let carried=ordering.activeTabID
+        let pageOnly=Layout_Handler.pageTemplate(state)
+        try ordering.restore(pageOnly.tree,activePane:activeID,pageOnly:true)
+        check(ordering.activeTabID == carried && ordering.active.id == ordering.paneIDs.first && ordering.paneIDs.count == snapshot.paneCount,"page layout carries the focused tab into the first pane without changing split geometry")
+        let empty=pageOnly.tree
+        func hasSubjects(_ node:WorkspaceLayoutTemplate.Node)->Bool{switch node{case .pane(_,_,_,let tabs):return tabs.contains{$0.route != nil || $0.view != nil || $0.source != .catalogue};case .split(_,_,let a,let b):return hasSubjects(a) || hasSubjects(b)}}
+        check(!hasSubjects(empty) && pageOnly.panels.isEmpty && pageOnly.settings.isEmpty && pageOnly.window == nil,"catalogue page templates contain geometry without saved asset subjects or app settings")
+        var invalid=state;invalid.rails=[.nan,1,0]
+        check((try? Layout_Handler.validate(invalid)) == nil,"invalid non-finite layout settings are rejected")
+        check(!Layout_Handler.isSetting("Workspace.Library.Favourites") && !Layout_Handler.isSetting("Workspace.Import.FavouriteFolders") && Layout_Handler.isSetting("workspace.targetPress"),"layout settings exclude user-managed favourites while retaining colour target state")
+        let temporary=FileManager.default.temporaryDirectory.appendingPathComponent("layout-tests-"+UUID().uuidString)
+        defer{try? FileManager.default.removeItem(at:temporary)}
+        let url=try CatalogueTree.make(at:temporary.appendingPathComponent("Catalogue"),name:"Layouts")
+        let store=AppDataStore(root:temporary.appendingPathComponent("App"));try store.write(AppDataStore.initialManifest())
+        try Layout_Handler.write([record],to:url,scope:.catalogue,appData:store)
+        check(try Layout_Handler.read(url,scope:.catalogue,appData:store) == [record],"catalogue layout templates persist through the native .colcat handler")
+        check(try Layout_Handler.read(url,scope:.app,appData:store).isEmpty,"catalogue templates do not leak into app layout storage")
+        var renamed=record;renamed.name="Renamed Workspace"
+        try Layout_Handler.write([renamed],to:url,scope:.app,appData:store)
+        check(try Layout_Handler.read(url,scope:.app,appData:store) == [renamed],"app workspace templates persist separately in .coldata")
+        try Layout_Handler.write([],to:url,scope:.catalogue,appData:store)
+        check(try Layout_Handler.read(url,scope:.catalogue,appData:store).isEmpty && Layout_Handler.read(url,scope:.app,appData:store) == [renamed],"removing a catalogue layout retains app layouts")
+        try Layout_Handler.write([record],to:url,scope:.catalogue,appData:store)
+        try CatalogueTree.write(Library(),schema:.fresh,index:url)
+        check(try Layout_Handler.read(url,scope:.catalogue,appData:store) == [record],"ordinary catalogue saves preserve saved layout templates")
+    }catch{check(false,"workspace template persistence and restore: \(error.localizedDescription)")}
 }

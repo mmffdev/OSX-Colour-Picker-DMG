@@ -181,6 +181,18 @@ Rick's new notes are B1 to B10, in his order and his words, each checked against
 - **LUTs.** Read .cube (1D and 3D) and show what one does to a palette: before and after, with ΔE per swatch. Write a LUT that carries a palette from one channel to another. Preview a palette through a camera log curve or a show LUT. Ties in with OCIO configs for the rendering channel.
 - **A real pixel histogram** for an image, with the cache-and-refresh honesty Photoshop has, once images are read properly.
 
+### Parked: lighting gels and spectral transmission (2026-10-16)
+
+○ Idea only; parked at Rick's request. Inspired by the LEE Swatch app's 287 Double CTO wavelength/transmission chart.
+
+- Store gel manufacturer, product number/name, original wavelength/transmission samples, provenance, dataset version and redistribution terms. Distinguish measured curves from digitised catalogue graphs; never infer a curve from HEX/RGB.
+- Add a reusable spectral chart with wavelength/value inspection and comparison overlays. Preview the result under a named daylight, tungsten or measured LED source, reporting light loss separately from colour appearance.
+- Calculate filtered light as source spectrum × gel transmission; allow stacked gels as a first-order product of transmission curves. Feed derived colour into the existing colour engine while retaining the source spectra and calculation conditions.
+- Route CSV/JSON import/export through a proposed `Handler_File_Gel` under `Handler_File_Manager`; keep spectral calculations separate and reusable. No new `.col*` extension decided.
+- Candidate data: [color-filter-sds](https://github.com/eosti/color-filter-sds) provides JSON for LEE/Apollo/Rosco, with incomplete spectral coverage. Its MIT code licence does not establish commercial redistribution rights to manufacturer data; the author directs commercial users to manufacturers.
+- Alternative: [photobiologyFilters](https://docs.r4photobiology.info/photobiologyFilters/) includes LEE/Rosco spectra and is GPL-2-or-later. Check individual data provenance and applicable terms before reuse; some LEE curves are digitised from catalogue graphs.
+- Suggested sequence when resumed: clear a small reference dataset; implement import/chart/source simulation; validate against reference results; seek manufacturer permission before bundling larger gel catalogues. Label screen previews as approximations and retain source-light dependence.
+
 ## B8. Asset and context management
 
 | # | Idea | Mark | Note |
@@ -409,3 +421,7 @@ Known gaps, carried over and not rechecked today:
 - The toolbar's Share item shares the open palette, or every swatch when All Swatches is showing.
 - The hotkey pick mode (`--pick`) adds to the current catalogue but does not sync by itself.
 - Swatches cannot be reordered by hand (B11.7).
+
+### Workspace layouts (2026-10-16)
+
+Implemented through the shared header Layout dropdown, beside Colour Target. App Layouts live in `.coldata`; Catalogue Layouts contain reusable page split geometry in `.colcat`, carrying the current tab into the first slot when applied. Both lists support Save New, Update, Rename and Remove/Undo Remove. `Layout_Handler` captures routes, tabs, split proportions, rail/panel positions and open states, view settings, Colour Target and window position on demand. Native file handlers preserve unrelated/unknown fields; missing subjects fall back to Library. Further limits and interaction refinements will follow use.

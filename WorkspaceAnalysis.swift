@@ -45,6 +45,10 @@ private final class HistogramFindingRow: NSButton {
 }
 
 final class WorkspaceHistogramPane: NSView, WorkspaceScrollableContent {
+    var layoutSelection:[Int]{get{[model.indexOfSelectedItem,channels.indexOfSelectedItem,showsAllFindings ? 1:0]}set{
+        guard newValue.count == 3,HistogramType.offered.indices.contains(newValue[0]) else{return}
+        model.selectItem(at:newValue[0]);rebuildChannels();channels.selectItem(at:Self.retainedChannelSelection(newValue[1],channelCount:type.channels.count));showsAllFindings=newValue[2] != 0;refresh()
+    }}
     let plot = HistogramView()
     var spectrumWidth:CGFloat=260 {didSet{needsLayout=true}}
     private var spectrum:[NSColor]=[]

@@ -5,10 +5,9 @@ import AppKit
 final class AppleMenubar: NSObject {
     static let shared = AppleMenubar()
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let content = NSView()
-    private let format = NSButton(title: "", target: nil, action: nil)
-    private let icon = NSButton(title: "", target: nil, action: nil)
-    private var swatches: [MenubarSwatchButton] = []
+    private var swatches:[(rect:NSRect,entry:ColourCopies.Entry?)]=[]
+    private var formatRect=NSRect.zero
+    private var renderKey=""
     private var observers: [NSObjectProtocol] = []
     private weak var library: LibraryController?
     private var showApp: (() -> Void)?
@@ -17,13 +16,12 @@ final class AppleMenubar: NSObject {
         super.init()
         item.autosaveName = "Colorgain Apple Menubar"
         guard let button = item.button else { return }
-        button.addSubview(content)
-        for control in [format, icon] { control.isBordered = false; content.addSubview(control); control.target = self }
-        format.font = Design.Text.body.font(); format.action = #selector(chooseFormat)
-        format.setAccessibilityLabel("Colour Copy Format")
-        icon.image = NSImage(named: NSImage.applicationIconName); icon.imageScaling = .scaleProportionallyDown
-        icon.action = #selector(openMenu); icon.toolTip = "Colorgain · Picker And Rectangle Picker"
-        icon.setAccessibilityLabel("Colorgain Menu")
+        // Keep the system status button flat. Nested live controls cause repeated
+        // AppKit replicant snapshots on macOS 26, even while the app is idle.
+        button.target=self;button.action=#selector(pressed)
+        button.imagePosition = .imageOnly
+        button.toolTip="Colorgain · Click A Swatch To Copy, The Format To Change It, Or The Icon For Tools"
+        DistributedNotificationCenter.default().addObserver(self,selector:#selector(appearanceChanged),name:NSNotification.Name("AppleInterfaceThemeChangedNotification"),object:nil)
         for name in [ColourCopies.changed, .prefsDidChange] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refresh() })
         }
@@ -32,32 +30,52 @@ final class AppleMenubar: NSObject {
     func bind(to library: LibraryController, showApp: @escaping () -> Void) {
         self.library = library; self.showApp = showApp; refresh()
     }
+    @objc private func appearanceChanged(){renderKey="";refresh()}
     private func refresh() {
-        let history = Array(ColourCopies.recent.suffix(Prefs.appleMenubarCount))
-        swatches.forEach { $0.removeFromSuperview() }; swatches = []
-        var x: CGFloat = 4
+        guard let button=item.button else{return}
+        let history=Array(ColourCopies.recent.suffix(Prefs.appleMenubarCount))
+        let key=([String(Prefs.appleMenubarSwatches),String(Prefs.appleMenubarCount),Prefs.copyFormat.rawValue]+history.map{$0.key+($0.sourceCMYK ?? "")}).joined(separator:"|")
+        guard key != renderKey else{return};renderKey=key
+        swatches=[];var x:CGFloat=4
         if Prefs.appleMenubarSwatches {
             for slot in 0..<Prefs.appleMenubarCount {
-                let entry = slot < history.count ? history[slot] : nil
-                let button = MenubarSwatchButton(frame: NSRect(x: x, y: 3, width: 18, height: 18))
-                button.entry = entry; button.target = self; button.action = #selector(copySwatch(_:))
-                button.isEnabled = entry != nil
-                button.setAccessibilityLabel(entry.map { "Copy " + Prefs.copyText($0.key) } ?? "Empty Swatch Slot")
-                button.toolTip = entry.map { Prefs.copyText($0.key) } ?? "Pick A Colour To Fill This Slot"
-                content.addSubview(button); swatches.append(button); x += 21
+                swatches.append((NSRect(x:x,y:3,width:18,height:18),slot<history.count ? history[slot]:nil));x+=21
             }
-            x += 6
+            x+=6
         }
-        format.title = Prefs.copyFormat.label + " ▾"
-        let width = max(48, format.intrinsicContentSize.width + 4)
-        format.frame = NSRect(x: x, y: 0, width: width, height: 24); x += width + 6
-        icon.frame = NSRect(x: x, y: 1, width: 24, height: 22); x += 28
-        item.length = x; content.frame = NSRect(x: 0, y: 0, width: x, height: 24)
-        item.button?.setAccessibilityLabel("Colorgain Colour Tools")
+        let label=NSAttributedString(string:Prefs.copyFormat.label+" ▾",attributes:[.font:Design.Text.body.font(),.foregroundColor:NSColor.labelColor])
+        let width=max(48,label.size().width+12)
+        formatRect=NSRect(x:x,y:0,width:width,height:24);x+=width+6
+        let iconRect=NSRect(x:x,y:1,width:22,height:22);x+=28
+        let image=NSImage(size:NSSize(width:x,height:24))
+        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+            image.lockFocus()
+            for slot in swatches {
+                let box=slot.rect.insetBy(dx:1,dy:1)
+                (slot.entry.flatMap{colorFromHex($0.key)} ?? NSColor.quaternaryLabelColor).setFill();box.fill()
+                NSColor.labelColor.withAlphaComponent(0.3).setStroke();let border=NSBezierPath(rect:box);border.lineWidth=0.5;border.stroke()
+            }
+            label.draw(at:NSPoint(x:formatRect.minX+4,y:6))
+            NSImage(named:NSImage.applicationIconName)?.draw(in:iconRect)
+            image.unlockFocus()
+        }
+        image.isTemplate=false;item.length=x;button.image=image
+        button.setAccessibilityLabel("Colorgain Colour Tools · "+Prefs.copyFormat.label)
+        var actions=swatches.compactMap{slot->NSAccessibilityCustomAction? in
+            guard let entry=slot.entry else{return nil}
+            return NSAccessibilityCustomAction(name:"Copy "+Prefs.copyText(entry.key),handler:{ColourCopies.copy(entry.key,sourceCMYK:entry.sourceCMYK,record:false,sound:Prefs.appleMenubarSound);return true})
+        }
+        actions.append(NSAccessibilityCustomAction(name:"Colour Copy Format",handler:{ [weak self] in self?.chooseFormat();return true }))
+        button.setAccessibilityCustomActions(actions)
     }
-    @objc private func copySwatch(_ sender: MenubarSwatchButton) {
-        guard let entry = sender.entry else { return }
-        ColourCopies.copy(entry.key, sourceCMYK: entry.sourceCMYK, record: false, sound: Prefs.appleMenubarSound)
+    @objc private func pressed(){
+        guard let button=item.button else{return}
+        // Accessibility and keyboard activation open the complete tools menu.
+        guard let event=NSApp.currentEvent,event.type == .leftMouseDown || event.type == .leftMouseUp else{openMenu();return}
+        let point=button.convert(event.locationInWindow,from:nil)
+        if let slot=swatches.first(where:{$0.rect.contains(point)}) {
+            if let entry=slot.entry{ColourCopies.copy(entry.key,sourceCMYK:entry.sourceCMYK,record:false,sound:Prefs.appleMenubarSound)}
+        } else if formatRect.contains(point){chooseFormat()}else{openMenu()}
     }
     @objc private func chooseFormat() {
         let menu = NSMenu(title: "Colour Copy Format")
@@ -66,7 +84,7 @@ final class AppleMenubar: NSObject {
             row.target = self; row.representedObject = value.rawValue; row.state = Prefs.copyFormat == value ? .on : .off
             menu.addItem(row)
         }
-        menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: 0, y: 0), in: format)
+        menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: formatRect.minX, y: 0), in: item.button)
     }
     @objc private func setFormat(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let value = ColourFormat(rawValue: raw) else { return }
@@ -86,7 +104,7 @@ final class AppleMenubar: NSObject {
         menu.addItem(.separator())
         add("Open Colorgain", #selector(openApp)); add("Apple Menubar Settings", #selector(settings))
         menu.addItem(.separator()); add("Quit Colorgain", #selector(quit))
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: icon)
+        menu.popUp(positioning: nil, at: NSPoint(x: formatRect.maxX+6, y: 0), in: item.button)
     }
     @objc private func newPalette() {
         DispatchQueue.main.async { [weak self] in
@@ -102,17 +120,6 @@ final class AppleMenubar: NSObject {
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func openApp() { showApp?() }
     @objc private func settings() { showApp?(); StudioWindowController.shared?.frame.go(.appleMenubar) }
-}
-
-private final class MenubarSwatchButton: NSButton {
-    var entry: ColourCopies.Entry?
-    override func draw(_ dirtyRect: NSRect) {
-        let box = bounds.insetBy(dx: 1, dy: 1)
-        (entry.map { colorFromHex($0.key) ?? NSColor.controlBackgroundColor } ?? NSColor.quaternaryLabelColor).setFill()
-        NSBezierPath(rect: box).fill()
-        NSColor.labelColor.withAlphaComponent(0.3).setStroke(); let border = NSBezierPath(rect: box); border.lineWidth = 0.5; border.stroke()
-        if isHighlighted { NSColor.labelColor.setStroke(); let pressed = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)); pressed.lineWidth = 1; pressed.stroke() }
-    }
 }
 
 private final class MenubarCountSlider: NSSlider {

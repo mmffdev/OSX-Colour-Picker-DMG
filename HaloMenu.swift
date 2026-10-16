@@ -31,6 +31,7 @@ struct HaloAction {
     var children: (() -> [HaloAction])? = nil
     /// Conventional menus may need their own confirmation route instead of the halo’s slider.
     var onMenuSelect: (() -> Void)? = nil
+    var destinationGallery: (() -> HaloGalleryRequest)? = nil
 }
 
 extension HaloAction {
@@ -290,6 +291,7 @@ final class HaloMenu: NSResponder {
     private var wheelAt: CFTimeInterval = 0
     private let panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
     private let dial = HaloDialView()
+    private var destinationGallery: HaloDestinationGallery?
 
     init(label: String, caption: String? = nil, hint: String? = nil, closeLabel: String = "Close", actions: [HaloAction]) {
         self.label = label
@@ -310,6 +312,7 @@ final class HaloMenu: NSResponder {
     required init?(coder: NSCoder) { fatalError("HaloMenu is built in code") }
 
     deinit {
+        destinationGallery?.dismiss()
         detach()
         exitTimer?.invalidate()
         ticker?.invalidate()
@@ -395,7 +398,7 @@ final class HaloMenu: NSResponder {
     /// How many rings deep these actions go beyond their own.
     private func depth(of actions: [HaloAction], limit: Int) -> Int {
         guard limit > 0 else { return 0 }
-        return actions.compactMap { $0.children }.map { 1 + depth(of: $0(), limit: limit - 1) }.max() ?? 0
+        return actions.filter { $0.destinationGallery == nil }.compactMap { $0.children }.map { 1 + depth(of: $0(), limit: limit - 1) }.max() ?? 0
     }
 
     private func present(_ frame: CGRect, over host: NSWindow, anchor view: NSView?, rect: NSRect?, sticky: Bool, focus: Bool) {
@@ -429,6 +432,7 @@ final class HaloMenu: NSResponder {
 
     func close() {
         guard isOpen else { return }
+        destinationGallery?.dismiss();destinationGallery=nil
         clearExit()
         removeWatchers()
         dial.endDrag()
@@ -467,7 +471,7 @@ final class HaloMenu: NSResponder {
 
     /// Closes shortly after the pointer leaves, unless it comes back or a confirmation is waiting.
     fileprivate func leave() {
-        guard isOpen, !sticky, exitTimer == nil, !busy else { return }
+        guard destinationGallery == nil, isOpen, !sticky, exitTimer == nil, !busy else { return }
         let timer = Timer(timeInterval: 0.12, repeats: false) { [weak self] _ in
             self?.exitTimer = nil
             self?.close()
@@ -679,6 +683,9 @@ final class HaloMenu: NSResponder {
             refresh()
             return
         }
+        if let request = action.destinationGallery {
+            openDestinations(request());return
+        }
         if let children = action.children {
             clearExit()
             if let at = live.firstIndex(where: { $0.id == action.id }) { turn(toPlace: at) }
@@ -689,6 +696,19 @@ final class HaloMenu: NSResponder {
         if action.keepsOpen { action.onSelect(); return }
         close()
         action.onSelect()
+    }
+
+    private func openDestinations(_ request:HaloGalleryRequest) {
+        guard let host=panel.parent else{return}
+        clearExit();removeWatchers()
+        let gallery=HaloDestinationGallery(request);destinationGallery=gallery
+        gallery.onBack={ [weak self] in
+            guard let self else{return};self.destinationGallery?.dismiss();self.destinationGallery=nil
+            self.panel.orderFront(nil);self.takeKeyboard();self.addWatchers()
+        }
+        gallery.onCancel={ [weak self] in self?.close() }
+        gallery.onCommit={ [weak self] run in self?.close();run() }
+        let frame=panel.frame;panel.orderOut(nil);gallery.open(over:frame,in:host)
     }
 
     /// One step back, as Escape: off the outermost ring, or closed when only the first is showing.
