@@ -1,0 +1,63 @@
+## forum.colorgain.com - Discourse container definition for /var/discourse/containers/app.yml.
+## TLS is terminated by Plesk's nginx, which proxies to 127.0.0.1:8080 (see vhost_nginx.conf).
+## __SMTP_PASSWORD__ is filled in by install.sh from /root/.colorgain-forum-smtp; never commit a real one.
+
+templates:
+  - "templates/postgres.template.yml"
+  - "templates/redis.template.yml"
+  - "templates/web.template.yml"
+  - "templates/web.ratelimited.template.yml"
+
+expose:
+  - "127.0.0.1:8080:80"
+
+params:
+  db_default_text_search_config: "pg_catalog.english"
+  db_shared_buffers: "2048MB"
+  version: stable
+
+env:
+  LC_ALL: en_US.UTF-8
+  LANG: en_US.UTF-8
+  LANGUAGE: en_US.UTF-8
+  DISCOURSE_DEFAULT_LOCALE: en_GB
+  UNICORN_WORKERS: 4
+
+  DISCOURSE_HOSTNAME: forum.colorgain.com
+  DISCOURSE_FORCE_HTTPS: true
+  DISCOURSE_DEVELOPER_EMAILS: 'cookra@me.com'
+
+  ## Mail goes out through the server's own Postfix on SMTPS, as forum@colorgain.com.
+  DISCOURSE_SMTP_ADDRESS: mmffdev.com
+  DISCOURSE_SMTP_PORT: 465
+  DISCOURSE_SMTP_FORCE_TLS: true
+  DISCOURSE_SMTP_ENABLE_START_TLS: false
+  DISCOURSE_SMTP_USER_NAME: forum@colorgain.com
+  DISCOURSE_SMTP_PASSWORD: "__SMTP_PASSWORD__"
+  DISCOURSE_SMTP_DOMAIN: colorgain.com
+  DISCOURSE_NOTIFICATION_EMAIL: forum@colorgain.com
+
+volumes:
+  - volume:
+      host: /var/discourse/shared/standalone
+      guest: /shared
+  - volume:
+      host: /var/discourse/shared/standalone/log/var-log
+      guest: /var/log
+
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone --depth 1 https://github.com/discourse/docker_manager.git
+
+run:
+  ## Trust X-Forwarded-For from the Docker gateway so rate limits and logs see the visitor, not the proxy.
+  - replace:
+      filename: "/etc/nginx/conf.d/discourse.conf"
+      from: /server.+{/
+      to: |
+        server {
+          set_real_ip_from 172.17.0.0/16;
+          real_ip_header X-Forwarded-For;
