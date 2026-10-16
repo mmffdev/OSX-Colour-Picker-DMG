@@ -1,0 +1,35 @@
+## docs.colorgain.com: Wiki.js 2 and its Postgres, at /var/wiki on the Plesk box.
+## Plesk nginx terminates TLS and proxies to 127.0.0.1:3000 (vhost_nginx.conf). Secrets come from /var/wiki/.env.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wiki
+      POSTGRES_USER: wiki
+      POSTGRES_PASSWORD: ${WIKI_DB_PASSWORD}
+    volumes:
+      - /var/wiki/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiki"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  wiki:
+    image: ghcr.io/requarks/wiki:2.5
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: wiki
+      DB_USER: wiki
+      DB_PASS: ${WIKI_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - /var/wiki/data:/wiki/data/content
