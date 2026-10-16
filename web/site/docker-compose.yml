@@ -1,6 +1,8 @@
 ## colorgain.com: the Payload site and its Postgres, at /var/site on the Plesk box.
 ## The source is rsynced to /var/site/src by web/site/deploy.sh; the container installs, migrates, builds and serves it
 ## with the database reachable, which a plain image build cannot do (the pages are generated from the database).
+## The build output (.next) stays beside the source in /var/site/src, never in a persisted volume: Turbopack's cache
+## otherwise outlives the install that produced it.
 ## Plesk nginx terminates TLS and proxies colorgain.com to 127.0.0.1:3002 (vhost_nginx.conf).
 services:
   db:
@@ -37,9 +39,7 @@ services:
     volumes:
       - /var/site/src:/app
       - site_node_modules:/app/node_modules
-      - site_next:/app/.next
       - /var/site/media:/app/public/media
 
 volumes:
   site_node_modules:
-  site_next:
