@@ -13,6 +13,7 @@ set -euo pipefail
 HOST=colorgain.com; SYS=/var/www/vhosts/system/$HOST/conf; APP=http://127.0.0.1:3002
 step() { printf '\n== %s ==\n' "$*"; }
 cd /var/site; chmod 600 .env.site; . ./.env
+install -m 600 /var/site/src/docker-compose.yml /var/site/docker-compose.yml   # compose runs from /var/site, beside .env
 step "1 runtime env"
 umask 077
 cat > site.env <<ENV
