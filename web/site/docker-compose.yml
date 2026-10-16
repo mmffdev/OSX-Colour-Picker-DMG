@@ -31,7 +31,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
-    command: sh -c "npm ci --no-audit --no-fund && { ls src/migrations/*.ts >/dev/null 2>&1 || npx payload migrate:create initial --skip-empty; } && npm run migrate && npm run build && npm run start"
+    command: sh -c "npm ci --include=dev --no-audit --no-fund && { ls src/migrations/*.ts >/dev/null 2>&1 || npx payload migrate:create initial --skip-empty; } && npm run migrate && npm run build && npm run start"
     ports:
       - "127.0.0.1:3002:3000"
     volumes:
