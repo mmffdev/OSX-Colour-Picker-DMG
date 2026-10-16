@@ -18,3 +18,7 @@ appstore/*.xcodeproj/
 
 /ICC/
 .env.forum
+web/docs/node_modules/
+web/docs/dist/
+web/docs/.astro/
+.playwright-mcp/
