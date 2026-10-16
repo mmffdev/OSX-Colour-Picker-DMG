@@ -1,0 +1,45 @@
+## colorgain.com: the Payload site and its Postgres, at /var/site on the Plesk box.
+## The source is rsynced to /var/site/src by web/site/deploy.sh; the container installs, migrates, builds and serves it
+## with the database reachable, which a plain image build cannot do (the pages are generated from the database).
+## Plesk nginx terminates TLS and proxies colorgain.com to 127.0.0.1:3002 (vhost_nginx.conf).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: site
+      POSTGRES_USER: site
+      POSTGRES_PASSWORD: ${SITE_DB_PASSWORD}
+    volumes:
+      - /var/site/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U site"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  site:
+    image: node:22-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /app
+    env_file: /var/site/site.env
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    command: sh -c "npm ci --no-audit --no-fund && npm run migrate && npm run build && npm run start"
+    ports:
+      - "127.0.0.1:3002:3000"
+    volumes:
+      - /var/site/src:/app
+      - site_node_modules:/app/node_modules
+      - site_next:/app/.next
+      - /var/site/media:/app/public/media
+
+volumes:
+  site_node_modules:
+  site_next:
