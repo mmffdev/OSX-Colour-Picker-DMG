@@ -66,19 +66,22 @@ final class Help_HexButton: NSButton {
     @objc private func openHelp(){Help_Handler.shared.open(pageID,section:sectionID)}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
-    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.inVisibleRect,.mouseEnteredAndExited,.activeInActiveApp],owner:self))}
+    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.inVisibleRect,.mouseEnteredAndExited,.activeAlways],owner:self))}
     override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
     override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
     override func draw(_ dirtyRect:NSRect){
-        let ink=ThemedButton.readable(on:Design.card)
-        let colour=hovered || isHighlighted ? ink:Design.mix(Design.card,ink,0.8)
+        let active=hovered || isHighlighted
+        let ground=active ? Design.orange:Design.card
+        let colour=contrastRatio("#666666",hexOf(ground) ?? "#FFFFFF") >= 4.5 ? Design.hex("#666666"):ThemedButton.readable(on:ground)
         let path=NSBezierPath(),radius:CGFloat=9
         for i in 0..<6 {
             let angle=CGFloat(i)*CGFloat.pi/3+CGFloat.pi/6
             let point=NSPoint(x:bounds.midX+cos(angle)*radius,y:bounds.midY+sin(angle)*radius)
             if i == 0{path.move(to:point)}else{path.line(to:point)}
         }
-        path.close();colour.setStroke();path.lineWidth=1.25;path.stroke()
+        path.close()
+        if active {Design.orange.setFill();path.fill()}
+        colour.setStroke();path.lineWidth=1.25;path.stroke()
         let text=Design.attributed("?",.body,colour:colour)
         text.draw(at:NSPoint(x:bounds.midX-text.size().width/2,y:bounds.midY-text.size().height/2))
         if window?.firstResponder === self {NSBezierPath(rect:bounds.insetBy(dx:2,dy:2)).stroke()}
