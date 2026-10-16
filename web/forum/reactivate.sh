@@ -9,6 +9,7 @@ plesk bin site --update $H -certificate-name "Lets Encrypt colorgain.com" | tail
 plesk bin site --update $H -ssl-redirect true | tail -1
 install -m 644 "$HERE/vhost_nginx.conf" $SYS/vhost_nginx.conf
 install -m 644 "$HERE/vhost.conf" $SYS/vhost.conf
+plesk bin domain --update-web-server-settings $H -nginx-proxy-mode false | tail -1
 plesk sbin httpdmng --reconfigure-domain $H && nginx -t 2>&1 | tail -1
 echo "forum:  $(plesk bin site --info $H | grep 'Domain status' | sed 's/Domain status: *//')"
 echo "listen: $(grep -o 'listen [^;]*' $SYS/nginx.conf | tr '\n' ',')"

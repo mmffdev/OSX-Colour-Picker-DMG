@@ -39,6 +39,7 @@ echo "app.yml written ($(grep -c . /var/discourse/containers/app.yml) lines)"
 step "4 plesk nginx proxy"
 install -m 644 "$HERE/vhost_nginx.conf" "$SYS/vhost_nginx.conf"
 install -m 644 "$HERE/vhost.conf" "$SYS/vhost.conf"
+plesk bin domain --update-web-server-settings $HOST -nginx-proxy-mode false | tail -1
 plesk sbin httpdmng --reconfigure-domain $HOST
 nginx -t 2>&1 | tail -1
 
