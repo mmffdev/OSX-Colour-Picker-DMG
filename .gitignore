@@ -21,3 +21,5 @@ appstore/*.xcodeproj/
 .playwright-mcp/
 .env.docs
 .env.releases
+.env.site
+web/site/tsconfig.tsbuildinfo
