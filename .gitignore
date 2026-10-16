@@ -17,3 +17,4 @@ appstore/*.xcodeproj/
 /ICC Profiles/
 
 /ICC/
+.env.forum

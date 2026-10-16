@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 ## Stands up forum.colorgain.com on the Plesk box. Run as root with this folder copied to /root/forum-setup:
 ##   ssh mmffdev-admin bash /root/forum-setup/install.sh
+## The admin is admin@colorgain.com, username Colorgain; its credentials come from web/forum/.env.forum, which is never committed.
 ## Idempotent: every step checks before it acts. Docker calls take </dev/null so they never eat this script when it is piped in. Takes 10-15 minutes, almost all of it the Discourse bootstrap.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -54,8 +55,8 @@ if [ ! -s /root/.colorgain-forum-admin ]; then
 fi
 APW="$(cat /root/.colorgain-forum-admin)"
 for i in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8080/srv/status && break; sleep 5; done
-printf 'cookra@me.com\n%s\n%s\nY\n' "$APW" "$APW" | docker exec -i app bash -lc 'cd /var/www/discourse && su discourse -c "bundle exec rake admin:create"' 2>&1 | grep -vi password || true
-docker exec -i app bash -lc 'cd /var/www/discourse && su discourse -c "bundle exec rails runner \"u=User.find_by_username(%q(user1)); if u then UsernameChanger.change(u,%q(rick)); u.reload.update!(name: %q(Rick)) end; puts User.where(admin: true).pluck(:username).inspect\""' </dev/null 2>&1 | grep -v warning | tail -1
+printf 'admin@colorgain.com\n%s\n%s\nY\n' "$APW" "$APW" | docker exec -i app bash -lc 'cd /var/www/discourse && su discourse -c "bundle exec rake admin:create"' 2>&1 | grep -vi password || true
+docker exec -i app bash -lc 'cd /var/www/discourse && su discourse -c "bundle exec rails runner \"u=User.find_by_username(%q(user1)); if u then UsernameChanger.change(u,%q(Colorgain)); u.reload.update!(name: %q(Colorgain)) end; puts User.where(admin: true).pluck(:username).inspect\""' </dev/null 2>&1 | grep -v warning | tail -1
 
 step "7 proof"
 echo "status: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/srv/status)"

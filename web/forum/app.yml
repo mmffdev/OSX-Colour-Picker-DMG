@@ -25,7 +25,7 @@ env:
 
   DISCOURSE_HOSTNAME: forum.colorgain.com
   DISCOURSE_FORCE_HTTPS: true
-  DISCOURSE_DEVELOPER_EMAILS: 'cookra@me.com'
+  DISCOURSE_DEVELOPER_EMAILS: 'admin@colorgain.com'
 
   ## Mail goes out through the server's own Postfix on SMTPS, as forum@colorgain.com.
   DISCOURSE_SMTP_ADDRESS: mmffdev.com
