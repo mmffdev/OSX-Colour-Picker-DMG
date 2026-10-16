@@ -14,7 +14,10 @@ final class Logo: NSView {
     static let size: CGFloat = 18
     private static let headerLockup: NSImage? = {
 #if SWIFT_PACKAGE
-        let bundle = Bundle.module
+        // build.sh installs resources directly in the app, while SwiftPM's bare
+        // executable uses its generated resource bundle. Do not initialise
+        // Bundle.module in the installed app: it traps when that bundle is absent.
+        let bundle = Bundle.main.bundleURL.pathExtension == "app" ? Bundle.main : Bundle.module
 #else
         let bundle = Bundle.main
 #endif

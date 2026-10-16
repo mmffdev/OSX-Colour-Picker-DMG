@@ -11,7 +11,7 @@ import ImageIO
 //    more clusters than needed, then pick a spread of distinct colours so small accents survive;
 //  - edges: a cluster's average is muddied by anti-aliased pixels (red text on grey averages to
 //    pink), so each cluster reports its most common actual colour, and colours that are only a
-//    blend of two stronger ones are dropped.
+//    blend of two stronger ones are dropped only when they lack a solid interior.
 
 /// Up to `count` distinct colours from the image, most prominent first.
 /// Returns fewer when the image has fewer clearly different colours.
@@ -54,6 +54,7 @@ func loadCGImage(_ url: URL) -> CGImage? {
 struct Cluster {
     let rgb: (r: Double, g: Double, b: Double)
     var weight: Double
+    var hasSolidInterior = false
     var lab: (l: Double, a: Double, b: Double) { labOf(rgb) }
     var chroma: Double { (lab.a * lab.a + lab.b * lab.b).squareRoot() }
     var hex: String {
@@ -71,16 +72,20 @@ func deltaE(_ x: Cluster, _ y: Cluster) -> Double {
 func merged(_ clusters: [Cluster], within threshold: Double = 7) -> [Cluster] {
     var out: [Cluster] = []
     for c in clusters.sorted(by: { $0.weight > $1.weight }) {
-        if let i = out.firstIndex(where: { deltaE($0, c) < threshold }) { out[i].weight += c.weight }
+        if let i = out.firstIndex(where: { deltaE($0, c) < threshold }) {
+            out[i].weight += c.weight
+            out[i].hasSolidInterior = out[i].hasSolidInterior || c.hasSolidInterior
+        }
         else { out.append(c) }
     }
     return out
 }
 
-/// Drops colours that sit on the line between two heavier ones — the signature of anti-aliasing
-/// and soft edges, not a colour in its own right.
+/// Drops edge-only blends between two heavier colours. A flat interior is evidence of a real
+/// surface: grey panels and deliberate intermediate shades must not disappear as "blends".
 func withoutBlends(_ clusters: [Cluster], tolerance: Double = 6) -> [Cluster] {
     clusters.filter { c in
+        if c.hasSolidInterior { return true }
         let heavier = clusters.filter { $0.weight > c.weight }
         for (i, a) in heavier.enumerated() {
             for b in heavier[(i + 1)...] where isBlend(c, of: a, b, tolerance: tolerance) { return false }
@@ -104,7 +109,7 @@ private func isBlend(_ c: Cluster, of a: Cluster, _ b: Cluster, tolerance: Doubl
 /// Heaviest first, then whichever remaining colour is most different from those already chosen,
 /// favouring larger areas and stronger colour. Stops early rather than pad with lookalikes.
 func pickDistinct(_ clusters: [Cluster], count: Int, minimumShare: Double = 0.0005,
-                  minimumDifference: Double = 14) -> [Cluster] {
+                  minimumDifference: Double = 7) -> [Cluster] {
     var pool = clusters.filter { $0.weight >= minimumShare }.sorted { $0.weight > $1.weight }
     guard !pool.isEmpty else { return Array(clusters.sorted { $0.weight > $1.weight }.prefix(1)) }
     var chosen = [pool.removeFirst()]
@@ -152,11 +157,14 @@ private final class SRGBBitmap {
     /// colour (pixels bucketed at 5 bits a channel) rather than its average.
     func clusters(around centres: [RGB]) -> [Cluster] {
         guard !centres.isEmpty else { return [] }
-        struct Bin { var n = 0, r = 0, g = 0, b = 0 }
+        struct Bin { var n = 0, r = 0, g = 0, b = 0, interior = 0 }
         var bins = [[Int: Bin]](repeating: [:], count: centres.count)
         var counts = [Int](repeating: 0, count: centres.count)
         let data = context.data!.assumingMemoryBound(to: UInt8.self)
         let total = width * height
+        func pixelKey(at p: Int) -> Int {
+            (Int(data[p * 4]) >> 3) << 10 | (Int(data[p * 4 + 1]) >> 3) << 5 | (Int(data[p * 4 + 2]) >> 3)
+        }
         for p in 0..<total {
             let r = Int(data[p * 4]), g = Int(data[p * 4 + 1]), b = Int(data[p * 4 + 2])
             let px: RGB = (Float(r) / 255, Float(g) / 255, Float(b) / 255)
@@ -169,13 +177,22 @@ private final class SRGBBitmap {
             let key = (r >> 3) << 10 | (g >> 3) << 5 | (b >> 3)
             var bin = bins[nearest][key] ?? Bin()
             bin.n += 1; bin.r += r; bin.g += g; bin.b += b
+            let x = p % width, y = p / width
+            if x > 0, x < width - 1, y > 0, y < height - 1 {
+                var solid = true
+                for dy in -1...1 {
+                    for dx in -1...1 where pixelKey(at: p + dy * width + dx) != key { solid = false }
+                }
+                if solid { bin.interior += 1 }
+            }
             bins[nearest][key] = bin
         }
         return centres.indices.compactMap { i in
             guard let mode = bins[i].values.max(by: { $0.n < $1.n }) else { return nil }
             let n = Double(mode.n) * 255
             return Cluster(rgb: (Double(mode.r) / n, Double(mode.g) / n, Double(mode.b) / n),
-                           weight: Double(counts[i]) / Double(total))
+                           weight: Double(counts[i]) / Double(total),
+                           hasSolidInterior: mode.interior >= max(4, Int(ceil(Double(total) * 0.0005))))
         }
     }
 

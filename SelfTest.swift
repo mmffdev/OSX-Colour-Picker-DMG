@@ -344,6 +344,22 @@ func runSelfTest() -> Never {
     check(solidColours.count == 1 && near(solidColours[0], "#00FF00"), "near-duplicate clusters collapse: \(solidColours)")
     check(extractPalette(from: twoTone, count: 0).isEmpty, "asking for zero colours gives none")
 
+    // Unequal flat grey bands are real surfaces, not antialiasing between black and white.
+    let greyBands = testImage(width: 200, height: 200) { _, y in
+        let v: UInt8 = y < 70 ? 248 : y < 120 ? 0 : y < 150 ? 64 : y < 170 ? 112 : y < 186 ? 176 : 212
+        return (v, v, v)
+    }
+    let greys = extractPalette(from: greyBands, count: 8)
+    check(["#F8F8F8", "#000000", "#404040", "#707070", "#B0B0B0", "#D4D4D4"].allSatisfy { expected in greys.contains { near($0, expected) } },
+          "solid grey bands survive blend removal and distinct-colour selection: \(greys)")
+    let softEdge = testImage(width: 200, height: 100) { x, _ in
+        let v: UInt8 = x < 100 ? 0 : x == 100 ? 128 : 255
+        return (v, v, v)
+    }
+    let edgeColours = extractPalette(from: softEdge, count: 8)
+    check(edgeColours.count == 2 && edgeColours.contains { near($0, "#000000") } && edgeColours.contains { near($0, "#FFFFFF") },
+          "a thin antialiased edge does not become an extra grey swatch: \(edgeColours)")
+
     // Mid-tones catch gamma mistakes that pure red/green/blue cannot.
     let midTone = testImage(width: 64, height: 64) { x, _ in x < 40 ? (0xEC, 0xEC, 0xEC) : (0x75, 0x50, 0x7B) }
     let mids = extractPalette(from: midTone, count: 4)
