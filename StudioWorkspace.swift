@@ -72,7 +72,7 @@ private final class WorkspaceSectionHeader:NSButton {
     @objc private func runHeaderAction(){headerAction?()}
     override func layout(){
         super.layout();help.frame=Help_HexButton.frame(width:bounds.width,height:28)
-        actionButton.frame=NSRect(x:bounds.width-60,y:2,width:24,height:24);actionButton.contentTintColor=Design.ink
+        actionButton.frame=NSRect(x:bounds.width-60,y:2+Help_HexButton.opticalOffset,width:24,height:24);actionButton.contentTintColor=Design.ink
         trailingControl?.frame=NSRect(x:max(150,bounds.width-188),y:0,width:min(152,max(0,bounds.width-178)),height:28)
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}

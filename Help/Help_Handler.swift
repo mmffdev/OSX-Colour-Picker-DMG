@@ -48,6 +48,8 @@ final class Help_Handler: NSObject {
 final class Help_HexButton: NSButton {
     static let trailingInset:CGFloat=20
     static let slot:CGFloat=28
+    /// Helvetica Neue header ink sits a point below the geometric centre of its line box.
+    static let opticalOffset:CGFloat=1
     var pageID="catalogues",sectionID:String?
     private var hovered=false
     init(page:String,section:String?=nil,title:String) {
@@ -59,7 +61,7 @@ final class Help_HexButton: NSButton {
     }
     required init?(coder:NSCoder){fatalError()}
     static func frame(width:CGFloat,height:CGFloat)->NSRect {
-        NSRect(x:width-trailingInset-slot/2,y:(height-slot)/2,width:slot,height:slot)
+        NSRect(x:width-trailingInset-slot/2,y:(height-slot)/2+opticalOffset,width:slot,height:slot)
     }
     @objc private func openHelp(){Help_Handler.shared.open(pageID,section:sectionID)}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
