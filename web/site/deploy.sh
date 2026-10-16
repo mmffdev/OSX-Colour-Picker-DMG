@@ -5,6 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 HOST=colorgain.com
+## Migrations are generated on the server on a first deploy: bring any back first, or the push below would delete them.
+mkdir -p src/migrations
+rsync -az mmffdev-admin:/var/site/src/src/migrations/ ./src/migrations/ 2>/dev/null || true
 rsync -az --delete --exclude node_modules --exclude .next --exclude .git --exclude .env.site --exclude .env \
   --exclude 'public/media' ./ mmffdev-admin:/var/site/src/
 scp -q .env.site mmffdev-admin:/var/site/.env.site
