@@ -26,19 +26,8 @@ export const InitTheme: React.FC = () => {
       return theme === 'light' || theme === 'dark'
     }
 
+    // Colorgain has one light look (see .claude/c_c_design_colour.md); the preference machinery stays for later.
     var themeToSet = '${defaultTheme}'
-    var preference = window.localStorage.getItem('${themeLocalStorageKey}')
-
-    if (themeIsValid(preference)) {
-      themeToSet = preference
-    } else {
-      var implicitPreference = getImplicitPreference()
-
-      if (implicitPreference) {
-        themeToSet = implicitPreference
-      }
-    }
-
     document.documentElement.setAttribute('data-theme', themeToSet)
   })();
   `,

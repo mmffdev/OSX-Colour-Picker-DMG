@@ -69,10 +69,10 @@ print('api key proof:', json.load(u.urlopen(req)).get('user', {}).get('email'))
 PY
 step "4 plesk nginx proxy on the live domain"
 if curl -fsS -o /dev/null "$APP/admin/login" </dev/null 2>/dev/null; then
-  plesk bin domain --update-web-server-settings $HOST -nginx-proxy-mode false | tail -1
+  plesk bin domain --update-web-server-settings $HOST -nginx-proxy-mode false </dev/null | tail -1
   install -m 644 /var/site/src/vhost_nginx.conf "$SYS/vhost_nginx.conf"
   install -m 644 /var/site/src/vhost.conf "$SYS/vhost.conf"
-  plesk sbin httpdmng --reconfigure-domain $HOST; nginx -t 2>&1 | tail -1
+  plesk sbin httpdmng --reconfigure-domain $HOST </dev/null; nginx -t 2>&1 </dev/null | tail -1
 else echo "app not answering: live domain left as it was"; fi
 step "5 proof"
 echo "https: $(curl -s -o /dev/null -w '%{http_code}' https://$HOST/)  $(curl -s https://$HOST/ | grep -o '<title>[^<]*' | head -1)"
