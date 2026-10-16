@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ## Deploys colorgain.com: rsyncs this folder to /var/site/src on the Plesk box, where the container installs, migrates,
-## builds and serves it; creates the owner and an API key from .env.site on the first run; switches the live domain to
+## builds and serves it (NO_BUILD=1 skips the rebuild and only finishes); creates the owner and an API key from .env.site on the first run; switches the live domain to
 ## the app only once it answers. Idempotent.   web/site/deploy.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -8,7 +8,7 @@ HOST=colorgain.com
 rsync -az --delete --exclude node_modules --exclude .next --exclude .git --exclude .env.site --exclude .env \
   --exclude 'public/media' ./ mmffdev-admin:/var/site/src/
 scp -q .env.site mmffdev-admin:/var/site/.env.site
-ssh mmffdev-admin bash -s <<'REMOTE'
+ssh mmffdev-admin NO_BUILD="${NO_BUILD:-0}" bash -s <<'REMOTE'
 set -euo pipefail
 HOST=colorgain.com; SYS=/var/www/vhosts/system/$HOST/conf; APP=http://127.0.0.1:3002
 step() { printf '\n== %s ==\n' "$*"; }
@@ -32,7 +32,8 @@ umask 022
 chown -R 1000:1000 /var/site/src /var/site/media
 echo "written"
 step "2 containers (install, migrate, build, serve: several minutes on a fresh deploy)"
-docker compose up -d --force-recreate site </dev/null 2>&1 | grep -vi warn || true
+if [ "${NO_BUILD:-0}" = 1 ]; then docker compose up -d site </dev/null 2>&1 | grep -vi warn || true   # NO_BUILD=1: finish a deploy already running
+else docker compose up -d --force-recreate site </dev/null 2>&1 | grep -vi warn || true; fi
 for i in $(seq 1 120); do curl -fsS -o /dev/null "$APP/admin/login" </dev/null 2>/dev/null && break; sleep 5; done
 docker compose ps --format '{{.Name}} {{.Status}}' </dev/null
 echo "app: $(curl -s -o /dev/null -w '%{http_code}' $APP/admin/login)"
