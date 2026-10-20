@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#C0B9AC",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.47569610810383905,
+        "y" : 0.49008458353561601,
+        "z" : 0.34907035537924547
+      },
+      "pickedAt" : 1791480763408.791,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.75294117647058822,
+          0.72549019607843135,
+          0.67450980392156867
+        ]
+      }
+    },
+    {
+      "hex" : "#DD9025",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.42531985828627483,
+        "y" : 0.36192434709072441,
+        "z" : 0.050359596923046562
+      },
+      "pickedAt" : 1791480764033.365,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.8666666666666667,
+          0.56470588235294117,
+          0.14509803921568629
+        ]
+      }
+    },
+    {
+      "hex" : "#465D2A",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.072171345513491067,
+        "y" : 0.093502508973844781,
+        "z" : 0.028016094391802682
+      },
+      "pickedAt" : 1791480764934.3801,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.27450980392156865,
+          0.36470588235294116,
+          0.16470588235294117
+        ]
+      }
+    },
+    {
+      "hex" : "#16494B",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.039223501760965437,
+        "y" : 0.053814497743365636,
+        "z" : 0.056829672842491553
+      },
+      "pickedAt" : 1791480766251.9761,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.086274509803921567,
+          0.28627450980392155,
+          0.29411764705882354
+        ]
+      }
+    },
+    {
+      "hex" : "#0A1717",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.0058490187949731265,
+        "y" : 0.007337187347796696,
+        "z" : 0.006993266461781192
+      },
+      "pickedAt" : 1791480767435.918,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.039215686274509803,
+          0.090196078431372548,
+          0.090196078431372548
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 20",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.557Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "964E4CE2-241E-43DF-9ED4-F35BBEB54FD2",
+    "documentID" : "E9F74C6C-6DBA-4733-848D-965F7EE4EB9E",
+    "lastSavedAt" : "2026-10-19T23:43:09.956Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "964E4CE2-241E-43DF-9ED4-F35BBEB54FD2",
+    "createdAt" : 1791480749230.7939,
+    "entries" : [
+      {
+        "addedAt" : 1791480763408.791,
+        "hex" : "#C0B9AC"
+      },
+      {
+        "addedAt" : 1791480764033.365,
+        "hex" : "#DD9025"
+      },
+      {
+        "addedAt" : 1791480764934.3801,
+        "hex" : "#465D2A"
+      },
+      {
+        "addedAt" : 1791480766251.9761,
+        "hex" : "#16494B"
+      },
+      {
+        "addedAt" : 1791480767435.918,
+        "hex" : "#0A1717"
+      }
+    ],
+    "id" : "E9F74C6C-6DBA-4733-848D-965F7EE4EB9E",
+    "name" : "Palette 20",
+    "placedAt" : 1792453388446.5771,
+    "position" : 166,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791480749231.001,
+    "purposes" : [
+      {
+        "changedAt" : 1791480749231.001,
+        "id" : "32EED52F-E6A8-4D4F-AA5C-E561FCD074E0",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

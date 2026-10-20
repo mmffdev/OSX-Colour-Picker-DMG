@@ -31,7 +31,7 @@ struct ContrastState: Codable, Equatable {
 private func passColour(_ ok: Bool) -> NSColor { ok ? .systemGreen : .systemRed }
 
 /// A square of one of the two colours. Pressing it makes it the one the next colour picked goes to.
-private final class ChipButton: NSButton {
+private final class ChipButton: ClickCursorButton {
     var hex = "#000000" { didSet { needsDisplay = true } }
     var armed = false { didSet { needsDisplay = true } }
 
@@ -90,7 +90,9 @@ private final class ContrastTable: NSView {
 
 /// The colours of the chosen palette, then white and black. A press sends the colour to whichever
 /// of Text Colour and Background is waiting for one.
-private final class TargetSpectrum: NSView {
+private final class TargetSpectrum: ClickCursorView {
+    override var handCursorRects:[NSRect]{boxes.map{$0.rect}}
+
     var hexes: [String] = [] { didSet { needsDisplay = true } }
     var pair = ContrastPair(ink: "#000000", paper: "#FFFFFF") { didSet { needsDisplay = true } }
     var onPick: ((String) -> Void)?
@@ -147,7 +149,9 @@ private final class TargetSpectrum: NSView {
 /// Every palette in the library as a strip of its colours, in the sidebar's groups: Favourites,
 /// each project, then Palettes. A press on a palette chooses it; a press on a group's heading
 /// opens or closes the group.
-private final class PaletteShelf: NSView {
+private final class PaletteShelf: ClickCursorView {
+    override var handCursorRects:[NSRect]{frames.map{$0.rect}}
+
     enum Row {
         /// `key` names the group for remembering whether it is closed.
         case heading(String, key: String)
@@ -378,7 +382,9 @@ private final class ContrastPreview: NSView, NSTextFieldDelegate {
 }
 
 /// Every pairing of the chosen palette's colours. Rows are the text colour, columns the background.
-private final class ContrastGrid: NSView {
+private final class ContrastGrid: ClickCursorView {
+    override var handCursorRects:[NSRect]{hexes.isEmpty ? []:[bounds]}
+
     var hexes: [String] = [] { didSet { needsDisplay = true } }
     var pair = ContrastPair(ink: "#000000", paper: "#FFFFFF") { didSet { needsDisplay = true } }
     var onPick: ((ContrastPair) -> Void)?
@@ -469,9 +475,9 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     private let badge = NSTextField(labelWithString: "")
     private let method = ToggleBar(labels: ["WCAG 2", "APCA"])
     private let table = ContrastTable()
-    private let goal = NSPopUpButton()
+    private let goal = ClickCursorPopupButton()
     private var fixInk: NSButton!, fixPaper: NSButton!
-    private let from = NSPopUpButton()
+    private let from = ClickCursorPopupButton()
     private let hint = caption("", size: 13)
     private let spectrum = TargetSpectrum()
     private var dropper: NSButton!
@@ -479,7 +485,7 @@ final class ContrastViewController: NSViewController, NSTextFieldDelegate {
     /// The palettes scroll on their own, under the controls, so the controls stay in view.
     private let shelfScroll = LetGoScrollView()
 
-    private let headingFont = NSPopUpButton(), bodyFont = NSPopUpButton()
+    private let headingFont = ClickCursorPopupButton(), bodyFont = ClickCursorPopupButton()
     private let preview = ContrastPreview()
     private let gridTitle = caption("", size: 13)
     private let grid = ContrastGrid()

@@ -36,7 +36,9 @@ final class PaletteDraft {
     }
 }
 
-final class TileView: NSView {
+final class TileView: ClickCursorView {
+    override var handCursorRects:[NSRect]{[bounds]}
+
     var hex = "" { didSet { needsDisplay = true } }
     var bars: [NSColor] = [] { didSet { needsDisplay = true } }
     var runTitle: String? { didSet { needsDisplay = true } }
@@ -228,13 +230,13 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
     private var projectFilter = ProjectFilter.all
     private var shownProjects: [Project] = []
 
-    private let arrange = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let show = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let projects = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let arrange = ClickCursorPopupButton(frame: .zero, pullsDown: false)
+    private let show = ClickCursorPopupButton(frame: .zero, pullsDown: false)
+    private let projects = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     private let labels = PopoverButton(title: "Labels")
     private var labelsPopover = NSPopover()
     private var labelChecks: [NSButton] = []
-    private let addTo = NSPopUpButton(frame: .zero, pullsDown: true)
+    private let addTo = ClickCursorPopupButton(frame: .zero, pullsDown: true)
     private lazy var header = PageHeader(actions: [browsing, selecting, tagBar])
     /// The bar's right-hand side: filters while browsing, actions while several swatches are selected.
     private let browsing = NSStackView()
@@ -278,7 +280,7 @@ final class AllSwatchesViewController: NSViewController, NSCollectionViewDataSou
         labels.toolTip = "Choose what is written under each swatch"
         // Ticks in a popover rather than a menu, so it stays open while several are chosen.
         labelChecks = TileView.labelChoices.enumerated().map { at, choice in
-            let box = NSButton(checkboxWithTitle: choice.title, target: self, action: #selector(labelToggled(_:)))
+            let box = ClickCursorButton(checkboxWithTitle: choice.title, target: self, action: #selector(labelToggled(_:)))
             box.tag = at
             return box
         }
@@ -781,7 +783,7 @@ final class BuilderViewController: NSViewController, NSTableViewDataSource, NSTa
     var onSave: (() -> Void)?
     var onCancel: (() -> Void)?
 
-    private let table = NSTableView()
+    private let table = ClickCursorTableView()
     private let count = caption("")
     private let hint = NSTextField(wrappingLabelWithString: "Click swatches in the grid to add them here.")
     private var save: NSButton!

@@ -51,13 +51,8 @@ final class ContentViewController: NSViewController {
     static var releaseLine: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
-        let commit = info["ColourBuildCommit"] as? String
-        #if APPSTORE
-        let edition = "AS Release"
-        #else
-        let edition = "Release"
-        #endif
-        return "\(edition) v\(version)" + (commit.map { "  \($0)" } ?? "")
+        let built = info["ColourBuildDate"] as? String
+        return "v\(version)" + (built.map { "  ·  \($0)" } ?? "")
     }
     /// The footer: a hairline, then the status line. Placed by the window, full width.
     let footer = NSView()
@@ -340,6 +335,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         // Cascading would nudge the window onto the main screen on showing, undoing the saved place.
         shouldCascadeWindows = false
         restoreFrame()
+        win.titlebarAppearsTransparent = true
         Theme.apply(to: win)
         DispatchQueue.main.async { Theme.apply(to: win) }   // once more after every page has its views
 
@@ -710,7 +706,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     // MARK: Keeping up
 
     @objc private func projectFilesChanged() { sidebar.reload() }
-    @objc private func themeChanged() { if let w = window { Theme.apply(to: w) } }
+    @objc private func themeChanged() { if let w = window { w.backgroundColor = Theme.background } }
     /// L: charcoal, then black, then white, then off-white, then the theme again.
     @objc func stepBackground() { Theme.cycle() }
 
@@ -779,7 +775,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         content.restStatus()
     }
 
-    @objc private func prefsChanged() {
+    @objc private func prefsChanged(_ notification: Notification) {
+        if notification.userInfo?["key"] as? String == "cardRows" {
+            if case .palette = selection { content.palette.refreshVisibleCards() }
+            content.restStatus()
+            return
+        }
         if case .palette = selection { content.palette.reload() } else if case .overview = selection { content.overview.reload() } else { content.all.reload() }
         content.restStatus()
     }
@@ -823,9 +824,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
         Prefs.historyRailShown = !historyItem.isCollapsed
     }
 
-    @objc func exportShown() { library.export(library.exportPalettes(for: selection)) }
+    private var selectedGridExports:[ExportPalette]? {
+        guard let frame=StudioWindowController.shared?.frame.activeAssetFrame,!frame.page.grid.selectedItems.isEmpty else{return nil}
+        if !frame.selectedGridPalettes.isEmpty {return frame.selectedGridPalettes.flatMap{library.exportPalettes(for:.palette($0))}}
+        let items=frame.page.grid.selectedItems
+        guard items.allSatisfy({$0.hex != nil}) else{return []}
+        return [ExportPalette(name:"Selected Swatches",colours:items.compactMap {item in item.hex.map {ExportColour(name:item.title,hex:displayHex($0))}})]
+    }
+    @objc func exportShown() { library.export(selectedGridExports ?? library.exportPalettes(for: selection)) }
     /// The palette showing, as a .colpalette; from any other page, the footer says what to open.
     @objc func exportShownPaletteFile() {
+        if let frame=StudioWindowController.shared?.frame.activeAssetFrame,!frame.page.grid.selectedItems.isEmpty {
+            let ids=frame.selectedGridPalettes
+            if ids.count == 1,let id=ids.first {library.exportPaletteFile(id)}
+            else if !ids.isEmpty {library.exportPaletteFiles(ids:ids)}
+            else {library.flash("Select palettes to export palette files")}
+            return
+        }
         if case .palette(let id) = selection { library.exportPaletteFile(id) } else { library.flash("Open a palette to export it as a file") }
     }
     /// Where an import from the File menu lands: the member whose palette or Overview is showing, else the stock list.
@@ -838,12 +853,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate, NSSearc
     }
     @objc func importPaletteFilesShown() { library.importPalettes(.paletteFiles, into: shownProject) }
     @objc func importTokensShown() { library.importPalettes(.tokens, into: shownProject) }
-    @objc func exportDesignPack() { library.exportDesignPack(for: selection) }
+    @objc func exportDesignPack() {
+        if let frame=StudioWindowController.shared?.frame.activeAssetFrame,!frame.page.grid.selectedItems.isEmpty {
+            let selected=frame.page.grid.selectedItems
+            guard selected.count == 1 else {library.flash("Design packs require one palette or member; \(selected.count) assets are selected");return}
+            if let id=frame.selectedGridPalettes.first {library.exportDesignPack(for:.palette(id));return}
+            if let id=frame.selectedGridMembers.first {library.exportDesignPack(for:.overview(id));return}
+            library.flash("Select one palette or member for a design pack");return
+        }
+        library.exportDesignPack(for: selection)
+    }
     @objc func addShownToAdobe(_ sender: NSMenuItem) {
         guard let send = sender.representedObject as? AdobeSend else { return }
-        library.addToAdobe(library.exportPalettes(for: send.palette.map { .palette($0) } ?? selection), at: send.destination)
+        library.addToAdobe(send.palette.map{library.exportPalettes(for:.palette($0))} ?? selectedGridExports ?? library.exportPalettes(for:selection), at: send.destination)
     }
-    @objc func addShownToColourPanel() { library.addToColourPanel(library.exportPalettes(for: selection)) }
+    @objc func addShownToColourPanel() { library.addToColourPanel(selectedGridExports ?? library.exportPalettes(for: selection)) }
 
     // MARK: Search
     //

@@ -1,0 +1,611 @@
+import AppKit
+
+// ---------- The design: Colorgain's own look, in numbers ----------
+//
+// The rules are in .claude/c_design_guide.md and its children; the living specimen is the style
+// sheet artifact. This file is those rules as the app reads them: one family, six weights, ten
+// text styles, six greys, eight step colours, a grid and a beat. Nothing on a screen takes a font,
+// a grey or a gap from anywhere else.
+
+enum Design {
+    // MARK: Type
+
+    /// Helvetica Neue by weight. Falls back to the system font only if a weight is missing, which no Mac does.
+    static func font(_ size: CGFloat, _ weight: Weight) -> NSFont {
+        NSFont(name: weight.postScriptName, size: max(13, size)) ?? NSFont.systemFont(ofSize: max(13, size), weight: weight.system)
+    }
+    enum Weight {
+        case ultraLight, thin, light, regular, medium, bold
+        var postScriptName: String {
+            switch self {
+            case .ultraLight: return "HelveticaNeue-UltraLight"
+            case .thin: return "HelveticaNeue-Thin"
+            case .light: return "HelveticaNeue-Light"
+            case .regular: return "HelveticaNeue"
+            case .medium: return "HelveticaNeue-Medium"
+            case .bold: return "HelveticaNeue-Bold"
+            }
+        }
+        var system: NSFont.Weight {
+            switch self {
+            case .ultraLight: return .ultraLight
+            case .thin: return .thin
+            case .light: return .light
+            case .regular: return .regular
+            case .medium: return .medium
+            case .bold: return .bold
+            }
+        }
+    }
+
+    /// The ten styles: size, weight, line height as a multiple, tracking as a fraction of the size.
+    enum Text {
+        case display, title, headline, heading, header, lead, body, bodyStrong, controlLabel, caption, label, section, numeral, action
+        var size: CGFloat {
+            switch self {
+            case .display: return 88
+            case .title: return 48
+            case .headline: return 30
+            case .heading: return 17
+            case .header: return 15
+            case .lead: return 20
+            case .body, .bodyStrong, .controlLabel, .action: return 13
+            case .caption, .label: return 13
+            case .section: return 13
+            case .numeral: return 64
+            }
+        }
+        var weight: Weight {
+            switch self {
+            case .display, .numeral: return .thin
+            case .title, .lead: return .light
+            case .headline, .body, .caption: return .regular
+            case .heading, .header, .bodyStrong, .label, .section, .action: return .medium
+            case .controlLabel: return .bold
+            }
+        }
+        var lineHeight: CGFloat {
+            switch self {
+            case .display: return 0.92
+            case .title: return 1.0
+            case .headline: return 1.1
+            case .heading: return 1.25
+            case .header: return 1.3
+            case .lead: return 1.38
+            case .body, .bodyStrong, .controlLabel: return 1.55
+            case .caption: return 1.45
+            case .label, .section: return 1.2
+            case .numeral: return 0.9
+            case .action: return 1.2
+            }
+        }
+        var tracking: CGFloat {
+            switch self {
+            case .display: return -0.045
+            case .title: return -0.03
+            case .headline: return -0.018
+            case .heading, .header: return -0.005
+            case .lead: return -0.01
+            case .numeral: return -0.04
+            case .label, .section: return 0.06
+            default: return 0
+            }
+        }
+        func font(_ size: CGFloat? = nil) -> NSFont { Design.font(size ?? self.size, weight) }
+    }
+
+    /// A label in one of the ten styles, its tracking and line height set, ink unless told otherwise.
+    static func text(_ s: String, _ style: Text, size: CGFloat? = nil, colour: NSColor = Design.ink, wraps: Bool = false) -> NSTextField {
+        let l = wraps ? NSTextField(wrappingLabelWithString: "") : NSTextField(labelWithString: "")
+        l.font = style.font(size ?? style.size)
+        l.attributedStringValue = attributed(s, style, size: size, colour: colour, lineHeight: wraps)
+        l.textColor = colour
+        return l
+    }
+
+    /// `lineHeight` sets the style's line height, for text that wraps; a single-line label leaves it
+    /// to the font, since a taller line pushes the glyphs out of a one-line cell.
+    static func attributed(_ s: String, _ style: Text, size: CGFloat? = nil, colour: NSColor = Design.ink, align: NSTextAlignment = .left, lineHeight: Bool = false) -> NSAttributedString {
+        let sz = max(13, size ?? style.size)
+        let p = NSMutableParagraphStyle()
+        if lineHeight {
+            p.minimumLineHeight = (sz * style.lineHeight).rounded()
+            p.maximumLineHeight = p.minimumLineHeight
+        }
+        p.alignment = align
+        p.lineBreakMode = .byWordWrapping
+        var attrs: [NSAttributedString.Key: Any] = [.font: style.font(sz), .foregroundColor: colour, .paragraphStyle: p, .kern: sz * style.tracking]
+        if style == .numeral || style == .caption || style == .label {
+            attrs[.font] = NSFont(descriptor: style.font(sz).fontDescriptor.addingAttributes([.featureSettings: [[NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType, .selectorIdentifier: kMonospacedNumbersSelector]]]), size: sz) ?? style.font(sz)
+        }
+        let text = style == .label || style == .section ? s.uppercased() : s
+        return NSAttributedString(string: text, attributes: attrs)
+    }
+
+    // MARK: Colour
+
+    /// Swiss surfaces share the user's saved app background; palette samples never use these tokens.
+    private static var customGround: NSColor? { Theme.fixedBackground.flatMap(colorFromHex) }
+    static var surfaceColours: [NSColor] { [paper, card, mist, rule, soft, quiet, ink] }
+
+    /// Refresh cached AppKit/layer colours as well as custom-drawn surfaces.
+    static func refreshSurfaces(from previous: [NSColor]) {
+        let current = surfaceColours
+        let previousKeys=previous.map(hexOf)
+        func mapped(_ colour: NSColor?) -> NSColor? {
+            guard let colour else { return nil }
+            let key=hexOf(colour)
+            return previousKeys.firstIndex(of:key).map { current[$0] } ?? colour
+        }
+        func walk(_ view: NSView) {
+            if view is AppearancePresetControl { return }
+            if let colour = view.layer?.backgroundColor { view.layer?.backgroundColor = mapped(NSColor(cgColor: colour))?.cgColor }
+            if let colour = view.layer?.borderColor { view.layer?.borderColor = mapped(NSColor(cgColor: colour))?.cgColor }
+            if let field = view as? NSTextField { field.textColor = mapped(field.textColor); field.backgroundColor = mapped(field.backgroundColor) ?? card }
+            if let button = view as? NSButton { button.contentTintColor = mapped(button.contentTintColor) }
+            if let scroll = view as? NSScrollView { scroll.backgroundColor = card; scroll.contentView.backgroundColor = card }
+            if let table = view as? NSTableView { table.backgroundColor = card }
+            if let image = view as? NSImageView { image.contentTintColor = mapped(image.contentTintColor) }
+            if let grid = view as? TileGrid { grid.canvasColour = card }
+            view.needsDisplay = true
+            view.subviews.forEach(walk)
+            if let tree=view as? WorkspaceBranchTree { tree.repaintColours() }
+        }
+        for window in NSApp.windows where !(window is NSColorPanel) {
+            window.backgroundColor = Theme.background
+            if let content = window.contentView { walk(content) }
+        }
+    }
+
+
+    static var paper: NSColor { customGround ?? hex("#C4C4C4") }
+    /// The step being worked, and every other step card. Rick's trial of 2026-10-07.
+    static let houseBlue = hex("#53A1E9")
+    static let houseYellow = hex("#F4BE00")
+    static let active = houseYellow
+    static let inactive = hex("#B8B5AF")
+    static var card: NSColor { customGround ?? hex("#F8F7F5") }
+    static var mist: NSColor { customGround.map { $0.blended(withFraction: 0.12, of: ink) ?? $0 } ?? hex("#E3E2DE") }
+    static var rule: NSColor { customGround.map { $0.blended(withFraction: 0.22, of: ink) ?? $0 } ?? hex("#CFCDC7") }
+    static var soft: NSColor { customGround.map { _ in ink } ?? hex("#A3A19B") }
+    static var quiet: NSColor { customGround.map { _ in ink } ?? hex("#6B6964") }
+    static var ink: NSColor { customGround.map { Theme.takesLightText(on: hexOf($0) ?? "#FFFFFF") ? NSColor.white : NSColor.black } ?? hex("#161616") }
+    /// The one accent: focus rings and the grid overlay, nothing else.
+    static let orange = hex("#EC7A3C")
+
+    struct StepColour { let name: String; let hex: String; var colour: NSColor { Design.hex(hex) } }
+    /// The eight step colours in order, mixed from orange, pale blue and teal, at full strength. The
+    /// numerals on them are always ink, as on the Spotify concept, so every colour must carry ink at 3:1.
+    static let steps: [StepColour] = [
+        StepColour(name: "Apricot", hex: "#F2D3B4"),
+        StepColour(name: "Pale Blue", hex: "#A9CFE3"),
+        StepColour(name: "Harbour Teal", hex: "#5FB3A8"),
+        StepColour(name: "Sand", hex: "#E8D9A8"),
+        StepColour(name: "Orange", hex: "#F0803A"),
+        StepColour(name: "Sky", hex: "#7FB2D6"),
+        StepColour(name: "Deep Teal", hex: "#2F8F86"),
+        StepColour(name: "Signal Red", hex: "#C9382C"),
+    ]
+    static func step(_ i: Int) -> StepColour { steps[max(0, min(steps.count - 1, i))] }
+
+    static func hex(_ h: String) -> NSColor {
+        var s = h; if s.hasPrefix("#") { s.removeFirst() }
+        let n = UInt32(s, radix: 16) ?? 0
+        return NSColor(srgbRed: CGFloat((n >> 16) & 255) / 255, green: CGFloat((n >> 8) & 255) / 255, blue: CGFloat(n & 255) / 255, alpha: 1)
+    }
+    /// `fraction` of the way from `a` to `b`, in sRGB.
+    static func mix(_ a: NSColor, _ b: NSColor, _ fraction: CGFloat) -> NSColor {
+        (a.usingColorSpace(.sRGB) ?? a).blended(withFraction: fraction, of: b.usingColorSpace(.sRGB) ?? b) ?? a
+    }
+
+    // MARK: Grid and beat
+
+    enum Wizard {
+        static let size = NSSize(width: 1040, height: 660)
+        static let margin: CGFloat = 48
+        static let gutter: CGFloat = 24
+        static let columns = 12
+        static let band: CGFloat = 10
+        /// Square. Swiss has no rounded corners.
+        static let radius: CGFloat = 0
+        /// The x of a column's left edge and the width of a run of columns, inside the margins.
+        static func column(_ c: Int) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth + gutter) }
+        static var columnWidth: CGFloat { (size.width - 2 * margin - CGFloat(columns - 1) * gutter) / CGFloat(columns) }
+        static func span(_ from: Int, _ to: Int) -> CGFloat { CGFloat(to - from + 1) * columnWidth + CGFloat(to - from) * gutter }
+    }
+    /// The app window's grid (c_c_c_design_grid_app.md): twelve columns inside 24 margins with 16 gutters,
+    /// a 94 header and a 48 footer. The window resizes, so every measure takes the width it is at.
+    enum App {
+        /// The height is chosen so the rows, from under the areas' rule to the footer, come to whole units: 25 at first, 17 at least.
+        static let size = NSSize(width: 1440, height: 923)      // 94 + 1 + 80, then 25 units, then 48
+        static let least = NSSize(width: 1120, height: 699)     // the same with 17 units
+        /// Shared expanded width for Rail1 and Rail2 across workspaces.
+        static let railWidth:CGFloat = 360
+        static let margin: CGFloat = 24
+        static let gutter: CGFloat = 16
+        /// The gutter between areas, twice the column gutter: between the rails, between rail2 and the page, and at a page's split.
+        /// A two-level grid: the window's twelve columns with the wide gutter after columns 3, 5 and 8, every area's own columns inside (Rick, 2026-10-09).
+        static let areaGutter: CGFloat = 32
+        static let wideAfter = [3, 5, 8]
+        static var extra: CGFloat { areaGutter - gutter }
+        static let columns = 12
+        static let header: CGFloat = 94
+        static let footer: CGFloat = 48
+        /// The page's clear space above its title.
+        static let pageTop: CGFloat = 34
+        /// Master Inner: the beat every row under an area's rule keeps, and where a line of text sits in a
+        /// row. Every row is a multiple of the unit, so a row in one area shares its baseline with a row in
+        /// another; a two-line row is two units, a header row one. The overlay draws it (Rick, 2026-10-08).
+        /// The beat: 28 since 2026-10-08, the height a 24 unit plus the band's four points turned out to be; every row, every
+        /// list and the grid itself stand on it. The text sits on the line 17 in, so capitals are centred and the descenders have air.
+        static let unit: CGFloat = 28
+        static let textBaseline: CGFloat = 17
+        /// A row's ground is its unit, no more; kept as the one place to say so.
+        static let groundBelow: CGFloat = 0
+        static func ground(_ box: NSRect) -> NSRect { NSRect(x: box.minX, y: box.minY, width: box.width, height: box.height + groundBelow) }
+        /// The grid drawn over the window, on while the window is being built; the backslash key turns it off and on.
+        static var masterGrid = false
+        static let gridColour = Design.houseYellow
+        static func columnWidth(in width: CGFloat) -> CGFloat { (width - 2 * margin - CGFloat(columns - 1) * gutter - CGFloat(wideAfter.count) * extra) / CGFloat(columns) }
+        static func column(_ c: Int, in width: CGFloat) -> CGFloat { margin + CGFloat(c - 1) * (columnWidth(in: width) + gutter) + CGFloat(wideAfter.filter { $0 < c }.count) * extra }
+        static func span(_ from: Int, _ to: Int, in width: CGFloat) -> CGFloat { column(to, in: width) + columnWidth(in: width) - column(from, in: width) }
+        /// A page's own columns: as many of the window's as its width holds, the area gutter at its split. The x of each, their width, the split.
+        static func pageColumns(width: CGFloat, in window: CGFloat) -> (x: [CGFloat], width: CGFloat, split: Int) {
+            let cw = columnWidth(in: window)
+            let n = max(2, Int(((width + gutter - extra) / (cw + gutter)).rounded())), k = n / 2
+            return ((0..<n).map { (CGFloat($0) * (cw + gutter) + ($0 >= k ? extra : 0)).rounded() }, cw, k)
+        }
+    }
+    /// Every gap is a multiple of four.
+    static func beat(_ n: Int) -> CGFloat { CGFloat(n) * 4 }
+
+    // MARK: The mark
+
+    /// The diagonal arrow: "go there", one thin stroke at 45°.
+    /// `back` turns it 180: the same stroke pointing down and left, "close what is open".
+    static func arrow(_ size: CGFloat, colour: NSColor = ink, back: Bool = false) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: false) { r in
+            colour.setStroke()
+            let p = NSBezierPath()
+            let u = size / 16
+            func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { back ? NSPoint(x: (16 - x) * u, y: (16 - y) * u) : NSPoint(x: x * u, y: y * u) }
+            p.move(to: pt(3.5, 3.5)); p.line(to: pt(12.5, 12.5))
+            p.move(to: pt(5.5, 12.5)); p.line(to: pt(12.5, 12.5)); p.line(to: pt(12.5, 5.5))
+            p.lineWidth = size >= 24 ? 1.1 : 1.3
+            p.lineCapStyle = .butt
+            p.stroke()
+            return true
+        }
+    }
+
+    // MARK: A hairline
+
+    static func hairline(_ colour: NSColor = rule) -> NSView {
+        let v = NSView()
+        v.wantsLayer = true
+        v.layer?.backgroundColor = colour.cgColor
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return v
+    }
+}
+
+/// The lines that tie a tree's rows to their parents, all right angles: a stem down from under the parent's mark, starting
+/// just below the parent's words; a tee into a child that has siblings after it, an elbow into the last; the stems of
+/// ancestors with later siblings passing straight through. Each row says where its mark's centre is and where the mark begins.
+enum TreeLines {
+    struct Row {
+        var top: CGFloat, height: CGFloat, level: Int
+        /// The centre of the row's own mark, the level number or the icon, where a stem to its children hangs from.
+        var anchor: CGFloat
+        /// Where the mark begins, which a tail from the parent's stem reaches, two points short.
+        var markLeft: CGFloat
+        var baseline: CGFloat
+    }
+    static func draw(_ rows: [Row], colour: NSColor) {
+        colour.setFill()
+        func stem(_ x: CGFloat, from y0: CGFloat, to y1: CGFloat) { NSRect(x: x.rounded() - 1, y: y0, width: 1, height: y1 - y0).fill() }
+        /// Whether a row at `level` comes after row `i` before any row shallower than it: a later sibling of the row at that level.
+        func later(_ level: Int, after i: Int) -> Bool {
+            for k in rows.indices where k > i { if rows[k].level < level { return false }; if rows[k].level == level { return true } }
+            return false
+        }
+        for (i, r) in rows.enumerated() where r.level > 0 {
+            guard let p = rows[..<i].lastIndex(where: { $0.level == r.level - 1 }) else { continue }
+            // The arm sits on the centre of the number and the words: two points above the line they sit on.
+            let x = rows[p].anchor, tailY = (r.top + r.baseline - 2).rounded()
+            stem(x, from: r.top, to: later(r.level, after: i) ? r.top + r.height : tailY)
+            NSRect(x: x.rounded() - 1, y: tailY - 1, width: r.markLeft - 2 - (x.rounded() - 1), height: 1).fill()
+            // The ancestors' stems, where an ancestor still has a sibling to come.
+            var at = p, level = r.level - 1
+            while level >= 1, let gp = rows[..<at].lastIndex(where: { $0.level == level - 1 }) {
+                if later(level, after: i) { stem(rows[gp].anchor, from: r.top, to: r.top + r.height) }
+                at = gp; level -= 1
+            }
+        }
+        for (i, r) in rows.enumerated() where i + 1 < rows.count && rows[i + 1].level == r.level + 1 {
+            stem(r.anchor, from: (r.top + r.baseline + 4).rounded(), to: r.top + r.height)
+        }
+    }
+}
+
+/// A row's mark on rail1: the old sidebar's icons, drawn 12 high in the given colour.
+enum RowMark {
+    static func image(_ name: String, colour: NSColor) -> NSImage {
+        let base = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+        let c = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular).applying(NSImage.SymbolConfiguration(paletteColors: [colour]))
+        return base.withSymbolConfiguration(c) ?? base
+    }
+    /// Drawn with its centre on the row's text line, in a 14 box starting at `x`.
+    static func draw(_ name: String, x: CGFloat, baseline: CGFloat, colour: NSColor) {
+        let img = image(name, colour: colour), size = img.size
+        let r = NSRect(x: x + (14 - size.width) / 2, y: baseline - 5 - size.height / 2, width: size.width, height: size.height)
+        img.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+}
+
+/// Shared setup/rail ribbon: the head arrives first, then the notched tail follows.
+enum SelectionRibbon {
+    static let slide: TimeInterval = 0.48, tailWait: TimeInterval = 0.56, tail: TimeInterval = 0.30
+    static var duration: TimeInterval { tailWait + tail }
+    static func draw(top: CGFloat, height: CGFloat, reach: CGFloat, age: TimeInterval, leaving: Bool = false, colour: NSColor) {
+        func ease(_ value: Double) -> CGFloat { CGFloat(1 - pow(1 - max(0, min(1, value)), 3)) }
+        let tip: CGFloat = 14, notch: CGFloat = 10, end = reach - tip, off = -reach
+        let mid = top + height / 2
+        let head: CGFloat, tailX: CGFloat
+        if leaving {
+            head = end - (end - off) * ease(age / slide)
+            tailX = min(0, head - reach)
+        } else {
+            head = off + (end - off) * ease(age / slide)
+            tailX = min(-34 + 34 * ease((age - tailWait) / tail), head - tip - 1)
+        }
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: tailX, y: top))
+        path.line(to: NSPoint(x: head, y: top))
+        path.line(to: NSPoint(x: head + tip, y: mid))
+        path.line(to: NSPoint(x: head, y: top + height))
+        path.line(to: NSPoint(x: tailX, y: top + height))
+        path.line(to: NSPoint(x: tailX + notch, y: mid))
+        path.close(); colour.setFill(); path.fill()
+    }
+}
+
+/// A neutral row with a diagonal grey strip occupying only the rail's existing leading gutter.
+/// The strip slides in from the left and stays fixed once its row is selected.
+enum RailBarberPole {
+    static let stripe = Design.hex("#D4D4D2")
+    static var ground: NSColor { Design.card.blended(withFraction: 0.25, of: Design.mist) ?? Design.card }
+    static func draw(in box: NSRect, stripWidth: CGFloat, age: TimeInterval) {
+        guard box.width > 0, box.height > 0 else { return }
+        let width = max(0, min(stripWidth, box.width))
+        let progress = CGFloat(1 - pow(1 - max(0, min(1, age / SelectionRibbon.slide)), 3))
+        fill(NSRect(x: box.minX, y: box.minY, width: box.width, height: max(0, box.height - 1)), ground)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: box.minX, y: box.minY, width: width, height: max(0, box.height - 1))).addClip()
+        let left = box.minX - width * (1 - progress)
+        NSBezierPath(rect: NSRect(x: left, y: box.minY, width: width, height: box.height)).addClip()
+        stripe.setFill()
+        let band: CGFloat = 12, period: CGFloat = 24
+        var x = left - period
+        while x < left + width + box.height + period {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: x, y: box.minY))
+            path.line(to: NSPoint(x: x + band, y: box.minY))
+            path.line(to: NSPoint(x: x + band - box.height, y: box.maxY))
+            path.line(to: NSPoint(x: x - box.height, y: box.maxY))
+            path.close(); path.fill()
+            x += period
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// One ribbon clock for a set of row keys, with selected rows held open.
+final class Rollover<Key: Hashable> {
+    var barberPole = false
+    private(set) var hover: Key?
+    private var reveal: [Key: CGFloat] = [:]
+    private var clock: Timer?
+    private var lastTick = Date()
+    var keys: () -> [Key] = { [] }
+    var locked: (Key) -> Bool = { _ in false }
+    var redraw: () -> Void = {}
+    deinit { clock?.invalidate() }
+
+    /// Where a pane should be: out under the pointer and on what is locked, home for the rest.
+    func goal(_ k: Key) -> CGFloat { k == hover || locked(k) ? CGFloat(SelectionRibbon.duration) : 0 }
+    /// Starts the clock if any pane is away from where it should be; it stops itself when every pane has arrived.
+    func settle() {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            reveal = Dictionary(uniqueKeysWithValues: Set(keys()).map { ($0, goal($0)) })
+            redraw(); return
+        }
+        let moving = keys().contains { (reveal[$0] ?? 0) != goal($0) }
+        guard moving, clock == nil else { return }
+        lastTick = Date()
+        clock = Timer.scheduledTimer(withTimeInterval: 1 / 90, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastTick))
+            self.lastTick = now
+            var done = true
+            for k in Set(self.keys()) {
+                let g = self.goal(k), v = self.reveal[k] ?? 0
+                if v == g { continue }
+                let next = v < g ? min(g, v + step) : max(g, v - step * CGFloat(SelectionRibbon.duration / SelectionRibbon.slide))
+                self.reveal[k] = next
+                if next != g { done = false }
+            }
+            self.reveal = self.reveal.filter { $0.value > 0 }
+            self.redraw()
+            if done { t.invalidate(); self.clock = nil }
+        }
+        RunLoop.main.add(clock!, forMode: .common)
+    }
+    /// The pointer is over another key, or over none.
+    func moved(_ over: Key?) { if over != hover { hover = over; settle() } }
+    /// Draws a key's pane, as far out as it has flown: from the left edge to `reach`, inside the row, leaving its bottom divider visible.
+    func pane(_ k: Key, box: NSRect, reach: CGFloat, stripWidth: CGFloat = 24) {
+        guard let v = reveal[k], v > 0 else { return }
+        if barberPole {
+            RailBarberPole.draw(in: box, stripWidth: stripWidth, age: TimeInterval(v))
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: 0, y: box.minY, width: box.maxX, height: box.height)).addClip()
+        SelectionRibbon.draw(top: box.minY, height: max(0, box.height - 1), reach: min(reach, box.maxX), age: TimeInterval(v), colour: Design.houseYellow)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// The caret on a row that holds others: pointing right when they are hidden, down when they show. A thin stroke in the
+/// house manner, six points across its longer side, centred on `centre`, which a row puts on its mark's centre line.
+enum Caret {
+    static func draw(open: Bool, centre c: NSPoint, colour: NSColor) {
+        colour.setStroke()
+        let p = NSBezierPath(); p.lineWidth = 1.2; p.lineJoinStyle = .miter; p.lineCapStyle = .butt
+        if open {
+            p.move(to: NSPoint(x: c.x - 3.5, y: c.y - 1.75)); p.line(to: NSPoint(x: c.x, y: c.y + 1.75)); p.line(to: NSPoint(x: c.x + 3.5, y: c.y - 1.75))
+        } else {
+            p.move(to: NSPoint(x: c.x - 1.75, y: c.y - 3.5)); p.line(to: NSPoint(x: c.x + 1.75, y: c.y)); p.line(to: NSPoint(x: c.x - 1.75, y: c.y + 3.5))
+        }
+        p.stroke()
+    }
+}
+
+extension Design {
+    /// The halo's own mark: a ring, as the dial is, with a smaller ring inside it. Drawn in a 16 box.
+    static func haloMark(in g: NSRect, colour: NSColor) {
+        colour.setStroke()
+        let outer = NSBezierPath(ovalIn: g.insetBy(dx: 2, dy: 2)); outer.lineWidth = 2; outer.stroke()
+        let inner = NSBezierPath(ovalIn: g.insetBy(dx: 5.5, dy: 5.5)); inner.lineWidth = 1; inner.stroke()
+    }
+}
+
+/// Shared dropdown chrome: a quiet rounded field and a contained trailing arrow cell.
+enum DropdownSkin {
+    static let arrowWidth:CGFloat = 28
+    static func draw(in bounds:NSRect,hover:Bool=false,up:Bool=false,flipped:Bool=true) {
+        guard bounds.width.isFinite, bounds.height.isFinite, bounds.width >= arrowWidth, bounds.height >= 2 else { return }
+        let r=bounds.insetBy(dx:0.5,dy:0.5)
+        let outline=NSBezierPath(roundedRect:r,xRadius:4,yRadius:4)
+        if hover { Design.mist.setFill();outline.fill() }
+        Design.rule.setStroke();outline.lineWidth=1;outline.stroke()
+        let x=bounds.maxX-arrowWidth
+        let divider=NSBezierPath();divider.move(to:NSPoint(x:x,y:r.minY));divider.line(to:NSPoint(x:x,y:r.maxY));divider.lineWidth=1;divider.stroke()
+        let c=NSPoint(x:x+arrowWidth/2,y:bounds.midY), sign:CGFloat = (up != flipped) ? 1 : -1
+        let arrow=NSBezierPath();arrow.move(to:NSPoint(x:c.x-3,y:c.y-sign*1.5));arrow.line(to:NSPoint(x:c.x,y:c.y+sign*1.5));arrow.line(to:NSPoint(x:c.x+3,y:c.y-sign*1.5));arrow.lineWidth=1.2;arrow.lineJoinStyle = .round
+        Design.quiet.setStroke();arrow.stroke()
+    }
+}
+
+enum InlineDropdownSkin {
+    static func draw(in bounds:NSRect,up:Bool=false){
+        let x=bounds.maxX-7,y=bounds.midY,sign:CGFloat=up ? -1:1
+        let path=NSBezierPath();path.move(to:NSPoint(x:x-3,y:y-sign*1.5));path.line(to:NSPoint(x:x,y:y+sign*1.5));path.line(to:NSPoint(x:x+3,y:y-sign*1.5));path.lineWidth=1.2;Design.quiet.setStroke();path.stroke()
+    }
+}
+final class DropdownButton:ClickCursorButton {
+    var borderless=false {didSet{needsDisplay=true}}
+    var fittedWidth:CGFloat{ceil(Design.attributed(title,.body).size().width)+(borderless ? 20:48)}
+    var opensUpward=false
+    override var isFlipped:Bool{true}
+    override func draw(_ dirtyRect:NSRect){
+        if borderless{InlineDropdownSkin.draw(in:bounds,up:opensUpward)}else{DropdownSkin.draw(in:bounds,hover:isHighlighted,up:opensUpward)}
+        Design.attributed(title,.body,colour:isEnabled ? Design.ink:Design.quiet).draw(x:borderless ? 0:8,baseline:bounds.midY+(borderless ? 5:4),width:max(0,bounds.width-(borderless ? 20:44)))
+    }
+}
+
+/// Reusable full-colour vector assets; SVG originals live in assets/glyphs.
+enum ResultGlyph: String {
+    case warning = "Glyph-Warning", pass = "Glyph-Pass"
+    /// Fixed vector silhouettes: never substitute platform-dependent emoji artwork.
+    func draw(in rect: NSRect) {
+        func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+            NSPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        let path = NSBezierPath()
+        if self == .pass {
+            // Broad, curved green tick with a tapered rising arm, matching the supplied glyph.
+            path.move(to: p(0.04, 0.55))
+            path.curve(to: p(0.25, 0.49), controlPoint1: p(0.13, 0.43), controlPoint2: p(0.17, 0.43))
+            path.line(to: p(0.35, 0.60))
+            path.curve(to: p(0.96, 0.06), controlPoint1: p(0.53, 0.31), controlPoint2: p(0.79, 0.13))
+            path.curve(to: p(0.97, 0.10), controlPoint1: p(1.00, 0.04), controlPoint2: p(1.00, 0.07))
+            path.curve(to: p(0.43, 0.94), controlPoint1: p(0.71, 0.34), controlPoint2: p(0.54, 0.67))
+            path.curve(to: p(0.30, 0.96), controlPoint1: p(0.40, 0.98), controlPoint2: p(0.33, 0.99))
+            path.curve(to: p(0.04, 0.55), controlPoint1: p(0.22, 0.76), controlPoint2: p(0.14, 0.63))
+            path.close()
+            NSColor(srgbRed: 0.47, green: 0.68, blue: 0.17, alpha: 1).setFill(); path.fill()
+        } else {
+            // Rounded amber triangle, dark outline and tapered exclamation (not a text emoji).
+            path.move(to: p(0.46, 0.09))
+            path.curve(to: p(0.54, 0.09), controlPoint1: p(0.48, 0.05), controlPoint2: p(0.52, 0.05))
+            path.line(to: p(0.95, 0.85))
+            path.curve(to: p(0.91, 0.92), controlPoint1: p(0.98, 0.90), controlPoint2: p(0.96, 0.92))
+            path.line(to: p(0.09, 0.92))
+            path.curve(to: p(0.05, 0.85), controlPoint1: p(0.04, 0.92), controlPoint2: p(0.02, 0.90))
+            path.close()
+            NSColor(srgbRed: 1, green: 0.72, blue: 0, alpha: 1).setFill(); path.fill()
+            NSColor(srgbRed: 0.10, green: 0.09, blue: 0.06, alpha: 1).setStroke()
+            path.lineWidth = max(1, rect.width * 0.035); path.lineJoinStyle = .round; path.stroke()
+            let mark = NSBezierPath()
+            mark.move(to: p(0.46, 0.33)); mark.curve(to: p(0.54, 0.33), controlPoint1: p(0.46, 0.29), controlPoint2: p(0.54, 0.29))
+            mark.line(to: p(0.52, 0.68)); mark.line(to: p(0.48, 0.68)); mark.close()
+            NSColor.black.setFill(); mark.fill()
+            NSBezierPath(ovalIn: NSRect(x: p(0.47, 0.74).x, y: p(0.47, 0.74).y, width: rect.width * 0.06, height: rect.height * 0.06)).fill()
+        }
+    }
+}
+
+/// Theme-aware square checkbox. Native button semantics retain keyboard and VoiceOver access.
+final class SwissCheckbox: ClickCursorButton {
+    private var hovering = false
+    override var isFlipped: Bool { true }
+    init(_ label: String) {
+        super.init(frame: .zero)
+        title = label
+        setButtonType(.switch)
+        isBordered = false
+        font = Design.Text.bodyStrong.font()
+        setAccessibilityLabel(label)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshInk), name: .themeDidChange, object: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func refreshInk() { needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        let font = Design.Text.bodyStrong.font()
+        let side = ceil(font.capHeight)
+        let baseline = bounds.midY + 5
+        let square = NSRect(x: 8, y: baseline - side, width: side, height: side)
+        let ink = isEnabled ? Design.ink : Design.quiet
+        if hovering {
+            ink.withAlphaComponent(0.10).setFill()
+            NSBezierPath(rect: square.insetBy(dx: -3, dy: -3)).fill()
+        }
+        if state == .on { fill(square, ink) }
+        else {
+            ink.setStroke()
+            let outline = NSBezierPath(rect: square.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = hovering ? 2 : 1
+            outline.stroke()
+        }
+        Design.attributed(title, .bodyStrong, colour: ink).draw(x: square.maxX + 8, baseline: baseline, width: max(0, bounds.width - square.maxX - 12))
+        if window?.firstResponder === self {
+            ink.setStroke()
+            let focus = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
+            focus.lineWidth = 1
+            focus.setLineDash([2, 2], count: 2, phase: 0)
+            focus.stroke()
+        }
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func resetCursorRects() { if isEnabled { addCursorRect(bounds, cursor: .pointingHand) } }
+}

@@ -1,0 +1,147 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#271219",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.012566726972115697,
+        "y" : 0.009439490061210323,
+        "z" : 0.007812441211114799
+      },
+      "pickedAt" : 1791482774577.842,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.15294117647058825,
+          0.070588235294117646,
+          0.098039215686274508
+        ]
+      }
+    },
+    {
+      "hex" : "#584048",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.071566965064107368,
+        "y" : 0.062394628045964129,
+        "z" : 0.052617441067907014
+      },
+      "pickedAt" : 1791482775120.4451,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.34509803921568627,
+          0.25098039215686274,
+          0.28235294117647058
+        ]
+      }
+    },
+    {
+      "hex" : "#F2E9D5",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.79616236599967505,
+        "y" : 0.822043800348499,
+        "z" : 0.56667992414561708
+      },
+      "pickedAt" : 1791482775879.5969,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.94901960784313721,
+          0.9137254901960784,
+          0.83529411764705885
+        ]
+      }
+    },
+    {
+      "hex" : "#244863",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.05050127020834709,
+        "y" : 0.057946397529462984,
+        "z" : 0.095645970846389344
+      },
+      "pickedAt" : 1791482777223.7183,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.14117647058823529,
+          0.28235294117647058,
+          0.38823529411764707
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 140",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.444Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "786CA68A-CF4E-4A08-8C34-80DA7AD60CB1",
+    "documentID" : "ECF6AA8F-BC60-470D-BF52-708836F06759",
+    "lastSavedAt" : "2026-10-19T23:43:09.419Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "786CA68A-CF4E-4A08-8C34-80DA7AD60CB1",
+    "createdAt" : 1791482772743.3328,
+    "entries" : [
+      {
+        "addedAt" : 1791482774577.842,
+        "hex" : "#271219"
+      },
+      {
+        "addedAt" : 1791482775120.4451,
+        "hex" : "#584048"
+      },
+      {
+        "addedAt" : 1791482775879.5969,
+        "hex" : "#F2E9D5"
+      },
+      {
+        "addedAt" : 1791482777223.7183,
+        "hex" : "#244863"
+      }
+    ],
+    "id" : "ECF6AA8F-BC60-470D-BF52-708836F06759",
+    "name" : "Palette 140",
+    "placedAt" : 1792453388446.5771,
+    "position" : 42,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791482772743.6973,
+    "purposes" : [
+      {
+        "changedAt" : 1791482772743.6973,
+        "id" : "83A43FCA-4C58-4BC7-A250-5E5EB97B1AED",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

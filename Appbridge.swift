@@ -116,6 +116,9 @@ enum AdobeASE {
 
     /// Coordinate with other file presenters, reject stale previews, back up, then replace atomically.
     static func append(_ palette: ExportPalette, at url: URL, expectedDigest: String, backupDirectory: URL? = nil) throws {
+        try FileEditAccess.withWriteAccess(to: url) { try appendWithAccess(palette, at: url, expectedDigest: expectedDigest, backupDirectory: backupDirectory) }
+    }
+    private static func appendWithAccess(_ palette: ExportPalette, at url: URL, expectedDigest: String, backupDirectory: URL?) throws {
         var coordinationError: NSError?, writeError: Error?
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinationError) { target in
             do {
@@ -160,7 +163,7 @@ enum ASERegistry {
         guard value.version == 1, value.sources.count <= 2000,
               Set(value.sources.map { $0.id }).count == value.sources.count else { throw failure("Unsupported or invalid ASE registry.") }
         for source in value.sources where !source.path.hasPrefix("/") {
-            guard source.path.hasPrefix(directory + "/"), !source.path.split(separator: "/").contains("..") else { throw failure("Invalid relative ASE location.") }
+            _ = try Handler_File_Manager.contained(source.path, under: root)
         }
         return value
     }
@@ -174,7 +177,7 @@ enum ASERegistry {
     static func write(_ sources: [AppbridgeStore.Source], root: URL, name: String? = nil) throws {
         let portable = sources.map { value -> AppbridgeStore.Source in
             var value = value
-            if value.path.hasPrefix(root.path + "/" + directory + "/") { value.path = String(value.path.dropFirst(root.path.count + 1)) }
+            if value.path.hasPrefix(root.path + "/") { value.path = String(value.path.dropFirst(root.path.count + 1)) }
             return value
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -312,6 +315,22 @@ final class AppbridgeStore: NSObject, UNUserNotificationCenterDelegate {
             scan(); restartWatches()
             timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.checkLocations() }
         } catch { configurationError = error.localizedDescription; notices = [error.localizedDescription] }
+    }
+    func reloadImportedConnections() {
+        guard let root else { return }
+        do { sources = try ASERegistry.resolved(root); scan(); restartWatches() }
+        catch { report(error.localizedDescription) }
+    }
+    /// Reload links written by the shared import transaction before opening a file.
+    func openImported(_ url: URL) {
+        guard let root else { return }
+        do {
+            sources = try ASERegistry.resolved(root)
+            if !sources.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+                try save(sources + [Source(path: url.path, folder: false)])
+            }
+            pendingOpen = url.path; scan(); restartWatches()
+        } catch { report(error.localizedDescription) }
     }
     /// Isolated source snapshot for layout regression tests; no disk reads or watchers.
     init(previewSources: [Source]) { sources = previewSources; super.init() }
@@ -814,7 +833,7 @@ private final class AppbridgeFileList: NSView {
     }
 }
 
-final class AppbridgeListButton: NSButton {
+final class AppbridgeListButton: ClickCursorButton {
     var trailingSymbol: String?
     var outlined = false { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     private let symbol: String?

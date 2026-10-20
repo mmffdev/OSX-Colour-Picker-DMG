@@ -40,7 +40,7 @@ enum FileRecoveryPresenter {
         let workspaceIssue = report.issues.contains { issue in
             issue.url.pathExtension == "coldata" || ["Assets", "Keys"].contains(where: { issue.url.standardizedFileURL.path.hasPrefix(workspace.appendingPathComponent($0).standardizedFileURL.path + "/") })
         }
-        let registration = Catalogues.standard.registry.first { row in URL(fileURLWithPath: row.path).standardizedFileURL == report.root.standardizedFileURL }
+        let registration = Catalogues.standard.registry.first { row in row.url(in: workspace) == report.root.standardizedFileURL }
         let catalogueName = registration?.name ?? (report.root.standardizedFileURL == workspace.standardizedFileURL ? Catalogues.mainName : report.root.lastPathComponent)
         let repairable = report.issues.filter { issue in
             guard let handler = try? manager.handler(for: issue.url) else { return issue.url.pathExtension.isEmpty }
@@ -302,29 +302,31 @@ enum CatalogueRowActions {
             let panel=NSSavePanel()
             panel.title="Export Catalogue";panel.prompt="Export"
             panel.nameFieldStringValue=filesystemName(name)+".colshr"
-            panel.message="Save a verified catalogue archive. Your catalogue remains registered and its original files stay in place. Shared global assets and external ICC references are not bundled."
+            panel.message="Save a verified catalogue archive. Your originals stay in place. Optionally include My Library palettes and typography; external ICC originals remain references."
+            let includeShared=ClickCursorButton(checkboxWithTitle:"Include My Library Palettes And Typography",target:nil,action:nil)
+            panel.accessoryView=includeShared
             panel.beginSheetModal(for:window) { result in
                 guard result == .OK,let destination=panel.url else{return}
                 guard destination.pathExtension.lowercased() == "colshr" else {
                     FileRecoveryPresenter.showFailure(failure("Use the .colshr extension for a catalogue archive."),over:window);return
                 }
-                archive(name:name,to:destination,window:window,backup:false)
+                archive(name:name,to:destination,window:window,backup:false,includeShared:includeShared.state == .on)
             }
         }
     }
-    private static func archive(name:String,to destination:URL,window:NSWindow,backup:Bool) {
+    private static func archive(name:String,to destination:URL,window:NSWindow,backup:Bool,includeShared:Bool=false) {
         guard let view=window.contentView else{return}
         let progress=SwissFocusModal(title:backup ? "Backing Up Catalogue":"Exporting Catalogue",message:"Checking and archiving “\(name)”. The catalogue stays in place. Missing files will be reported instead of producing an incomplete archive.")
         progress.present(over:view)
         let catalogues=Catalogues.standard
         DispatchQueue.global(qos:.userInitiated).async {
-            let result=Result {try Handler_File_Manager.shared.createCatalogueArchive(name:name,catalogues:catalogues,to:destination)}
+            let result=Result {try Handler_File_Manager.shared.createCatalogueArchive(name:name,catalogues:catalogues,to:destination,includeShared:includeShared)}
             DispatchQueue.main.async {
                 progress.dismissOverlay()
                 switch result {
                 case .success:
                     guard let view=window.contentView else{return}
-                    let done=SwissFocusModal(title:backup ? "Backup Saved":"Catalogue Exported",message:"“\(name)” remains in your library.\n\n\(destination.path)\n\nShared global assets remain in the workspace. ICC dependencies remain links unless embedded in a proof; individual ASE files are included. Monitored ASE folders must be converted to individual links before archiving.")
+                    let done=SwissFocusModal(title:backup ? "Backup Saved":"Catalogue Exported",message:"“\(name)” remains in your library.\n\n\(destination.path)\n\nMy Library assets are bundled only when selected. ICC dependencies remain links unless embedded in a proof; individual ASE files are included. Monitored ASE folders must be converted to individual links before archiving.")
                     done.button("Show In Finder") {NSWorkspace.shared.activateFileViewerSelecting([destination]);done.dismissOverlay()}
                     done.button("Close",primary:true) {done.dismissOverlay()};done.present(over:view)
                 case .failure(let error):FileRecoveryPresenter.showFailure(error,over:window)

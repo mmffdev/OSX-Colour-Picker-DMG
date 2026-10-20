@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build MMFFDev Colour 3.app and package it as a .pkg installer. The installer offers two homes:
+# Build Colorgain.app and package it as a .pkg installer. The installer offers two homes:
 # /Applications for every user, or ~/Applications for the person installing. installer/welcome.html
 # explains the difference; installer/distribution.xml is the installer's layout.
 # Output: ./MMFFDev-Colour-3.pkg
@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./signing.sh
 
-APP_NAME="MMFFDev Colour 3"
+APP_NAME="Colorgain"
 PKG_IDENTIFIER="com.mmffdev.colour3"
 PKG_VERSION="3.0.0"
 PKG="./MMFFDev-Colour-3.pkg"

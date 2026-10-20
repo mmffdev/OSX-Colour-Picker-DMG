@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Includes inode identity so atomic replacements invalidate a cache even with unchanged size/date.
 struct FileVersion: Equatable {
@@ -6,8 +7,13 @@ struct FileVersion: Equatable {
     let bytes: UInt64
     let inode: UInt64
     static func read(_ url: URL) -> FileVersion? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path), let modified = attributes[.modificationDate] as? Date else { return nil }
-        return FileVersion(modified: modified, bytes: (attributes[.size] as? NSNumber)?.uint64Value ?? 0, inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0)
+        var info=stat()
+        let result=url.withUnsafeFileSystemRepresentation { path in
+            path.map { fstatat(AT_FDCWD,$0,&info,0) } ?? -1
+        }
+        guard result == 0 else{return nil}
+        let modified=Date(timeIntervalSince1970:Double(info.st_mtimespec.tv_sec)+Double(info.st_mtimespec.tv_nsec)/1_000_000_000)
+        return FileVersion(modified:modified,bytes:UInt64(max(0,info.st_size)),inode:UInt64(info.st_ino))
     }
 }
 

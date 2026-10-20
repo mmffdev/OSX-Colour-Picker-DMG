@@ -65,7 +65,25 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     private var checks: [Check] = []
     private var matched = 0, missing = 0
     private var verdict: Verdict = .waiting
-    enum Verdict { case waiting, passed, failed(String) }
+    enum Verdict {
+        case waiting, passed, failed(String), notEvaluated(String), needsConfirmation(String)
+        var title: String { switch self {
+        case .waiting: return "Waiting For A Measurement"
+        case .passed: return "Passed · 7 Of 7 Checks"
+        case .failed: return "Outside Proof Tolerances"
+        case .notEvaluated: return "Not Evaluated"
+        case .needsConfirmation: return "Needs Confirmation"
+        } }
+        var reason: String { switch self {
+        case .failed(let reason), .notEvaluated(let reason), .needsConfirmation(let reason): return reason
+        default: return ""
+        } }
+        var record: String { title + (reason.isEmpty ? "" : " · " + reason) }
+    }
+    private var proofConditionsConfirmed = false, readingConditionsConfirmed = false
+    private var proofReview = ProofConditionReview(), readingReview = ProofConditionReview()
+    private var importedReading: ProofDataset?
+    private let confirmConditions = SwissButton("Confirm Missing Conditions", .secondary)
     private let label = ProofLabelView()
     private let importMeasurement = SwissButton("Import Measurement…", .primary)
     private let exportReport = SwissButton("Export Report…", .secondary)
@@ -75,14 +93,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
 
     /// The bundled Fogra subset by name, its conditions stamped from the file's own words: the 2008 file says D50, 2 degree only in prose.
     static func bundled(_ name: String) -> ProofDataset? {
-        let file = name + "_MW3_Subset.txt"
-        let candidates = [Bundle.main.resourceURL?.appendingPathComponent("ProofingResources").appendingPathComponent(file), Bundle.main.resourceURL?.appendingPathComponent(file)].compactMap { $0 }
-        guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }), let data = try? Data(contentsOf: url), var set = try? ProofImport.read(data, name: name) else { return nil }
-        if set.metadata["ILLUMINATION_NAME"] == nil, (set.metadata["INSTRUMENTATION"] ?? "").localizedCaseInsensitiveContains("D50") { set.metadata["ILLUMINATION_NAME"] = "D50" }
-        if set.metadata["OBSERVER_ANGLE"] == nil, (set.metadata["INSTRUMENTATION"] ?? "").localizedCaseInsensitiveContains("2 degree") { set.metadata["OBSERVER_ANGLE"] = "2" }
-        if set.metadata["FILTER"] == nil, (set.metadata["INSTRUMENTATION"] ?? "").localizedCaseInsensitiveContains("no polarisation") { set.metadata["FILTER"] = "M0" }
-        set.source = "Fogra characterisation data, unmodified · " + file
-        return set
+        try? ProofReferences.read(name)
     }
 
     /// The seven checks of ISO 12647-7:2016 for a control strip, from the reference and a measurement matched by ID.
@@ -119,6 +130,25 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             Check(name: "Neutral scale, average", clause: "Table 2", limit: 2.0, value: neutral.count >= 5 ? mean(neutral) : nil, unit: "ΔCh"),
         ]
         return (checks, pairs.count, reference.patches.count - pairs.count)
+    }
+
+    static func verify(reference: ProofDataset, measurement: ProofDataset, confirmed: Bool = false)
+        -> (checks: [Check], matched: Int, missing: Int, review: ProofConditionReview, verdict: Verdict) {
+        do { try reference.validate(); try measurement.validate() }
+        catch { return ([], 0, reference.patches.count, ProofConditionReview(), .notEvaluated(error.localizedDescription)) }
+        let review = ProofConditions.review(reference: reference, measurement: measurement, confirmed: confirmed)
+        let result = evaluate(reference: reference, measurement: measurement)
+        guard review.canEvaluate else {
+            let empty = result.checks.map { Check(name:$0.name, clause:$0.clause, limit:$0.limit, value:nil, unit:$0.unit) }
+            return (empty, result.matched, result.missing, review,
+                    review.needsConfirmation ? .needsConfirmation(review.detail) : .notEvaluated(review.detail))
+        }
+        let verdict: Verdict
+        if result.missing > 0 { verdict = .failed("\(result.missing) of \(reference.patches.count) patches have no measurement") }
+        else if let bad = result.checks.first(where: { $0.within == false }) { verdict = .failed(bad.name + " is outside " + String(format:"%.1f",bad.limit)) }
+        else if result.checks.contains(where: { $0.value == nil }) { verdict = .notEvaluated("A required check could not be made from this strip") }
+        else { verdict = .passed }
+        return (result.checks, result.matched, result.missing, review, verdict)
     }
 
     // MARK: Check A Colour
@@ -250,8 +280,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         var list: [Section]
         switch flow {
         case .menu: list = Self.routes.map { Section(name: $0.title, rows: $0.need.count + 4) }
-        case .verify: list = [Section(name: "Condition", rows: 6), Section(name: "Measure", rows: 8), Section(name: "Result", rows: 12), Section(name: "Label", rows: 15)]
-        case .check: list = [Section(name: "Master", rows: 9), Section(name: "Measure", rows: 9), Section(name: "Decide", rows: 10)]
+        case .verify: list = [Section(name: "Condition", rows: 6), Section(name: "Measure", rows: 12), Section(name: "Result", rows: 19), Section(name: "Label", rows: 23)]
+        case .check: list = [Section(name: "Master", rows: 9), Section(name: "Measure", rows: 9), Section(name: "Decide", rows: 15)]
         case .print: list = [Section(name: "Palette", rows: max(16 + Int(ceil(bloomHeight / u)), held.count + 5)), Section(name: "Note", rows: 7)]
         case .press: list = [Section(name: "Condition", rows: 5), Section(name: "Measure", rows: 6), Section(name: "OK Sheet", rows: 5)]
         }
@@ -271,7 +301,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         addSubview(profileSelector)
         NotificationCenter.default.addObserver(self,selector:#selector(savedProfilesChanged),name:.printProfilesChanged,object:nil)
         for (b, a) in [(importMeasurement, #selector(importMeasurementTapped)), (exportReport, #selector(exportReportTapped)), (saveLabel, #selector(saveLabelTapped)), (backToMenu, #selector(backTapped)),
-                       (approve, #selector(approveTapped)), (reject, #selector(rejectTapped)), (importReading, #selector(importReadingTapped)), (copyNote, #selector(copyNoteTapped))] {
+                       (approve, #selector(approveTapped)), (reject, #selector(rejectTapped)), (importReading, #selector(importReadingTapped)), (copyNote, #selector(copyNoteTapped)), (confirmConditions, #selector(confirmConditionsTapped))] {
             b.target = self; b.action = a; addSubview(b)
         }
         for (index, button) in startButtons.enumerated() { button.tag = index; button.target = self; button.action = #selector(startWorkflow(_:)); addSubview(button) }
@@ -331,7 +361,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         case .verify:
             conditionMenu = menu("Printing condition the proof simulates", value: condition.name, options: Self.conditions.map { $0.name }) { [weak self] value in
                 guard let self, let c = Self.conditions.first(where: { $0.name == value }) else { return }
-                self.condition = c; self.reference = Self.bundled(c.file); self.recompute(); self.needsDisplay = true
+                self.condition = c; self.reference = Self.bundled(c.file); self.proofConditionsConfirmed = false; self.recompute(); self.needsDisplay = true; self.needsLayout = true; self.onResize?()
             }
         case .check:
             if checkPalette == nil { checkPalette = palettes.first }
@@ -347,8 +377,8 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
                 menu("Tolerance", value: Self.toleranceName(checkTolerance), options: Self.tolerances.map { Self.toleranceName($0) }) { [weak self] value in
                     guard let self, let t = Self.tolerances.first(where: { Self.toleranceName($0) == value }) else { return }; self.checkTolerance = t; self.recompute(); self.needsDisplay = true
                 },
-                menu("Printing condition of the sample", value: checkCondition, options: PressProfiles.all.map(\.name)) { [weak self] value in self?.checkCondition = value; self?.needsDisplay = true },
-                menu("Measurement mode · Backing", value: checkMode, options: ["M0 · White backing", "M1 · White backing", "M2 · White backing", "M1 · Black backing"]) { [weak self] value in self?.checkMode = value; self?.needsDisplay = true },
+                menu("Printing condition of the sample", value: checkCondition, options: PressProfiles.all.map(\.name)) { [weak self] value in self?.checkCondition = value; self?.readingContextChanged() },
+                menu("Measurement mode · Backing", value: checkMode, options: ["M0 · White backing", "M1 · White backing", "M2 · White backing", "M1 · Black backing"]) { [weak self] value in self?.checkMode = value; self?.readingContextChanged() },
             ]
         case .print:
             if printPalette == nil { printPalette = palettes.first }
@@ -380,19 +410,28 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         switch flow {
         case .verify:
             if let reference, let measurement {
-                let r = Self.evaluate(reference: reference, measurement: measurement)
-                checks = r.checks; matched = r.matched; missing = r.missing
-                if missing > 0 { verdict = .failed("\(missing) of \(reference.patches.count) patches have no measurement") }
-                else if let bad = checks.first(where: { $0.within == false }) { verdict = .failed(bad.name + " is outside " + String(format: "%.1f", bad.limit)) }
-                else if checks.contains(where: { $0.value == nil }) { verdict = .failed("A check could not be made from this strip") }
-                else { verdict = .passed }
-            } else { checks = Self.evaluate(reference: reference ?? ProofDataset(name: "", source: "", sha256: "", metadata: [:], patches: []), measurement: ProofDataset(name: "", source: "", sha256: "", metadata: [:], patches: [])).checks; matched = 0; missing = reference?.patches.count ?? 0; verdict = .waiting }
+                let r = Self.verify(reference: reference, measurement: measurement, confirmed: proofConditionsConfirmed)
+                checks = r.checks; matched = r.matched; missing = r.missing; proofReview = r.review; verdict = r.verdict
+            } else {
+                checks = []; matched = 0; missing = reference?.patches.count ?? 0
+                proofReview = problem.isEmpty ? ProofConditionReview() : ProofConditionReview(conflicts:[problem])
+                verdict = measurement == nil && problem.isEmpty ? .waiting : .notEvaluated(problem.isEmpty ? "Bundled reference unavailable" : problem)
+            }
             label.condition = condition.short
             label.job = measurement.map { ($0.name as NSString).deletingPathExtension } ?? "No measurement yet"
-            label.checks = checks; label.verdict = verdict; label.measurement = measurement; label.needsDisplay = true
+            label.checks = checks; label.verdict = verdict; label.measurement = measurement; label.conditionReview = proofReview.record; label.needsDisplay = true
         case .check:
-            sample = [sampleL, sampleA, sampleB].map { Double($0.stringValue.replacingOccurrences(of: ",", with: ".")) }.reduce(into: [Double]()) { if let d = $1 { $0.append(d) } }.count == 3
-                ? LabD50(l: Double(sampleL.stringValue)!, a: Double(sampleA.stringValue.replacingOccurrences(of: ",", with: "."))!, b: Double(sampleB.stringValue.replacingOccurrences(of: ",", with: "."))!) : nil
+            decision = nil
+            let numbers = [sampleL, sampleA, sampleB].compactMap { Double($0.stringValue.replacingOccurrences(of:",",with:".")) }
+            sample = numbers.count == 3 && ProofPatch(id:"Sample",name:"Sample",l:numbers[0],a:numbers[1],b:numbers[2]).valid
+                ? LabD50(l:numbers[0],a:numbers[1],b:numbers[2]) : nil
+            let mode = checkMode.components(separatedBy:" · ")
+            let expected = ProofDataset(name:"Comparison",source:"Selected conditions",sha256:"",metadata:[
+                "ILLUMINATION_NAME":"D50", "OBSERVER_ANGLE":"2", "FILTER":mode.first ?? "M1",
+                "MEASUREMENT_BACKING":mode.last ?? "White backing"], patches:[])
+            let reading = importedReading ?? ProofDataset(name:"Typed reading",source:"Manual entry",sha256:"",metadata:[:],patches:[])
+            readingReview = ProofConditions.review(reference:expected,measurement:reading,confirmed:readingConditionsConfirmed)
+
         case .print:
             held = []
             guard let p = printPalette else { return }
@@ -418,7 +457,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         for m in [conditionMenu].compactMap({ $0 }) + checkMenus + printMenus {
             for c in m.constraints where c.firstAttribute == .width { c.constant = available }
         }
-        for b in [importMeasurement, exportReport, saveLabel, backToMenu, approve, reject, importReading, copyNote] { b.isHidden = true }
+        for b in [importMeasurement, exportReport, saveLabel, backToMenu, approve, reject, importReading, copyNote, confirmConditions] { b.isHidden = true }
         for f in [sampleL, sampleA, sampleB] { f.isHidden = true }
         for m in checkMenus + printMenus { m.isHidden = true }
         conditionMenu?.isHidden = true
@@ -438,20 +477,26 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         case .verify:
             if let m = conditionMenu { dropdown(m, baseline: rowBaseline(0, 0)) }
             place(importMeasurement, x: x, baseline: rowBaseline(1, 0))
-            place(exportReport, x: x, baseline: rowBaseline(2, 11))
+            if proofReview.needsConfirmation { place(confirmConditions, x:x, baseline:rowBaseline(1,11)) }
+            confirmConditions.toolTip = "Confirm only if these missing conditions are known: " + proofReview.detail
+            place(exportReport, x: x, baseline: rowBaseline(2, 18))
             label.isHidden = false
-            label.frame = NSRect(x: x, y: rowBaseline(3, 0) - Self.line, width: min(available, 520), height: 12 * u)
-            place(saveLabel, x: x, baseline: rowBaseline(3, 13))
-            place(backToMenu, x: saveLabel.frame.maxX + 24, baseline: rowBaseline(3, 13))
+            label.frame = NSRect(x: x, y: rowBaseline(3, 0) - Self.line, width: min(available, 520), height: 20 * u)
+            place(saveLabel, x: x, baseline: rowBaseline(3, 21))
+            place(backToMenu, x: saveLabel.frame.maxX + 24, baseline: rowBaseline(3, 21))
         case .check:
             for (i, m) in checkMenus.enumerated() where i < 3 { dropdown(m, baseline: rowBaseline(0, i * 2)) }
             if checkMenus.count >= 5 { dropdown(checkMenus[3], baseline: rowBaseline(1, 0)); dropdown(checkMenus[4], baseline: rowBaseline(1, 2)) }
             let third = (available - 32) / 3
             for (i, f) in [sampleL, sampleA, sampleB].enumerated() { f.isHidden = false; f.frame = NSRect(x: x + CGFloat(i) * (third + 16), y: rowBaseline(1, 5) - 17, width: third, height: 24) }
             place(importReading, x: x, baseline: rowBaseline(1, 7))
-            place(approve, x: x, baseline: rowBaseline(2, 7))
-            place(reject, x: approve.frame.maxX + 16, baseline: rowBaseline(2, 7))
-            place(backToMenu, x: x, baseline: rowBaseline(2, 9))
+            if sample != nil && readingReview.needsConfirmation { place(confirmConditions,x:x,baseline:rowBaseline(2,10)) }
+            confirmConditions.toolTip = "Confirm only if these missing conditions are known: " + readingReview.detail
+            approve.isEnabled = sample != nil && masterLab != nil && readingReview.canEvaluate
+            reject.isEnabled = approve.isEnabled
+            place(approve, x: x, baseline: rowBaseline(2, 11))
+            place(reject, x: approve.frame.maxX + 16, baseline: rowBaseline(2, 11))
+            place(backToMenu, x: x, baseline: rowBaseline(2, 13))
         case .print:
             profileSelector.frame=NSRect(x:0,y:rowBaseline(0,2)-11,width:max(140,x-Design.App.areaGutter),height:56)
 
@@ -549,33 +594,34 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         row("Measurement mode", m.map { $0.metadata["FILTER"] ?? $0.metadata["MEASUREMENT_CONDITION"] ?? "Not declared" } ?? "—", baseline: rowBaseline(1, 5))
         row("Backing", m.map { $0.metadata["MEASUREMENT_BACKING"] ?? "Not declared" } ?? "—", baseline: rowBaseline(1, 6))
         row("Instrument", m.map { $0.metadata["INSTRUMENTATION"] ?? $0.metadata["ORIGINATOR"] ?? "Not declared" } ?? "—", baseline: rowBaseline(1, 7))
+        row("Condition check", m == nil && problem.isEmpty ? "—" : proofReview.status, baseline:rowBaseline(1,8), strong:true)
+        if m != nil || !problem.isEmpty { SettingsSheet.paragraph(proofReview.detail.isEmpty ? "Declared conditions match the reference." : proofReview.detail,
+            x:x, firstBaseline:rowBaseline(1,9), width:w-x, height:2*u, colour:Design.quiet) }
         // 03 Result: the verdict in a one-line box, two figures, then the seven checks with their clauses.
         SettingsSheet.section(3, "Result", guide: s[2].guide, contentX: x, width: w)
-        let verdictWords: String, verdictColour: NSColor
-        switch verdict {
-        case .waiting: verdictWords = "Waiting for a measurement"; verdictColour = Design.quiet
-        case .passed: verdictWords = "Passes ISO 12647-7"; verdictColour = Design.ink
-        case .failed: verdictWords = "Does not pass ISO 12647-7"; verdictColour = Design.ink
-        }
-        text(verdictWords, x: x, baseline: rowBaseline(2, 0), style: .headline, colour: verdictColour)
-        if case .failed(let why) = verdict { text(why, x: x, baseline: rowBaseline(2, 1), style: .caption, colour: Design.quiet) }
-        else { text(m == nil ? "Import the measurement under 02 to see the seven checks." : "All seven checks are within the standard's tolerances; the label carries the figures as they stand.", x: x, baseline: rowBaseline(2, 1), style: .caption, colour: Design.quiet) }
+        text(verdict.title, x:x, baseline:rowBaseline(2,0), style:.headline)
+        let explanation = verdict.reason.isEmpty ? (m == nil ? "Import the measurement under 02 to see the seven checks." : proofReview.status) : (m == nil || proofReview.canEvaluate ? verdict.reason : "Resolve the conditions shown under 02 before evaluating.")
+        text(explanation, x:x, baseline:rowBaseline(2,1), style:.caption, colour:Design.quiet)
         // The check over two columns, the tolerance with its clause on the third, the measured figure and its verdict on the fourth.
         let tolX = column(at: 0.5), measX = column(at: 0.75)
         let head = rowBaseline(2, 2)
         text("Check", x: x, baseline: head, style: .caption, colour: Design.quiet)
-        text("Tolerance · Clause", x: tolX, baseline: head, style: .caption, colour: Design.quiet)
+        text("Limit", x: tolX, baseline: head, style: .caption, colour: Design.quiet)
         text("Measured", x: measX, baseline: head, style: .caption, colour: Design.quiet)
         hairline(x: x, y: head + u - Self.line - 1, width: w - x, Design.rule)
         for (i, c) in checks.enumerated() {
-            let b = rowBaseline(2, 3 + i)
-            text(c.name + " · " + c.unit, x: x, baseline: b, width: tolX - x - 16)
-            text("≤ " + number(c.limit) + " · " + c.clause, x: tolX, baseline: b, width: measX - tolX - 16)
-            let verdictWord = c.within.map { $0 ? "Within" : "Outside" } ?? (m == nil ? "" : "Not in strip")
-            text(number(c.value, 2) + (verdictWord.isEmpty ? "" : " · " + verdictWord), x: measX, baseline: b, style: c.within == false ? .bodyStrong : .body, colour: c.value == nil ? Design.quiet : Design.ink, width: w - measX)
-            hairline(x: x, y: b + u - Self.line - 1, width: w - x, Design.rule)
+            let b = rowBaseline(2, 3 + i * 2)
+            SettingsSheet.paragraph(c.name + " · " + c.unit,x:x,firstBaseline:b,width:tolX-x-16,height:2*u-4,colour:Design.ink)
+            text("≤ " + number(c.limit), x:tolX, baseline:b, width:measX-tolX-16)
+            text(c.clause,x:tolX,baseline:b+u,style:.caption,colour:Design.quiet,width:measX-tolX-16)
+            text(number(c.value,2), x:measX, baseline:b, style:c.within == false ? .bodyStrong : .body,
+                 colour:c.value == nil ? Design.quiet : Design.ink, width:max(0,w-measX-24))
+            if let within = c.within {
+                (within ? ResultGlyph.pass : ResultGlyph.warning).draw(in:NSRect(x:w-16,y:b-12,width:14,height:14))
+            }
+            hairline(x: x, y: b + 2*u - Self.line - 1, width: w - x, Design.rule)
         }
-        text("Clauses of ISO 12647-7:2016, verified against its text on 12 Oct 2026.", x: x, baseline: rowBaseline(2, 10), style: .caption, colour: Design.quiet)
+        text("Check limits: ISO 12647-7:2016.", x: x, baseline: rowBaseline(2, 17), style: .caption, colour: Design.quiet)
         // 04 Label
         SettingsSheet.section(4, "Label", guide: s[3].guide, contentX: x, width: w)
         lead("The label is the artefact. It names the standard, the condition, the figures, the instrument and the file, and it is stuck to the proof. The same record goes in the report.", section: 3)
@@ -594,7 +640,7 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
             text(String(format: "%.2f · %.2f · %.2f", lab.l, lab.a, lab.b), x: box.maxX + 16, baseline: rowBaseline(0, 7), style: .bodyStrong)
         } else { text("No colour chosen. The catalogue needs a palette with at least one colour.", x: x, baseline: rowBaseline(0, 6), style: .caption, colour: Design.quiet) }
         SettingsSheet.section(2, "Measure", guide: s[1].guide, contentX: x, width: w)
-        lead("Measure the printed sample, or bring in the supplier's reading. The mode and backing are recorded with the value, so an M0 reading is never compared to an M1 master without saying so.", section: 1)
+        lead("Measure the printed sample, or import one reading. Declared conditions must match the selected comparison; missing declarations need confirmation before a decision.", section: 1)
         text("Sample · L* a* b* · type the reading, or import a one-patch CGATS file", x: x, baseline: rowBaseline(1, 4), style: .caption, colour: Design.quiet)
         hairline(x: x, y: rowBaseline(1, 5) + 6, width: w - x, Design.rule)
         if let m = masterLab {
@@ -607,17 +653,27 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         }
         SettingsSheet.section(3, "Decide", guide: s[2].guide, contentX: x, width: w)
         lead("The difference is the standard's CIEDE2000, master first. The decision is a person's; the page records it, it does not make it.", section: 2)
-        if let m = masterLab, let sm = sample {
+        if sample != nil && !readingReview.canEvaluate {
+            text(readingReview.status,x:x,baseline:rowBaseline(2,0),style:.headline)
+            SettingsSheet.paragraph(readingReview.detail,x:x,firstBaseline:rowBaseline(2,1),width:w-x,height:2*u,colour:Design.quiet)
+        } else if let m = masterLab, let sm = sample {
             let d = deltaE2000(m, sm), dl = sm.l - m.l, da = sm.a - m.a, db = sm.b - m.b
             text(d <= checkTolerance ? "Within the brand tolerance" : "Outside the brand tolerance", x: x, baseline: rowBaseline(2, 0), style: .headline)
             text(String(format: "ΔE00 %.2f · tolerance %.1f", d, checkTolerance), x: x, baseline: rowBaseline(2, 1), style: .bodyStrong)
             func direction(_ v: Double, _ up: String, _ down: String, _ same: String) -> String { abs(v) < 0.05 ? same : v > 0 ? up : down }
             text([direction(dl, "lighter", "darker", "same lightness"), direction(da, "redder", "greener", "same a*"), direction(db, "yellower", "bluer", "same b*")].joined(separator: " · ") + String(format: "   ΔL %.2f · Δa %.2f · Δb %.2f", dl, da, db), x: x, baseline: rowBaseline(2, 2), style: .caption, colour: Design.quiet)
+        } else if !problem.isEmpty {
+            text("Reading Not Loaded",x:x,baseline:rowBaseline(2,0),style:.headline)
+            SettingsSheet.paragraph(problem,x:x,firstBaseline:rowBaseline(2,1),width:w-x,height:2*u,colour:Design.quiet)
         } else { text("Type or import a sample under 02 to see the difference.", x: x, baseline: rowBaseline(2, 0), style: .caption, colour: Design.quiet) }
         row("Condition", checkCondition, baseline: rowBaseline(2, 4))
         row("Mode · Backing", checkMode, baseline: rowBaseline(2, 5))
         row("Decision", decision ?? "Not yet decided", baseline: rowBaseline(2, 6), quiet: decision == nil, strong: decision != nil)
-        text("Approve copies the record; the swatch keeps it once the approvals model is built.", x: x, baseline: rowBaseline(2, 8), style: .caption, colour: Design.quiet)
+        if sample != nil {
+            text(readingReview.status,x:x,baseline:rowBaseline(2,8),style:.caption,colour:Design.quiet)
+            text(readingReview.assumptions.isEmpty ? (importedReading?.name ?? "Typed reading · Conditions require confirmation") : "Missing declarations confirmed by user; original file unchanged.",x:x,baseline:rowBaseline(2,9),style:.caption,colour:Design.quiet)
+        }
+        text("Approve copies the record; the swatch keeps it once the approvals model is built.", x: x, baseline: rowBaseline(2, 12), style: .caption, colour: Design.quiet)
     }
 
     private func drawPrint(_ s: [Section]) {
@@ -707,28 +763,29 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
     }
     @objc private func importMeasurementTapped() {
         guard let url = open("Import The Measured Wedge", "CGATS or CSV: SAMPLE_ID, LAB_L, LAB_A, LAB_B. Patches match the reference by ID.") else { return }
-        do {
-            let set = try read(url)
-            if let i = set.metadata["ILLUMINATION_NAME"], i.uppercased() != "D50" { throw ProofError.invalid("\(set.name) declares \(i). The reference is D50 / 2°; measure again or convert before import.") }
-            if let o = set.metadata["OBSERVER_ANGLE"], !["2", "2.0"].contains(o) { throw ProofError.invalid("\(set.name) declares a \(o)° observer. The reference is D50 / 2°.") }
-            measurement = set; problem = ""
-        } catch { problem = error.localizedDescription }
+        loadMeasurement(from:url)
+    }
+    func loadMeasurement(from url:URL) {
+        measurement = nil; proofConditionsConfirmed = false
+        do { measurement = try read(url); problem = "" }
+        catch { problem = error.localizedDescription }
         recompute(); needsDisplay = true; needsLayout = true; onResize?()
     }
+
     @objc private func exportReportTapped() {
         guard let reference, let measurement else { problem = "Import a measurement first."; needsDisplay = true; return }
         var lines = [["Colorgain proof report", DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .short)],
-                     ["Standard", "ISO 12647-7:2016", "All differences CIEDE2000 (4.1)"],
+                     ["Standard", "ISO 12647-7:2016", "Units stated per check"],
                      ["Condition", condition.name], ["Reference", reference.source, "SHA-256", reference.sha256],
-                     ["Measurement", measurement.name, "SHA-256", measurement.sha256], ["Measurement conditions", measurement.conditions],
-                     ["Verdict", { switch verdict { case .passed: return "Passed"; case .failed(let why): return "Failed · " + why; case .waiting: return "Waiting" } }()],
+                     ["Measurement", measurement.name, "SHA-256", measurement.sha256], ["Measurement conditions", measurement.conditions], ["Condition validation",proofReview.record],
+                     ["Verdict", verdict.record],
                      ["Check", "Clause", "Unit", "Tolerance", "Measured", "Result"]]
-        lines += checks.map { [$0.name, $0.clause, $0.unit, number($0.limit), number($0.value, 3), $0.within.map { $0 ? "Within" : "Outside" } ?? "Not in strip"] }
+        lines += checks.map { [$0.name, $0.clause, $0.unit, number($0.limit), number($0.value, 3), $0.within.map { $0 ? "Within" : "Outside" } ?? (proofReview.canEvaluate ? "Not in strip" : "Not evaluated")] }
         lines.append(["ID", "Name", "Reference L", "a", "b", "Measured L", "a", "b", "ΔE00"])
         let measured = Dictionary(measurement.patches.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for r in reference.patches {
             let m = measured[r.id]
-            lines.append([r.id, r.name, number(r.l, 2), number(r.a, 2), number(r.b, 2), number(m?.l, 2), number(m?.a, 2), number(m?.b, 2), number(m.map { deltaE2000(r.lab, $0.lab) }, 3)])
+            lines.append([r.id, r.name, String(r.l), String(r.a), String(r.b), m.map { String($0.l) } ?? "", m.map { String($0.a) } ?? "", m.map { String($0.b) } ?? "", number(proofReview.canEvaluate ? m.map { deltaE2000(r.lab, $0.lab) } : nil, 6)])
         }
         func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         let csv = lines.map { $0.map(q).joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
@@ -746,30 +803,49 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
         do { try data.write(to: url, options: .atomic); problem = "Saved " + url.lastPathComponent } catch { problem = error.localizedDescription }
         needsDisplay = true
     }
+    private func readingContextChanged() {
+        readingConditionsConfirmed = false; decision = nil; problem = ""
+        recompute(); needsDisplay = true; needsLayout = true; onResize?()
+    }
     func controlTextDidEndEditing(_ obj: Notification) { recompute(); needsDisplay = true }
-    func controlTextDidChange(_ obj: Notification) { recompute(); needsDisplay = true }
+    func controlTextDidChange(_ obj: Notification) {
+        importedReading = nil; readingContextChanged()
+    }
+    @objc private func confirmConditionsTapped() {
+        if flow == .verify && proofReview.needsConfirmation { proofConditionsConfirmed = true }
+        if flow == .check && readingReview.needsConfirmation { readingConditionsConfirmed = true }
+        recompute(); needsDisplay = true; needsLayout = true; onResize?()
+    }
     @objc private func importReadingTapped() {
-        guard let url = open("Import A Reading", "A CGATS or CSV file; the first patch is the sample.") else { return }
+        guard let url = open("Import A Reading", "A one-patch CGATS or CSV file. Declared conditions are checked before comparison.") else { return }
+        importedReading = nil; readingConditionsConfirmed = false; decision = nil
+        [sampleL,sampleA,sampleB].forEach { $0.stringValue = "" }
         do {
             let set = try read(url)
-            guard let first = set.patches.first else { throw ProofError.invalid("The file holds no patch.") }
-            sampleL.stringValue = String(format: "%.2f", first.l); sampleA.stringValue = String(format: "%.2f", first.a); sampleB.stringValue = String(format: "%.2f", first.b)
-            if let f = set.metadata["FILTER"] { checkMode = f + " · " + (set.metadata["MEASUREMENT_BACKING"].map { $0.capitalized + " backing" } ?? "Backing not declared"); checkMenus.last?.displayValue(checkMode) }
+            guard set.patches.count == 1, let first = set.patches.first else { throw ProofError.invalid("Import exactly one patch for Check A Colour; select the intended reading in your measurement software.") }
+            importedReading = set
+            sampleL.stringValue = String(first.l); sampleA.stringValue = String(first.a); sampleB.stringValue = String(first.b)
             problem = ""
         } catch { problem = error.localizedDescription }
-        recompute(); needsDisplay = true
+        recompute(); needsDisplay = true; needsLayout = true; onResize?()
     }
     private var checkRecord: String? {
         guard let p = checkPalette, let hex = checkHex, let m = masterLab, let sm = sample else { return nil }
         let d = deltaE2000(m, sm)
-        return [decision ?? "Undecided", library.library.name(of: hex, in: p.id) + " · " + p.name,
-                String(format: "Master L %.2f a %.2f b %.2f · Sample L %.2f a %.2f b %.2f · ΔE00 %.2f · tolerance %.1f", m.l, m.a, m.b, sm.l, sm.a, sm.b, d, checkTolerance),
-                checkCondition + " · " + checkMode, DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .short)].joined(separator: "\n")
+        var lines = [decision ?? "Undecided", library.library.name(of:hex,in:p.id) + " · " + p.name]
+        lines.append(String(format:"Master L %.2f a %.2f b %.2f · Sample L %.2f a %.2f b %.2f · ΔE00 %.2f · tolerance %.1f",m.l,m.a,m.b,sm.l,sm.a,sm.b,d,checkTolerance))
+        lines.append(checkCondition + " · " + checkMode)
+        lines.append(readingReview.record)
+        if let reading = importedReading { lines.append("Measurement " + reading.name + " · SHA-256 " + reading.sha256 + " · " + reading.conditions) }
+        else { lines.append("Manually entered reading") }
+        lines.append("Exact sample Lab: " + [sm.l,sm.a,sm.b].map { String($0) }.joined(separator:", "))
+        lines.append(DateFormatter.localizedString(from:Date(),dateStyle:.medium,timeStyle:.short))
+        return lines.joined(separator:"\n")
     }
     @objc private func approveTapped() { decide("Approved") }
     @objc private func rejectTapped() { decide("Rejected") }
     private func decide(_ word: String) {
-        guard sample != nil, masterLab != nil else { problem = "Type or import a sample first."; needsDisplay = true; return }
+        guard sample != nil, masterLab != nil, readingReview.canEvaluate else { problem = "Resolve the measurement conditions before deciding."; needsDisplay = true; return }
         decision = word
         if let record = checkRecord { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(record, forType: .string); library.flash(word + " · record copied") }
         needsDisplay = true
@@ -785,13 +861,14 @@ final class PrePressPage: NSView, PageSection, NSTextFieldDelegate {
 final class ProofLabelView: NSView {
     var condition = "", job = "", checks: [PrePressPage.Check] = [], verdict: PrePressPage.Verdict = .waiting
     var measurement: ProofDataset?
+    var conditionReview = ""
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         fill(bounds, Design.card)
         Design.ink.setStroke(); NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).stroke()
         let x: CGFloat = 20, w = bounds.width - 40
-        let passed: Bool? = { switch verdict { case .passed: return true; case .failed: return false; case .waiting: return nil } }()
-        Design.attributed(passed == true ? "Proof verified" : passed == false ? "Proof not verified" : "Proof label", .label).draw(x: x, baseline: 30)
+        let passed: Bool? = { switch verdict { case .passed: return true; case .failed: return false; case .waiting, .notEvaluated, .needsConfirmation: return nil } }()
+        Design.attributed(passed == true ? "Proof verified" : passed == false ? "Proof not verified" : verdict.title, .label).draw(x: x, baseline: 30)
         let std = Design.attributed("ISO 12647-7:2016", .caption, colour: Design.quiet)
         std.draw(x: x + w - std.size().width, baseline: 30)
         hairline(x: x, y: 40, width: w, Design.ink)
@@ -799,20 +876,23 @@ final class ProofLabelView: NSView {
         func value(_ name: String) -> String { checks.first { $0.name == name }.flatMap { $0.value }.map { String(format: "%.1f", $0) } ?? "—" }
         let cells: [(String, String)] = [
             ("Simulates", condition),
-            ("Result", passed == true ? "Passed · 7 of 7 checks" : passed == false ? "Failed" : "No measurement"),
+            ("Result", verdict.title),
             ("Average · Maximum ΔE00", value("All patches, average") + " · " + value("All patches, maximum")),
             ("Paper · Solids · CMY hue ΔH", value("Paper white") + " · " + value("Solids C, M, Y, K") + " · " + value("C, M, Y hue")),
             ("Grey ΔCh max · avg", value("Neutral scale, maximum") + " · " + value("Neutral scale, average")),
             ("Measured", measurement?.conditions ?? "—"),
             ("Measurement file", measurement?.name ?? "—"),
-            ("Software", "Colorgain 3.0 · Fogra data, unmodified"),
+            ("Condition check", conditionReview.components(separatedBy:" · ").first ?? "—"),
         ]
         let colW = (w - 16) / 2
         for (i, cell) in cells.enumerated() {
-            let cx = x + CGFloat(i % 2) * (colW + 16), top: CGFloat = 104 + CGFloat(i / 2) * 44
+            let cx = x + CGFloat(i % 2) * (colW + 16), top: CGFloat = 104 + CGFloat(i / 2) * 58
             Design.attributed(cell.0, .caption, colour: Design.quiet).draw(x: cx, baseline: top, width: colW)
-            Design.attributed(cell.1, .bodyStrong).draw(x: cx, baseline: top + 18, width: colW)
+            SettingsSheet.paragraph(cell.1,x:cx,firstBaseline:top+18,width:colW,height:36,colour:Design.ink)
         }
+        Design.attributed("Validation details", .caption, colour:Design.quiet).draw(x:x,baseline:330,width:w)
+        SettingsSheet.paragraph(verdict.reason.isEmpty ? conditionReview : verdict.reason,
+            x:x,firstBaseline:350,width:w,height:5*Design.App.unit,colour:Design.ink)
         let bar = NSRect(x: x, y: bounds.height - 30, width: w, height: 10)
         hairline(x: x, y: bar.minY - 10, width: w, Design.rule)
         let inks = [Design.hex("#00A0E3"), Design.hex("#E5007E"), Design.hex("#FFEF00"), Design.ink, Design.hex("#7C7C7C"), Design.card]

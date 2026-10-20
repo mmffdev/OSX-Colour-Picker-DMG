@@ -27,7 +27,7 @@ targets:
     sources:
       - path: ..
         name: Sources
-        includes: ["*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
+        includes: ["*.swift", "UIPrimitives/**/*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
         excludes: ["Package.swift", "project.yml", "Colorgain.xcodeproj", "Colorgain Store.xcodeproj", "Colorgain Style Sheet.html", "appstore", "helper", "vendor", "tools", "Help/Resources", "design", "assets", "icons", "installer", "release", ".build", ".swiftpm", "Claude outputs"]
       - path: ../ProofingResources
         name: Proofing Reference Data
@@ -47,7 +47,7 @@ targets:
         includes: ["*.icns"]
     settings:
       base:
-        PRODUCT_NAME: MMFFDev Colour 3
+        PRODUCT_NAME: Colorgain
         EXECUTABLE_NAME: MMFFDevColour3
         PRODUCT_BUNDLE_IDENTIFIER: com.mmffdev.mmffdevcolour3
         GENERATE_INFOPLIST_FILE: NO
@@ -94,6 +94,9 @@ targets:
               /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
               /usr/libexec/PlistBuddy -c "Delete :ColourBuildCommit" "$plist" 2>/dev/null || true
               /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$plist"
+              built="$(date '+%Y-%m-%d %H:%M %Z')"
+              /usr/libexec/PlistBuddy -c "Delete :ColourBuildDate" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :ColourBuildDate string $built" "$plist"
           fi
 schemes:
   # The default: Cmd+R opens the app as a brand-new user, in a throwaway home wiped each time, so the

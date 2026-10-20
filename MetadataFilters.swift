@@ -36,6 +36,11 @@ struct MetadataFilterField: Equatable, Identifiable {
         .init(id:"exported",title:"Exported Files",group:"Review",keys:["Colorgain.Exported"]),
         .init(id:"label",title:"Label",group:"Review",keys:["XMP.Label"]),
         .init(id:"keyword",title:"Keyword",group:"Review",keys:["IPTC.Keywords","XMP.Subject","XMP.Keywords"]),
+        .init(id:"assetTitle",title:"Asset Title",group:"Asset",keys:["XMP.Title"]),
+        .init(id:"assetDescription",title:"Description",group:"Asset",keys:["XMP.Description"]),
+        .init(id:"printProcess",title:"Print Process",group:"Print & Design",keys:["Colorgain.PrintProcess"]),
+        .init(id:"colourStandard",title:"Colour Standard",group:"Print & Design",keys:["Colorgain.ColourStandard"]),
+        .init(id:"subjectCode",title:"Subject Code",group:"Asset",keys:["IPTC.SubjectCode"]),
         .init(id:"editState",title:"Edit State",group:"Review",keys:["Colorgain.EditState","XMP.History"]),
         .init(id:"camera",title:"Camera",group:"Camera",keys:["EXIF.Make","EXIF.Model","TIFF.Make","TIFF.Model"]),
         .init(id:"cameraSerial",title:"Camera Serial Number",group:"Camera",keys:["EXIF.BodySerialNumber","MakerNote.SerialNumber"]),
@@ -109,7 +114,9 @@ private extension Data {
     var jsonObject: Any { (try? JSONSerialization.jsonObject(with:self,options:[.fragmentsAllowed])) ?? NSNull() }
 }
 
-private final class MetadataFilterColumnView:NSView {
+private final class MetadataFilterColumnView:ClickCursorView {
+    override var handCursorRects:[NSRect]{[NSRect(x:0,y:30,width:bounds.width,height:min(max(0,bounds.height-30),CGFloat(max(0,options.count-offset))*rowHeight))]}
+
     let fieldControl=WorkspaceMenuControl()
     var column=MetadataFilterColumn(field:"captureDate"){didSet{fieldControl.title=MetadataFilterField.all.first{$0.id==column.field}?.title ?? column.field;needsDisplay=true}}
     var options:[(String,Int)]=[] {didSet{offset=min(offset,max(0,options.count-1));needsDisplay=true}}

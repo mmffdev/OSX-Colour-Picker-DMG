@@ -33,7 +33,8 @@ extension LibraryController {
 
 // ---------- The wheel ----------
 
-final class WheelView: NSView {
+final class WheelView: ClickCursorView {
+    override var dragCursorRects:[NSRect]{state.nodes.map{let p=place($0);return NSRect(x:p.x-nodeRadius-5,y:p.y-nodeRadius-5,width:(nodeRadius+5)*2,height:(nodeRadius+5)*2)}}
     var state = LabState(base: LabNode(h: 0, s: 0, v: 0.5)) { didSet { needsDisplay = true } }
     /// The colour the lightness slider is working on; ringed when colours move on their own.
     var selected = 0 { didSet { needsDisplay = true } }
@@ -193,7 +194,7 @@ final class WheelView: NSView {
 // ---------- Rule buttons ----------
 
 /// A small diagram of the rule, drawn from the rule's own arrangement.
-final class RuleButton: NSButton {
+final class RuleButton: ClickCursorButton {
     let rule: LabRule
     var chosen = false { didSet { needsDisplay = true } }
 
@@ -259,7 +260,8 @@ final class RuleButton: NSButton {
 // ---------- The result strip ----------
 
 /// One colour in the strip: click copies it; its controls appear under the pointer.
-final class StripColumn: NSView {
+final class StripColumn: ClickCursorView {
+    override var handCursorRects:[NSRect]{onCopy == nil ? []:[bounds]}
     var onCopy: (() -> Void)?
     var onBase: (() -> Void)?
     var onLock: (() -> Void)?
@@ -524,7 +526,7 @@ final class LabViewController: NSViewController {
     private let wheel = WheelView()
     private var rules: [RuleButton] = []
     private let dim = NSImageView(), bright = NSImageView()
-    private let slider = NSSlider(value: 1, minValue: 0.08, maxValue: 1, target: nil, action: nil)
+    private let slider = ClickCursorSlider(value: 1, minValue: 0.08, maxValue: 1, target: nil, action: nil)
     private let why = NSTextField(wrappingLabelWithString: "")
     private let strip = StripView()
     private let saveBar: SaveBar

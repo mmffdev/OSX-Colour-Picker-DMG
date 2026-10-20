@@ -30,12 +30,21 @@ extension Handler_File_Manager {
                 try copyVerified(child, to: destination.appendingPathComponent(child.lastPathComponent), depth: depth + 1)
             }
         } else {
-            guard (values.fileSize ?? 0) <= 256 * 1024 * 1024 else { throw failure("This file exceeds the 256 MB managed-copy limit. Use Finder to relocate it, then select its new location: " + source.lastPathComponent) }
             let revision = try FileRevision.read(source)
-            let bytes = try filesystem.read(source)
-            guard Sharing.sha256(bytes) == revision.digest else { throw failure("The source changed while it was being copied.") }
             try createDirectory(destination.deletingLastPathComponent())
-            try publishRaw(bytes, to: destination, createOnly: true)
+            if (values.fileSize ?? 0) > 256 * 1024 * 1024 {
+                guard !FileManager.default.fileExists(atPath:destination.path) else { throw failure("The destination already exists.") }
+                let temporary=destination.deletingLastPathComponent().appendingPathComponent(".colorgain-copy-"+UUID().uuidString)
+                defer { try? FileManager.default.removeItem(at:temporary) }
+                try FileManager.default.copyItem(at:source,to:temporary)
+                guard try FileRevision.read(temporary) == revision,try FileRevision.read(source) == revision else { throw failure("The source changed while it was being copied.") }
+                try FileOperationTransaction.current?.prepare(destination,after:revision.digest)
+                try FileManager.default.moveItem(at:temporary,to:destination)
+            } else {
+                let bytes = try filesystem.read(source)
+                guard Sharing.sha256(bytes) == revision.digest else { throw failure("The source changed while it was being copied.") }
+                try publishRaw(bytes, to: destination, createOnly: true)
+            }
             guard try FileRevision.read(destination) == revision, try FileRevision.read(source) == revision else { throw failure("The copied file could not be verified. The original is retained.") }
         }
     }

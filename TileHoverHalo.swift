@@ -38,7 +38,7 @@ final class HaloDestinationGallery: NSObject, NSSearchFieldDelegate {
         var colours:[NSColor]=[]
         override func draw(_ rect:NSRect){SwissDropdown.drawSpectrum(colours,in:bounds)}
     }
-    private final class Tile:NSButton {
+    private final class Tile:ClickCursorButton {
         let item:HaloGalleryItem
         var run:(()->Void)?
         var picked=false {didSet{needsDisplay=true}}

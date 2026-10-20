@@ -1,6 +1,8 @@
 import AppKit
 import UniformTypeIdentifiers
 
+extension Notification.Name{static let openProfileRail=Notification.Name("Colorgain.OpenProfileRail")}
+
 /// Both the PrePress controls and palette header consume the same .coldata profile list.
 final class PrintProfileSelector:NSView,Overlay {
     var dismissOnOutsideClick:Bool{true}
@@ -10,7 +12,7 @@ final class PrintProfileSelector:NSView,Overlay {
         return event.window === window && bounds.contains(convert(event.locationInWindow,from:nil))
     }
     var opensUpward=false { didSet { button.opensUpward=opensUpward;button.needsDisplay=true } }
-    var preferredControlWidth:CGFloat { ceil(Design.attributed(button.title,.body).size().width)+48 }
+    var preferredControlWidth:CGFloat { ceil(Design.attributed(button.title,.body).size().width)+(compact ? 20:48) }
     let compact:Bool
     private let button=PrintProfileValueButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -27,23 +29,14 @@ final class PrintProfileSelector:NSView,Overlay {
     @objc private func open(){
         if dropped != nil {dismissOverlay();return}
         guard let window else{return};do{document=try SavedPrintProfiles.load()}catch{NSApp.presentError(error);return};dismissOverlay()
-        let actions=["Save Profile…","Edit Profile…","Duplicate Profile","Remove Profile…","Import Profile…","Export Profile…"]
-        let labels=actions+["#Saved Profiles","Current Settings"]+document.profiles.map{$0.name}
-        let profiles=document.profiles,chosen=profiles.first{$0.id==document.selected}?.name ?? "Current Settings"
-        let panel=SwissDropdown.MenuPanel(items:labels,chosen:chosen,width:max(260,bounds.width)){[weak self] i in
+        let profiles=document.profiles,labels=["Current Settings"]+document.profiles.map{$0.name}+[SwissDropdown.MenuPanel.divider,"Edit Profiles…"]
+        let chosen=profiles.first{$0.id==document.selected}?.name ?? "Current Settings"
+        let panel=SwissDropdown.MenuPanel(items:labels,chosen:chosen,width:max(260,bounds.width)){[weak self] index in
             guard let self else{return};self.dismissOverlay()
-            do{switch i{
-            case 0:self.editor(nil,settings:self.document.current)
-            case 1:if let p=self.selected{self.editor(p,settings:p.settings)}
-            case 2:if let id=self.document.selected{try SavedPrintProfiles.duplicate(id)}
-            case 3:if let p=self.selected{self.confirmRemoval(p)}
-            case 4:self.importFile()
-            case 5:self.exportFile()
-            case 7:try SavedPrintProfiles.setCurrent(self.document.current)
-            default:if i>=8,profiles.indices.contains(i-8){try SavedPrintProfiles.select(profiles[i-8].id)}
-            }}catch{NSApp.presentError(error)};self.reload()
+            if index == labels.count-1{NotificationCenter.default.post(name:.openProfileRail,object:self);return}
+            do{if index == 0{try SavedPrintProfiles.setCurrent(self.document.current)}else if profiles.indices.contains(index-1){try SavedPrintProfiles.select(profiles[index-1].id)}}catch{NSApp.presentError(error)}
+            self.reload()
         }
-        panel.configure(disabled:document.selected == nil ? [1,2,3,6]:[6])
         let screen=window.convertToScreen(convert(button.frame,to:nil));if opensUpward { panel.place(above:NSPoint(x:screen.maxX-panel.frame.width,y:screen.maxY+4)) } else { panel.place(below:NSPoint(x:screen.minX,y:screen.minY-4)) };window.addChildWindow(panel,ordered:.above);dropped=panel;Overlays.opened(self)
     }
     private var selected:SavedPrintProfile?{document.profiles.first{$0.id==document.selected}}
@@ -56,17 +49,17 @@ final class PrintProfileSelector:NSView,Overlay {
             do{var p=original ?? SavedPrintProfile(name:"",description:"",settings:form.settings);p.name=name.stringValue;p.description=description.stringValue;p.settings=form.settings;try SavedPrintProfiles.save(p);modal?.dismissOverlay()}catch{NSApp.presentError(error)}
         };modal.present(over:self)
     }
-    private func confirmRemoval(_ p:SavedPrintProfile){
-        let modal=SwissFocusModal(title:"Remove Print Profile",message:"Remove “"+p.name+"” from your saved profiles. The current printing settings remain available as Current Settings.")
+    func confirmRemoval(_ p:SavedPrintProfile){
+        let modal=SwissFocusModal(title:"Remove Viewing Profile",message:"Remove “"+p.name+"” from your saved profiles. The current printing settings remain available as Current Settings.")
         let slider=SwissSlide();slider.words="Slide To Remove Profile";modal.content(slider,height:SwissSlide.height)
         slider.onArmed={ [weak modal] armed in guard armed else{return};do{try SavedPrintProfiles.remove(p.id);modal?.dismissOverlay()}catch{NSApp.presentError(error)} }
         modal.button("Keep Profile"){[weak modal] in modal?.dismissOverlay()};modal.present(over:self)
     }
     private var fileType:UTType{UTType(filenameExtension:"colpro") ?? UTType(exportedAs:"com.mmffdev.colorgain.print-profile",conformingTo:.json)}
-    private func importFile(){let panel=NSOpenPanel();panel.allowedContentTypes=[fileType];panel.allowsMultipleSelection=false;panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0;guard size<=65536 else{throw failure("Choose a .colpro profile under 64 KB.")};try SavedPrintProfiles.importProfile(Handler_File_Manager.shared.read(url))}catch{NSApp.presentError(error)}}}
-    private func exportFile(){let p=selected ?? SavedPrintProfile(name:"Current Print Settings",description:"",settings:document.current);let panel=NSSavePanel();panel.allowedContentTypes=[fileType];panel.nameFieldStringValue=filesystemName(p.name)+".colpro";panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{try Handler_File_Manager.shared.write(SavedPrintProfiles.export(p),to:url)}catch{NSApp.presentError(error)}}}
+    func importFile(){let panel=NSOpenPanel();panel.allowedContentTypes=[fileType];panel.allowsMultipleSelection=false;panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0;guard size<=65536 else{throw failure("Choose a .colpro profile under 64 KB.")};try SavedPrintProfiles.importProfile(Handler_File_Manager.shared.read(url))}catch{NSApp.presentError(error)}}}
+    func exportFile(){let p=selected ?? SavedPrintProfile(name:"Current Viewing Proof",description:"",settings:document.current);let panel=NSSavePanel();panel.allowedContentTypes=[fileType];panel.nameFieldStringValue=filesystemName(p.name)+".colpro";panel.begin{reply in guard reply == .OK,let url=panel.url else{return};do{try Handler_File_Manager.shared.write(SavedPrintProfiles.export(p),to:url)}catch{NSApp.presentError(error)}}}
 }
-private final class PrintProfileValueButton:NSButton {
+private final class PrintProfileValueButton:ClickCursorButton {
     var compact=false
     var opensUpward=false
     override init(frame:NSRect){super.init(frame:frame);isBordered=false;alignment = .left}
@@ -74,8 +67,8 @@ private final class PrintProfileValueButton:NSButton {
     override var isFlipped:Bool{true}
     override func draw(_ dirtyRect:NSRect){
         let hover=window.map{bounds.contains(convert($0.mouseLocationOutsideOfEventStream,from:nil))} ?? false
-        DropdownSkin.draw(in:bounds,hover:hover || isHighlighted,up:opensUpward)
-        Design.attributed(title,.body,colour:Design.ink).draw(x:8,baseline:bounds.midY+4,width:max(0,bounds.width-44))
+        if compact{InlineDropdownSkin.draw(in:bounds,up:opensUpward)}else{DropdownSkin.draw(in:bounds,hover:hover || isHighlighted,up:opensUpward)}
+        Design.attributed(title,.body,colour:Design.ink).draw(x:compact ? 0:8,baseline:bounds.midY+4,width:max(0,bounds.width-(compact ? 20:44)))
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}

@@ -237,9 +237,11 @@ extension NSEvent.ModifierFlags {
 
 /// A button that shows a shortcut and, once pressed, takes the next key combination typed.
 /// Esc backs out; Delete takes the shortcut off.
-final class ShortcutField: NSButton {
+final class ShortcutField: ClickCursorButton {
     /// A combination was typed (nil for Delete), with the key that was pressed.
     var onRecord: ((Shortcut?, Int?) -> Void)?
+    var onQuickRecord:((String?)->Void)?
+    var quickKey:String? {didSet{show()}}
     var shortcut: Shortcut? { didSet { show() } }
     private var recording = false { didSet { show() } }
 
@@ -254,7 +256,7 @@ final class ShortcutField: NSButton {
     required init?(coder: NSCoder) { fatalError() }
 
     private func show() {
-        title = recording ? "Type shortcut\u{2026}" : (shortcut?.display ?? "None")
+        title = recording ? "Type shortcut\u{2026}" : (shortcut?.display ?? quickKey.flatMap{$0.isEmpty ? nil:$0} ?? "None")
         toolTip = "Click, then type the new shortcut. Esc cancels; Delete removes it."
     }
 
@@ -284,7 +286,11 @@ final class ShortcutField: NSButton {
         let modifiers = ShortcutModifiers(event.modifierFlags)
         recording = false
         if modifiers.isEmpty, event.keyCode == 53 { return }                                             // Esc
-        if modifiers.isEmpty, event.keyCode == 51 || event.keyCode == 117 { onRecord?(nil, nil); return } // Delete
+        if modifiers.isEmpty, event.keyCode == 51 || event.keyCode == 117 { if let onQuickRecord {onQuickRecord(nil)} else {onRecord?(nil, nil)};return } // Delete
+        if let onQuickRecord {
+            guard let key=QuickKeys.pressed(event) else {show();return}
+            onQuickRecord(key);return
+        }
         guard let key = event.characters(byApplyingModifiers: []), !key.isEmpty else { return }
         onRecord?(Shortcut(key: key, modifiers: modifiers), Int(event.keyCode))
     }

@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#393D81",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.067222215155304479,
+        "y" : 0.055865245861453805,
+        "z" : 0.16187992426741332
+      },
+      "pickedAt" : 1791482280543.2383,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.22352941176470589,
+          0.23921568627450981,
+          0.50588235294117645
+        ]
+      }
+    },
+    {
+      "hex" : "#9A2268",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.16686693113748202,
+        "y" : 0.091752114954581451,
+        "z" : 0.10491711589601299
+      },
+      "pickedAt" : 1791482281250.176,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.60392156862745094,
+          0.13333333333333333,
+          0.40784313725490196
+        ]
+      }
+    },
+    {
+      "hex" : "#EF6546",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.43523811402982471,
+        "y" : 0.28904105518475942,
+        "z" : 0.06839553550978221
+      },
+      "pickedAt" : 1791482282081.3411,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.93725490196078431,
+          0.396078431372549,
+          0.27450980392156865
+        ]
+      }
+    },
+    {
+      "hex" : "#EAA047",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.50314671902530739,
+        "y" : 0.43888487918932462,
+        "z" : 0.090588581347677194
+      },
+      "pickedAt" : 1791482283087.668,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.91764705882352937,
+          0.62745098039215685,
+          0.27843137254901962
+        ]
+      }
+    },
+    {
+      "hex" : "#2B8C8E",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.15023046871225545,
+        "y" : 0.20978018261036904,
+        "z" : 0.21898036168306045
+      },
+      "pickedAt" : 1791482283884.6021,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.16862745098039217,
+          0.5490196078431373,
+          0.55686274509803924
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 97",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.480Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "A08B68EF-76EA-460E-B26E-2B3DB9D8F132",
+    "documentID" : "6372E20C-7D5F-4DEB-9F81-099AB53DE067",
+    "lastSavedAt" : "2026-10-19T23:43:09.595Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "A08B68EF-76EA-460E-B26E-2B3DB9D8F132",
+    "createdAt" : 1791482279230.937,
+    "entries" : [
+      {
+        "addedAt" : 1791482280543.2383,
+        "hex" : "#393D81"
+      },
+      {
+        "addedAt" : 1791482281250.176,
+        "hex" : "#9A2268"
+      },
+      {
+        "addedAt" : 1791482282081.3411,
+        "hex" : "#EF6546"
+      },
+      {
+        "addedAt" : 1791482283087.668,
+        "hex" : "#EAA047"
+      },
+      {
+        "addedAt" : 1791482283884.6021,
+        "hex" : "#2B8C8E"
+      }
+    ],
+    "id" : "6372E20C-7D5F-4DEB-9F81-099AB53DE067",
+    "name" : "Palette 97",
+    "placedAt" : 1792453388446.5771,
+    "position" : 84,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791482279231.1479,
+    "purposes" : [
+      {
+        "changedAt" : 1791482279231.1479,
+        "id" : "09D0159B-1642-4D58-9857-91E1FD6BA3C3",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

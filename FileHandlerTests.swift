@@ -82,7 +82,7 @@ func runFileHandlerManagerTests(check: (Bool, String) -> Void) {
             application: { FileApplicationIdentity(bundleIdentifier: "test.colorgain", name: "Test", version: "1.2", build: "34") },
             creator: { FileCreatorIdentity(displayName: "Test Creator", accountName: "fixture") })
         let manager = Handler_File_Manager(metadata: metadata)
-        check(manager.descriptors.count == 15, "Manager registers one class per native document format")
+        check(manager.descriptors.count == 16, "Manager registers one class per native document format")
         do { try manager.register(Handler_File_Palette()); check(false, "Duplicate format registration rejected") }
         catch { check(true, "Duplicate format registration rejected") }
         let unknown = root.appendingPathComponent("unknown.colfuture")
@@ -147,6 +147,9 @@ func runFileHandlerManagerTests(check: (Bool, String) -> Void) {
         let oldHeader = (try JSONSerialization.jsonObject(with: manager.read(old)) as! [String: Any])["header"] as! [String: Any]
         check(oldHeader["createdAt"] == nil && oldHeader["createdBy"] == nil && oldHeader["lastSavedAt"] != nil, "The production palette facade saves legacy content without inventing its original creator")
         check((try? Handler_File_Manager.contained("../escape.colpal", under: root)) == nil, "Owned references cannot traverse outside their root")
+        let escapeCatalogue:[String:Any]=["libraryAssets":[["id":UUID().uuidString,"file":"../escape.colpal","kind":"palette","name":"Escape"]]]
+        check((try? Handler_File_Catalogue().referencesInInspectedTree(escapeCatalogue,at:root.appendingPathComponent("Test.colcat"))) == nil,
+              "Fast catalogue reference validation still rejects paths outside its root")
         let decoded = try JSONDecoder().decode(FileDocumentHeader.self, from: JSONSerialization.data(withJSONObject: edited))
         check(decoded.forSharing(includePersonalNames: false).lastSavedBy.accountName == nil && decoded.lastSavedBy.accountName == "fixture", "Share metadata can omit personal names without changing source provenance")
         check(!FileApplicationIdentity.current().version.isEmpty, "Bare binary metadata has an explicit development fallback")

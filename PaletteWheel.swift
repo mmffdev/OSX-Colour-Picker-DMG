@@ -18,7 +18,13 @@ enum PaletteWheelModel {
 
 /// A reusable edge-mounted fan. The host supplies a snapshot when opened and the action for an item.
 /// `edge` names the edge of the receiving area: .left fans right, .bottom fans up, etc.
-final class PaletteWheel: NSView, Overlay {
+final class PaletteWheel: ClickCursorView, Overlay {
+    override var handCursorRects:[NSRect]{
+        guard isOpen else{return []}
+        if showingDetails{return [closeHit,monitorHit,previousHit,nextHit]+spectrumHits.map{$0.rect}+(modalSwatch ? []:[expandHit,fieldHit])+(previewExpanded ? []:colourHits.map{$0.rect})}
+        return [] // Spoke hover uses the existing precise polar hit test.
+    }
+
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     func dismissOverlay() { dismiss() }
     func handleOverlayEscape() -> Bool { backFromPreview(); return true }
@@ -28,12 +34,16 @@ final class PaletteWheel: NSView, Overlay {
     struct ColourDetail { let name: String; let hex: String }
     struct Item { let id: UUID; let name: String; let colours: [NSColor]; var details: [ColourDetail] = [] }
     /// Page swatches share the wheel preview, without the surrounding palette spokes/list.
+    var onSpectral:((String)->NSColor?)?
+    var onProof:((String)->NSColor?)?
+    var controlsRect=NSRect.zero
     var modalSwatch = false
     private var modalPalette = false
     private var closeHit = NSRect.zero
     func presentSwatch(_ item: Item, hex: String) {
-        modalPalette = false; modalSwatch = true; items = { [item] }; currentID = { item.id }
+        modalPalette = false; modalSwatch = true; toolTip=nil; items = { [item] }; currentID = { item.id }
         present()
+        previewExpanded=true;expansion=1
         previewIndex = item.details.firstIndex { $0.hex == hex } ?? 0
         markerPosition = CGFloat(previewIndex); markerFrom = markerPosition
         needsDisplay = true
@@ -54,7 +64,7 @@ final class PaletteWheel: NSView, Overlay {
     var availableRect = NSRect.zero { didSet { needsDisplay = true } }
     var anchor = NSPoint.zero { didSet { needsLayout = true; needsDisplay = true } }
     private let notch = WheelNotch(frame: .zero)
-    private let openButton = NSButton(title: "", target: nil, action: nil)
+    private let openButton = ClickCursorButton(title: "", target: nil, action: nil)
     private var snapshot: [Item] = []
     private var position: CGFloat = 0, destination: CGFloat = 0
     private var reveal: CGFloat = 0, revealFrom: CGFloat = 0, revealTo: CGFloat = 0
@@ -111,8 +121,13 @@ final class PaletteWheel: NSView, Overlay {
         addSubview(openButton)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Palette wheel")
+        toolTip=nil
+        NotificationCenter.default.addObserver(self,selector:#selector(viewingChanged),name:.prefsDidChange,object:nil)
+        NotificationCenter.default.addObserver(self,selector:#selector(viewingChanged),name:.printProfilesChanged,object:nil)
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit{NotificationCenter.default.removeObserver(self)}
+    @objc private func viewingChanged(){setAccessibilityLabel("Swatch Preview. "+PaletteViewing.accessibilitySummary);needsDisplay=true}
 
     /// Keep the notch on its edge, and fit the visible fan below the app's protected headers.
     private var usable: NSRect { availableRect.isEmpty ? bounds : availableRect }
@@ -152,6 +167,7 @@ final class PaletteWheel: NSView, Overlay {
         if let tracking { addTrackingArea(tracking) }
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if modalSwatch && !monitorFullscreen && controlsRect.contains(point){return nil}
         if isOpen || reveal > 0.01 { return super.hitTest(point) }
         return nil
     }
@@ -304,6 +320,7 @@ final class PaletteWheel: NSView, Overlay {
         let pointer = convert(event.locationInWindow, from: nil)
         if showingDetails, !previewExpanded, let row = colourHits.first(where: { $0.rect.contains(pointer) }) { previewIndex = row.index }
         hovered = hit(pointer)
+        (hovered == nil ? NSCursor.arrow:NSCursor.pointingHand).set()
         toolTip = showingDetails ? nil : hovered.flatMap { PaletteWheelModel.index(CGFloat($0), count: snapshot.count) }.map { snapshot[$0].name }
         needsDisplay = true
     }
@@ -326,7 +343,7 @@ final class PaletteWheel: NSView, Overlay {
                 }
                 run(); return
             }
-            if expandHit.contains(pointer) || fieldHit.contains(pointer) {
+            if !modalSwatch && (expandHit.contains(pointer) || fieldHit.contains(pointer)) {
                 if monitorFullscreen { monitorFullscreen = false; window?.toggleFullScreen(nil) }
                 previewExpanded.toggle(); run(); return
             }
@@ -386,10 +403,11 @@ final class PaletteWheel: NSView, Overlay {
         guard !item.details.isEmpty else { return }
         if modalSwatch {
             let area = availableRect.isEmpty ? bounds : availableRect
-            let width = min(720, max(180, area.width - 32)), height = min(520, max(160, area.height - 32))
+            let width = min(720, max(1, area.width - 32)), height = min(520, max(1, area.height - 32))
             let normal = NSRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height)
             func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * expansion }
-            previewRect = NSRect(x: mix(normal.minX, bounds.minX), y: mix(normal.minY, bounds.minY), width: mix(normal.width, bounds.width), height: mix(normal.height, bounds.height))
+            let expandedArea=monitorFullscreen ? bounds:area
+            previewRect = NSRect(x: mix(normal.minX, expandedArea.minX), y: mix(normal.minY, expandedArea.minY), width: mix(normal.width, expandedArea.width), height: mix(normal.height, expandedArea.height))
             drawPreview(item); return
         }
         let angle = (CGFloat(ordinal) - position) * spacing
@@ -464,10 +482,11 @@ final class PaletteWheel: NSView, Overlay {
         NSGraphicsContext.restoreGraphicsState()
         let field = NSRect(x: previewRect.minX + 12, y: previewRect.minY + 12, width: previewRect.width - 24, height: max(24, previewRect.height - 66))
         fieldHit = field
-        if modalPalette && !item.colours.isEmpty {
-            let width=field.width/CGFloat(item.colours.count)
-            for (i,c) in item.colours.enumerated(){c.setFill();NSRect(x:field.minX+CGFloat(i)*width,y:field.minY,width:width+0.5,height:field.height).fill()}
-        } else if item.colours.indices.contains(active) { item.colours[active].setFill(); NSBezierPath(rect: field).fill() }
+        let colours=modalPalette ? item.colours:(item.colours.indices.contains(active) ? [item.colours[active]]:[])
+        let keys=modalPalette ? item.details.map(\.hex):[item.details[active].hex]
+        let predicted=keys.map{onProof?($0)}
+        let proof=predicted.allSatisfy{$0 != nil} ? predicted.compactMap{$0}:nil
+        PaletteViewing.draw(original:colours,proof:proof,spectral:keys.map{onSpectral?($0)},in:field)
         text(modalPalette ? item.name : item.details[active].name, rect: NSRect(x: field.minX, y: field.maxY + 10, width: field.width, height: 18), size: TextSize.body, colour: Design.ink, weight: .medium)
         expandHit = NSRect(x: previewRect.maxX - 42, y: field.maxY + 8, width: 30, height: 38)
         if modalSwatch {
@@ -475,13 +494,14 @@ final class PaletteWheel: NSView, Overlay {
             expandHit.origin.x -= 36
             text("×", rect: closeHit.insetBy(dx: 4, dy: 5), size: TextSize.title, colour: Design.ink, centred: true)
         }
-        monitorHit = NSRect(x: expandHit.minX - 36, y: expandHit.minY, width: 30, height: 38)
+        monitorHit = NSRect(x: expandHit.minX - (modalSwatch ? 0:36), y: expandHit.minY, width: 30, height: 38)
+        if modalSwatch {expandHit = .zero}
         previousHit = NSRect(x: previewRect.midX - 38, y: field.maxY + 8, width: 32, height: 38)
         nextHit = NSRect(x: previewRect.midX + 6, y: field.maxY + 8, width: 32, height: 38)
         let monitor = NSRect(x: monitorHit.minX + 6, y: monitorHit.minY + 9, width: 18, height: 13)
         Design.ink.setStroke(); let screen = NSBezierPath(rect: monitor); screen.lineWidth = 1.5; screen.stroke()
         let stand = NSBezierPath(); stand.move(to: NSPoint(x: monitor.midX, y: monitor.maxY)); stand.line(to: NSPoint(x: monitor.midX, y: monitor.maxY + 4)); stand.move(to: NSPoint(x: monitor.midX - 5, y: monitor.maxY + 4)); stand.line(to: NSPoint(x: monitor.midX + 5, y: monitor.maxY + 4)); stand.lineWidth = 1.5; stand.stroke()
-        text(previewExpanded ? "↙" : "↗", rect: expandHit.insetBy(dx: 4, dy: 5), size: TextSize.title, colour: Design.ink, centred: true)
+        if !modalSwatch {text(previewExpanded ? "↙" : "↗", rect: expandHit.insetBy(dx: 4, dy: 5), size: TextSize.title, colour: Design.ink, centred: true)}
         text("‹", rect: previousHit.insetBy(dx: 4, dy: 5), size: TextSize.title, colour: Design.ink, centred: true)
         text("›", rect: nextHit.insetBy(dx: 4, dy: 5), size: TextSize.title, colour: Design.ink, centred: true)
         let meta = NSRect(x: field.minX, y: field.maxY + 31, width: max(60, previousHit.minX - field.minX - 12), height: 18)
@@ -597,7 +617,7 @@ final class PaletteWheel: NSView, Overlay {
     }
 }
 
-private final class WheelNotch: NSButton {
+private final class WheelNotch: ClickCursorButton {
     var edge: PaletteWheel.Edge = .left { didSet { needsDisplay = true } }
     var expanded = false { didSet { needsDisplay = true } }
     override var isFlipped: Bool { true }

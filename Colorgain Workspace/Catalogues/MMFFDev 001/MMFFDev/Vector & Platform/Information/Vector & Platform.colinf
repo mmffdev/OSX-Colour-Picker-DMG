@@ -1,0 +1,44 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "format" : "colour-information",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-20T02:01:17.433Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "documentID" : "BC1C9A6C-FAED-48EA-BDC9-1EB541F1EF61",
+    "lastSavedAt" : "2026-10-20T02:01:17.433Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "member" : "BC1C9A6C-FAED-48EA-BDC9-1EB541F1EF61",
+  "record" : {
+    "createdAt" : 1792461675609.0168,
+    "id" : "BC1C9A6C-FAED-48EA-BDC9-1EB541F1EF61",
+    "name" : "Vector & Platform",
+    "position" : 1,
+    "positionChangedAt" : 1792461675609.0168
+  },
+  "version" : 1
+}

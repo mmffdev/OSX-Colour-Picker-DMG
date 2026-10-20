@@ -1,0 +1,171 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "colours" : [
+    {
+      "hex" : "#F5D6BD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.72990621414515044,
+        "y" : 0.71606806030629122,
+        "z" : 0.4414323439302375
+      },
+      "pickedAt" : 1791481690105.9961,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.96078431372549022,
+          0.83921568627450982,
+          0.74117647058823533
+        ]
+      }
+    },
+    {
+      "hex" : "#F5C5BD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.68596545740036152,
+        "y" : 0.63426790753636808,
+        "z" : 0.43035403641299896
+      },
+      "pickedAt" : 1791482111491.2209,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.96078431372549022,
+          0.77254901960784317,
+          0.74117647058823533
+        ]
+      }
+    },
+    {
+      "hex" : "#F5CEBD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.70863470758188918,
+        "y" : 0.67646900431762647,
+        "z" : 0.4360693891583966
+      },
+      "pickedAt" : 1791482111491.2209,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.96078431372549022,
+          0.80784313725490198,
+          0.74117647058823533
+        ]
+      }
+    },
+    {
+      "hex" : "#F5DDBD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.74939678742943328,
+        "y" : 0.75235172928103644,
+        "z" : 0.44634629126584335
+      },
+      "pickedAt" : 1791482111491.2209,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.96078431372549022,
+          0.8666666666666667,
+          0.74117647058823533
+        ]
+      }
+    },
+    {
+      "hex" : "#F5E4BD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.76971729230101216,
+        "y" : 0.79018039965445341,
+        "z" : 0.4514694802719042
+      },
+      "pickedAt" : 1791482111491.2209,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.96078431372549022,
+          0.89411764705882357,
+          0.74117647058823533
+        ]
+      }
+    }
+  ],
+  "file" : "Just Right — Analogous 2",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T23:43:10.158Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "151382D2-BE24-4D3C-A658-45D4A8D652D2",
+    "documentID" : "4A93FBB1-8EE0-4556-A55A-07D28CBF02FD",
+    "lastSavedAt" : "2026-10-19T23:43:10.632Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "bucketID" : "19FCF6E9-CC1E-4671-921B-2777BC776962",
+    "copiedFrom" : "151382D2-BE24-4D3C-A658-45D4A8D652D2",
+    "createdAt" : 1791482111491.2209,
+    "entries" : [
+      {
+        "addedAt" : 1791482111491.2209,
+        "hex" : "#F5C5BD"
+      },
+      {
+        "addedAt" : 1791482111491.2209,
+        "hex" : "#F5CEBD"
+      },
+      {
+        "addedAt" : 1791482111491.2209,
+        "hex" : "#F5D6BD"
+      },
+      {
+        "addedAt" : 1791482111491.2209,
+        "hex" : "#F5DDBD"
+      },
+      {
+        "addedAt" : 1791482111491.2209,
+        "hex" : "#F5E4BD"
+      }
+    ],
+    "id" : "4A93FBB1-8EE0-4556-A55A-07D28CBF02FD",
+    "isCustom" : true,
+    "name" : "Just Right — Analogous 2",
+    "placedAt" : 1792453388587.6589,
+    "position" : 121,
+    "projectID" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "purposes" : [
+      {
+        "changedAt" : 1791482111491.623,
+        "id" : "8A1207D6-BE52-4DC0-AFB2-094514CE7512",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "project" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+  "version" : 1
+}

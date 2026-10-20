@@ -13,7 +13,7 @@ final class OverviewViewController: NSViewController {
     private let header = PageHeader()
     private let host = NSView()
     /// The colour profile the project's palettes work to, unless one has its own.
-    private let profile = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let profile = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     private var form: ProjectFormController?
     private(set) var projectID: UUID?
     /// What the form on show was built from; a change to any of it builds the form afresh.

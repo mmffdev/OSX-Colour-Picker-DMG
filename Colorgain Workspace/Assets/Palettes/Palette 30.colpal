@@ -1,0 +1,191 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#B8DFF5",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.62381719047367068,
+        "y" : 0.6910002529952971,
+        "z" : 0.7304283876519051
+      },
+      "pickedAt" : 1791480908934.9131,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.72156862745098038,
+          0.87450980392156863,
+          0.96078431372549022
+        ]
+      }
+    },
+    {
+      "hex" : "#779AC1",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.28118302312870125,
+        "y" : 0.30503152605204542,
+        "z" : 0.41479408032845178
+      },
+      "pickedAt" : 1791480909882.5022,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.46666666666666667,
+          0.60392156862745094,
+          0.75686274509803919
+        ]
+      }
+    },
+    {
+      "hex" : "#517DAD",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.1746470259702223,
+        "y" : 0.19066031828779118,
+        "z" : 0.31949877691079076
+      },
+      "pickedAt" : 1791480911041.5139,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.31764705882352939,
+          0.49019607843137253,
+          0.67843137254901964
+        ]
+      }
+    },
+    {
+      "hex" : "#4F7BAA",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.16788592471469632,
+        "y" : 0.1837598143387611,
+        "z" : 0.30740066048810855
+      },
+      "pickedAt" : 1791480911939.6328,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.30980392156862746,
+          0.4823529411764706,
+          0.66666666666666663
+        ]
+      }
+    },
+    {
+      "hex" : "#052556",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.021101711902224915,
+        "y" : 0.019241954708277574,
+        "z" : 0.068277409581770629
+      },
+      "pickedAt" : 1791480912868.834,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.019607843137254902,
+          0.14509803921568629,
+          0.33725490196078434
+        ]
+      }
+    },
+    {
+      "hex" : "#020F22",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.004393158385816642,
+        "y" : 0.0045293944730379655,
+        "z" : 0.01189635112137555
+      },
+      "pickedAt" : 1791480914571.5918,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.0078431372549019607,
+          0.058823529411764705,
+          0.13333333333333333
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 30",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.547Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "1FDBF880-E6ED-45CA-B976-5B94674432DA",
+    "documentID" : "10C013FD-8C26-44E4-8A1A-20BDB11DFC55",
+    "lastSavedAt" : "2026-10-19T23:43:09.911Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "1FDBF880-E6ED-45CA-B976-5B94674432DA",
+    "createdAt" : 1791480906931.1162,
+    "entries" : [
+      {
+        "addedAt" : 1791480908934.9131,
+        "hex" : "#B8DFF5"
+      },
+      {
+        "addedAt" : 1791480909882.5022,
+        "hex" : "#779AC1"
+      },
+      {
+        "addedAt" : 1791480911041.5139,
+        "hex" : "#517DAD"
+      },
+      {
+        "addedAt" : 1791480911939.6328,
+        "hex" : "#4F7BAA"
+      },
+      {
+        "addedAt" : 1791480912868.834,
+        "hex" : "#052556"
+      },
+      {
+        "addedAt" : 1791480914571.5918,
+        "hex" : "#020F22"
+      }
+    ],
+    "id" : "10C013FD-8C26-44E4-8A1A-20BDB11DFC55",
+    "name" : "Palette 30",
+    "placedAt" : 1792453388446.5771,
+    "position" : 156,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791480906931.28,
+    "purposes" : [
+      {
+        "changedAt" : 1791480906931.28,
+        "id" : "900C38F6-CE5A-4FE0-94B6-23ED223694C3",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

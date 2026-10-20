@@ -34,7 +34,7 @@ enum RailStyle {
     /// for. rail2 is drawn by the app, so it reads the same setting and uses the same size, and
     /// the two rails always match.
     static var textSize: CGFloat {
-        let probe = NSTableView()
+        let probe = ClickCursorTableView()
         probe.rowSizeStyle = .default
         switch probe.effectiveRowSizeStyle {
         case .small: return 13
@@ -49,7 +49,9 @@ enum RailStyle {
 }
 
 /// A view that says when the pointer comes onto it and leaves it.
-class HoverView: NSView {
+class HoverView: ClickCursorView {
+    override var handCursorRects:[NSRect]{[]}
+
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
     override func updateTrackingAreas() {
@@ -89,7 +91,9 @@ class HoverView: NSView {
 }
 
 /// One row of a bucket: an icon, a title, and on the right whatever the kind of row needs.
-final class RailRow: NSView {
+final class RailRow: ClickCursorView {
+    override var handCursorRects:[NSRect]{isEnabled ? [bounds]:[]}
+
     enum Kind {
         /// A choice from a menu; the pop-up shows what is chosen.
         case choice(NSPopUpButton)
@@ -279,6 +283,7 @@ final class RailBucket: NSView {
 /// A dropdown on a page's options bar: an icon, a title and a small arrow, as a rail's row is an
 /// icon and a title. Pressed, it drops its bucket of rows beneath it.
 final class BarDropdown: HoverView {
+    override var handCursorRects:[NSRect]{[bounds]}
     private let icon = NSImageView(), title = NSTextField(labelWithString: ""), arrow = NSImageView()
     private let bucket: RailBucket
     private let popover = NSPopover()

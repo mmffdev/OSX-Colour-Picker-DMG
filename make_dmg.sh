@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build MMFFDev Colour 3.app and package it as a drag-to-Applications DMG, then write the Sparkle
+# Build Colorgain.app and package it as a drag-to-Applications DMG, then write the Sparkle
 # update feed for it into release/. Outputs: ./MMFFDev-Colour-3.dmg, release/<build>/{dmg, appcast.xml}.
 #
 # To publish: create a GitHub release tagged b<build> and upload both files from release/<build>.
@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./signing.sh
 
-APP_NAME="MMFFDev Colour 3"
+APP_NAME="Colorgain"
 DMG_BASENAME="MMFFDev-Colour-3"
 DMG="./${DMG_BASENAME}.dmg"
 

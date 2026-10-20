@@ -113,6 +113,8 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
                                    bucketID: ((l?.placedAt ?? .distantPast) >= (r?.placedAt ?? .distantPast) ? l ?? r : r ?? l)?.bucketID,
                                    claim: l?.claim ?? r?.claim))
         out.swatches[out.swatches.count - 1].review = PaletteAssetHandler.mergedReview(l?.review,r?.review)
+        let metadataPick=(l?.metadata?.changedAt ?? .distantPast) >= (r?.metadata?.changedAt ?? .distantPast) ? l?.metadata:r?.metadata
+        out.swatches[out.swatches.count - 1].metadata=metadataPick
         // The colour profile: the newer choice.
         let pick = (l?.profileChangedAt ?? .distantPast) >= (r?.profileChangedAt ?? .distantPast) ? l ?? r : r ?? l
         out.swatches[out.swatches.count - 1].profile = pick?.profile
@@ -137,8 +139,9 @@ func mergeLibraries(local: Library, remote: Library) -> Library {
         let l = local.colours.first { $0.hex == hex }, r = remote.colours.first { $0.hex == hex }
         var tags = (l ?? r)?.tags, at = (l ?? r)?.tagsChangedAt
         if let l = l, let r = r, (r.tagsChangedAt ?? .distantPast) > (l.tagsChangedAt ?? .distantPast) { tags = r.tags; at = r.tagsChangedAt }
+        let metadata=(l?.metadata?.changedAt ?? .distantPast) >= (r?.metadata?.changedAt ?? .distantPast) ? l?.metadata:r?.metadata
         return Colour(hex: hex, pickedAt: dates[hex]!, tags: tags, tagsChangedAt: at,
-                      source: (l ?? r)?.source, master: (l ?? r)?.master, kind: (l ?? r)?.kind)
+                      source: (l ?? r)?.source, master: (l ?? r)?.master, kind: (l ?? r)?.kind,metadata:metadata)
     }
 
     // Colour profiles: one copy of each, the newer kept.
@@ -304,9 +307,12 @@ struct Catalogues {
             try manager.copyVerified(source, to: target)
             guard try manager.copySnapshot(source) == revision else { throw failure("The source workspace changed during relocation. Retry after other operations finish. The original remains in place.") }
             try AppDataStore(root: target).update { manifest in
-                func rebased(_ path: String) -> String { path == source.path ? target.path : path.hasPrefix(source.path + "/") ? target.path + path.dropFirst(source.path.count) : path }
+                func rebased(_ path: String) -> String {
+                    guard path.hasPrefix("/") else { return path }
+                    return path == source.path ? target.path : path.hasPrefix(source.path + "/") ? target.path + path.dropFirst(source.path.count) : path
+                }
                 var rows = manifest["catalogues"] as? [[String: Any]] ?? []
-                for index in rows.indices { if let path = rows[index]["path"] as? String { rows[index]["path"] = rebased(URL(fileURLWithPath: path).resolvingSymlinksInPath().path) } }
+                for index in rows.indices { if let path = rows[index]["path"] as? String { rows[index]["path"] = rebased(path.hasPrefix("/") ? URL(fileURLWithPath: path).resolvingSymlinksInPath().path : path) } }
                 manifest["catalogues"] = rows
                 manifest["detachedCatalogues"] = (manifest["detachedCatalogues"] as? [String] ?? []).map(rebased)
             }
@@ -322,6 +328,20 @@ struct Catalogues {
         var name: String
         var path: String
         var id: UUID? = nil
+
+        func url(in root: URL) -> URL? {
+            if path.hasPrefix("/") { return URL(fileURLWithPath: path).standardizedFileURL }
+            guard !path.isEmpty, !path.split(separator: "/").contains("..") else { return nil }
+            let candidate = root.appendingPathComponent(path).standardizedFileURL
+            guard candidate.path.hasPrefix(root.standardizedFileURL.path + "/") else { return nil }
+            return candidate
+        }
+    }
+
+    private func registryPath(for directory: URL) -> String {
+        let home = root.standardizedFileURL.path + "/"
+        let path = directory.standardizedFileURL.path
+        return path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
     }
 
     var registryURL: URL { AppDataStore(root: root).url }
@@ -347,7 +367,7 @@ struct Catalogues {
             }
             let activeIDs = Set(entries.compactMap(\.id))
             manifest["detachedCatalogueIDs"] = (manifest["detachedCatalogueIDs"] as? [String] ?? []).filter { UUID(uuidString: $0).map { !activeIDs.contains($0) } ?? true }
-            let activePaths = Set(entries.flatMap { [URL(fileURLWithPath: $0.path).standardizedFileURL.path, URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path] })
+            let activePaths = Set(entries.compactMap { $0.url(in: root) }.flatMap { [$0.standardizedFileURL.path, $0.resolvingSymlinksInPath().path] })
             manifest["detachedCatalogues"] = (manifest["detachedCatalogues"] as? [String] ?? []).filter { !activePaths.contains($0) }
         }
     }
@@ -355,14 +375,14 @@ struct Catalogues {
     /// Puts a catalogue that lives in `dir` on the list under `name`, replacing an entry of that name.
     func register(_ name: String, at dir: URL) {
         var all = registry.filter { $0.name != name }
-        all.append(Entry(name: name, path: dir.path, id: CatalogueTree.catalogue(in: dir)?.id))
+        all.append(Entry(name: name, path: registryPath(for: dir), id: CatalogueTree.catalogue(in: dir)?.id))
         registry = all
     }
 
     /// Setup must know that the catalogue's location was saved before proceeding.
     func registerChecked(_ name: String, at dir: URL) throws {
         var all = registry.filter { $0.name != name }
-        all.append(Entry(name: name, path: dir.path, id: CatalogueTree.catalogue(in: dir)?.id))
+        all.append(Entry(name: name, path: registryPath(for: dir), id: CatalogueTree.catalogue(in: dir)?.id))
         try writeRegistry(all)
     }
 
@@ -394,7 +414,7 @@ struct Catalogues {
 
     /// The folder a catalogue's file is in: the one it was registered at, or its folder under Catalogues.
     func directory(for name: String) -> URL {
-        if let own = registry.first(where: { $0.name == name }) { return URL(fileURLWithPath: own.path) }
+        if let own = registry.first(where: { $0.name == name }), let location = own.url(in: root) { return location }
         return name == Catalogues.mainName ? root : folder.appendingPathComponent(filesystemName(name))
     }
 
@@ -449,8 +469,10 @@ struct Catalogues {
         }
         // A registered name for a folder already on the list, under Catalogues or by another entry, is a ghost: one folder, one name.
         var dirs = Set(names.map { folder.appendingPathComponent(filesystemName($0)).standardizedFileURL.path })
-        for entry in registry where !detached.contains(URL(fileURLWithPath: entry.path).standardizedFileURL.path) && !names.contains(entry.name) {
-            let dir = URL(fileURLWithPath: entry.path).standardizedFileURL.path
+        for entry in registry where !names.contains(entry.name) {
+            guard let location = entry.url(in: root) else { continue }
+            let dir = location.standardizedFileURL.path
+            if detached.contains(dir) || detached.contains(location.resolvingSymlinksInPath().path) { continue }
             guard !dirs.contains(dir) else { continue }
             dirs.insert(dir); names.append(entry.name)
         }
@@ -507,7 +529,7 @@ struct Catalogues {
                 var rows = manifest["catalogues"] as? [[String: Any]] ?? []
                 var row = rows.first { $0["name"] as? String == old } ?? [:]
                 rows.removeAll { $0["name"] as? String == old }
-                row["name"] = new; row["path"] = dest.path; row["id"] = identity.uuidString; rows.append(row)
+                row["name"] = new; row["path"] = registryPath(for: dest); row["id"] = identity.uuidString; rows.append(row)
                 manifest["catalogues"] = rows
                 var settings = manifest["settings"] as? [String: Any] ?? [:]
                 if settings[Catalogues.currentKey] as? String == old { settings[Catalogues.currentKey] = new; manifest["settings"] = settings }
@@ -716,8 +738,13 @@ final class SyncEngine {
     }
 
     func check() throws -> SyncState {
+        try check(local:store.load())
+    }
+
+    /// Pure merge planning against a caller-owned snapshot. Remote I/O and merge work can
+    /// happen off the main thread; callers must revalidate local disk before applying a plan.
+    func check(local:Library) throws -> SyncState {
         if let new = SyncEngine.renamedName(in: syncRoot, of: catalogue), new != catalogue { return .renamed(to: new) }
-        let local = try store.load()
         guard let (remote, strays) = try readRemote() else { return .firstSync }
         let merged = mergeLibraries(local: local, remote: remote)
         let plan = SyncPlan(local: local, remote: remote, merged: merged,

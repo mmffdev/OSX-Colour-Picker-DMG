@@ -16,7 +16,58 @@ struct FileInventory {
     var folders: [URL] = []
     var issues: [FileIssue] = []
     var relocated: [String: URL] = [:]
+    var assetPayloads:[String:Data]=[:]
+    var assetHeads:[String:InspectedAssetIdentity]=[:]
+    var observedAssets:[CatalogueTree.FoundAsset]=[]
+    var assetHeadsComplete=false
+    var catalogueDocument:CatalogueFile?
     var complete: Bool { issues.isEmpty }
+}
+
+struct InspectedAssetIdentity {
+    let id:UUID
+    let owner:UUID?
+    let kind:String
+    init?(_ object:[String:Any]) {
+        if let palette=object["palette"] as? [String:Any],
+           let raw=palette["id"] as? String,let id=UUID(uuidString:raw) {
+            self.id=id
+            owner=(object["project"] as? String).flatMap(UUID.init(uuidString:))
+            kind=palette["styles"] is [Any] ? "typography":"palette"
+        } else if let raw=object["member"] as? String,let id=UUID(uuidString:raw) {
+            self.id=id;owner=id;kind="information"
+        } else {return nil}
+    }
+}
+
+/// A file's inode, size and modification time change on coordinated atomic writes.
+/// Reuse an already validated identity and payload only while that exact disk version
+/// remains present. The inventory still walks every directory and validates links.
+enum InspectedAssetCache {
+    private static let lock=NSLock()
+    private static var entries:[String:(FileVersion,String,Data,InspectedAssetIdentity?,PaletteDocument?)]=[:]
+    private static var bytes=0
+    static func get(_ url:URL)->(String,Data,InspectedAssetIdentity?,PaletteDocument?)? {
+        guard let version=FileVersion.read(url) else{return nil}
+        let path=url.standardizedFileURL.path
+        lock.lock();defer{lock.unlock()}
+        guard let item=entries[path],item.0 == version else{return nil}
+        return (item.1,item.2,item.3,item.4)
+    }
+    static func put(_ url:URL,id:String,data:Data,head:InspectedAssetIdentity?,document:PaletteDocument?) {
+        guard data.count <= 1_048_576,let version=FileVersion.read(url) else{return}
+        let path=url.standardizedFileURL.path
+        lock.lock();defer{lock.unlock()}
+        if let old=entries.removeValue(forKey:path){bytes -= old.2.count}
+        if bytes+data.count > 67_108_864 {entries.removeAll();bytes=0}
+        entries[path]=(version,id,data,head,document);bytes += data.count
+    }
+    static func invalidate(in root:URL) {
+        let prefix=root.resolvingSymlinksInPath().standardizedFileURL.path+"/"
+        lock.lock();defer{lock.unlock()}
+        entries=entries.filter{!URL(fileURLWithPath:$0.key).resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(prefix)}
+        bytes=entries.values.reduce(0){$0+$1.2.count}
+    }
 }
 
 extension Handler_File_Manager {
@@ -32,7 +83,7 @@ extension Handler_File_Manager {
                     let key = url.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased()
                     if !names.insert(key).inserted { result.issues.append(FileIssue(url: url, state: .ambiguous, message: "Several folder entries differ only by case or Unicode spelling. Resolve them before moving or saving files.")) }
                     if depth == 0, ["Backups", "Catalogues"].contains(url.lastPathComponent) { continue }
-                    if depth == 0, url.lastPathComponent == "Assets", FileManager.default.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) { continue }
+                    if depth == 0, url.lastPathComponent == "Assets", (FileManager.default.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || FileManager.default.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)) { continue }
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                     if values.isSymbolicLink == true { result.issues.append(FileIssue(url: url, state: .ambiguous, message: "Symbolic links need explicit review before file operations.")); continue }
                     if values.isDirectory == true { result.folders.append(url); walk(url, depth: depth + 1) }
@@ -49,25 +100,73 @@ extension Handler_File_Manager {
 
     func inspectCatalogue(_ index: URL) -> FileInventory {
         let root = index.deletingLastPathComponent()
+        let trace=ProcessInfo.processInfo.environment["COLORGAIN_PERF_TRACE"] == "1"
+        let started=Date()
+        func report(_ label:String,_ from:Date) {
+            if trace {print(String(format:"PERF inspect %@ %.3f s",label,Date().timeIntervalSince(from)))}
+        }
         var result = inventory(root: root)
+        report("inventory",started)
         // An unavailable parent is the incident; do not manufacture a child error for every link.
         guard !result.issues.contains(where: { $0.url.standardizedFileURL == root.standardizedFileURL }) else { return result }
         do {
+            let referencesStarted=Date()
             let handler = try self.handler(for: index)
             let bytes = try read(index)
             let object = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
-            let references = try handler.references(object, at: index)
+            result.catalogueDocument=CatalogueTree.decode(bytes)
+            let rootIsLink=(try? root.resourceValues(forKeys:[.isSymbolicLinkKey]).isSymbolicLink) == true
+            let references: [FileReference]
+            if result.complete,!rootIsLink,let catalogue=handler as? Handler_File_Catalogue {
+                references=try catalogue.referencesInInspectedTree(object,at:index)
+            } else {references=try handler.references(object,at:index)}
+            report("references",referencesStarted)
             var candidates: [String: [URL]] = [:]
-            for url in result.files where ["colpal", "coltyp", "colinf"].contains(url.pathExtension.lowercased()) {
-                do {
-                    let h = try self.handler(for: url)
-                    let doc = try JSONSerialization.jsonObject(with: read(url)) as! [String: Any]
-                    if let id = h.identity(doc) { candidates[id.lowercased(), default: []].append(url) }
-                } catch { result.issues.append(FileIssue.wrapping(error, at: url)) }
+            var inspectedIdentities:[String:String]=[:]
+            var cachedPayloadBytes=0
+            let assets=result.files.filter{["colpal","coltyp","colinf"].contains($0.pathExtension.lowercased())}
+            result.assetHeadsComplete=true
+            if result.files.contains(where:{$0.pathExtension.lowercased() == ColourFiles.legacyPalette}) {result.assetHeadsComplete=false}
+            let logicalRoot=root.path+"/",physicalRoot=root.resolvingSymlinksInPath().standardizedFileURL.path+"/"
+            let assetsStarted=Date()
+            let inspected=inspectAssetFiles(assets)
+            report("assetValidation",assetsStarted)
+            for (url,inspection) in zip(assets,inspected) {
+                switch inspection {
+                case .failure(let issue):result.issues.append(issue)
+                case .success(let asset):
+                    guard let id=asset.identity else{result.assetHeadsComplete=false;continue}
+                    candidates[id.lowercased(),default:[]].append(url)
+                    inspectedIdentities[url.path]=id
+                    let listed=url.path
+                    let relativePath:String
+                    if listed.hasPrefix(logicalRoot) {relativePath=String(listed.dropFirst(logicalRoot.count))}
+                    else if listed.hasPrefix(physicalRoot) {relativePath=String(listed.dropFirst(physicalRoot.count))}
+                    else {
+                        let resolved=url.resolvingSymlinksInPath().standardizedFileURL.path
+                        guard resolved.hasPrefix(physicalRoot) else {result.assetHeadsComplete=false;continue}
+                        relativePath=String(resolved.dropFirst(physicalRoot.count))
+                    }
+                    inspectedIdentities[physicalRoot+relativePath]=id
+                    inspectedIdentities[logicalRoot+relativePath]=id
+                    if let head=asset.head {result.assetHeads[url.path]=head}
+                    let retainPayload=asset.data.count <= 1_048_576 && cachedPayloadBytes+asset.data.count <= 67_108_864
+                    if retainPayload {
+                        result.assetPayloads[url.path]=asset.data
+                        cachedPayloadBytes += asset.data.count
+                    }
+                    if let head=asset.head {
+                        let display=root.appendingPathComponent(relativePath)
+                        inspectedIdentities[display.path]=id
+                        let kind:CatalogueTree.FoundAsset.Kind=head.kind == "information" ? .information:head.kind == "typography" ? .typography:.palette
+                        result.observedAssets.append(.init(url:display,kind:kind,id:head.id,owner:head.owner,payload:retainPayload ? asset.data:nil,document:asset.document))
+                    } else {result.assetHeadsComplete=false}
+                }
             }
             for (id, urls) in candidates where urls.count > 1 {
                 result.issues.append(FileIssue(url: urls[0], state: .ambiguous, message: "Several files carry identity \(id). Choose which copy to use."))
             }
+            var referenceMisses=0
             for reference in references {
                 if reference.kind == "Folder" {
                     // Existing resolver may find a proven relocation by member identities. Missing empty
@@ -78,6 +177,13 @@ extension Handler_File_Manager {
                     result.issues.append(FileIssue(url: reference.url, state: .missing, message: "A catalogue folder is unavailable. Locate it or explicitly remove its reference.")); continue
                 }
                 do {
+                    if let inspected=inspectedIdentities[reference.url.path] {
+                        if let expected=reference.identity,inspected.caseInsensitiveCompare(expected) != .orderedSame {
+                            throw FileIssue(url:reference.url,state:.identityMismatch,message:"This file does not match the catalogue reference.")
+                        }
+                        continue
+                    }
+                    referenceMisses += 1
                     let h = try self.handler(for: reference.url)
                     let doc = try JSONSerialization.jsonObject(with: read(reference.url)) as! [String: Any]
                     if let expected = reference.identity, h.identity(doc)?.caseInsensitiveCompare(expected) != .orderedSame {
@@ -89,6 +195,8 @@ extension Handler_File_Manager {
                     else { result.issues.append(issue) }
                 }
             }
+            if trace && assets.count > 1_000 {print("PERF inspect heads \(result.observedAssets.count)/\(assets.count) complete=\(result.assetHeadsComplete) referenceMisses=\(referenceMisses)")}
+            report("total",started)
         } catch { result.issues.append(FileIssue.wrapping(error, at: index)) }
         // Parent failures group descendants. Keep the full expected graph untouched on disk.
         let all = result.issues
@@ -104,9 +212,15 @@ extension Handler_File_Manager {
         }
     }
 
-    func requireAvailableCatalogue(_ index: URL) throws {
+    @discardableResult
+    func validatedCatalogue(_ index: URL) throws -> FileInventory {
         let observed = inspectCatalogue(index)
         guard observed.complete else { throw FileRecoveryReport(root: observed.root, issues: observed.issues) }
+        return observed
+    }
+
+    func requireAvailableCatalogue(_ index: URL) throws {
+        _ = try validatedCatalogue(index)
     }
 }
 

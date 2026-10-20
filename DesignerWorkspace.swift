@@ -93,7 +93,7 @@ private final class DesignerTabs:NSView {
     override func draw(_ dirtyRect:NSRect){Design.card.setFill();bounds.fill();hairline(x:0,y:bounds.height-1,width:bounds.width,Design.rule)}
 }
 
-private final class DesignerTabButton:NSButton {
+private final class DesignerTabButton:ClickCursorButton {
     let mode:DesignerWorkspace.Mode
     var active=false {didSet{state=active ? .on:.off;needsDisplay=true}}
     var run:((DesignerWorkspace.Mode)->Void)?

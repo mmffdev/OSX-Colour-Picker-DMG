@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Colorgain's existing light interface is the visual authority. This is an offline review catalogue, not a replacement UI. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Colorgain · UI Primitives Catalogue</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to specimen</a>
+  <div class="app">
+    <header class="masthead">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Colorgain</span></div>
+      <div class="masthead-title"><span>DESIGN SYSTEM / REVIEW COPY</span><strong>UI Primitives Catalogue</strong></div>
+      <div class="masthead-actions"><button type="button" id="overviewButton">Overview</button><button type="button" id="exportButton" title="Download your review notes">Export review ↓</button></div>
+    </header>
+    <div class="workarea">
+      <aside class="inventory" aria-label="Primitive inventory">
+        <div class="inventory-head"><div><span class="eyebrow">COMPONENT INDEX</span><h1>Design pack</h1></div><span class="index-count" id="indexCount"></span></div>
+        <label class="search-wrap"><span class="sr-only">Search primitives</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m15.5 15.5 5 5"></path></svg><input id="search" type="search" placeholder="Find a primitive…" autocomplete="off"></label>
+        <div class="filter-row" role="group" aria-label="Implementation status"><button class="filter active" data-filter="all" aria-pressed="true">All</button><button class="filter" data-filter="live" aria-pressed="false">Code-backed</button><button class="filter" data-filter="composite" aria-pressed="false">Composed</button><button class="filter" data-filter="migration" aria-pressed="false">Migration</button></div>
+        <nav id="tree" aria-label="Components"></nav>
+        <div class="inventory-foot">Select a component to load its specimen and contract. Details are rendered only for the selected item.</div>
+      </aside>
+      <main id="main" class="main">
+        <div class="stage-head"><div><span class="eyebrow" id="stageKicker">FRAMEWORK MAP</span><h2 id="stageTitle">The app is one nested system.</h2><p id="stageIntro">Select a region to inspect its design, dimensions, location and configurable parts.</p></div><div class="stage-switches"><button type="button" id="measureButton" aria-pressed="true">Measurements <b>On</b></button><button type="button" id="themeButton" aria-pressed="false">Canvas <b>Light</b></button></div></div>
+        <div class="stage"><div id="specimen" class="specimen" aria-live="polite"></div><div class="stage-caption"><span class="live-dot"></span><span>HTML reconstruction for review · Native Swift source is authoritative</span><span id="specimenScale">NOT TO SCALE</span></div></div>
+        <section class="related" aria-labelledby="relatedTitle"><div class="related-head"><h3 id="relatedTitle">Nested within this component</h3><span>Choose a child to inspect its contract</span></div><div id="relatedItems" class="related-items"></div></section>
+      </main>
+      <aside class="details" aria-label="Component contract">
+        <div class="details-inner"><div id="detailContent"></div><div class="review"><div class="review-head"><span class="eyebrow">YOUR REVIEW</span><span id="savedStatus">Saved in this browser</span></div><div class="review-options" role="group" aria-label="Review decision"><button data-decision="keep">Keep</button><button data-decision="revise">Revise</button><button data-decision="retire">Retire</button></div><label for="reviewNote">Notes for this primitive</label><textarea id="reviewNote" rows="5" placeholder="What should stay, change or be added?"></textarea><p>Notes stay on this computer until you export them.</p></div></div>
+      </aside>
+    </div>
+    <footer class="site-footer"><span>Colorgain UI framework · Review artefact</span><span id="reviewCount">0 reviewed</span><span>20 October 2026</span></footer>
+  </div>
+  <script src="components.js?v=collections-2"></script><script src="app.js?v=collections-2"></script>
+</body>
+</html>

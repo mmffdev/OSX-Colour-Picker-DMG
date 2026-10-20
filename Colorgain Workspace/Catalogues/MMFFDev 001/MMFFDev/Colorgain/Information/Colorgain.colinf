@@ -1,0 +1,44 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "format" : "colour-information",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:25:22.129Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "documentID" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "lastSavedAt" : "2026-10-19T19:25:22.129Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "member" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+  "record" : {
+    "createdAt" : 1792437922097.585,
+    "id" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "name" : "Colorgain",
+    "position" : 0,
+    "positionChangedAt" : 1792437922097.585
+  },
+  "version" : 1
+}

@@ -16,6 +16,8 @@ struct HaloAction {
     var label: String
     var icon: NSImage
     var description: String? = nil
+    /// Optional coloured swatch shown before a conventional menu label.
+    var menuSwatch: NSColor? = nil
     var disabled = false
     /// nil for a plain action; true or false for one that shows a tick dot.
     var checked: Bool? = nil
@@ -1398,7 +1400,9 @@ private final class HaloDialView: NSView, NSTextFieldDelegate {
 
 /// A small picture of the dial, for a button that opens one: a ring, a wedge at twelve o'clock
 /// and a centre dot, drawn in whatever ink suits the surface behind it.
-final class HaloTriggerView: NSView {
+final class HaloTriggerView: ClickCursorView {
+    override var handCursorRects:[NSRect]{onPress == nil ? []:[bounds]}
+
     var ink = NSColor.labelColor { didSet { needsDisplay = true } }
     var onPress: (() -> Void)?
     private var hovering = false { didSet { needsDisplay = true } }

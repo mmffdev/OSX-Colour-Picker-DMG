@@ -33,7 +33,10 @@ enum Arrange: Int, CaseIterable {
 enum Prefs {
     private static let d = AppPreferences.shared
 
-    private static func changed() { NotificationCenter.default.post(name: .prefsDidChange, object: nil) }
+    private static func changed(_ key: String? = nil) {
+        NotificationCenter.default.post(name: .prefsDidChange, object: nil,
+                                        userInfo: key.map { ["key": $0] })
+    }
 
     private static func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
     private static func int(_ key: String, _ fallback: Int) -> Int { d.object(forKey: key) as? Int ?? fallback }
@@ -252,7 +255,7 @@ enum Prefs {
             guard let saved = d.stringArray(forKey: "cardRows") else { return ColourFormat.defaultCardRows }
             return ColourFormat.cardRows.filter { saved.contains($0.rawValue) }
         }
-        set { d.set(newValue.map { $0.rawValue }, forKey: "cardRows"); changed() }
+        set { d.set(newValue.map { $0.rawValue }, forKey: "cardRows"); changed("cardRows") }
     }
 
     /// The purpose a new palette is turned to, and the one a palette with none is shown as.

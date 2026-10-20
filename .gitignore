@@ -1,4 +1,5 @@
 .DS_Store
+**/.colorgain-file-management.lock
 AppIcon.iconset/
 MMFFDevColour3
 .env.notarytool

@@ -10,6 +10,144 @@ import Compression
 // catalogue of colours is nowhere near the limits.
 
 enum Zip {
+    /// File-backed entries keep camera originals out of the process heap.
+    struct StreamEntry {
+        let path: String
+        let file: URL?
+        let data: Data?
+        init(path: String, file: URL) { self.path=path; self.file=file; self.data=nil }
+        init(path: String, data: Data) { self.path=path; self.file=nil; self.data=data }
+    }
+
+    private static func le64(_ value: UInt64) -> Data {
+        var result=Data();result.append(le32(UInt32(truncatingIfNeeded:value)));result.append(le32(UInt32(truncatingIfNeeded:value >> 32)));return result
+    }
+    private static func u64(_ bytes: Data, _ offset: Int) -> UInt64 {
+        UInt64(u32(bytes,offset)) | (UInt64(u32(bytes,offset+4)) << 32)
+    }
+
+    /// ZIP64 stored entries. Photos are already compressed, so deflating them costs time and memory.
+    static func writeStreaming(_ entries:[StreamEntry], to destination:URL) throws {
+        guard entries.count <= 20_000 else {throw Fault.damaged("too many files")}
+        let fm=FileManager.default
+        let temporary=destination.deletingLastPathComponent().appendingPathComponent("." + destination.lastPathComponent + "." + UUID().uuidString + ".tmp")
+        guard fm.createFile(atPath:temporary.path,contents:nil) else {throw Fault.damaged("the archive could not be created")}
+        defer {try? fm.removeItem(at:temporary)}
+        let output=try FileHandle(forWritingTo:temporary)
+        defer {try? output.close()}
+        var position:UInt64=0
+        func put(_ bytes:Data) throws {try output.write(contentsOf:bytes);position += UInt64(bytes.count)}
+        var directory=Data()
+        let (time,day)=dosStamp(Date())
+        var seen=Set<String>()
+        for entry in entries {
+            guard seen.insert(entry.path).inserted,
+                  !entry.path.hasPrefix("/"),!entry.path.split(separator:"/").contains(".."),
+                  !entry.path.isEmpty,entry.path.utf8.count <= 65_535 else {throw Fault.damaged("an unsafe or duplicate file name")}
+            let name=Data(entry.path.utf8)
+            let size:UInt64
+            if let data=entry.data {size=UInt64(data.count)}
+            else if let file=entry.file {
+                let values=try file.resourceValues(forKeys:[.fileSizeKey,.isDirectoryKey,.isSymbolicLinkKey])
+                guard values.isDirectory != true,values.isSymbolicLink != true,let count=values.fileSize,count >= 0 else {throw Fault.damaged("a source is not a regular file")}
+                size=UInt64(count)
+            } else {throw Fault.damaged("an entry has no bytes")}
+            let offset=position
+            // Fixed ZIP64 local extra allows the size to be patched after the stream and CRC are known.
+            var extra=Data();extra.append(le16(1));extra.append(le16(16));extra.append(le64(size));extra.append(le64(size))
+            var header=Data()
+            header.append(le32(0x04034b50));header.append(le16(45));header.append(le16(0x0800));header.append(le16(0))
+            header.append(le16(time));header.append(le16(day));header.append(le32(0));header.append(le32(UInt32.max));header.append(le32(UInt32.max))
+            header.append(le16(UInt16(name.count)));header.append(le16(UInt16(extra.count)));header.append(name);header.append(extra)
+            try put(header)
+            var crc:UInt32=0xFFFFFFFF
+            var consumed:UInt64=0
+            func consume(_ chunk:Data) throws {
+                for byte in chunk {crc=crcTable[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)}
+                try put(chunk);consumed += UInt64(chunk.count)
+            }
+            if let data=entry.data {try consume(data)}
+            else if let file=entry.file {
+                let input=try FileHandle(forReadingFrom:file);defer{try? input.close()}
+                while let chunk=try input.read(upToCount:1024*1024),!chunk.isEmpty {try consume(chunk)}
+            }
+            guard consumed == size else {throw Fault.damaged("a source changed during export")}
+            crc ^= 0xFFFFFFFF
+            let after=position
+            try output.seek(toOffset:offset+14);try output.write(contentsOf:le32(crc));try output.seek(toOffset:after)
+            var centralExtra=Data();centralExtra.append(le16(1));centralExtra.append(le16(24));centralExtra.append(le64(size));centralExtra.append(le64(size));centralExtra.append(le64(offset))
+            directory.append(le32(0x02014b50));directory.append(le16(45));directory.append(le16(45));directory.append(le16(0x0800));directory.append(le16(0))
+            directory.append(le16(time));directory.append(le16(day));directory.append(le32(crc));directory.append(le32(UInt32.max));directory.append(le32(UInt32.max))
+            directory.append(le16(UInt16(name.count)));directory.append(le16(UInt16(centralExtra.count)));directory.append(le16(0));directory.append(le16(0));directory.append(le16(0))
+            directory.append(le32(0));directory.append(le32(UInt32.max));directory.append(name);directory.append(centralExtra)
+        }
+        let directoryOffset=position
+        try put(directory)
+        let zip64Offset=position
+        var ending=Data()
+        ending.append(le32(0x06064b50));ending.append(le64(44));ending.append(le16(45));ending.append(le16(45));ending.append(le32(0));ending.append(le32(0))
+        ending.append(le64(UInt64(entries.count)));ending.append(le64(UInt64(entries.count)));ending.append(le64(UInt64(directory.count)));ending.append(le64(directoryOffset))
+        ending.append(le32(0x07064b50));ending.append(le32(0));ending.append(le64(zip64Offset));ending.append(le32(1))
+        ending.append(le32(0x06054b50));ending.append(le16(0));ending.append(le16(0));ending.append(le16(UInt16.max));ending.append(le16(UInt16.max))
+        ending.append(le32(UInt32.max));ending.append(le32(UInt32.max));ending.append(le16(0))
+        try put(ending)
+        try output.synchronize()
+        guard !fm.fileExists(atPath:destination.path) else {throw Fault.damaged("the destination already exists")}
+        try FileOperationTransaction.current?.prepare(destination,after:try FileRevision.read(temporary).digest)
+        try fm.moveItem(at:temporary,to:destination)
+    }
+
+    /// Extract our stored ZIP64 archives without loading file payloads into memory.
+    static func extractStreaming(_ archive:URL, to root:URL) throws -> [String] {
+        let fm=FileManager.default
+        let input=try FileHandle(forReadingFrom:archive);defer{try? input.close()}
+        var position:UInt64=0
+        var paths:[String]=[]
+        var seen=Set<String>()
+        func read(_ count:Int) throws -> Data {
+            guard let bytes=try input.read(upToCount:count),bytes.count == count else {throw Fault.damaged("a file ends early")}
+            position += UInt64(count);return bytes
+        }
+        while true {
+            let signature=try read(4)
+            if u32(signature,0) == 0x02014b50 {break}
+            guard u32(signature,0) == 0x04034b50,paths.count < 20_000 else {throw Fault.damaged("a local file header is missing")}
+            let header=try read(26)
+            let flags=u16(header,2),method=u16(header,4),expectedCRC=u32(header,10)
+            let nameLength=Int(u16(header,22)),extraLength=Int(u16(header,24))
+            guard flags == 0x0800,method == 0,nameLength > 0,extraLength <= 65_535 else {throw Fault.damaged("unsupported streaming entry")}
+            let nameBytes=try read(nameLength),extra=try read(extraLength)
+            guard let path=String(data:nameBytes,encoding:.utf8),
+                  !path.hasPrefix("/"),!path.split(separator:"/").contains(".."),
+                  !path.hasSuffix("/"),seen.insert(path).inserted else {throw Fault.damaged("an unsafe or duplicate file name")}
+            var size:UInt64?
+            var at=0
+            while at+4 <= extra.count {
+                let kind=u16(extra,at),length=Int(u16(extra,at+2));at += 4
+                guard at+length <= extra.count else {throw Fault.damaged("invalid ZIP64 extra")}
+                if kind == 1 && length >= 16 {
+                    let uncompressed=u64(extra,at),compressed=u64(extra,at+8)
+                    guard uncompressed == compressed else {throw Fault.damaged("a stored entry has conflicting sizes")}
+                    size=uncompressed
+                }
+                at += length
+            }
+            guard let size,size <= UInt64(Int64.max) else {throw Fault.damaged("an entry has no ZIP64 size")}
+            let target=try Handler_File_Manager.contained(path,under:root)
+            try fm.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
+            guard fm.createFile(atPath:target.path,contents:nil) else {throw Fault.damaged("a staged file could not be created")}
+            let output=try FileHandle(forWritingTo:target);defer{try? output.close()}
+            var remaining=size,crc:UInt32=0xFFFFFFFF
+            while remaining > 0 {
+                let chunk=try read(Int(min(remaining,1024*1024)))
+                for byte in chunk {crc=crcTable[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)}
+                try output.write(contentsOf:chunk);remaining -= UInt64(chunk.count)
+            }
+            guard crc ^ 0xFFFFFFFF == expectedCRC else {throw Fault.damaged(path + " does not match its checksum")}
+            paths.append(path)
+        }
+        return paths
+    }
     struct Entry: Equatable {
         let path: String
         let data: Data

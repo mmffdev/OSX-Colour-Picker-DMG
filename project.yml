@@ -28,7 +28,7 @@ targets:
     sources:
       - path: .
         name: Sources
-        includes: ["*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
+        includes: ["*.swift", "UIPrimitives/**/*.swift", "FileHandlers/**/*.swift", "Help/**/*.swift"]
         excludes:
           - Package.swift
           - project.yml
@@ -72,7 +72,7 @@ targets:
         codeSign: true
     settings:
       base:
-        PRODUCT_NAME: MMFFDev Colour 3
+        PRODUCT_NAME: Colorgain
         EXECUTABLE_NAME: MMFFDevColour3
         PRODUCT_BUNDLE_IDENTIFIER: com.mmffdev.mmffdevcolour3
         GENERATE_INFOPLIST_FILE: NO
@@ -104,7 +104,7 @@ targets:
           # The input files put this phase after the property list and the binary are in place; without
           # them Xcode may process Info.plist after the stamp and lose it.
           # What build.sh does after compiling: the build number is the commit count, the commit is
-          # stamped for the footer (a "+" when Swift files were uncommitted), and the Adobe helper and
+          # stamped for provenance (a "+" when Swift files were uncommitted), and the Adobe helper and
           # its daemon plist go into the bundle. Xcode signs the whole bundle after this phase.
           set -euo pipefail
           cd "$SRCROOT"
@@ -117,6 +117,9 @@ targets:
               /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
               /usr/libexec/PlistBuddy -c "Delete :ColourBuildCommit" "$plist" 2>/dev/null || true
               /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$plist"
+              built="$(date '+%Y-%m-%d %H:%M %Z')"
+              /usr/libexec/PlistBuddy -c "Delete :ColourBuildDate" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :ColourBuildDate string $built" "$plist"
           fi
           helper="$app/Contents/MacOS/MMFFDevColour3Helper"
           id="com.mmffdev.mmffdevcolour3.helper"

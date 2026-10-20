@@ -10,6 +10,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
     }
     private let store=ICCProfileLibrary.shared
     private let search=NSSearchField()
+    private let refreshButton=PaletteAssetIcon(frame:.zero)
     private let addFile=SwissButton("Add File…",.quiet),addFolder=SwissButton("Add Folder…",.quiet)
     private let use=SwissButton("Use As Target",.quiet),locateButton=SwissButton("Locate…",.quiet),remove=SwissButton("Remove Link",.quiet)
     private let tree=WorkspaceBranchTree()
@@ -20,21 +21,26 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
     private var expanded:Set<String>=["yours","missing"]
     private var previousMissing=Set<String>()
     private var rebuilding=false,busy=false
+    var onContentHeightChange:(()->Void)?
     var onTarget:((ICCProfileLibrary.Profile)->Void)?
+    var onCollectionActions:((ICCProfileLibrary.Profile)->HaloAction)?
     override var isFlipped:Bool {true}
-    private var treeHeight:CGFloat {CGFloat(tree.numberOfRows)*28}
-    var minimumContentHeight:CGFloat {100+treeHeight+(selected == nil ? 28:224)}
+    private var treeHeight:CGFloat {CGFloat(tree.numberOfRows)*34}
+    var minimumContentHeight:CGFloat {treeHeight+108+(selected == nil ? 0:212)}
     override init(frame:NSRect){
         super.init(frame:frame)
         search.appearance=NSAppearance(named:.aqua);search.textColor=Design.ink;search.backgroundColor=Design.card
         search.placeholderString="Search ICC Profiles";search.font=Design.Text.body.font();search.delegate=self;search.setAccessibilityLabel("Search ICC Profiles")
         for button in [addFile,addFolder,use,locateButton,remove]{addSubview(button);button.target=self}
         addFile.action=#selector(chooseFiles);addFolder.action=#selector(chooseFolder);use.action=#selector(useSelected);locateButton.action=#selector(locateSelected);remove.action=#selector(removeSelected)
-        addSubview(search);addSubview(details);addSubview(status)
+        addSubview(search);addSubview(details);addSubview(status);addSubview(refreshButton)
+        refreshButton.symbol="arrow.clockwise";refreshButton.setAccessibilityLabel("Refresh ICC Profiles");refreshButton.toolTip="Refresh ICC Profiles";refreshButton.run={ [weak self] in self?.refresh() }
         details.font=Design.Text.caption.font();details.textColor=Design.ink;details.maximumNumberOfLines=6
         status.font=Design.Text.caption.font();status.textColor=Design.quiet;status.maximumNumberOfLines=1
         let column=NSTableColumn(identifier:.init("ICCProfiles"));tree.addTableColumn(column);tree.outlineTableColumn=column;tree.headerView=nil
-        tree.rowHeight=28;tree.intercellSpacing = .zero;tree.indentationPerLevel=0;tree.backgroundColor=Design.card;tree.style = .plain;tree.focusRingType = .none
+        tree.swatchFamily = .yellow
+        tree.leadingDisclosure=true;tree.depthOffset=2;tree.connectsFromParent=true
+        tree.rowHeight=34;tree.intercellSpacing = .zero;tree.indentationPerLevel=0;tree.backgroundColor=Design.card;tree.style = .plain;tree.focusRingType = .none
         tree.delegate=self;tree.dataSource=self;tree.setAccessibilityLabel("ICC Profile Library")
         addSubview(tree);tree.installConnectors(in:self)
         tree.target=self;tree.doubleAction=#selector(openSelected)
@@ -45,6 +51,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
             if linked && !available {actions.append(HaloAction(id:"locate",label:"Locate ICC Profile…",symbol:"folder",onSelect:{[weak self] in self?.locate(profile.id)}))}
             actions.append(HaloAction(id:"reveal",label:"Show In Finder",symbol:"arrow.up.right",disabled:!FileManager.default.fileExists(atPath:ICCProfileLibrary.resolvedURL(profile).path),onSelect:{NSWorkspace.shared.activateFileViewerSelecting([ICCProfileLibrary.resolvedURL(profile)])}))
             if linked{actions.append(HaloAction(id:"remove",label:"Remove Link",symbol:"minus",onSelect:{[weak self] in self?.store.remove(profile.id)}))}
+            if let collection=self.onCollectionActions?(profile){actions.append(collection)}
             self.context.open(actions,at:point,in:view)
         }
         observer=NotificationCenter.default.addObserver(forName:ICCProfileLibrary.changed,object:nil,queue:.main){[weak self] _ in self?.reload()}
@@ -92,18 +99,26 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
         locateButton.isHidden = !isLinked || !store.needsLocate(profile);remove.isHidden = !isLinked
         status.stringValue=profile.canTarget ? "Linked Files Stay In Their Original Location":"This Profile Type Can Be Inspected Only"
     }
+    override func draw(_ dirtyRect:NSRect){
+        let depth=tree.numberOfRows > 0 ? tree.level(forRow:tree.numberOfRows-1)+tree.depthOffset:tree.depthOffset
+        fill(bounds,depth > 0 ? Design.mix(Design.card,WorkspaceBranchTree.tint(depth-1,family:.yellow),0.045):Design.card)
+        hairline(x:0,y:treeHeight,width:bounds.width)
+    }
     override func layout(){
         super.layout();let w=max(0,bounds.width-32)
-        search.frame=NSRect(x:16,y:12,width:w,height:28)
-        addFile.frame=NSRect(x:16,y:48,width:132,height:32);addFolder.frame=NSRect(x:164,y:48,width:max(0,w-148),height:32)
-        tree.frame=NSRect(x:0,y:96,width:bounds.width,height:treeHeight);tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()
-        let bottom=96+treeHeight
-        details.frame=NSRect(x:16,y:bottom+12,width:w,height:124)
-        use.frame=NSRect(x:16,y:bottom+140,width:140,height:32);locateButton.frame=NSRect(x:164,y:bottom+140,width:max(0,w-148),height:32)
-        remove.frame=NSRect(x:16,y:bottom+172,width:140,height:32)
-        status.frame=NSRect(x:16,y:bottom+(selected == nil ? 8:208),width:w,height:20)
+        tree.frame=NSRect(x:0,y:0,width:bounds.width,height:treeHeight);tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()
+        let bottom=treeHeight
+        search.frame=NSRect(x:16,y:bottom+12,width:max(0,w-36),height:28)
+        refreshButton.ink=Design.ink;refreshButton.frame=NSRect(x:bounds.width-40,y:bottom+12,width:24,height:28)
+        addFile.frame=NSRect(x:16,y:bottom+48,width:132,height:32);addFolder.frame=NSRect(x:164,y:bottom+48,width:max(0,w-148),height:32)
+        let detailTop=bottom+96
+        details.frame=NSRect(x:16,y:detailTop,width:w,height:124)
+        use.frame=NSRect(x:16,y:detailTop+128,width:140,height:32);locateButton.frame=NSRect(x:164,y:detailTop+128,width:max(0,w-148),height:32)
+        remove.frame=NSRect(x:16,y:detailTop+160,width:140,height:32)
+        status.frame=NSRect(x:16,y:bottom+(selected == nil ? 88:300),width:w,height:20)
     }
-    private func refreshExtent(){needsLayout=true;var view=superview;while let current=view{if let panel=current as? WorkspacePanel{panel.rail?.arrange();break};view=current.superview}}
+
+    private func refreshExtent(){needsLayout=true;needsDisplay=true;onContentHeightChange?();var view=superview;while let current=view{if let panel=current as? WorkspacePanel{panel.rail?.arrange();break};view=current.superview}}
     @objc private func chooseFiles(){choose(folder:false)}
     @objc private func chooseFolder(){choose(folder:true)}
     private func choose(folder:Bool){
@@ -149,7 +164,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
     func outlineView(_ outlineView:NSOutlineView,rowViewForItem item:Any)->NSTableRowView?{let row=WorkspaceBranchTree.Row();row.accordion=tree;return row}
     func outlineView(_ outlineView:NSOutlineView,viewFor tableColumn:NSTableColumn?,item:Any)->NSView?{
         let node=item as! Node,cell=WorkspaceBranchTree.Cell(frame:.zero)
-        cell.compactMetadata=true
+        cell.compactMetadata=true;cell.leadingDisclosure=true
         cell.symbol=node.profile == nil ? "folder":"doc";cell.star.isHidden=true
         let missing=node.profile.map{store.needsLocate($0)} ?? false
         cell.warning=missing

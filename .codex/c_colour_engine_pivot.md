@@ -1,5 +1,7 @@
 # Proofing engine pivot and licence review
 
+**Current decision, 17 October 2026:** Rick selected Apple ColorSync. The [shared PCS pipeline](c_pcs_pipeline.md) supersedes the LittleCMS recommendation and engine-replacement steps below. The remaining file-management and instrument research remains separate.
+
 Reviewed 2026-10-12. Rick accepted the proofing review except pagination and house-button changes; leave those controls unchanged.
 
 ## Apple API status

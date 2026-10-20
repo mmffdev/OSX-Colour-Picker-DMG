@@ -43,6 +43,13 @@ struct PaletteReview:Codable,Equatable {
 /// Storage owners still coordinate catalogue/global transactions; this handler owns the asset bytes.
 enum PaletteAssetHandler {
     typealias Asset=PaletteDocument
+    private static let readCacheLock=NSLock()
+    private static var readCache:[String:(FileVersion,Asset)]=[:]
+    static func invalidateReadCache(in root:URL) {
+        let prefix=root.resolvingSymlinksInPath().standardizedFileURL.path+"/"
+        readCacheLock.lock();defer{readCacheLock.unlock()}
+        readCache=readCache.filter{!URL(fileURLWithPath:$0.key).resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(prefix)}
+    }
     enum Fault:LocalizedError {
         case unsupported,invalidRating
         var errorDescription:String? {
@@ -56,7 +63,27 @@ enum PaletteAssetHandler {
         let asset=try ColourFiles.decoder().decode(Asset.self,from:data)
         try validate(asset);return asset
     }
-    static func read(_ url:URL)throws->Asset {try read(Handler_File_Manager.shared.read(url))}
+    static func read(_ data:Data,at url:URL)throws->Asset {
+        guard let version=FileVersion.read(url) else{return try read(data)}
+        let path=url.standardizedFileURL.path
+        readCacheLock.lock()
+        if let cached=readCache[path],cached.0 == version {readCacheLock.unlock();return cached.1}
+        readCacheLock.unlock()
+        let asset=try read(data)
+        readCacheLock.lock();defer{readCacheLock.unlock()}
+        if readCache.count > 4_096 {readCache.removeAll()}
+        readCache[path]=(version,asset)
+        return asset
+    }
+    static func read(_ url:URL)throws->Asset {
+        if let version=FileVersion.read(url) {
+            let path=url.standardizedFileURL.path
+            readCacheLock.lock()
+            if let cached=readCache[path],cached.0 == version {readCacheLock.unlock();return cached.1}
+            readCacheLock.unlock()
+        }
+        return try read(Handler_File_Manager.shared.read(url),at:url)
+    }
     static func data(_ asset:Asset)throws->Data {try validate(asset);return try Handler_File_Manager.shared.documentBytes(ColourFiles.encoder().encode(asset),extension:asset.format == "colour-typography" ? "coltyp" : "colpal")}
     static func store(_ asset:Asset,at url:URL)throws {try Handler_File_Manager.shared.write(data(asset),to:url)}
     static func document(_ palette:Swatch,in library:Library,member:UUID?,file:String,catalogue:UUID?=nil)->Asset {
@@ -107,10 +134,14 @@ enum PaletteAssetHandler {
         var rating:Int?
         /// Nil means all flags; an empty string means unflagged.
         var flag:String?
+        var selectedFlags:Set<String>{
+            get{flag.map{Set($0.components(separatedBy:"|"))} ?? []}
+            set{flag=newValue.isEmpty ? nil:newValue.sorted().joined(separator:"|")}
+        }
         var order:Order = .newest
         func matches(_ palette:Swatch)->Bool {
             (rating == nil || (palette.review?.rating ?? 0) == rating) &&
-            (flag == nil || (palette.review?.flag?.rawValue ?? "") == flag)
+            (flag == nil || selectedFlags.contains(palette.review?.flag?.rawValue ?? ""))
         }
     }
     static func filtered(_ palettes:[Swatch],by filter:Filter,in library:Library)->[Swatch] {
@@ -120,7 +151,24 @@ enum PaletteAssetHandler {
         case newest="Newest",oldest="Oldest",name="Name",starred="Starred",useCount="Project Use Count",rating="Rating",flag="Flag"
     }
     static func ordered(_ palettes:[Swatch],by order:Order,in library:Library)->[Swatch] {
-        let uses=order == .useCount ? Dictionary(uniqueKeysWithValues:palettes.map{($0.id,presentation($0,in:library).useCount)}):[:]
+        var uses:[UUID:Int]=[:]
+        if order == .useCount {
+            var descendants:[UUID:[UUID]]=[:]
+            var projects:[UUID:UUID]=[:]
+            for palette in library.swatches {
+                if let parent=palette.copiedFrom {descendants[parent,default:[]].append(palette.id)}
+                if let project=palette.projectID {projects[palette.id]=project}
+            }
+            for palette in palettes {
+                var seen=Set<UUID>(),stack=[palette.id],owners=Set<UUID>()
+                while let id=stack.popLast() {
+                    guard seen.insert(id).inserted else{continue}
+                    if let owner=projects[id]{owners.insert(owner)}
+                    stack.append(contentsOf:descendants[id] ?? [])
+                }
+                uses[palette.id]=owners.count
+            }
+        }
         return palettes.sorted {a,b in
             switch order {
             case .newest:if a.createdAt != b.createdAt{return a.createdAt > b.createdAt}

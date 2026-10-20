@@ -1,0 +1,41 @@
+{
+  "description" : "Your keyboard shortcuts.",
+  "header" : {
+    "createdAt" : "2026-10-19T19:25:22.067Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "documentID" : "C6F049AE-2ECF-4413-8924-5820F11A738D",
+    "lastSavedAt" : "2026-10-19T19:25:22.067Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "name" : "Default",
+  "quickKeys" : {
+
+  },
+  "shortcuts" : {
+
+  },
+  "version" : 1
+}

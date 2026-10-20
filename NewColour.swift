@@ -38,7 +38,7 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
     private var fields: [NSTextField] = []
     private var captions: [NSTextField] = []
     private var columns: [NSStackView] = []
-    private let press = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let press = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     private let pressRow = NSStackView()
     private let chip = NSView()
     private let readout = NSTextField(wrappingLabelWithString: "")
@@ -436,7 +436,9 @@ final class NewColourSheet: NSView, NSTextFieldDelegate {
 
 /// A blank swatch the size of its neighbours, with a ringed plus in the middle. Pressing it opens
 /// New Colour. Drawn in the theme's button greys, so it never competes with the colours beside it.
-final class AddSwatchTile: NSView {
+final class AddSwatchTile: ClickCursorView {
+    override var handCursorRects:[NSRect]{[bounds]}
+
     var onPress: (() -> Void)?
     private let radius: CGFloat
     private var hovering = false { didSet { needsDisplay = true } }

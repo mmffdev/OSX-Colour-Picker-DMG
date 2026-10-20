@@ -13,6 +13,8 @@ final class Help_Handler: NSObject {
     static let pages: [Page] = [
         .init(id:"index",title:"Overview",file:"Help_Index",sections:[]),
         .init(id:"catalogues",title:"Library",file:"Help_Library",sections:["catalogues","favourites","folders","my-palettes"]),
+        .init(id:"palette-page",title:"Palette Page",file:"Help_Palette_Page",sections:["start","ownership","navigation","reading","presets","workflow","target","rendering","tolerance","delta-view","analysis","organise","footer","layouts","routine","troubleshooting","glossary","references"]),
+        .init(id:"halo",title:"Halo",file:"Help_Halo",sections:["purpose","opening","navigation","palette-actions","colour-actions","destinations","confirmation","settings"]),
         .init(id:"icc-profiles",title:"ICC Profiles",file:"Help_ICC_Profiles",sections:[]),
         .init(id:"histograms",title:"Histograms",file:"Help_Histograms",sections:[]),
         .init(id:"bloom",title:"Delta Bloom",file:"Help_Delta_Bloom",sections:[]),
@@ -129,7 +131,28 @@ private final class Help_Reader: NSWindowController, WKNavigationDelegate {
         let css="""
         *{box-sizing:border-box}html{scroll-behavior:auto}::-webkit-scrollbar{width:16px}::-webkit-scrollbar-thumb{background:#F4BE00;border:5px solid \(ground)}body{margin:0;background:\(ground);color:\(ink);font:15px/1.65 'Helvetica Neue',Helvetica,Arial,sans-serif}a{color:inherit;text-underline-offset:4px}a:focus-visible{outline:2px solid currentColor;outline-offset:4px}nav{position:fixed;inset:0 auto 0 0;width:200px;padding:28px 20px;border-right:1px solid \(rule);overflow:auto}nav strong{display:block;font-size:20px;margin-bottom:24px}nav a{display:block;margin:0 0 12px}nav [aria-current]{font-weight:500}main{margin-left:200px;padding:32px 40px 70vh;max-width:960px}h1{font-size:36px;font-weight:300;line-height:1.2;margin:0 0 20px}h2{font-size:24px;font-weight:400;margin:44px 0 14px;padding-top:20px;border-top:2px solid currentColor;scroll-margin-top:24px}h3{font-size:17px;font-weight:500}p{margin:0 0 18px}.contents a{display:inline-block;margin:0 18px 8px 0}.diagram{border:1px solid \(rule);padding:20px;margin:24px 0}.diagram strong{display:block}.diagram .row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid \(rule)}.diagram .indent{padding-left:24px}.diagram .indent2{padding-left:48px}.flow{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.flow span{padding:8px 12px;border:1px solid currentColor}figcaption{font-size:13px;margin-top:12px}code{font-family:inherit;font-weight:500}ul{padding-left:20px}svg{max-width:100%;height:auto;stroke:currentColor;fill:none} @media(max-width:700px){nav{position:static;width:auto;border-right:0;border-bottom:1px solid \(rule)}nav a{display:inline-block;margin-right:16px}main{margin-left:0;padding:24px 24px 70vh}}
         """
-        web.loadHTMLString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>\(page.title)</title><style>\(css)</style></head><body><nav aria-label=\"Help topics\"><strong>Colorgain Help</strong>\(index)</nav><main>\(content)</main></body></html>",baseURL:nil)
+        let contentsCSS="""
+        .page-contents{position:fixed;left:200px;top:0;bottom:0;width:190px;padding:32px 16px;border-right:1px solid \(rule);overflow:auto}.page-contents strong{display:block;margin-bottom:16px;font-weight:500}.page-contents a{display:block;padding:6px 8px;margin:0 0 4px;border-left:3px solid transparent;text-decoration:none;font-size:13px;line-height:1.45}.page-contents a[aria-current="location"]{border-left-color:#F4BE00;background:color-mix(in srgb,\(ink) 6%,\(ground));font-weight:500}body.has-contents main{margin-left:390px;max-width:1180px;padding-left:28px;padding-right:28px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:10px 8px;border-bottom:1px solid \(rule)}th{font-weight:500}.note{border-left:3px solid #F4BE00;padding:12px 16px;margin:24px 0;background:color-mix(in srgb,\(ink) 3%,\(ground))}section{scroll-margin-top:24px}h2:focus{outline:none}.steps li{margin-bottom:12px}@media(max-width:760px){.page-contents{position:sticky;top:0;left:auto;width:auto;max-height:28vh;background:\(ground);border-right:0;border-bottom:1px solid \(rule);padding:12px 20px;z-index:2}.page-contents a{display:inline-block;margin-right:8px}body.has-contents main{margin-left:0;padding:24px 24px 70vh}}
+        """
+        let contentsScript="""
+        <script>
+        (()=>{
+          const headings=[...document.querySelectorAll('main h2')];
+          if(!headings.length)return;
+          const aside=document.createElement('aside');aside.className='page-contents';aside.setAttribute('aria-label','Contents for this page');
+          const title=document.createElement('strong');title.textContent='On This Page';aside.append(title);
+          const links=headings.map((heading,index)=>{
+            if(!heading.id)heading.id='section-'+index;
+            const link=document.createElement('a');link.href='#'+heading.id;link.textContent=heading.textContent;aside.append(link);
+            link.addEventListener('click',event=>{event.preventDefault();heading.scrollIntoView({block:'start'});heading.tabIndex=-1;heading.focus({preventScroll:true});update();});return link;
+          });
+          document.body.insertBefore(aside,document.querySelector('main'));document.body.classList.add('has-contents');
+          function update(){let active=0;headings.forEach((heading,index)=>{if(heading.getBoundingClientRect().top<=100)active=index;});links.forEach((link,index)=>{if(index===active)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');});}
+          let pending=false;window.addEventListener('scroll',()=>{if(!pending){pending=true;requestAnimationFrame(()=>{update();pending=false;});}},{passive:true});window.addEventListener('resize',update);update();
+        })();
+        </script>
+        """
+        web.loadHTMLString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>\(page.title)</title><style>\(css)\(contentsCSS)</style></head><body><nav aria-label=\"Help topics\"><strong>Colorgain Help</strong>\(index)</nav><main>\(content)</main>\(contentsScript)</body></html>",baseURL:nil)
         showWindow(nil);window?.makeKeyAndOrderFront(nil)
     }
     func webView(_ webView:WKWebView,didFinish navigation:WKNavigation!){

@@ -88,6 +88,8 @@ struct CollectionEntry: Codable, Equatable {
     var groupName: String?
     /// What each level between is called, top down; `groupName` is the first.
     var levelNames: [String]? = nil
+    var workItemPlural: String? = nil
+    var profile: [String:String]? = nil
     var template: SchemaNode
     var templateID: UUID?
     var groups: [GroupEntry]
@@ -129,6 +131,14 @@ struct CatalogueFile: Codable, Equatable {
     /// User-saved metadata filter presets; portable with the catalogue.
     var metadataFilters: [MetadataFilterPreset]? = nil
     var workspaceLayouts: [WorkspaceLayoutTemplate]? = nil
+    var importedAssets: [WorkspaceImportedAsset]? = nil
+    /// User-curated asset memberships. Independent of the ownership/schema collections above.
+    var assetCollections: [AssetCollectionEntry]? = nil
+    /// Colour of the top Collections navigation node, stored with this catalogue.
+    var assetCollectionsRootColour: String? = nil
+    var structure: SimpleCatalogueStructure? = nil
+    var sharedAssetReferences: [String:String]? = nil
+    var libraryAssetTypes: [String]? = nil
 }
 
 /// "Web.colinf": a member's information pack, its record and details.
@@ -183,6 +193,88 @@ enum TreeError: LocalizedError {
 }
 
 enum CatalogueTree {
+    /// A review, tag, note or metadata edit changes one portable asset file and no
+    /// catalogue links. The caller has already loaded and validated the tree.
+    static func writePortableEdit(from before:Library,to after:Library,index:URL,validated:Bool=false)throws->Bool {
+        guard before.swatches.count == after.swatches.count else{return false}
+        let differences=after.swatches.indices.filter{before.swatches[$0] != after.swatches[$0]}
+        guard differences.count == 1 else{return false}
+        let at=differences[0],old=before.swatches[at],new=after.swatches[at]
+        var allowed=new
+        allowed.review=old.review;allowed.tags=old.tags
+        allowed.assetNotes=old.assetNotes;allowed.metadata=old.metadata
+        guard allowed == old else{return false}
+        var reset=after;reset.swatches[at]=old
+        guard reset == before else{return false}
+        let root=index.deletingLastPathComponent()
+        if !validated {try Handler_File_Manager.shared.requireAvailableCatalogue(index)}
+        guard let cat=catalogue(in:root),
+              let link=(cat.libraryAssets + cat.collections.flatMap{$0.allMembers.flatMap{$0.member.assets}}).first(where:{$0.id == new.id}) else{return false}
+        let url=root.appendingPathComponent(link.file)
+        guard FileManager.default.fileExists(atPath:url.path),
+              (try? PaletteAssetHandler.read(url).palette.id) == new.id else{return false}
+        let doc=PaletteAssetHandler.document(new,in:after,member:new.projectID,file:url.deletingPathExtension().lastPathComponent,catalogue:cat.id)
+        try PaletteAssetHandler.store(doc,at:url)
+        return true
+    }
+
+    /// A name-only edit changes one palette file and its link. The surrounding
+    /// transaction owns rollback if either write fails, including a filename move.
+    static func writePortableRename(from before:Library,to after:Library,index:URL,validated:Bool=false)throws->Bool {
+        guard before.swatches.count == after.swatches.count else{return false}
+        let differences=after.swatches.indices.filter{before.swatches[$0] != after.swatches[$0]}
+        guard differences.count == 1 else{return false}
+        let at=differences[0],old=before.swatches[at],new=after.swatches[at]
+        var allowed=new
+        allowed.name=old.name;allowed.nameChangedAt=old.nameChangedAt
+        guard allowed == old else{return false}
+        var reset=after;reset.swatches[at]=old
+        guard reset == before else{return false}
+        if !validated {try Handler_File_Manager.shared.requireAvailableCatalogue(index)}
+        let root=index.deletingLastPathComponent()
+        guard var catalogue=catalogue(in:root) else{return false}
+        let matches=catalogue.libraryAssets.filter{$0.id == new.id}
+            + catalogue.collections.flatMap{$0.allMembers.flatMap{$0.member.assets.filter{$0.id == new.id}}}
+        guard matches.count == 1,let link=matches.first else{return false}
+        let source=try Handler_File_Manager.contained(link.file,under:root)
+        guard source.pathExtension.lowercased() == fileExtension(of:new),
+              let document=try? PaletteAssetHandler.read(source),document.palette.id == new.id else{return false}
+        let folder=source.deletingLastPathComponent()
+        var taken=Set<String>()
+        let target=try settleFile(existing:source,wanted:filesystemName(new.name),extension:fileExtension(of:new),in:folder,taken:&taken)
+        let filename=target.deletingPathExtension().lastPathComponent
+        let data=try PaletteAssetHandler.data(paletteDocument(new,in:after,member:new.projectID,file:filename,catalogue:catalogue.id))
+        try Handler_File_Manager.shared.write(data,to:target)
+        let newLink=AssetLink(id:new.id,kind:new.isTypography ? .typography:.palette,name:new.name,file:relative(target,to:root))
+        if newLink != link {
+            func update(_ assets:inout [AssetLink])->Bool {
+                guard let index=assets.firstIndex(where:{$0.id == new.id}) else{return false}
+                assets[index]=newLink
+                return true
+            }
+            func update(_ groups:inout [GroupEntry])->Bool {
+                for index in groups.indices {
+                    if update(&groups[index].members){return true}
+                    if var children=groups[index].groups,update(&children){groups[index].groups=children;return true}
+                }
+                return false
+            }
+            func update(_ members:inout [MemberEntry])->Bool {
+                for index in members.indices {if update(&members[index].assets){return true}}
+                return false
+            }
+            var linked=update(&catalogue.libraryAssets)
+            if !linked {
+                for index in catalogue.collections.indices {
+                    if update(&catalogue.collections[index].members) || update(&catalogue.collections[index].groups) {linked=true;break}
+                }
+            }
+            guard linked else{throw failure("The palette link changed while renaming. The file transaction has been rolled back.")}
+            catalogue.changedAt=Date()
+            try Handler_File_Manager.shared.write(encoder().encode(catalogue),to:index)
+        }
+        return true
+    }
     private static func encoder() -> JSONEncoder { ColourFiles.encoder() }
     private static func decoder() -> JSONDecoder { ColourFiles.decoder() }
     private static let fm = FileManager.default
@@ -248,12 +340,48 @@ enum CatalogueTree {
         let id: UUID
         /// The member the file says it belongs to; nil for the Library.
         let owner: UUID?
+        let payload:Data?
+        let document:PaletteDocument?
+        init(url:URL,kind:Kind,id:UUID,owner:UUID?,payload:Data?=nil,document:PaletteDocument?=nil) {
+            self.url=url;self.kind=kind;self.id=id;self.owner=owner;self.payload=payload;self.document=document
+        }
     }
     private struct AssetHead: Decodable {
         struct P: Decodable { let id: UUID; let styles: [TypeStyle]? }
         let palette: P?
         let project: UUID?
         let member: UUID?
+    }
+    private static let assetHeadLock=NSLock()
+    private static var assetHeads:[String:(FileVersion,FoundAsset?)]=[:]
+    static func invalidateScanCache(in root:URL) {
+        let prefix=root.resolvingSymlinksInPath().standardizedFileURL.path+"/"
+        assetHeadLock.lock()
+        assetHeads=assetHeads.filter{!URL(fileURLWithPath:$0.key).resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(prefix)}
+        assetHeadLock.unlock()
+        InspectedAssetCache.invalidate(in:root)
+        PaletteAssetHandler.invalidateReadCache(in:root)
+    }
+    private static func foundAsset(at url:URL,extension ext:String,payload:Data?=nil)->FoundAsset? {
+        let path=url.standardizedFileURL.path
+        guard let version=FileVersion.read(url) else{return nil}
+        assetHeadLock.lock()
+        if let cached=assetHeads[path],cached.0 == version {
+            assetHeadLock.unlock();return cached.1
+        }
+        assetHeadLock.unlock()
+        let found:FoundAsset?
+        if let head=payload.flatMap({try? decoder().decode(AssetHead.self,from:$0)}) ?? read(AssetHead.self,at:url) {
+            if ext == ColourFiles.information {
+                found=head.member.map{FoundAsset(url:url,kind:.information,id:$0,owner:$0,payload:payload)}
+            } else if let palette=head.palette {
+                found=FoundAsset(url:url,kind:palette.styles != nil ? .typography:.palette,id:palette.id,owner:head.project,payload:payload)
+            } else {found=nil}
+        } else {found=nil}
+        assetHeadLock.lock();defer{assetHeadLock.unlock()}
+        if assetHeads.count > 20_000{assetHeads.removeAll()}
+        assetHeads[path]=(version,found)
+        return found
     }
 
     /// Every asset under the root, wherever Finder put it, except in the backups.
@@ -265,23 +393,44 @@ enum CatalogueTree {
             for name in names(in: dir) {
                 let url = dir.appendingPathComponent(name)
                 if isFolder(url) {
-                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues" || (name == "Assets" && fm.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path))) { continue }
+                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues" || (name == "Assets" && (fm.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || fm.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)))) { continue }
                     walk(url, depth: depth + 1)
                     continue
                 }
                 let ext = (name as NSString).pathExtension.lowercased()
-                guard kinds.contains(ext), let head = read(AssetHead.self, at: url) else { continue }
-                if ext == ColourFiles.information {
-                    if let m = head.member { out.append(FoundAsset(url: url, kind: .information, id: m, owner: m)) }
-                    continue
-                }
-                guard let p = head.palette else { continue }
-                // The palette itself says what it is; the extension is the hint.
-                out.append(FoundAsset(url: url, kind: p.styles != nil ? .typography : .palette, id: p.id, owner: head.project))
+                guard kinds.contains(ext),let found=foundAsset(at:url,extension:ext) else{continue}
+                out.append(found)
             }
         }
         walk(root, depth: 0)
         return out
+    }
+    private static func scanAssets(in inventory:FileInventory)->[FoundAsset] {
+        if inventory.assetHeadsComplete {return inventory.observedAssets}
+        let kinds:Set<String>=[ColourFiles.palette,ColourFiles.typography,ColourFiles.legacyPalette,ColourFiles.information]
+        // FileManager's directory listing resolves /var to /private/var on macOS. Keep
+        // the caller's root spelling so ownership and .colcat link comparisons agree.
+        let logicalRoot=inventory.root.path+"/"
+        let physicalRoot=inventory.root.resolvingSymlinksInPath().standardizedFileURL.path+"/"
+        return inventory.files.compactMap{url in
+            let ext=url.pathExtension.lowercased()
+            guard kinds.contains(ext) else{return nil}
+            let listedPath=url.path
+            let display:URL
+            if listedPath.hasPrefix(logicalRoot) {display=url}
+            else if listedPath.hasPrefix(physicalRoot) {display=inventory.root.appendingPathComponent(String(listedPath.dropFirst(physicalRoot.count)))}
+            else {
+                let physical=url.resolvingSymlinksInPath().standardizedFileURL.path
+                guard physical.hasPrefix(physicalRoot) else{return nil}
+                display=inventory.root.appendingPathComponent(String(physical.dropFirst(physicalRoot.count)))
+            }
+            let payload=inventory.assetPayloads[url.path]
+            if let head=inventory.assetHeads[url.path] {
+                let kind:FoundAsset.Kind=head.kind == "information" ? .information : head.kind == "typography" ? .typography : .palette
+                return FoundAsset(url:display,kind:kind,id:head.id,owner:head.owner,payload:payload)
+            }
+            return foundAsset(at:display,extension:ext,payload:payload)
+        }
     }
 
     // MARK: Where the folders are
@@ -439,13 +588,26 @@ enum CatalogueTree {
 
     /// Reads the catalogue: the structure file, then the folders and assets as Finder has left them.
     /// `palettes` false reads only the shape, for the schema alone.
-    static func read(root: URL, palettes wantPalettes: Bool = true) throws -> TreeLoaded {
+    static func read(root: URL, palettes wantPalettes: Bool = true, validated:Bool = false, observed:FileInventory? = nil) throws -> TreeLoaded {
+        let trace=ProcessInfo.processInfo.environment["COLORGAIN_PERF_TRACE"] == "1"
+        let readStarted=Date()
+        func report(_ label:String,_ started:Date) {
+            if trace {print(String(format:"PERF tree %@ %.3f s",label,Date().timeIntervalSince(started)))}
+        }
         guard let indexURL = CatalogueFiles.index(in: root) else { throw TreeError.noIndex(root) }
-        try Handler_File_Manager.shared.requireAvailableCatalogue(indexURL)
-        let data = try Handler_File_Manager.shared.read(indexURL)
-        guard let cat = decode(data) else { throw TreeError.notThisVersion(indexURL) }
-        let assets = scanAssets(root: root)
+        if !validated {try Handler_File_Manager.shared.requireAvailableCatalogue(indexURL)}
+        let cat:CatalogueFile
+        if let validated=observed?.catalogueDocument {cat=validated}
+        else {
+            let data=try Handler_File_Manager.shared.read(indexURL)
+            guard let decoded=decode(data) else{throw TreeError.notThisVersion(indexURL)}
+            cat=decoded
+        }
+        let assets = observed.map{scanAssets(in:$0)} ?? scanAssets(root: root)
+        report("scanAssets",readStarted)
+        let resolveStarted=Date()
         let res = resolve(root: root, catalogue: cat, assets: assets)
+        report("resolve",resolveStarted)
         var notes = res.notes
         var dirty = !notes.isEmpty
         var lib = Library()
@@ -458,8 +620,8 @@ enum CatalogueTree {
         var entries: [UUID: MemberEntry] = [:]
         for c in cat.collections where !res.gone.contains(c.id) {
             var made = SchemaCollection(id: c.id, name: c.name, about: c.about, folderName: c.groupName, folders: [], stack: c.template)
-            made.templateID = c.templateID
-            made.levelNames = c.levelNames
+            made.templateID = c.templateID; made.workItemPlural = c.workItemPlural
+            made.levelNames = c.levelNames; made.workItemPlural = c.workItemPlural; made.profile = c.profile
             if let url = res.collections[c.id], url.lastPathComponent != c.folder, url.lastPathComponent != filesystemName(c.name) { made.name = url.lastPathComponent }
             func take(_ groups: [GroupEntry], parent: UUID?) {
                 for g in groups where !res.gone.contains(g.id) {
@@ -535,10 +697,14 @@ enum CatalogueTree {
         let palettesFound = assets.filter { $0.kind != .information && atLink($0) } + assets.filter { $0.kind != .information && !atLink($0) }
         var byOwner: [UUID?: [Swatch]] = [:]
         if wantPalettes {
+            let palettesStarted=Date()
             for a in palettesFound {
                 let (found, member) = owner(of: a.url)
                 guard found else { notes.append("\(a.url.lastPathComponent) sits outside any member and was left alone"); continue }
-                let doc = try PaletteAssetHandler.read(a.url)
+                let doc:PaletteDocument
+                if let validated=a.document {doc=validated}
+                else if let bytes=a.payload {doc=try PaletteAssetHandler.read(bytes,at:a.url)}
+                else {doc=try PaletteAssetHandler.read(a.url)}
                 guard seenPalettes.insert(doc.palette.id).inserted else { notes.append("\(a.url.lastPathComponent) is a second copy of a palette already read and was left alone"); continue }
                 var p = doc.palette
                 p.projectID = member
@@ -580,6 +746,7 @@ enum CatalogueTree {
             }
             if let file = cat.swatches.map({ root.appendingPathComponent($0) }),
                let doc = read(SwatchesDocument.self, at: file) { takeColours(doc.colours) }
+            report("palettes",palettesStarted)
         }
         if let file = cat.profiles.map({ root.appendingPathComponent($0) }),
            let doc = read(ProfilesDocument.self, at: file) { lib.colourProfiles = doc.profiles }
@@ -593,7 +760,8 @@ enum CatalogueTree {
         let alive = Set(projects.map { $0.id })
         lib.tagInfo = cat.tags.filter { $0.projectID.map { alive.contains($0) } ?? true }
         if lib.tagInfo.count != cat.tags.count { dirty = true }
-        let schema = SchemaTrial.SchemaFile(collections: collections, places: places, stacks: stacks.isEmpty ? nil : stacks, templates: cat.templates.isEmpty ? nil : cat.templates)
+        let schema = SchemaTrial.SchemaFile(collections: collections, places: places, stacks: stacks.isEmpty ? nil : stacks, templates: cat.templates.isEmpty ? nil : cat.templates, structure: cat.structure)
+        report("total",readStarted)
         return TreeLoaded(library: lib, schema: schema, catalogue: cat, dirty: dirty, notes: notes)
     }
 
@@ -616,7 +784,12 @@ enum CatalogueTree {
     /// Writes the library and the schema: every folder and asset settled where the structure says, moved and renamed to
     /// match, then the structure file, then what the app listed and no longer has taken away. `carry`, when given,
     /// describes the folders of an earlier layout, for bringing one across.
-    static func write(_ lib: Library, schema given: SchemaTrial.SchemaFile, index indexURL: URL, name: String? = nil, now: Date = Date(), carry: CatalogueFile? = nil, poolDirectory: String = "Assets", createEmptyPools: Bool = true) throws {
+    static func write(_ lib: Library, schema given: SchemaTrial.SchemaFile, index indexURL: URL, name: String? = nil, now: Date = Date(), carry: CatalogueFile? = nil, poolDirectory: String = "Assets", createEmptyPools: Bool = true, dirtyPalettes: Set<UUID>? = nil, observed: FileInventory? = nil) throws {
+        let trace=ProcessInfo.processInfo.environment["COLORGAIN_PERF_TRACE"] == "1"
+        let writeStarted=Date()
+        func report(_ label:String,_ started:Date) {
+            if trace {print(String(format:"PERF write %@ %.3f s",label,Date().timeIntervalSince(started)))}
+        }
         var schema = given
         // A member always has a home: with no collection at all, the first one is made for it.
         if !lib.projects.isEmpty && schema.collections.isEmpty { schema.collections = SchemaTrial.SchemaFile.fresh.collections }
@@ -624,8 +797,11 @@ enum CatalogueTree {
         try Handler_File_Manager.shared.createDirectory(root)
         if poolDirectory != "" { try ASERegistry.seed(root, name: name ?? indexURL.deletingPathExtension().lastPathComponent) }
         let old = catalogue(in: root) ?? carry
-        let found = scanAssets(root: root)
+        let found = observed.map { scanAssets(in: $0) } ?? scanAssets(root: root)
+        report("scanAssets",writeStarted)
+        let resolveStarted=Date()
         let res = resolve(root: root, catalogue: old, assets: found)
+        report("resolve",resolveStarted)
         let catID = old?.id ?? UUID()
         let catName = name ?? old?.name ?? root.lastPathComponent
 
@@ -651,6 +827,8 @@ enum CatalogueTree {
             guard let i = list.firstIndex(where: { url in url.lastPathComponent == name && (parent.map { url.deletingLastPathComponent().standardizedFileURL == $0.standardizedFileURL } ?? true) }) else { return nil }
             return list.remove(at: i)
         }
+        var importedAssets = old?.importedAssets
+        var importMoves: [(URL, URL)] = []
         /// A folder moved: everything found inside it is now under its new path.
         func rebase(from was: URL, to now: URL) {
             let a = was.standardizedFileURL.path + "/", b = now.standardizedFileURL.path + "/"
@@ -658,13 +836,31 @@ enum CatalogueTree {
                 let path = url.standardizedFileURL.path
                 return path.hasPrefix(a) ? URL(fileURLWithPath: b + path.dropFirst(a.count)) : url
             }
+            importMoves.append((was, now))
+            if var records = importedAssets {
+                for i in records.indices where !records[i].external {
+                    records[i].path = relative(moved(root.appendingPathComponent(records[i].path)), to: root)
+                }
+                importedAssets = records
+            }
             paletteAt = paletteAt.mapValues(moved); infoAt = infoAt.mapValues(moved)
             memberAt = memberAt.mapValues(moved); groupAt = groupAt.mapValues(moved)
         }
         var removing: [URL] = []
         var written: [(URL, Data)] = []
         let e = encoder()
-        func link(_ s: Swatch, at url: URL) -> AssetLink { AssetLink(id: s.id, kind: s.isTypography ? .typography : .palette, name: s.name, file: relative(url, to: root)) }
+        let rootPrefix=root.standardizedFileURL.path+"/"
+        func link(_ s: Swatch, at url: URL) -> AssetLink {
+            let path=url.standardizedFileURL.path
+            let location=path.hasPrefix(rootPrefix) ? String(path.dropFirst(rootPrefix.count)):relative(url,to:root)
+            return AssetLink(id:s.id,kind:s.isTypography ? .typography:.palette,name:s.name,file:location)
+        }
+        var preparedAssetHomes=Set<String>()
+        func prepareAssetHome(_ home:URL)throws {
+            if preparedAssetHomes.insert(home.standardizedFileURL.path).inserted {
+                try Handler_File_Manager.shared.createDirectory(home)
+            }
+        }
 
         // The collections, each a folder at the root.
         var collectionURL: [UUID: URL] = [:]
@@ -727,18 +923,36 @@ enum CatalogueTree {
             // A group's folder is found by the group's id; a group the member never listed, as when the member moved to a
             // collection whose template has other ids, takes the folder of that name that is no longer spoken for.
             let treeIDs = Set(SchemaTrial.rows(of: tree).map { $0.node.id.uuidString })
+            // Resolve bucket folders by their original semantic IDs, even when a new Assets
+            // container changes their parent. Moving the entire folder retains binary assets.
+            var originalBuckets:[UUID:URL]=[:]
+            if let was {
+                let oldTree=was.schema ?? old?.collections.first(where:{$0.allMembers.contains(where:{$0.member.id == p.id})})?.template
+                func oldPaths(_ node:SchemaNode,under:URL){
+                    for child in node.children {
+                        let at=under.appendingPathComponent(was.buckets[child.id.uuidString] ?? filesystemName(child.name))
+                        originalBuckets[child.id]=at;oldPaths(child,under:at)
+                    }
+                }
+                if let oldTree {oldPaths(oldTree,under:folder)}
+            }
             var spare = Set((was?.buckets ?? [:]).filter { !treeIDs.contains($0.key) }.map { $0.value })
             for row in SchemaTrial.rows(of: tree) where row.level >= 2 {
                 let above = parentNode(of: row.node.id)
                 let under = above.flatMap { bucketURL[$0] } ?? folder
                 var takenHere = above.flatMap { bucketURL[$0] != nil ? bucketTaken[$0] : nil } ?? rootTaken
-                var existing = (was?.buckets[row.node.id.uuidString]).map { under.appendingPathComponent($0) }.flatMap { fm.fileExists(atPath: $0.path) ? $0 : nil }
+                var existing = originalBuckets[row.node.id].flatMap { fm.fileExists(atPath:$0.path) ? $0:nil }
                 if existing == nil, spare.contains(filesystemName(row.node.name)), fm.fileExists(atPath: under.appendingPathComponent(filesystemName(row.node.name)).path) {
                     existing = under.appendingPathComponent(filesystemName(row.node.name))
                     spare.remove(filesystemName(row.node.name))
                 }
                 let url = try settle(existing: existing, wanted: filesystemName(row.node.name), in: under, taken: &takenHere)
-                if let was = existing, was != url { rebase(from: was, to: url) }
+                if let was = existing, was != url {
+                    rebase(from: was, to: url)
+                    originalBuckets=originalBuckets.mapValues { value in
+                        value.path.hasPrefix(was.path+"/") ? URL(fileURLWithPath:url.path+value.path.dropFirst(was.path.count)):value
+                    }
+                }
                 if let above = above, bucketURL[above] != nil { bucketTaken[above] = takenHere } else { rootTaken = takenHere }
                 bucketURL[row.node.id] = url
                 bucketTaken[row.node.id] = []
@@ -760,11 +974,15 @@ enum CatalogueTree {
             for palette in held {
                 let role: SchemaRole = palette.isTypography ? .typography : .palettes
                 let home = palette.bucketID.flatMap { id in SchemaTrial.rows(of: tree).contains(where: { $0.node.id == id && SchemaTrial.role(of: $0.node) == role }) ? bucketURL[id] : nil } ?? bucket(for: role) ?? folder.appendingPathComponent(role.title)
+                try prepareAssetHome(home)
                 var takenHere = fileTaken[home.path] ?? []
-                let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere)
+                let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere, parentKnownToExist:true)
+                let moved=paletteAt[palette.id]?.standardizedFileURL != url.standardizedFileURL
                 fileTaken[home.path] = takenHere
                 paletteAt[palette.id] = url
-                written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: p.id, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+                if moved || dirtyPalettes == nil || dirtyPalettes!.contains(palette.id) || !FileManager.default.fileExists(atPath:url.path) {
+                    written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: p.id, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+                }
                 links.append(link(palette, at: url))
             }
             // Its information pack, in its Information group, or in its own folder when its schema has none.
@@ -787,11 +1005,15 @@ enum CatalogueTree {
         var poolTaken: [String: Set<String>] = [:]
         for palette in lib.palettes(in: nil) {
             let home = library.appendingPathComponent(palette.isTypography ? TreeFiles.typographyPool : TreeFiles.palettesPool)
+            try prepareAssetHome(home)
             var takenHere = poolTaken[home.path] ?? []
-            let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere)
+            let url = try settleFile(existing: paletteAt[palette.id], wanted: filesystemName(palette.name), extension: fileExtension(of: palette), in: home, taken: &takenHere, parentKnownToExist:true)
+            let moved=paletteAt[palette.id]?.standardizedFileURL != url.standardizedFileURL
             poolTaken[home.path] = takenHere
             paletteAt[palette.id] = url
-            written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: nil, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+            if moved || dirtyPalettes == nil || dirtyPalettes!.contains(palette.id) || !FileManager.default.fileExists(atPath:url.path) {
+                written.append((url, try PaletteAssetHandler.data(paletteDocument(palette, in: lib, member: nil, file: url.deletingPathExtension().lastPathComponent, catalogue: catID))))
+            }
             libraryLinks.append(link(palette, at: url))
         }
         let used = Set(lib.swatches.flatMap { s in s.entries.map { $0.hex } + (s.styles ?? []).flatMap { [$0.ink, $0.paper] } })
@@ -805,10 +1027,13 @@ enum CatalogueTree {
         if createEmptyPools || !lib.colourProfiles.isEmpty { written.append((profilesURL, try e.encode(ProfilesDocument(catalogue: catID, profiles: lib.colourProfiles)))) }
 
         // Everything written, each file only when what it holds has changed.
+        report("prepare",writeStarted)
+        let filesStarted=Date()
         for (url, data) in written {
             try Handler_File_Manager.shared.createDirectory(url.deletingLastPathComponent())
             try Handler_File_Manager.shared.write(data, to: url)
         }
+        report("files",filesStarted)
 
         // What the app listed and no longer has: palettes and members it deleted.
         let live = Set(lib.swatches.map { $0.id })
@@ -832,20 +1057,31 @@ enum CatalogueTree {
             let direct = inside.filter { SchemaTrial.folder(of: $0.id, among: schema.collections, places: placesAll) == nil }.compactMap { entries[$0.id] }
             var made = CollectionEntry(id: c.id, name: c.name, about: c.about, folder: collectionURL[c.id]?.lastPathComponent ?? filesystemName(c.name), groupName: c.folderName,
                                        template: c.stack, templateID: c.templateID, groups: groups, members: direct)
-            made.levelNames = c.levelNames
+            made.levelNames = c.levelNames; made.workItemPlural = c.workItemPlural; made.profile = c.profile
             return made
         }
         let file = CatalogueFile(id: catID, name: catName, about: old?.about, createdAt: old?.createdAt ?? now, changedAt: now, library: lib.version,
                                  activePalette: lib.activeSwatchID, colours: lib.colours.map { $0.hex }, tags: lib.tagInfo, deleted: lib.deleted,
                                  templates: schema.templates ?? [], collections: collections, libraryAssets: libraryLinks,
                                  swatches: createEmptyPools || !looseColours.isEmpty ? relative(swatchesURL, to: root) : nil, profiles: createEmptyPools || !lib.colourProfiles.isEmpty ? relative(profilesURL, to: root) : nil,
-                                 metadataFilters: old?.metadataFilters,workspaceLayouts:old?.workspaceLayouts)
+                                 metadataFilters: old?.metadataFilters,workspaceLayouts:old?.workspaceLayouts,importedAssets:importedAssets,assetCollections:old?.assetCollections ?? (old == nil && indexURL.lastPathComponent != "Assets.colcat" ? [AssetCollections.defaultEntry()] : nil),assetCollectionsRootColour:old?.assetCollectionsRootColour,structure:schema.structure,sharedAssetReferences:old?.sharedAssetReferences,libraryAssetTypes:old?.libraryAssetTypes)
+        if !importMoves.isEmpty, FileManager.default.fileExists(atPath: ASERegistry.url(in: root).path) {
+            var sources = try ASERegistry.resolved(root)
+            let previous = sources.map(\.path)
+            for (from, to) in importMoves {
+                for i in sources.indices where sources[i].path.hasPrefix(from.path + "/") {
+                    sources[i].path = to.path + String(sources[i].path.dropFirst(from.path.count))
+                }
+            }
+            if sources.map(\.path) != previous { try ASERegistry.write(sources, root: root) }
+        }
         let before = catalogue(in: root)
         var sameDate = file
         sameDate.changedAt = before?.changedAt ?? now
         if sameDate != before {
             do { try Handler_File_Manager.shared.write(e.encode(file), to: indexURL) } catch { throw StoreError.saveFailed(indexURL, error) }
         }
+        report("total",writeStarted)
 
         for url in removing.sorted(by: { $0.path.count > $1.path.count }) where fm.fileExists(atPath: url.path) { try remove(url) }
     }
@@ -882,8 +1118,8 @@ enum CatalogueTree {
     }
 
     /// The same for a file: `parent/<wanted>.<ext>`, moving the file that holds the same thing, and changing its extension when an earlier version gave it another.
-    private static func settleFile(existing: URL?, wanted: String, extension ext: String, in parent: URL, taken: inout Set<String>) throws -> URL {
-        try Handler_File_Manager.shared.createDirectory(parent)
+    private static func settleFile(existing: URL?, wanted: String, extension ext: String, in parent: URL, taken: inout Set<String>, parentKnownToExist:Bool=false) throws -> URL {
+        if !parentKnownToExist {try Handler_File_Manager.shared.createDirectory(parent)}
         if let e = existing, e.deletingLastPathComponent().standardizedFileURL == parent.standardizedFileURL, e.pathExtension.lowercased() == ext {
             let have = e.deletingPathExtension().lastPathComponent
             if have == wanted || (taken.contains(wanted) && isVariant(have, of: wanted)) { taken.insert(have); return e }

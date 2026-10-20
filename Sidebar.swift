@@ -304,7 +304,7 @@ final class BucketCellView: NSTableCellView {
     var onGear: ((NSButton) -> Void)?
 
     override init(frame: NSRect) {
-        gear = NSButton(frame: .zero)
+        gear = ClickCursorButton(frame: .zero)
         super.init(frame: frame)
         gear.isBordered = false
         gear.bezelStyle = .inline
@@ -378,7 +378,7 @@ final class ThemedRowView: NSTableRowView {
 }
 
 /// One of the strip's icons: a button that says when the pointer is on it.
-final class StripButton: NSButton {
+final class StripButton: ClickCursorButton {
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
     override func updateTrackingAreas() {
@@ -427,6 +427,8 @@ final class HeadingCellView: NSTableCellView {
 }
 
 final class SidebarOutlineView: NSOutlineView {
+    override func resetCursorRects(){super.resetCursorRects();for index in 0..<numberOfRows{ClickCursor.register([rect(ofRow:index)],in:self)}}
+
     /// The right-hand column of icons (gears, padlocks) is this wide and this far from the edge on every row.
     static let trailingIcon: CGFloat = 16
     static let trailingPad: CGFloat = 4

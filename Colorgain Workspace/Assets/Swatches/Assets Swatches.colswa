@@ -1,0 +1,128 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#1B1B1F",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.010960198738717244,
+        "y" : 0.011126321984254355,
+        "z" : 0.011002392135477891
+      },
+      "pickedAt" : 1791497922064.166,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.10588235294117647,
+          0.10588235294117647,
+          0.12156862745098039
+        ]
+      }
+    },
+    {
+      "hex" : "#2BB29C",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.2295491823224419,
+        "y" : 0.34469305876950018,
+        "z" : 0.28098875268340251
+      },
+      "pickedAt" : 1791482739784.262,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.16862745098039217,
+          0.69803921568627447,
+          0.61176470588235299
+        ]
+      }
+    },
+    {
+      "hex" : "#FF3F41",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.46273191733317603,
+        "y" : 0.26131708700112144,
+        "z" : 0.056503595165508888
+      },
+      "pickedAt" : 1791482740499.5151,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          1,
+          0.24705882352941178,
+          0.25490196078431371
+        ]
+      }
+    },
+    {
+      "hex" : "#33363D",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.035317801123961087,
+        "y" : 0.036640071516563011,
+        "z" : 0.037369519373197504
+      },
+      "pickedAt" : 1791482741313.4241,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.20000000000000001,
+          0.21176470588235294,
+          0.23921568627450981
+        ]
+      }
+    },
+    {
+      "hex" : "#22252A",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.017412163709923063,
+        "y" : 0.018225240010726236,
+        "z" : 0.018554440492963661
+      },
+      "pickedAt" : 1791482742495.3079,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.13333333333333333,
+          0.14509803921568629,
+          0.16470588235294117
+        ]
+      }
+    }
+  ],
+  "format" : "colour-swatches",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:25:22.074Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "documentID" : "DD9C3900-7425-450F-BF15-F8C7DEC2C9A6",
+    "lastSavedAt" : "2026-10-20T03:25:25.584Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "version" : 1
+}

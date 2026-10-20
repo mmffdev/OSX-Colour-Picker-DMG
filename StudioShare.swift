@@ -12,7 +12,9 @@ import UniformTypeIdentifiers
 // Export: Level, Contents, Options, Check, Save. Import: Choose, Contents, Check, Twins, Placement, Confirm, Done.
 // Nothing is written to the catalogue before Confirm, and the import goes in as one change the history can undo.
 
-final class SharePage: NSView, PageSection, Overlay {
+final class SharePage: ClickCursorView, PageSection, Overlay {
+    override var handCursorRects:[NSRect]{steps[step] == "Done" ? []:Array(stepRects.prefix(step))}
+
     enum Mode { case export, bringIn }
     struct Level { let level: ShareLevel; let subject: UUID?; let name: String }
 
@@ -213,6 +215,7 @@ final class SharePage: NSView, PageSection, Overlay {
 
     private func clear() {
         if let s = staging { Sharing.discard(s) }
+        if let inspected=inspection?.stagedRoot,inspected != staging {Sharing.discard(inspected)}
         levels = []; levelIndex = 0; tree = nil; ticked = []; step = 0; carryTags = true; carryNotes = true
         carryAssets = false; carryAppbridge = false; importedName = nil; aseSelection = []; restoreASELocations = false
         chosenFile = nil; inspection = nil; staging = nil; staged = nil; placements = []; placementIndex = 0
@@ -574,7 +577,7 @@ final class SharePage: NSView, PageSection, Overlay {
             // Twins and places are worked out once the share has been staged and read.
             guard let i = inspection else { return }
             do {
-                if let s = staging { Sharing.discard(s) }
+                if let s = staging,s != i.stagedRoot { Sharing.discard(s) }
                 let dir = try Sharing.stage(i)
                 staging = dir
                 let s = try Sharing.read(staging: dir, level: i.manifest.level)
@@ -662,6 +665,7 @@ final class SharePage: NSView, PageSection, Overlay {
     }
 
     private func inspectImport(_ url: URL) {
+        if let prior=inspection?.stagedRoot,prior != staging {Sharing.discard(prior)}
         do { inspection = try Sharing.inspect(url); chosenFile = url; buildTree() }
         catch { problem = error.localizedDescription; inspection = nil; chosenFile = nil }
     }

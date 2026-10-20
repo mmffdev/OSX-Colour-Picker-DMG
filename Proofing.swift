@@ -19,12 +19,73 @@ struct ProofDataset: Codable, Equatable {
     var metadata: [String: String]
     var patches: [ProofPatch]
     var conditions: String {
-        [metadata["ILLUMINATION_NAME"] ?? "Illuminant unspecified", metadata["OBSERVER_ANGLE"].map { $0 + "°" } ?? "Observer unspecified", metadata["FILTER"] ?? metadata["MEASUREMENT_CONDITION"] ?? "Measurement mode unspecified"].joined(separator: " · ")
+        [metadata["ILLUMINATION_NAME"] ?? "Illuminant unspecified", metadata["OBSERVER_ANGLE"].map { $0 + "°" } ?? "Observer unspecified", metadata["FILTER"] ?? metadata["MEASUREMENT_CONDITION"] ?? "Measurement mode unspecified", metadata["MEASUREMENT_BACKING"].map { $0 + " backing" } ?? "Backing unspecified"].joined(separator: " · ")
     }
     var hasD50: Bool { metadata["ILLUMINATION_NAME"]?.uppercased() == "D50" && ["2", "2.0"].contains(metadata["OBSERVER_ANGLE"] ?? "") }
     func validate() throws {
         guard !patches.isEmpty, patches.count <= 10000, patches.allSatisfy(\.valid) else { throw ProofError.invalid("Expected 1–10,000 patches with finite Lab values (L 0–100).") }
         guard Set(patches.map(\.id)).count == patches.count else { throw ProofError.invalid("Duplicate patch IDs. Each patch must have a unique ID.") }
+    }
+}
+/// One gate shared by measured workflows. Confirmations supply missing facts only; they never
+/// replace an explicit declaration. Original metadata and file hashes remain untouched.
+struct ProofConditionReview {
+    var conflicts: [String] = []
+    var missing: [String] = []
+    var assumptions: [String] = []
+    var canEvaluate: Bool { conflicts.isEmpty && missing.isEmpty }
+    var needsConfirmation: Bool { conflicts.isEmpty && !missing.isEmpty }
+    var status: String {
+        if !conflicts.isEmpty { return "Incompatible Conditions" }
+        if !missing.isEmpty { return "Needs Confirmation" }
+        return assumptions.isEmpty ? "Conditions Match" : "Confirmed By User"
+    }
+    var detail: String { (conflicts.isEmpty ? (missing.isEmpty ? assumptions : missing) : conflicts).joined(separator: "; ") }
+    var record: String { status + (detail.isEmpty ? "" : " · " + detail) }
+}
+enum ProofConditions {
+    static let labels = ["ILLUMINATION_NAME":"Illuminant", "OBSERVER_ANGLE":"Observer", "FILTER":"Measurement mode", "MEASUREMENT_BACKING":"Backing"]
+    static func canonical(_ value: String, key: String) -> String {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch key {
+        case "OBSERVER_ANGLE": return Double(clean.replacingOccurrences(of:"°",with:"")).map { String($0) } ?? clean
+        case "MEASUREMENT_BACKING": return clean.replacingOccurrences(of:" BACKING",with:"")
+        default: return clean
+        }
+    }
+    static func review(reference: ProofDataset, measurement: ProofDataset? = nil,
+                       confirmed: Bool = false, requireMeasurementDetails: Bool = true) -> ProofConditionReview {
+        var review = ProofConditionReview()
+        let keys = ["ILLUMINATION_NAME", "OBSERVER_ANGLE"] + (requireMeasurementDetails ? ["FILTER", "MEASUREMENT_BACKING"] : [])
+        func values(_ dataset: ProofDataset, _ key: String) -> [String] {
+            let aliases = key == "FILTER" ? ["FILTER", "MEASUREMENT_CONDITION"] : [key]
+            return aliases.compactMap { dataset.metadata[$0] }.map { canonical($0,key:key) }.filter { !$0.isEmpty }
+        }
+        // Always detect explicit conflicts, even when legacy callers require only D50/2°.
+        for key in ["ILLUMINATION_NAME", "OBSERVER_ANGLE", "FILTER", "MEASUREMENT_BACKING"] {
+            let expected = key == "ILLUMINATION_NAME" ? "D50" : key == "OBSERVER_ANGLE" ? "2.0" : nil
+            let ref = values(reference,key), measured = measurement.map { values($0,key) } ?? []
+            for (name, entries) in [(reference.name,ref), (measurement?.name ?? "Measurement",measured)] {
+                if Set(entries).count > 1 { review.conflicts.append(name + ": conflicting " + (labels[key] ?? key) + " declarations") }
+                if let expected, let actual = entries.first, actual != expected {
+                    review.conflicts.append(name + ": " + (labels[key] ?? key) + " " + actual + "; requires " + expected)
+                }
+            }
+            if let a = ref.first, let b = measured.first, a != b, expected == nil {
+                review.conflicts.append((labels[key] ?? key) + " differs: reference " + a + ", measurement " + b)
+            }
+            guard keys.contains(key) else { continue }
+            let expectedValue = expected ?? ref.first
+            if ref.isEmpty {
+                let fact = "Reference " + (labels[key] ?? key) + (expectedValue.map { " = " + $0 } ?? " not declared")
+                if confirmed && expectedValue != nil { review.assumptions.append(fact) } else { review.missing.append(fact) }
+            }
+            if measurement != nil && measured.isEmpty {
+                let fact = (labels[key] ?? key) + (expectedValue.map { " = " + $0 } ?? " not declared in reference")
+                if confirmed && expectedValue != nil { review.assumptions.append(fact) } else { review.missing.append(fact) }
+            }
+        }
+        return review
     }
 }
 /// App bundles own reference resources; no SwiftPM accessor may fall back to a developer's build tree.
@@ -48,6 +109,10 @@ enum ProofReferences {
             result.metadata["OBSERVER_ANGLE"] = "2"
             result.metadata["FILTER"] = "M0"
             result.metadata["CONDITIONS_SOURCE"] = "Bundled Fogra FOGRA39 reference; D50/2° from original INSTRUMENTATION; M0 legacy condition"
+        }
+        // These known bundled references explicitly describe white backing in INSTRUMENTATION.
+        if (result.metadata["INSTRUMENTATION"] ?? "").localizedCaseInsensitiveContains("white backing") {
+            result.metadata["MEASUREMENT_BACKING"] = "White"
         }
         return result
     }
@@ -94,7 +159,14 @@ enum ProofImport {
                 if key == "END_DATA" { rows = false; ended = true; continue }
                 if format { fields += values.map { $0.uppercased() } }
                 else if rows { records.append(values) }
-                else if values.count > 1 { metadata[key] = values.dropFirst().joined(separator: " ") }
+                else if values.count > 1 {
+                    let value = values.dropFirst().joined(separator:" ")
+                    if ProofConditions.labels[key] != nil || key == "MEASUREMENT_CONDITION", let prior = metadata[key],
+                       ProofConditions.canonical(prior,key:key) != ProofConditions.canonical(value,key:key) {
+                        throw ProofError.invalid("Conflicting " + key + " declarations. Export one consistent measurement condition.")
+                    }
+                    metadata[key] = value
+                }
             }
             guard ended else { throw ProofError.invalid("Incomplete CGATS table: END_DATA is missing.") }
             if let n = metadata["NUMBER_OF_SETS"].flatMap(Int.init), n != records.count { throw ProofError.invalid("Declared patch count does not match the data.") }
@@ -164,6 +236,7 @@ struct ProofResult {
     var inks: [Double]?
     var difference: Double?
     var issue: String?
+    var conversion: PCSConversion.Provenance?
     func status(_ options: ProofOptions) -> ProofStatus {
         guard let d = difference else { return .notEvaluated }
         if d > options.tolerance { return .outsideTolerance }
@@ -173,21 +246,12 @@ struct ProofResult {
 }
 enum ProofEngine {
     static func conditionsIssue(_ session: ProofSession) -> String? {
-        let data = [session.reference] + (session.options.mode == "Measurement" ? session.measurement.map { [$0] } ?? [] : [])
-        for d in data {
-            if let i = d.metadata["ILLUMINATION_NAME"], i.uppercased() != "D50" { return "\(d.name) declares \(i). This workspace compares D50/2° Lab only." }
-            if let o = d.metadata["OBSERVER_ANGLE"], !["2","2.0"].contains(o) { return "\(d.name) declares a \(o)° observer. Use matching D50/2° data." }
-            if !d.hasD50 && !session.options.confirmD50 { return "Confirm D50 / 2° for files without declared viewing conditions before evaluating." }
-        }
-        if session.options.mode == "Measurement", let m = session.measurement {
-            if let a = session.reference.metadata["FILTER"] ?? session.reference.metadata["MEASUREMENT_CONDITION"],
-               let b = m.metadata["FILTER"] ?? m.metadata["MEASUREMENT_CONDITION"], a.caseInsensitiveCompare(b) != .orderedSame { return "Measurement modes differ: \(a) vs \(b)." }
-            for key in ["MEASUREMENT_BACKING"] {
-                if let a = session.reference.metadata[key], let b = m.metadata[key], a.caseInsensitiveCompare(b) != .orderedSame { return "Measurement conditions differ: \(key) is \(a) vs \(b)." }
-            }
-        }
-        return nil
+        let review = ProofConditions.review(reference: session.reference,
+            measurement: session.options.mode == "Measurement" ? session.measurement : nil,
+            confirmed: session.options.confirmD50, requireMeasurementDetails: false)
+        return review.canEvaluate ? nil : review.record
     }
+
     static func evaluate(_ session: ProofSession) -> [ProofResult] {
         let options = session.options, method = DifferenceMethod(rawValue: options.method) ?? .ciede2000
         if (try? session.validate()) == nil { return session.reference.patches.map { ProofResult(reference:$0,issue:"Invalid proof data or settings") } }
@@ -203,13 +267,13 @@ enum ProofEngine {
             } else if options.recipe {
                 guard [RenderingIntent.absolute.rawValue, RenderingIntent.relative.rawValue].contains(options.intent) else { result.issue = "Fixed CMYK recipes support absolute or relative colorimetric evaluation only"; return result }
                 guard let inks = patch.cmyk else { result.issue = "No source CMYK recipe"; return result }
-                guard let master = PrintBuild.master(ofInks: inks.map { $0 / 100 }, press: profile) else { result.issue = "Profile conversion unavailable"; return result }
-                let white = RenderingIntent(rawValue: options.intent) == .absolute ? PressProfiles.paperWhite(of: profile) : XYZ.d50
-                result.sample = XYZ(x: master.x * white.x / XYZ.d50.x, y: master.y * white.y, z: master.z * white.z / XYZ.d50.z).lab
+                guard let master = PrintBuild.master(ofInks: inks.map { $0 / 100 }, press: profile, intent: RenderingIntent(rawValue: options.intent) ?? .absolute) else { result.issue = "Profile conversion unavailable"; return result }
+                result.sample = master.lab
                 result.inks = inks
+                result.conversion = PressProfiles.space(named: profile).flatMap { PCSConversion.provenance(for: $0) }
             } else {
                 guard let build = PrintBuild.of(patch.lab.xyz, press: profile, intent: RenderingIntent(rawValue: options.intent) ?? .absolute, blackPoint: false) else { result.issue = "Profile conversion unavailable"; return result }
-                result.sample = build.printed.lab; result.inks = build.inks.map { $0 * 100 }
+                result.sample = build.printed.lab; result.inks = build.inks.map { $0 * 100 }; result.conversion = build.provenance
             }
             if let sample = result.sample { result.difference = method.difference(patch.lab, sample) }
             return result
@@ -228,17 +292,22 @@ enum ProofEngine {
     static func csv(_ results: [ProofResult], session: ProofSession) -> String {
         func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         func n(_ d: Double?) -> String { d.map { String(format: "%.6f", $0) } ?? "" }
-        let profileHash = (session.embeddedProfile ?? PressProfiles.all.first { $0.name == session.options.profile }.flatMap { FileManager.default.contents(atPath:$0.path) }).map { SHA256.hash(data:$0).map{String(format:"%02x",$0)}.joined() } ?? "Unavailable"
-        var lines = [["Colorgain Proof Report", "Generated", ISO8601DateFormatter().string(from: Date())],
+        let conversions = results.compactMap(\.conversion)
+        let profileHash = Array(Set(conversions.map(\.profileSHA256))).sorted().joined(separator:"; ")
+        let engine = conversions.first
+        let header: [[String]] = [["Colorgain Proof Report", "Generated", ISO8601DateFormatter().string(from: Date())],
                      ["Mode",session.options.mode,"Reference",session.reference.name,"SHA256",session.reference.sha256],
                      ["Measurement",session.measurement?.name ?? "None","SHA256",session.measurement?.sha256 ?? ""],
                      ["Profile",session.options.profile,"Intent",session.options.intent,"Black Point Compensation","Off"],
-                     ["Profile SHA256",profileHash,"Preserve CMYK recipe",String(session.options.recipe)],
+                     ["Profile SHA256",profileHash.isEmpty ? "Not evaluated":profileHash,"Preserve CMYK recipe",String(session.options.recipe)],
+                     ["Conversion engine",engine?.engine ?? "Not used", "PCS pipeline version",engine.map { String($0.pipelineVersion) } ?? ""],
+                     ["Engine platform",engine?.operatingSystem ?? "", "Connection space",engine?.connectionSpace ?? ""],
                      ["Measurement conditions",session.measurement?.conditions ?? "None"],
                      ["Method",session.options.method,"Tolerance",n(session.options.tolerance),"Ink review limit (%)",n(session.options.inkLimit)],
                      ["Conditions",session.reference.conditions,"Missing conditions confirmed D50/2°",String(session.options.confirmD50)],
                      ["Notes",session.notes], ["Scope","User tolerance review; not a certified contract proof. Screen colours are previews."],
-                     ["ID","Name","Reference L","Reference a","Reference b","Sample L","Sample a","Sample b","Delta L","Delta a","Delta b","Delta E","C %","M %","Y %","K %","Total ink %","Status","Issue"]].map { $0.map(q).joined(separator: ",") }
+                     ["ID","Name","Reference L","Reference a","Reference b","Sample L","Sample a","Sample b","Delta L","Delta a","Delta b","Delta E","C %","M %","Y %","K %","Total ink %","Status","Issue"]]
+        var lines = header.map { $0.map(q).joined(separator: ",") }
         // Keep the complete instrument/file metadata alongside the numeric report.
         let metadataRows = session.reference.metadata.sorted { $0.key < $1.key }.map { ["Reference metadata",$0.key,$0.value] }
             + (session.measurement?.metadata ?? [:]).sorted { $0.key < $1.key }.map { ["Measurement metadata",$0.key,$0.value] }
@@ -260,6 +329,16 @@ struct ProofConfiguration: Codable {
     var created = Date()
     var session: ProofSession
     var densitySimulation: [Double]?
+    /// Absent in legacy configurations: their conversion engine is unknown.
+    var conversion: PCSConversion.Provenance?
+    init(version: Int = 1, id: UUID = UUID(), name: String, created: Date = Date(), session: ProofSession, densitySimulation: [Double]? = nil) {
+        self.version = version; self.id = id; self.name = name; self.created = created
+        self.session = session; self.densitySimulation = densitySimulation
+        if session.options.mode == "Prediction" {
+            let profile = session.embeddedProfile.map { PressProfiles.registerProofProfile($0) } ?? session.options.profile
+            conversion = PressProfiles.space(named: profile).flatMap { PCSConversion.provenance(for: $0) }
+        }
+    }
     func validate() throws {
         guard version == 1, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               name.count <= 160, created.timeIntervalSince1970.isFinite else { throw ProofError.invalid("Invalid proof configuration.") }

@@ -1,6 +1,6 @@
-# Apple Menubar — App Store
+# Apple Menubar
 
-Built in `codex/apple-menubar`, from the current uncommitted app baseline. `AppleMenubar.swift` is guarded by `APPSTORE`; the direct-download build has no status item or settings entry.
+One shared macOS status item in both the direct-download and App Store editions. It is bound after the workspace opens and retains the app menu-bar settings route in each edition.
 
 A single movable status item groups recent swatches, the shared `Prefs.copyFormat` selector and the Colorgain icon. The icon menu reuses `LibraryController` Picker and Rectangle Picker. Ten slots are shown initially; Settings → Apple Menubar → 01 Settings can hide them, choose 1–20, and mute menubar sounds. Empty slots remain disabled until real samples arrive.
 

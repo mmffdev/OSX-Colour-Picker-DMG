@@ -3,7 +3,9 @@ import AppKit
 // ---------- A palette: one card per swatch ----------
 
 /// One line of a card: label, values, copy mark. Click copies that line.
-final class FormatRow: NSView {
+final class FormatRow: ClickCursorView {
+    override var handCursorRects:[NSRect]{onCopy == nil ? []:[bounds]}
+
     var onCopy: (() -> Void)?
     private let label = NSTextField(labelWithString: "")
     private let values = NSStackView()
@@ -392,9 +394,9 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private let displayBucket = RailBucket("Display"), paletteBucket = RailBucket("Palette"), swatchBucket = RailBucket("Swatches")
     private let labelsBucket = RailBucket("Labels"), tagsBucket = RailBucket("Tags")
 
-    private let contrastMenu = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let groupMenu = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let showMenu = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let contrastMenu = ClickCursorPopupButton(frame: .zero, pullsDown: false)
+    private let groupMenu = ClickCursorPopupButton(frame: .zero, pullsDown: false)
+    private let showMenu = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     private var panelRows: [RailRow] = []
     private var labelRows: [RailRow] = []
     /// Under that, while Histogram is on: the choices every swatch's histogram follows.
@@ -424,14 +426,14 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
     private let labels = PopoverButton(title: "Labels")
     private var labelsPopover = NSPopover()
     private var labelChecks: [NSButton] = []
-    private let addTo = NSPopUpButton(frame: .zero, pullsDown: true)
+    private let addTo = ClickCursorPopupButton(frame: .zero, pullsDown: true)
     /// The bar's right-hand side: the palette's own actions, or actions on several selected swatches.
     private let browsing = NSStackView()
     private let selecting = NSStackView()
     private var restSubtitle = ""
-    private let sort = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let sort = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     /// The colour profile this palette is proofed for: its own, or the one it inherits.
-    private let profile = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let profile = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     private let spectrum = SpectrumView()
     private let grid = SwatchGridView()
     private let scroll = PagingScrollView()
@@ -491,7 +493,7 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         labels.toolTip = "Choose which values each card shows"
         // Ticks in a popover rather than a menu, so it stays open while several are chosen.
         labelChecks = (["Name"] + ColourFormat.cardRows.map { $0.label }).map {
-            NSButton(checkboxWithTitle: $0, target: self, action: #selector(labelToggled))
+            ClickCursorButton(checkboxWithTitle: $0, target: self, action: #selector(labelToggled))
         }
         labelsPopover = tickPopover(labelChecks)
 
@@ -980,6 +982,15 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         guard isViewLoaded else { return }
         grid.collectionViewLayout?.invalidateLayout()
         grid.needsLayout = true
+    }
+
+    /// A card-row preference changes card height and text, but not palette membership or order.
+    /// Reconfigure only the on-screen cards instead of rebuilding the palette and its grid.
+    func refreshVisibleCards() {
+        guard isViewLoaded else { return }
+        sizeCards()
+        let visible = grid.indexPathsForVisibleItems()
+        if !visible.isEmpty { grid.reloadItems(at: visible) }
     }
 
     func reveal(_ hex: String) {

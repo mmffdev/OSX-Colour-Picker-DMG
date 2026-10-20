@@ -1,0 +1,105 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#B2B2B2",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.42926833168319245,
+        "y" : 0.44520119451622792,
+        "z" : 0.36737480996857963
+      },
+      "pickedAt" : 1791480606735.158,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.69803921568627447,
+          0.69803921568627447,
+          0.69803921568627447
+        ]
+      }
+    },
+    {
+      "hex" : "#FAFAFA",
+      "pickedAt" : 1792176361356.1111
+    },
+    {
+      "hex" : "#414141",
+      "pickedAt" : 1792176361356.1111
+    },
+    {
+      "hex" : "#707070",
+      "pickedAt" : 1792176361356.1111
+    }
+  ],
+  "file" : "Sampled 3",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.407Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "E2AFAAE4-7F8F-428D-BACA-B6EEFDA6A520",
+    "documentID" : "538CFC13-07E6-4C64-B40F-7D319ADFF25B",
+    "lastSavedAt" : "2026-10-19T23:43:09.245Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "E2AFAAE4-7F8F-428D-BACA-B6EEFDA6A520",
+    "createdAt" : 1792176361356.1111,
+    "entries" : [
+      {
+        "addedAt" : 1792176361356.1111,
+        "hex" : "#FAFAFA"
+      },
+      {
+        "addedAt" : 1792176361356.1111,
+        "hex" : "#414141"
+      },
+      {
+        "addedAt" : 1792176361356.1111,
+        "hex" : "#B2B2B2"
+      },
+      {
+        "addedAt" : 1792176361356.1111,
+        "hex" : "#707070"
+      }
+    ],
+    "id" : "538CFC13-07E6-4C64-B40F-7D319ADFF25B",
+    "name" : "Sampled 3",
+    "placedAt" : 1792453388446.5771,
+    "position" : 0,
+    "purpose" : "web",
+    "purposeChangedAt" : 1792176361357.9358,
+    "purposes" : [
+      {
+        "changedAt" : 1792176361357.9358,
+        "id" : "C77C79E5-18D2-4862-90BA-18333A4D5252",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

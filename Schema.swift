@@ -59,6 +59,9 @@ struct SchemaCollection: Codable, Equatable {
     var templateID: UUID? = nil
     /// What each level between the heading and a member is called, top down, such as Client then Stream; `folderName` is the first of them.
     var levelNames: [String]? = nil
+    /// Display terminology for this client; semantic work-item identity is unchanged.
+    var workItemPlural: String? = nil
+    var profile: [String:String]? = nil
 
     /// The levels between, top down: `levelNames`, or the one `folderName`, or none.
     var levels: [String] { levelNames ?? (folderName.map { [$0] } ?? []) }
@@ -105,7 +108,7 @@ enum SchemaTrial {
     static let primaryNames = ["Project", "Contract", "Client", "Customer", "Group", "Brand", "Campaign", "Job", "Production", "Title", "Account"]
     static let nestedNames = ["Palettes", "Typography", "Assets", "Characters", "Environments", "Props", "Vehicles", "Textures", "Materials",
                               "Interface", "Icons", "Logos", "Photography", "Illustration", "Video", "Print", "Packaging", "Social", "Web",
-                              "Deliverables", "References", "Scope", "Documents", "Information"]
+                              "Deliverables", "References", "Scope", "Documents", "Information", "ASE"]
 
     static func names(forLevel level: Int) -> [String] { level == 1 ? primaryNames : nestedNames }
 
@@ -138,6 +141,7 @@ enum SchemaTrial {
         var stacks: [String: SchemaNode]?
         /// The templates kept in the catalogue, in the order the index lists them.
         var templates: [SchemaTemplate]?
+        var structure: SimpleCatalogueStructure? = nil
         /// What a catalogue starts with: the one collection the app has always had.
         static var fresh: SchemaFile { SchemaFile(collections: [SchemaCollection(id: firstCollection, name: "Projects", stack: start)], places: [:]) }
     }
@@ -187,6 +191,11 @@ enum SchemaTrial {
 
     /// The whole schema at once, as a share brings it: written through the store like any change.
     static func replace(_ f: SchemaFile) { write(f) }
+
+    /// Catalogue defaults remain available before the first client is created.
+    static var structure: SimpleCatalogueStructure? { file.structure }
+    static var personalMode:Bool {structure?.personalMode == true}
+    static var personalCollection:SchemaCollection? {structure?.personalCollectionID.flatMap{id in collections.first{$0.id == id}}}
 
     /// Every collection, in rail1's order.
     static var collections: [SchemaCollection] {
@@ -256,6 +265,7 @@ enum SchemaTrial {
     }
     /// Where a new member goes when nothing says otherwise: the first collection, made now if the catalogue has none.
     static func homeForNewMember() -> SchemaCollection {
+        if personalMode,let personalCollection{return personalCollection}
         if let first = collections.first { return first }
         collections = SchemaFile.fresh.collections
         return collections[0]
@@ -403,6 +413,8 @@ enum SchemaTrial {
 
 /// One row on the map: its level, its name, what it holds, and, while it is selected or under the pointer, what can be done with it.
 private final class SchemaRowView: HoverView {
+    override var handCursorRects:[NSRect]{onSelect == nil ? []:[bounds]}
+
     var onSelect: (() -> Void)?
     /// Set on a row that can be put in another order among its siblings: the drag ends with where it was dropped,
     /// as an index among the rows that share its parent.
@@ -529,9 +541,10 @@ private final class SchemaRowView: HoverView {
 }
 
 /// The handle a row is dragged by: two columns of three dots.
-private final class SchemaGrip: NSView {
+final class SchemaGrip: NSView {
+    var ink:NSColor = .tertiaryLabelColor {didSet{needsDisplay=true}}
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.tertiaryLabelColor.setFill()
+        ink.withAlphaComponent(0.72).setFill()
         for col in 0..<2 {
             for row in 0..<3 {
                 NSBezierPath(ovalIn: NSRect(x: CGFloat(col) * 5 + 1, y: CGFloat(row) * 5 + 1, width: 3, height: 3)).fill()
@@ -543,6 +556,8 @@ private final class SchemaGrip: NSView {
 
 /// One name in the column of names on offer: ticked when it is the selected group's.
 private final class SchemaNameRow: HoverView {
+    override var handCursorRects:[NSRect]{onChoose == nil ? []:[bounds]}
+
     var onChoose: (() -> Void)?
     private let chosen: Bool
     private var over = false { didSet { needsDisplay = true } }
@@ -613,8 +628,8 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private var removing: UUID?
     private var making = Making.nothing
 
-    private let collectionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let stackPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let collectionPopup = ClickCursorPopupButton(frame: .zero, pullsDown: false)
+    private let stackPopup = ClickCursorPopupButton(frame: .zero, pullsDown: false)
     /// Over each column, a few lines on where the user is and what can be done there.
     private let leftHelp = NSTextField(wrappingLabelWithString: "")
     private let rightHelp = NSTextField(wrappingLabelWithString: "")
@@ -625,9 +640,9 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
     private let newRow = NSStackView()
     private var makingRows: [NSGridRow] = []
     private let map = NSStackView()
-    private let addNext = NSButton(title: "", target: nil, action: nil)
+    private let addNext = ClickCursorButton(title: "", target: nil, action: nil)
     /// Under the map while a member's own stack is open: the member and all it holds, gone after a slide.
-    private let removeMemberButton = NSButton(title: "", target: nil, action: nil)
+    private let removeMemberButton = ClickCursorButton(title: "", target: nil, action: nil)
     private let levelTitle = NSTextField(labelWithString: "")
     /// The names on offer, as a column that scrolls inside the pane: Custom Name first, then the list for the level.
     private let names = NSStackView()
@@ -841,7 +856,12 @@ final class SchemaPanel: SettingsPanel, NSTextFieldDelegate {
             grid.leadingAnchor.constraint(equalTo: column.trailingAnchor, constant: 24),
             about.heightAnchor.constraint(equalToConstant: 64),
         ])
-        view = v
+        let workspace=NSTextField(wrappingLabelWithString:WorkspaceSidebarStructure.summary(catalogue:library.catalogue))
+        workspace.font=Design.Text.body.font();workspace.textColor=Design.ink;workspace.preferredMaxLayoutWidth=900
+        let workspaceTitle=Design.text("Workspace Structure",.bodyStrong)
+        let reference=NSStackView(views:[workspaceTitle,workspace]);reference.orientation = .vertical;reference.alignment = .leading;reference.spacing=8;reference.edgeInsets=NSEdgeInsets(top:16,left:36,bottom:16,right:36)
+        let container=NSStackView(views:[v,reference]);container.orientation = .vertical;container.alignment = .leading;container.spacing=0
+        view = container
         load()
         show()
     }

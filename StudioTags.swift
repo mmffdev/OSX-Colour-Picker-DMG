@@ -141,6 +141,17 @@ extension LibraryController {
 
 /// The panel the halo's Tags opens: the tags as words separated by commas, and the scope a new one takes, from a house dropdown.
 enum TagPanel {
+    static func palettes(_ ids:[UUID],library:LibraryController,over window:NSWindow?) {
+        if ids.count == 1,let id=ids.first {palette(id,library:library,over:window);return}
+        let records=ids.compactMap{library.library.swatch($0)}
+        guard !records.isEmpty else {return}
+        let common=records.dropFirst().reduce(Set(records[0].tagList)){$0.intersection($1.tagList)}
+        let within=Set(records.compactMap(\.projectID))
+        ask(title:"Tags for \(records.count) Selected Palettes",note:"Replace the tags on all \(records.count) selected palettes. Initially showing their shared tags. New tags use the chosen scope.",value:common.sorted().joined(separator:", "),within:within,start:.global,library:library,over:window) {tags,scope in
+            for id in ids {library.setTags(ofPalette:id,tags,newScope:scope)}
+        }
+    }
+
     static func palette(_ id: UUID, library: LibraryController, over window: NSWindow?) {
         let lib = library.library
         guard let s = lib.swatch(id) else { Diagnostics.log("tags", "no palette for \(id)"); return }
@@ -179,7 +190,9 @@ enum TagPanel {
     }
 }
 
-final class TagsSettings: NSView, NSTextFieldDelegate, PageSection, Overlay {
+final class TagsSettings: ClickCursorView, NSTextFieldDelegate, PageSection, Overlay {
+    override var handCursorRects:[NSRect]{filterHits.map{$0.0}+(chosen == nil ? []:[scopeHit]+colourHits.map{$0.0})}
+
     var sectionAnchors: [(String,CGFloat)] { [("Library",SettingsSheet.headerGuide+1),("Tag Editor",SettingsSheet.baseline(14)+1)] }
     /// Rail1's Edit Tags under a member: the page opens filtered to it. Taken by the next reload.
     static var pendingScope: TagScope?

@@ -12,7 +12,7 @@ final class Handler_File_Manager {
         [Handler_File_App_Data(), Handler_File_Catalogue(), Handler_File_Palette(), Handler_File_Typography(),
          Handler_File_Swatches(), Handler_File_Swatch(), Handler_File_Information(), Handler_File_Colour_Profiles(),
          Handler_File_Print_Profile(), Handler_File_Proof(), Handler_File_History(), Handler_File_Key_Profile(),
-         Handler_File_ASE_Registry(), Handler_File_Share(), Handler_File_QR()]
+         Handler_File_ASE_Registry(), Handler_File_Sidecar(), Handler_File_Share(), Handler_File_QR()]
     }
 
     init(filesystem: FileSystemAccess = FileSystemAccess(), metadata: FileMetadataProvider = FileMetadataProvider(), registerDefaults: Bool = true) {
@@ -51,6 +51,56 @@ final class Handler_File_Manager {
         } catch { throw FileIssue.wrapping(error, at: url) }
     }
 
+    struct InspectedAssetPayload {
+        let data:Data
+        let identity:String?
+        let head:InspectedAssetIdentity?
+        let document:PaletteDocument?
+    }
+    /// Inspect independent asset files concurrently while holding the manager's
+    /// write lock. Each worker uses an immutable handler snapshot; custom test
+    /// managers retain serial reads through their injected filesystem.
+    func inspectAssetFiles(_ urls:[URL])->[Result<InspectedAssetPayload,FileIssue>] {
+        lock.lock();defer{lock.unlock()}
+        let handlerSnapshot=self.handlers,readFilesystem=self.filesystem
+        let requested=Int(ProcessInfo.processInfo.environment["COLORGAIN_INSPECTION_WORKERS"] ?? "") ?? 4
+        let workers=self === Self.shared ? min(max(1,min(12,requested)),ProcessInfo.processInfo.activeProcessorCount,max(1,urls.count)):1
+        var results:[Int:Result<InspectedAssetPayload,FileIssue>]=[:]
+        let resultsLock=NSLock()
+        DispatchQueue.concurrentPerform(iterations:workers) { worker in
+            for index in stride(from:worker,to:urls.count,by:workers) {
+                let url=urls[index]
+                let result:Result<InspectedAssetPayload,FileIssue>
+                do {
+                    if let cached=InspectedAssetCache.get(url) {
+                        result = .success(InspectedAssetPayload(data:cached.1,identity:cached.0,head:cached.2,document:cached.3))
+                    } else {
+                        guard let handler=handlerSnapshot[url.pathExtension.lowercased()] else {
+                            throw FileIssue(url:url,state:.unsupportedVersion,message:"This file type is not supported.")
+                        }
+                        let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+                        guard size <= handler.descriptor.maximumBytes else {throw failure("The file exceeds its supported size.")}
+                        let data=try readFilesystem.read(url)
+                        guard let object=try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw failure("Invalid asset document.")}
+                        let document:PaletteDocument?
+                        if (handler is Handler_File_Palette || handler is Handler_File_Typography),
+                           let paletteHandler=handler as? Handler_File_JSON {
+                            document=try paletteHandler.inspectedDocument(data,object:object,at:url)
+                        } else {
+                            _ = try handler.canonical(data)
+                            document=nil
+                        }
+                        let identity=handler.identity(object),head=InspectedAssetIdentity(object)
+                        if let identity {InspectedAssetCache.put(url,id:identity,data:data,head:head,document:document)}
+                        result = .success(InspectedAssetPayload(data:data,identity:identity,head:head,document:document))
+                    }
+                } catch {result = .failure(FileIssue.wrapping(error,at:url))}
+                resultsLock.lock();results[index]=result;resultsLock.unlock()
+            }
+        }
+        return (0..<urls.count).map{results[$0]!}
+    }
+
     /// Portable native output (without a filesystem destination); creation provenance belongs to
     /// this exported document. Existing-file provenance is retained by write(_:to:).
     func documentBytes(_ data: Data, extension ext: String, includePersonalNames: Bool = true, preservingLegacyProvenance: Bool = false) throws -> Data {
@@ -67,7 +117,15 @@ final class Handler_File_Manager {
 
     /// Serialize read/modify/write; file coordination and expected bytes guard external edits.
     func write(_ data: Data, to url: URL, expected: FileRevision? = nil, createOnly: Bool = false) throws {
+        try FileEditAccess.withWriteAccess(to: url, manager: self) { try writeWithAccess(data, to: url, expected: expected, createOnly: createOnly) }
+    }
+    private func writeWithAccess(_ data: Data, to url: URL, expected: FileRevision?, createOnly: Bool) throws {
         lock.lock(); defer { lock.unlock() }
+        let trace=ProcessInfo.processInfo.environment["COLORGAIN_PERF_TRACE"] == "1" && url.pathExtension == "colcat"
+        let writeStarted=Date()
+        func report(_ label:String,_ started:Date) {
+            if trace {print(String(format:"PERF index %@ %.3f s",label,Date().timeIntervalSince(started)))}
+        }
         var coordinateError: NSError?, operationError: Error?
         let coordinator = NSFileCoordinator(filePresenter: nil)
         coordinator.coordinate(writingItemAt: url, options: [], error: &coordinateError) { coordinated in
@@ -75,6 +133,7 @@ final class Handler_File_Manager {
                 let handler = try self.handler(for: coordinated)
                 try self.validateContainer(data, at: coordinated)
                 let incomingCanonical = try handler.canonical(data)
+                report("incomingCanonical",writeStarted)
                 if handler.descriptor.archive && coordinated.pathExtension.lowercased() != "colmanifest" {
                     try self.publishRaw(data, to: coordinated, expected: expected, createOnly: createOnly)
                     return
@@ -87,10 +146,13 @@ final class Handler_File_Manager {
                 if let expected, expected.digest != old.map(Sharing.sha256) { throw failure("The file changed after this operation was planned. Review it again before saving.") }
                 var previous: [String: Any]?
                 if let old {
+                    let oldStarted=Date()
                     let canonical = try handler.canonical(old)
+                    report("oldCanonical",oldStarted)
                     previous = try JSONSerialization.jsonObject(with: old) as? [String: Any]
                     let known = try JSONSerialization.jsonObject(with: canonical)
                     incoming = try Self.retainingUnknown(previous!, known: known, incoming: incoming) as! [String: Any]
+                    report("retainUnknown",oldStarted)
                     // Preserve identity. Independent copies must be written to a new destination.
                     if let oldID = handler.identity(previous!), let newID = handler.identity(incoming), oldID != newID { throw failure("The destination belongs to a different document.") }
                     if Self.equal(Self.withoutHeader(incoming), Self.withoutHeader(previous!)) { return }
@@ -99,9 +161,12 @@ final class Handler_File_Manager {
                 let priorHeader = old == nil ? incoming["header"] : previous?["header"]
                 incoming["header"] = try self.metadata.header(identity: handler.identity(incoming), previous: priorHeader as? [String: Any], existing: old != nil, derivedFrom: (incoming["palette"] as? [String: Any])?["copiedFrom"] as? String)
                 let output = try JSONSerialization.data(withJSONObject: incoming, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed])
+                let outputStarted=Date()
                 _ = try handler.canonical(output)
+                report("outputCanonical",outputStarted)
                 try FileOperationTransaction.current?.prepare(coordinated, after: Sharing.sha256(output))
                 try self.filesystem.write(output, coordinated)
+                report("total",writeStarted)
             } catch { operationError = error }
         }
         if let error = operationError ?? coordinateError {
@@ -122,6 +187,17 @@ final class Handler_File_Manager {
     }
     /// Standard-format adapters and archive output preserve their native bytes.
     func publishRaw(_ data: Data, to url: URL, expected: FileRevision? = nil, createOnly: Bool = false) throws {
+        try FileEditAccess.withWriteAccess(to: url, manager: self) { try publishRawWithAccess(data, to: url, expected: expected, createOnly: createOnly) }
+    }
+    /// Ownership transitions change metadata only, under FileEditAccess's exclusive guard.
+    func publishEditMetadata(_ data: Data, to url: URL, expected: FileRevision) throws {
+        var before = try JSONSerialization.jsonObject(with: filesystem.read(url)) as! [String: Any]
+        var after = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        before.removeValue(forKey: "header"); after.removeValue(forKey: "header")
+        guard Self.equal(before, after) else { throw failure("An edit-lock transition cannot change asset contents.") }
+        try publishRawWithAccess(data, to: url, expected: expected, createOnly: false)
+    }
+    private func publishRawWithAccess(_ data: Data, to url: URL, expected: FileRevision?, createOnly: Bool) throws {
         lock.lock(); defer { lock.unlock() }
         let before: Data?
         do { before = try filesystem.read(url) }
@@ -198,15 +274,26 @@ final class Handler_File_Manager {
             return next
         }
         if let old = original as? [[String: Any]], let known = known as? [[String: Any]], let next = incoming as? [[String: Any]], old.count == known.count {
+            let keys = ["id", "hex", "path", "member", "key", "name", "space"]
+            var exact:[String:Int]=[:], foldedUUID:[String:Int]=[:]
+            for (index,candidate) in known.enumerated() {
+                for key in keys {
+                    guard let value=candidate[key] as? String else{continue}
+                    let token=key+"\u{0}"+value
+                    if exact[token] == nil {exact[token]=index}
+                    if UUID(uuidString:value) != nil {
+                        let folded=key+"\u{0}"+value.lowercased()
+                        if foldedUUID[folded] == nil {foldedUUID[folded]=index}
+                    }
+                }
+            }
             return try next.enumerated().map { index, item -> [String: Any] in
-                let keys = ["id", "hex", "path", "member", "key", "name", "space"]
                 let identity = keys.first { item[$0] is String }
                 let match: Int?
                 if let key = identity, let value = item[key] as? String {
-                    match = known.firstIndex { candidate in
-                        guard let previous = candidate[key] as? String else { return false }
-                        return previous == value || (UUID(uuidString: previous) != nil && previous.caseInsensitiveCompare(value) == .orderedSame)
-                    }
+                    let original=exact[key+"\u{0}"+value]
+                    let folded=foldedUUID[key+"\u{0}"+value.lowercased()]
+                    match=[original,folded].compactMap{$0}.min()
                 } else {
                     match = index < known.count ? index : nil
                     if let match, containsUnknown(old[match], known: known[match]), !equal(known[match], item) {

@@ -1,0 +1,258 @@
+{
+  "appbridge": [],
+  "appbridgeMigratedToCatalogue": "Catalogues/MMFFDev 001",
+  "assetMetadata": {
+    "keywords": [
+      {
+        "changedAt": 1792466527.0838308,
+        "name": "Green Light Grey",
+        "removed": false
+      },
+      {
+        "changedAt": 1792466527.083346,
+        "name": "Orange",
+        "removed": false
+      },
+      {
+        "changedAt": 1792466527.08359,
+        "name": "Red",
+        "removed": false
+      }
+    ],
+    "values": [
+      "Green Light Grey",
+      "Orange",
+      "Red"
+    ]
+  },
+  "assets": "Assets/my_library.collib",
+  "catalogues": [
+    {
+      "id": "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+      "name": "MMFFDev 001",
+      "path": "Catalogues/MMFFDev 001"
+    }
+  ],
+  "customAssetFamilies": [],
+  "customAssetTypes": [],
+  "defaultCatalogue": {
+    "id": "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+    "name": "MMFFDev 001"
+  },
+  "detachedCatalogueIDs": [],
+  "detachedCatalogues": [],
+  "header": {
+    "createdAt": "2026-10-19T19:25:22.053Z",
+    "createdBy": {
+      "accountName": "rick",
+      "actor": "Person",
+      "displayName": "Richard Cook"
+    },
+    "createdWith": {
+      "build": "357",
+      "bundleIdentifier": "com.mmffdev.mmffdevcolour3",
+      "commit": "06e4b29+",
+      "name": "Colorgain",
+      "version": "3.0"
+    },
+    "documentID": "052E8436-D8F1-4CA5-BBBE-DFF39D5DAB6A",
+    "lastSavedAt": "2026-10-20T09:41:43.051Z",
+    "lastSavedBy": {
+      "accountName": "rick",
+      "actor": "Person",
+      "displayName": "Richard Cook"
+    },
+    "lastSavedWith": {
+      "build": "357",
+      "bundleIdentifier": "com.mmffdev.mmffdevcolour3",
+      "commit": "06e4b29+",
+      "name": "Colorgain",
+      "version": "3.0"
+    },
+    "metadataVersion": 1
+  },
+  "history": "Global.colhis",
+  "keys": "Keys/default.colkeys",
+  "settings": {
+    "Workspace.CatalogueTree.Expanded.MMFFDev 001": [
+      "collection:406B021E-F1EB-430D-A092-2CC2F619DE2A",
+      "project(1A9155AB-2149-447C-B740-F6083C822BF0)"
+    ],
+    "Workspace.ICC.Expanded": [],
+    "Workspace.Library.Favourites.55174B89-FD8D-4607-BC6E-D96F8FB11F78": [
+      {
+        "id": "palette:60A9131E-581B-434D-90CB-A0F3D5102A8B",
+        "title": "Palette 129"
+      },
+      {
+        "id": "palette:CB8027DE-CD16-474D-8BA0-97CB613416A1",
+        "title": "Palette 143 2"
+      },
+      {
+        "id": "palette:4740D9CD-E25C-4CB3-AFA8-87652E6A0288",
+        "title": "Palette 147 3"
+      },
+      {
+        "id": "palette:75938D5D-0916-4383-AA3C-B773EF31E138",
+        "title": "Swiss Grotesque"
+      },
+      {
+        "id": "palette:D712D7B8-1047-47A0-A826-5E954D3B6731",
+        "title": "Sampled"
+      }
+    ],
+    "Workspace.Library.NodeColours": [
+      {
+        "colour": "#EEEEEE",
+        "id": "3C260AC9-E96C-4B33-BC7D-55F9D1410100"
+      },
+      {
+        "colour": "#DDDDDD",
+        "id": "B7E359A8-7A05-41BA-B01D-CA44672A9893"
+      },
+      {
+        "colour": "#CCCCCC",
+        "id": "4E471678-3082-4561-B83F-CFCB0980B700"
+      },
+      {
+        "colour": "#BBBBBB",
+        "id": "5E8B1DFE-8B8F-4999-971D-ADA7F5E9E499"
+      },
+      {
+        "colour": "#AAAAAA",
+        "id": "BF26C305-C035-4E26-8FB4-46DFB89F4ED1"
+      },
+      {
+        "colour": "#999999",
+        "id": "19FCF6E9-CC1E-4671-921B-2777BC776962"
+      },
+      {
+        "colour": "#777777",
+        "id": "9029B639-4C4F-42FF-9844-E1AD288C8424"
+      },
+      {
+        "colour": "#666666",
+        "id": "DFAD2C4A-D1C2-4F6A-946B-C2583FBC249B"
+      },
+      {
+        "colour": "#555555",
+        "id": "85AE4C5A-A3FF-4AF6-BDEA-0F938EDA0898"
+      },
+      {
+        "colour": "#111111",
+        "id": "E0C51ED1-EC1E-433A-BB85-D004F0F03797"
+      },
+      {
+        "colour": "#222222",
+        "id": "C882597C-8126-409C-9510-8AB1E8E21069"
+      },
+      {
+        "colour": "#222222",
+        "id": "397C04B7-C8A6-437D-ACF1-4E478D51E686"
+      },
+      {
+        "colour": "#719899",
+        "id": "project(BC1C9A6C-FAED-48EA-BDC9-1EB541F1EF61)"
+      },
+      {
+        "colour": "#4C65C6",
+        "id": "collection:406B021E-F1EB-430D-A092-2CC2F619DE2A"
+      },
+      {
+        "colour": "#1A32A4",
+        "id": "project(1A9155AB-2149-447C-B740-F6083C822BF0)"
+      },
+      {
+        "colour": "#8FA937",
+        "id": "mylibrary-documents"
+      },
+      {
+        "colour": "#93BA39",
+        "id": "mylibrary-fonts"
+      },
+      {
+        "colour": "#93BA3C",
+        "id": "mylibrary-icc"
+      },
+      {
+        "colour": "#A4CB81",
+        "id": "mylibrary-icon-sets"
+      },
+      {
+        "colour": "#B5DCAF",
+        "id": "mylibrary-images"
+      },
+      {
+        "colour": "#B5DCAF",
+        "id": "mylibrary-palettes"
+      },
+      {
+        "colour": "#7BB96F",
+        "id": "mylibrary-photography"
+      },
+      {
+        "colour": "#52974E",
+        "id": "mylibrary-swatches"
+      },
+      {
+        "colour": "#3E8624",
+        "id": "mylibrary-typography"
+      }
+    ],
+    "Workspace.Library.Sections.Catalogues.Collapsed": false,
+    "Workspace.Library.Sections.Favs.Collapsed": false,
+    "Workspace.Library.Sections.Folders.Collapsed": false,
+    "Workspace.Library.Sections.MyLibrary.Collapsed": false,
+    "Workspace.LibraryPlace.MMFFDev 001": "palette:75938D5D-0916-4383-AA3C-B773EF31E138",
+    "assistantDone": true,
+    "cardRows": [
+      "hex",
+      "rgb",
+      "cmyk",
+      "p3"
+    ],
+    "colourCopyHistory": {
+      "$data": "W3sia2V5IjoiI0Y0RTA2NSJ9LHsia2V5IjoiI0YxRjRGMiJ9LHsia2V5IjoiIzg1QTJBNSJ9LHsia2V5IjoiIzJBMzMzNiJ9LHsia2V5IjoiI0MxNzgwQyJ9LHsia2V5IjoiI0U5RDBCRiJ9LHsia2V5IjoiI0FBMzMzOSJ9LHsia2V5IjoiI0Q0Q0ZDMCJ9LHsia2V5IjoiIzlDNzY1NiJ9LHsia2V5IjoiIzNDNEI0QyJ9LHsia2V5IjoiIzJBMzMzNiJ9LHsia2V5IjoiI0FBMzMzOSJ9LHsia2V5IjoiI0RCREZFMSJ9LHsia2V5IjoiIzg1QTJBNSJ9LHsia2V5IjoiIzg1QTJBNSJ9LHsia2V5IjoiIzFBMzM0MCJ9LHsia2V5IjoiIzNFNjE2RiJ9LHsia2V5IjoiIzkxQTk5RCJ9LHsia2V5IjoiI0QyREJCRSJ9LHsia2V5IjoiI0QyREJCRSJ9XQ=="
+    },
+    "copyFormat": "adobeRGB",
+    "currentCatalogue": "MMFFDev 001",
+    "currentCatalogueID": "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+    "designer.mode": "Branding",
+    "groups.show.MMFFDev 001.member:1A9155AB-2149-447C-B740-F6083C822BF0/bucket:4E471678-3082-4561-B83F-CFCB0980B700": false,
+    "prepress.deltaWarnings": false,
+    "prepress.printProfiles": {
+      "current": {
+        "blackPoint": true,
+        "intent": "relative",
+        "press": "Coated FOGRA27 (ISO 12647-2:2004)",
+        "tolerance": 2,
+        "viewingCategory": 0,
+        "viewingChannel": {
+          "space": "srgb"
+        }
+      },
+      "profiles": [],
+      "version": 1
+    },
+    "quickKeys": {},
+    "settingsGroup": 0,
+    "settingsGroupTab.App & Interaction": 1,
+    "settingsGroupTab.Colour Management": 3,
+    "settingsSection.Cards & Grid": 0,
+    "settingsSection.Halo": 1,
+    "settingsSection.Theme": 2,
+    "setupDone": true,
+    "shortcuts": {},
+    "showContrast": false,
+    "showNames": true,
+    "showPaletteBars": false,
+    "theme.preset": "white",
+    "theme.sidebar.selectionBackground": "#DEC400",
+    "tileSize": 0,
+    "workspace.channelProfile": null,
+    "workspace.previewChannel": "srgb",
+    "workspace.targetPress": null
+  },
+  "version": 1,
+  "workspaceID": "052E8436-D8F1-4CA5-BBBE-DFF39D5DAB6A"
+}

@@ -141,7 +141,7 @@ enum CatalogueFiles {
     }
 
     /// The catalogue's structure file in a folder, ".colcat", if there is one.
-    static func index(in directory: URL) -> URL? { file(in: directory, extension: ColourFiles.catalogue) }
+    static func index(in directory: URL) -> URL? { file(in: directory, extension: "collib") ?? file(in: directory, extension: ColourFiles.catalogue) }
     /// An earlier version's index, ".colcatalogue", if there is one: read only to bring it across.
     static func legacyIndex(in directory: URL) -> URL? { file(in: directory, extension: ColourFiles.legacyCatalogue) }
     /// Either: whatever says a catalogue lives in this folder.

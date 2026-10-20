@@ -36,6 +36,24 @@ func runFileCatalogueLifecycleTests(check: (Bool, String) -> Void) {
         check(restored.library.swatches.count == 2 && restored.aseLinks.count == 1, "Removal archive can be reopened with native assets and portable ASE links")
     } catch { check(false, "Catalogue detach/archive: \(error)") }
     do {
+        let fixture=try FileHandlerFixture();defer{fixture.remove()}
+        let photo=fixture.first.appendingPathComponent("Full Size Photo.jpg")
+        FileManager.default.createFile(atPath:photo.path,contents:nil)
+        let handle=try FileHandle(forWritingTo:photo)
+        try handle.truncate(atOffset:45*1024*1024)
+        try handle.close()
+        let archive=fixture.root.appendingPathComponent("Large Photo.colshr")
+        let catalogues=Catalogues(root:fixture.root,legacyURL:nil)
+        try manager.createCatalogueArchive(name:"First",catalogues:catalogues,to:archive)
+        let inspection=try Sharing.inspect(archive)
+        let stage=try Sharing.stage(inspection);defer{Sharing.discard(stage)}
+        let restored=stage.appendingPathComponent("Full Size Photo.jpg")
+        let restoredSize=try restored.resourceValues(forKeys:[.fileSizeKey]).fileSize
+        let matches=try FileRevision.read(restored) == FileRevision.read(photo)
+        check(inspection.ok && restoredSize == 45*1024*1024 && matches,
+              "portable catalogue archive streams and restores a full-size photo above the old per-file limit")
+    } catch {check(false,"Full-size photo archive: \(error)")}
+    do {
         let fixture = try FileHandlerFixture(); defer { fixture.remove() }
         let catalogues = Catalogues(root: fixture.root, legacyURL: nil)
         let plan = try manager.prepareCatalogueRemoval(name: "First", catalogues: catalogues)

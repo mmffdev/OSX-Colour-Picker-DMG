@@ -221,6 +221,7 @@ enum DocumentsAccess {
 final class PermissionRow: NSView {
     private let permission: Permission
     private let line = NSView()
+    private var titleLabel: NSTextField!
     private let detail = NSTextField(wrappingLabelWithString: "")
     private let button = SwissButton("", .secondary)
     /// The width of the setup's lead button, so the two line up on the right.
@@ -231,6 +232,7 @@ final class PermissionRow: NSView {
         permission = p
         super.init(frame: .zero)
         let title = Design.text(p.title, .heading)
+        titleLabel = title
         detail.font = Design.Text.caption.font()
         detail.textColor = Design.quiet
         detail.preferredMaxLayoutWidth = textWidth
@@ -262,8 +264,11 @@ final class PermissionRow: NSView {
     func refresh() {
         // The hairline under the row says where things stand: ink when allowed, the quiet grey when not,
         // the accent while macOS is being asked.
-        line.layer?.backgroundColor = Design.ink.cgColor
+        titleLabel.attributedStringValue = Design.attributed(permission.title, .heading, colour: Design.ink)
+        titleLabel.textColor = Design.ink
+        line.layer?.backgroundColor = Design.rule.cgColor
         detail.attributedStringValue = Design.attributed(permission.detail(), .caption, colour: Design.quiet)
+        detail.textColor = Design.quiet
         if let t = permission.button() { button.title = t; button.isHidden = false } else { button.isHidden = true }
         button.trailing = permission.state() == .on ? .tick : .cross
     }

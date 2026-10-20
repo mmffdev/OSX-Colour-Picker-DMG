@@ -15,6 +15,40 @@ import QuartzCore
 final class SetupWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    func installSquareContent(_ content: NSView) {
+        // The approved setup uses square outside edges. A titled macOS window
+        // clips the web surface to rounded corners, even when its content is square.
+        styleMask = [.borderless, .resizable]
+        let shell = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        shell.wantsLayer = true
+        shell.layer?.backgroundColor = Design.card.cgColor
+        content.frame = shell.bounds
+        content.autoresizingMask = [.width, .height]
+        shell.addSubview(content)
+        let drag = SetupWindowDragView(frame: NSRect(x: 0, y: shell.bounds.height - 51, width: shell.bounds.width, height: 51))
+        drag.autoresizingMask = [.width, .minYMargin]
+        shell.addSubview(drag)
+        for (index, colour) in [NSColor(red: 1, green: 0.365, blue: 0.376, alpha: 1), NSColor(white: 0.84, alpha: 1), NSColor(white: 0.84, alpha: 1)].enumerated() {
+            let button = NSButton(frame: NSRect(x: 21 + index * 31, y: 16, width: 19, height: 19))
+            button.isBordered = false
+            button.title = ""
+            button.wantsLayer = true
+            button.layer?.backgroundColor = colour.cgColor
+            button.layer?.cornerRadius = 9.5
+            button.target = self
+            button.action = [#selector(closeSetup), #selector(minimiseSetup), #selector(zoomSetup)][index]
+            button.setAccessibilityLabel(["Close setup", "Minimise setup", "Zoom setup"][index])
+            drag.addSubview(button)
+        }
+        contentView = shell
+    }
+    @objc private func closeSetup() { close() }
+    @objc private func minimiseSetup() { miniaturize(nil) }
+    @objc private func zoomSetup() { zoom(nil) }
+}
+
+private final class SetupWindowDragView: NSView {
+    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 }
 
 final class SetupFrame: NSView {
@@ -46,7 +80,6 @@ final class SetupFrame: NSView {
         super.init(frame: NSRect(origin: .zero, size: W.size))
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
-        layer?.cornerRadius = W.radius
         layer?.masksToBounds = true
 
         band.wantsLayer = true
@@ -327,6 +360,7 @@ enum Relaunch {
 
     /// Opens a fresh copy of the app and quits this one.
     static func now() {
+        StudioWindowController.shared?.frame.saveWorkspaceSession(flush:true)
         if debugged {
             if CommandLine.arguments.contains("--new-user") {
                 preferences.set(true, forKey: "resumeNewUserAfterDebuggerRestart")
@@ -342,7 +376,7 @@ enum Relaunch {
             let c = NSWorkspace.OpenConfiguration()
             c.createsNewApplicationInstance = true
             // The flags this copy was opened with go with it, so a restart comes back the same way.
-            c.arguments = arguments(for: Array(CommandLine.arguments.dropFirst()))
+            c.arguments = arguments(for: Array(CommandLine.arguments.dropFirst())) + ["--resume-workspace-session"]
             NSWorkspace.shared.openApplication(at: bundle, configuration: c) { _, error in
                 DispatchQueue.main.async {
                     // A relaunch that did not start leaves this copy running and says so, rather than quitting into nothing.
@@ -358,7 +392,7 @@ enum Relaunch {
         } else if let exe = Bundle.main.executableURL {   // the bare binary Xcode runs
             let p = Process()
             p.executableURL = exe
-            p.arguments = arguments(for: Array(CommandLine.arguments.dropFirst()))
+            p.arguments = arguments(for: Array(CommandLine.arguments.dropFirst())) + ["--resume-workspace-session"]
             do {
                 try p.run()
                 NSApp.terminate(nil)

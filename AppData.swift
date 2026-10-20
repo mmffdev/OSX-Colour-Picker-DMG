@@ -216,8 +216,38 @@ enum KeyProfiles {
 struct GlobalAssets {
     let home: URL
     var root: URL { home.appendingPathComponent("Assets") }
-    var index: URL { root.appendingPathComponent("Assets.colcat") }
+    var libraryIndex:URL {root.appendingPathComponent("my_library.collib")}
+    var legacyIndex:URL {root.appendingPathComponent("Assets.colcat")}
+    var index:URL {FileManager.default.fileExists(atPath:libraryIndex.path) ? libraryIndex : FileManager.default.fileExists(atPath:legacyIndex.path) ? legacyIndex:libraryIndex}
+    var assetTypes:[String] {CatalogueTree.catalogue(in:root)?.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleCatalogueStructure().assetTypes}
+    func setAssetTypes(_ types:[String],custom:[SimpleCustomAssetType]=[])throws {
+        let known=Set(SimpleAssetType.all.map(\.id)+custom.map(\.id)+SimpleAssetType.workspaceCustomTypes(home:home).map(\.id))
+        guard Set(types).count == types.count,types.allSatisfy({known.contains($0)}) else{throw failure("Unsupported library asset categories.")}
+        try migrateLibraryIndex()
+        guard var doc=CatalogueTree.catalogue(in:root) else{throw failure("My Library is unavailable.")}
+        doc.libraryAssetTypes=types
+        try Handler_File_Manager.shared.write(ColourFiles.encoder().encode(doc),to:libraryIndex)
+    }
+    /// Changes only the index and manifest reference; payload paths and library identity stay stable.
+    func migrateLibraryIndex()throws {
+        let fm=FileManager.default,manager=Handler_File_Manager.shared
+        guard fm.fileExists(atPath:legacyIndex.path),!fm.fileExists(atPath:libraryIndex.path) else{return}
+        try manager.requireAvailableCatalogue(legacyIndex)
+        let original=try manager.read(legacyIndex)
+        var doc=try ColourFiles.decoder().decode(CatalogueFile.self,from:original)
+        doc.libraryAssetTypes=doc.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleCatalogueStructure().assetTypes
+        try manager.withTransaction(home:home) {
+            let backup=home.appendingPathComponent("Backups/My Library Migration/"+UUID().uuidString+"/Assets.colcat")
+            try manager.createDirectory(backup.deletingLastPathComponent())
+            try manager.write(original,to:backup)
+            try manager.write(ColourFiles.encoder().encode(doc),to:libraryIndex)
+            try manager.requireAvailableCatalogue(libraryIndex)
+            try AppDataStore(root:home).update{$0["assets"]="Assets/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes")}
+            try manager.move(legacyIndex,to:backup.deletingLastPathComponent().appendingPathComponent("Original.colcat"))
+        }
+    }
     func load() throws -> Library {
+        try migrateLibraryIndex()
         guard FileManager.default.fileExists(atPath: index.path) else {
             if FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path),
                (try AppDataStore(root: home).read())["assets"] != nil { throw FileIssue(url: index, state: .missing, message: "The global assets index is unavailable. Its contents have not been recreated.") }
@@ -227,21 +257,26 @@ struct GlobalAssets {
         let cat = try ColourFiles.decoder().decode(CatalogueFile.self, from: Handler_File_Manager.shared.read(index))
         guard cat.version == 3 else { throw failure("The global Assets index is not supported.") }
         var lib = Library(); lib.tagInfo = cat.tags; lib.deleted = cat.deleted; lib.activeSwatchID = cat.activePalette
+        var seenColours=Set<String>()
         for link in cat.libraryAssets {
             let doc = try PaletteAssetHandler.read(root.appendingPathComponent(link.file))
             var palette = doc.palette; palette.projectID = nil; lib.swatches.append(palette)
-            for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
+            for c in doc.colours where seenColours.insert(c.hex).inserted { lib.colours.append(c) }
         }
         if let file = cat.swatches {
             let doc = try ColourFiles.decoder().decode(SwatchesDocument.self, from: Handler_File_Manager.shared.read(root.appendingPathComponent(file)))
-            for c in doc.colours where !lib.colours.contains(where: { $0.hex == c.hex }) { lib.colours.append(c) }
+            for c in doc.colours where seenColours.insert(c.hex).inserted { lib.colours.append(c) }
         }
         if let file = cat.profiles { lib.colourProfiles = try ColourFiles.decoder().decode(ProfilesDocument.self, from: Handler_File_Manager.shared.read(root.appendingPathComponent(file))).profiles }
         return lib
     }
-    func save(_ lib: Library) throws {
-        try CatalogueTree.write(lib, schema: .init(collections: [], places: [:]), index: index, name: "Assets", poolDirectory: "")
-        try AppDataStore(root: home).update { $0["assets"] = "Assets/Assets.colcat" }
+    func save(_ lib: Library,dirtyPalettes:Set<UUID>? = nil,previous:Library? = nil) throws {
+        try migrateLibraryIndex()
+        if let previous,try CatalogueTree.writePortableEdit(from:previous,to:lib,index:libraryIndex,validated:true) {return}
+        if let previous,try CatalogueTree.writePortableRename(from:previous,to:lib,index:libraryIndex,validated:true) {return}
+        try CatalogueTree.write(lib, schema: .init(collections: [], places: [:]), index: libraryIndex, name: "Assets", poolDirectory: "",dirtyPalettes:dirtyPalettes)
+        if CatalogueTree.catalogue(in:root)?.libraryAssetTypes == nil {try setAssetTypes(assetTypes)}
+        try AppDataStore(root: home).update { $0["assets"] = "Assets/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes") }
     }
     static func split(_ lib: Library) -> (local: Library, global: Library) {
         var local = lib, global = lib
@@ -261,11 +296,17 @@ struct GlobalAssets {
     }
     static func joined(_ local: Library, _ global: Library) -> Library {
         var lib = local
-        lib.tagInfo.removeAll { t in t.projectID == nil && t.groupID == nil && global.tagInfo.contains { $0.name == t.name } }
-        lib.swatches += global.swatches.filter { g in !lib.swatches.contains { $0.id == g.id } }
-        lib.colours += global.colours.filter { g in !lib.colours.contains { $0.hex == g.hex } }
-        lib.colourProfiles += global.colourProfiles.filter { g in !lib.colourProfiles.contains { $0.id == g.id } }
-        lib.tagInfo += global.tagInfo.filter { g in !lib.tagInfo.contains { $0.name == g.name && $0.projectID == g.projectID } }
+        let globalNames=Set(global.tagInfo.map(\.name))
+        lib.tagInfo.removeAll { $0.projectID == nil && $0.groupID == nil && globalNames.contains($0.name) }
+        var swatchIDs=Set(lib.swatches.map(\.id))
+        for swatch in global.swatches where swatchIDs.insert(swatch.id).inserted {lib.swatches.append(swatch)}
+        var colourKeys=Set(lib.colours.map(\.hex))
+        for colour in global.colours where colourKeys.insert(colour.hex).inserted {lib.colours.append(colour)}
+        var profileIDs=Set(lib.colourProfiles.map(\.id))
+        for profile in global.colourProfiles where profileIDs.insert(profile.id).inserted {lib.colourProfiles.append(profile)}
+        struct TagKey:Hashable{let name:String;let project:UUID?}
+        var tagKeys=Set(lib.tagInfo.map{TagKey(name:$0.name,project:$0.projectID)})
+        for tag in global.tagInfo where tagKeys.insert(TagKey(name:tag.name,project:tag.projectID)).inserted {lib.tagInfo.append(tag)}
         if lib.activeSwatchID == nil { lib.activeSwatchID = global.activeSwatchID }
         return lib
     }
@@ -313,12 +354,13 @@ enum AppHomeSeed {
         let migrating = (try store.read())["legacyMigrationPending"] as? Bool == true
         let seeding = creating || migrating
         if !seeding {
+            try GlobalAssets(home:root).migrateLibraryIndex()
             let manifest = try store.read()
             for reference in try Handler_File_App_Data().references(manifest, at: store.url) { _ = try Handler_File_Manager.shared.read(reference.url) }
             return
         }
         try AppDataStore(root: root).update { value in
-            value["assets"] = "Assets/Assets.colcat"
+            value["assets"] = "Assets/my_library.collib"
             value["history"] = "Global.colhis"
             if value["appbridge"] == nil { value["appbridge"] = [] }
         }

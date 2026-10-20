@@ -1,0 +1,105 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "colours" : [
+    {
+      "hex" : "#A6BAC0",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.43078300060723146,
+        "y" : 0.4688043181213189,
+        "z" : 0.42943455523906315
+      },
+      "pickedAt" : 1791482785751.5239,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.65098039215686276,
+          0.72941176470588232,
+          0.75294117647058822
+        ]
+      }
+    },
+    {
+      "hex" : "#E2D9CF",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.68809837437781884,
+        "y" : 0.70446227874185907,
+        "z" : 0.52357433148210653
+      },
+      "pickedAt" : 1791482786648.3091,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.88627450980392153,
+          0.85098039215686272,
+          0.81176470588235294
+        ]
+      }
+    }
+  ],
+  "file" : "Pearl Bush On Tower Grey 2",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T23:43:10.073Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "2E1FCA2E-080D-432B-B9BB-E20E41911DD4",
+    "documentID" : "896AC7B1-8454-48EF-A932-6FD940A6AD3A",
+    "lastSavedAt" : "2026-10-19T23:43:10.271Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "bucketID" : "19FCF6E9-CC1E-4671-921B-2777BC776962",
+    "copiedFrom" : "2E1FCA2E-080D-432B-B9BB-E20E41911DD4",
+    "createdAt" : 1791508605671.1931,
+    "entries" : [
+      {
+        "addedAt" : 1791508605671.1931,
+        "hex" : "#E2D9CF"
+      },
+      {
+        "addedAt" : 1791508605671.1931,
+        "hex" : "#A6BAC0"
+      }
+    ],
+    "id" : "896AC7B1-8454-48EF-A932-6FD940A6AD3A",
+    "isCustom" : true,
+    "name" : "Pearl Bush On Tower Grey 2",
+    "placedAt" : 1792453388467.231,
+    "position" : 23,
+    "projectID" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "purposes" : [
+      {
+        "changedAt" : 1791508605671.4949,
+        "id" : "0E9DA25D-F357-49EE-9600-028064E024B6",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "project" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+  "version" : 1
+}

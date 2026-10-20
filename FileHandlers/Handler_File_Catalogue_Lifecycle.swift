@@ -137,38 +137,94 @@ extension Handler_File_Manager {
 
     /// Copies verified source bytes into a standard checked share; never a claim that external
     /// ICC/ASE links or unavailable files were bundled. Incomplete sources cannot take this path.
-    func archiveCatalogue(_ plan: FileCatalogueRemovalPlan, to destination: URL) throws {
+    func archiveCatalogue(_ plan: FileCatalogueRemovalPlan, to destination: URL, includeShared:Bool=false) throws {
         guard plan.canTransfer, let id = plan.identity else { throw failure("Recover missing files before creating an archive. Detach And Leave Files is still available.") }
         guard !destination.standardizedFileURL.path.hasPrefix(plan.root.standardizedFileURL.path + "/") else { throw failure("Save the archive outside the catalogue being removed.") }
-        var entries: [Zip.Entry] = []
+        var entries: [Zip.StreamEntry] = []
         for file in plan.ownedFiles + plan.otherFiles {
-            guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= 40 * 1024 * 1024 else { throw failure("A source file exceeds the archive's 40 MB per-file limit. Leave it in place or archive it outside Colorgain.") }
-            entries.append(Zip.Entry(path: CatalogueTree.relative(file, to: plan.root), data: try filesystem.read(file)))
+            entries.append(Zip.StreamEntry(path: CatalogueTree.relative(file, to: plan.root), file: file))
         }
-        let indexed = try JSONSerialization.jsonObject(with: read(plan.index)) as! [String: Any]
+        var indexed = try JSONSerialization.jsonObject(with: read(plan.index)) as! [String: Any]
         let required = try handler(for: plan.index).references(indexed, at: plan.index).filter { $0.kind != "Folder" }
         let paths = Set(entries.map(\.path))
         guard required.allSatisfy({ reference in paths.contains(CatalogueTree.relative(plan.inventory.relocated[reference.url.path] ?? reference.url, to: plan.root)) }) else { throw failure("The archive inventory does not include every referenced asset. Recover or explicitly relocate the affected files before archiving.") }
+        // External image links become owned files in this archive only. The live catalogue
+        // continues to point at the originals until the user changes those references.
+        if var records = indexed["importedAssets"] as? [[String: Any]] {
+            for i in records.indices where records[i]["external"] as? Bool == true {
+                let record = try ColourFiles.decoder().decode(WorkspaceImportedAsset.self, from: JSONSerialization.data(withJSONObject: records[i]))
+                guard record.type == "Photographs" || record.type == "Images" else { continue }
+                let source = try record.url(in: plan.root)
+                let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+                guard values.isDirectory != true, values.isSymbolicLink != true else { throw failure("The linked image is not a regular file: " + record.name) }
+                let relative = "Support/Referenced Images/" + record.id.uuidString + "/" + filesystemName(source.lastPathComponent)
+                entries.append(.init(path: relative, file: source))
+                records[i]["external"] = false
+                records[i]["path"] = relative
+            }
+            indexed["importedAssets"] = records
+            let indexPath = CatalogueTree.relative(plan.index, to: plan.root)
+            guard let at = entries.firstIndex(where: { $0.path == indexPath }) else { throw failure("The catalogue index is missing from the archive inventory.") }
+            entries[at] = .init(path: indexPath, data: try JSONSerialization.data(withJSONObject: indexed, options: .sortedKeys))
+        }
         let links = try ASERegistry.read(plan.root).sources
         guard !links.contains(where: { $0.folder }) else { throw failure("This catalogue monitors an ASE folder. Choose individual ASE files in Appbridge before making a portable archive; detaching will preserve the folder link.") }
         let ase = try ASERegistry.harvest(root: plan.root, selected: Set(links.map { $0.id }))
         let replacedPaths = Set(ase.map { $0.path })
         entries.removeAll { $0.path.hasSuffix(".colase") || replacedPaths.contains($0.path) }
-        entries += ase
+        entries += ase.map{.init(path:$0.path,data:$0.data)}
+        var sharedStaging:URL?
+        defer{if let sharedStaging{try? FileManager.default.removeItem(at:sharedStaging)}}
+        if includeShared {
+            let shared=try SimpleSharedArchive.prepare(home:plan.workspace)
+            sharedStaging=shared.staging
+            let sharedIDs=Set(try GlobalAssets(home:plan.workspace).load().swatches.map(\.id))
+            var links:[String:String]=[:]
+            for record in CatalogueTree.catalogue(in:plan.root)?.importedAssets ?? [] where record.external && record.type == "Palettes" {
+                let source=try record.url(in:plan.root)
+                if let doc=try? PaletteAssetHandler.read(source),sharedIDs.contains(doc.palette.id){links[record.id.uuidString]=doc.palette.id.uuidString}
+            }
+            let indexPath=CatalogueTree.relative(plan.index,to:plan.root)
+            if let at=entries.firstIndex(where:{$0.path == indexPath}) {
+                indexed["sharedAssetReferences"]=links
+                entries[at] = .init(path:indexPath,data:try JSONSerialization.data(withJSONObject:indexed,options:.sortedKeys))
+            }
+            entries.removeAll{$0.path.hasPrefix(SimpleSharedArchive.prefix)}
+            entries += shared.entries
+        }
+        let files=try entries.map { entry -> ShareManifest.File in
+            if let data=entry.data{return .init(path:entry.path,bytes:data.count,sha256:Sharing.sha256(data))}
+            guard let file=entry.file,let size=try file.resourceValues(forKeys:[.fileSizeKey]).fileSize,
+                  let digest=try FileRevision.read(file).digest else {throw failure("An archive source is unavailable: " + entry.path)}
+            return .init(path:entry.path,bytes:size,sha256:digest)
+        }
         let manifest = ShareManifest(level: .catalogue, exportedAt: Date(), catalogue: .init(id: id, name: plan.name), subject: .init(id: id, name: plan.name),
-            files: entries.map { .init(path: $0.path, bytes: $0.data.count, sha256: Sharing.sha256($0.data)) })
+            files: files)
         try createDirectory(destination.deletingLastPathComponent())
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw failure("The archive destination already exists. Choose a new filename.") }
-        try Zip.write([.init(path: ShareManifest.fileName, data: ColourFiles.encoder().encode(manifest))] + entries, to: destination, manager: self)
-        _ = try handler(for: destination).canonical(filesystem.read(destination))
+        let manifestBytes=try ColourFiles.encoder().encode(manifest)
+        if files.allSatisfy({$0.bytes <= 40*1024*1024}) && files.reduce(0,{$0+$1.bytes}) <= 256*1024*1024 {
+            let small=try entries.map{entry -> Zip.Entry in
+                if let data=entry.data{return .init(path:entry.path,data:data)}
+                guard let file=entry.file else{throw failure("An archive source is unavailable.")}
+                return .init(path:entry.path,data:try filesystem.read(file))
+            }
+            try Zip.write([.init(path:ShareManifest.fileName,data:manifestBytes)]+small,to:destination,manager:self)
+        } else {
+            let checkedManifest=try documentBytes(manifestBytes,extension:"colmanifest")
+            try Zip.writeStreaming([.init(path:ShareManifest.fileName,data:checkedManifest)]+entries,to:destination)
+        }
+        let inspected=try Sharing.inspect(destination)
+        defer{if let staged=inspected.stagedRoot{Sharing.discard(staged)}}
+        guard inspected.ok else {throw failure(inspected.problems.joined(separator:"\n"))}
     }
 
     /// Backup/export publishes a verified archive without detaching or changing the catalogue.
-    func createCatalogueArchive(name: String, catalogues: Catalogues, to destination: URL) throws {
+    func createCatalogueArchive(name: String, catalogues: Catalogues, to destination: URL, includeShared:Bool=false) throws {
         let plan = try prepareCatalogueRemoval(name: name, catalogues: catalogues)
         try withTransaction(home: plan.workspace) {
             try validate(plan)
-            try archiveCatalogue(plan, to: destination)
+            try archiveCatalogue(plan, to: destination,includeShared:includeShared)
             try validate(plan)
         }
     }
@@ -183,7 +239,9 @@ extension Handler_File_Manager {
             case .archive(let destination): try archiveCatalogue(plan, to: destination)
             case .binOwnedFiles:
                 guard plan.inventory.complete else { throw failure("Recover unavailable files before removing owned files. Detaching leaves them intact.") }
-                let sharedRoot = Catalogues(root: plan.workspace, legacyURL: nil).registry.contains { $0.name != plan.name && URL(fileURLWithPath: $0.path).resolvingSymlinksInPath() == plan.root.resolvingSymlinksInPath() }
+                let sharedRoot = Catalogues(root: plan.workspace, legacyURL: nil).registry.contains {
+                    $0.name != plan.name && $0.url(in: plan.workspace)?.resolvingSymlinksInPath() == plan.root.resolvingSymlinksInPath()
+                }
                 guard !sharedRoot else { throw failure("Another catalogue registration uses this folder. Detach this entry and retain the shared files.") }
                 for file in plan.ownedFiles { try trash(file) }
             case .transfer(let target, let create, let expected):

@@ -9,7 +9,7 @@ final class ProofDensitySimulation {
 }
 
 /// House diagonal arrow, with a full control target, hover, keyboard focus and accessible name.
-final class ProofChartArrow: NSButton {
+final class ProofChartArrow: ClickCursorButton {
     var contracts = false
     private var hover = false
     private var tracking: NSTrackingArea?

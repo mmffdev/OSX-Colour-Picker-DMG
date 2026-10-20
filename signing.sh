@@ -37,13 +37,16 @@ stamp_version() {
     local build
     build="$(git rev-list --count HEAD)"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$1/Contents/Info.plist"
-    # The commit the build was made from, shown in the window's footer. A "+" says the source had
+    # The commit the build was made from, retained for provenance. A "+" says the source had
     # changes that were not yet committed, so the build is not exactly that commit.
     local commit
     commit="$(git rev-parse --short HEAD)"
     if [ -n "$(git status --porcelain --untracked-files=no -- '*.swift')" ]; then commit="$commit+"; fi
     /usr/libexec/PlistBuddy -c "Delete :ColourBuildCommit" "$1/Contents/Info.plist" 2>/dev/null || true
     /usr/libexec/PlistBuddy -c "Add :ColourBuildCommit string $commit" "$1/Contents/Info.plist"
+    built="$(date '+%Y-%m-%d %H:%M %Z')"
+    /usr/libexec/PlistBuddy -c "Delete :ColourBuildDate" "$1/Contents/Info.plist" 2>/dev/null || true
+    /usr/libexec/PlistBuddy -c "Add :ColourBuildDate string $built" "$1/Contents/Info.plist"
     echo "build $build ($commit)"
 }
 

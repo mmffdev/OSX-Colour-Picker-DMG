@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 // ---------- Settings ----------
 //
@@ -28,6 +29,7 @@ private func note(_ s: String) -> NSTextField {
 private func row(_ views: [NSView]) -> NSStackView {
     let s = NSStackView(views: views)
     s.orientation = .horizontal
+    s.alignment = .lastBaseline
     s.spacing = 8
     return s
 }
@@ -58,7 +60,7 @@ class SettingsPanel: NSViewController {
     // A panel with more than one heading is shown a section at a time: a bar of the headings at the
     // top, and under it the rows of the one that is chosen. So no panel is taller than its tallest
     // section, and none runs off the foot of the screen.
-    private var sectionBar: ToggleBar?
+    private var sectionBar: NSSegmentedControl?
     private var sectionGrids: [NSView] = []
     private var sectionKey: String { "settingsSection." + (title ?? "") }
 
@@ -66,6 +68,8 @@ class SettingsPanel: NSViewController {
         let grid = NSGridView(views: rows)
         grid.rowSpacing = 9
         grid.columnSpacing = 10
+        grid.rowAlignment = .lastBaseline
+        grid.yPlacement = .top
         // A panel that is one view across, as Permissions is, has no columns to set.
         guard grid.numberOfColumns > 1 else { return grid }
         grid.column(at: 0).xPlacement = .trailing
@@ -104,7 +108,8 @@ class SettingsPanel: NSViewController {
         if sections.count > 1 {
             // Each word of a heading starts with a capital on the bar.
             let titles = sections.map { $0.title.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") }
-            let bar = ToggleBar(labels: titles, target: self, action: #selector(sectionChosen))
+            let bar = ClickCursorSegmentedControl(labels: titles, trackingMode: .selectOne, target: self, action: #selector(sectionChosen))
+            bar.font = NSFont.systemFont(ofSize: TextSize.body)
             bar.selectedSegment = min(max(0, AppPreferences.shared.integer(forKey: sectionKey)), sections.count - 1)
             sectionBar = bar
             sectionGrids = sections.map { grid($0.rows) }
@@ -139,6 +144,7 @@ class SettingsPanel: NSViewController {
 
     /// The window takes the height of the section now showing, its top edge staying where it is.
     private func resizeWindow() {
+        if let group = parent as? SettingsGroupController { group.resizeForSelection(); return }
         let size = view.fittingSize
         preferredContentSize = size
         guard let window = view.window, let content = window.contentView else { return }
@@ -159,7 +165,7 @@ class SettingsPanel: NSViewController {
     }
 
     func popup(_ titles: [String], _ action: Selector) -> NSPopUpButton {
-        let p = NSPopUpButton(frame: .zero, pullsDown: false)
+        let p = ClickCursorPopupButton(frame: .zero, pullsDown: false)
         p.addItems(withTitles: titles)
         p.target = self
         p.action = action
@@ -167,7 +173,7 @@ class SettingsPanel: NSViewController {
     }
 
     func check(_ title: String, _ action: Selector) -> NSButton {
-        NSButton(checkboxWithTitle: title, target: self, action: action)
+        ClickCursorButton(checkboxWithTitle: title, target: self, action: action)
     }
 
     func button(_ title: String, _ action: Selector) -> NSButton {
@@ -231,7 +237,7 @@ final class AppearancePanel: SettingsPanel {
     private lazy var bars = check("Show palette bars under the tiles", #selector(changed))
 
     override func rows() -> [[NSView]] {[
-        [heading("Colour cards"), blank],
+        [heading("Swatch Cards"), blank],
         [label("Rows on each card:"), row(Array(rowChecks.prefix(5)))],
         [blank, row(Array(rowChecks.dropFirst(5)))],
         [blank, note("P3, Adobe RGB and BT.2020 are the same colour written in those wider spaces; L*a*b* is under D50.")],
@@ -254,12 +260,20 @@ final class AppearancePanel: SettingsPanel {
         size.selectItem(at: Prefs.tileSize.rawValue)
     }
 
-    @objc private func changed() {
-        Prefs.houseCardRows = zip(rowChecks, ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 }
-        Prefs.showNames = names.state == .on
-        Prefs.showContrast = contrast.state == .on
-        Prefs.showPaletteBars = bars.state == .on
-        Prefs.tileSize = TileSize(rawValue: size.indexOfSelectedItem) ?? .medium
+    @objc private func changed(_ sender: NSControl) {
+        if rowChecks.contains(where: { $0 === sender }) {
+            let selected = zip(rowChecks, ColourFormat.cardRows).filter { $0.0.state == .on }.map { $0.1 }
+            if selected != Prefs.houseCardRows { Prefs.houseCardRows = selected }
+        } else if sender === names {
+            if (names.state == .on) != Prefs.showNames { Prefs.showNames = names.state == .on }
+        } else if sender === contrast {
+            if (contrast.state == .on) != Prefs.showContrast { Prefs.showContrast = contrast.state == .on }
+        } else if sender === bars {
+            if (bars.state == .on) != Prefs.showPaletteBars { Prefs.showPaletteBars = bars.state == .on }
+        } else if sender === size {
+            let selected = TileSize(rawValue: size.indexOfSelectedItem) ?? .medium
+            if selected != Prefs.tileSize { Prefs.tileSize = selected }
+        }
     }
 }
 
@@ -492,6 +506,7 @@ final class SyncPanel: SettingsPanel {
 // MARK: Shortcuts
 
 final class ShortcutsPanel: SettingsPanel {
+    private var quickFields:[String:ShortcutField]=[:]
     private var fields: [ShortcutField] = []
     private var ids: [String] = []
     private let message = note(" ")
@@ -501,7 +516,15 @@ final class ShortcutsPanel: SettingsPanel {
     override func rows() -> [[NSView]] {
         message.textColor = .systemRed
         // A section to each menu, so the list is never longer than the longest menu.
-        var rows: [[NSView]] = []
+        var rows: [[NSView]] = [[heading("Quick Keys"),blank]]
+        for command in QuickKeys.commands {
+            let field=ShortcutField(frame:.zero);field.quickKey=QuickKeys.key(for:command.id)
+            field.onQuickRecord={ [weak self] key in self?.recordQuick(key,for:command.id) }
+            quickFields[command.id]=field
+            let clear=symbolButton("xmark.circle",tooltip:"Remove this quick key",target:self,action:#selector(clearQuick(_:)))
+            clear.identifier=NSUserInterfaceItemIdentifier(command.id)
+            rows.append([label(command.title+":"),row([field,clear])])
+        }
         var menu = ""
         for (at, command) in Shortcuts.commands.enumerated() {
             if command.menu != menu {
@@ -528,9 +551,18 @@ final class ShortcutsPanel: SettingsPanel {
     }
 
     override func refresh() {
+        for (id,field) in quickFields {field.quickKey=QuickKeys.key(for:id)}
         let current = Dictionary(uniqueKeysWithValues: Shortcuts.commands.map { ($0.id, $0.shortcut) })
         for (field, id) in zip(fields, ids) { field.shortcut = current[id] ?? nil }
     }
+
+    private func recordQuick(_ key:String?,for id:String){
+        if let key,let conflict=QuickKeys.commands.first(where:{$0.id != id && QuickKeys.key(for:$0.id) == key}) {
+            message.stringValue="\(key) is already used by \(conflict.title)."
+        } else {QuickKeys.set(key ?? "",for:id);message.stringValue=" "}
+        view.window?.makeFirstResponder(nil);refresh()
+    }
+    @objc private func clearQuick(_ sender:NSButton){if let id=sender.identifier?.rawValue{recordQuick(nil,for:id)}}
 
     private func record(_ shortcut: Shortcut?, _ keyCode: Int?, at: Int) {
         let problem = Shortcuts.set(shortcut, keyCode: keyCode, for: ids[at])
@@ -542,7 +574,7 @@ final class ShortcutsPanel: SettingsPanel {
     @objc private func clear(_ sender: NSButton) { record(nil, nil, at: sender.tag) }
 
     @objc private func restore() {
-        Shortcuts.restoreDefaults()
+        Shortcuts.restoreDefaults();Prefs.quickKeys=[:]
         message.stringValue = " "
         refresh()
     }
@@ -551,16 +583,16 @@ final class ShortcutsPanel: SettingsPanel {
 // MARK: Theme
 
 final class ThemePanel: SettingsPanel {
-    private let selectionBackground = NSColorWell()
-    private let selectionText = NSColorWell()
-    private let hoverBackground = NSColorWell()
-    private let hoverText = NSColorWell()
-    private let activeBackground = NSColorWell()
-    private let activeText = NSColorWell()
+    private let selectionBackground = ClickCursorColorWell()
+    private let selectionText = ClickCursorColorWell()
+    private let hoverBackground = ClickCursorColorWell()
+    private let hoverText = ClickCursorColorWell()
+    private let activeBackground = ClickCursorColorWell()
+    private let activeText = ClickCursorColorWell()
     /// Match The Mac, Light, Dark, My Own Colours: one is always ticked.
     private lazy var modes: [NSButton] = ThemeMode.allCases.map { check($0.title, #selector(modeChosen(_:))) }
     /// For My Own Colours: the background, and whether its text is black, white, or whichever reads better.
-    private let ownBackground = NSColorWell()
+    private let ownBackground = ClickCursorColorWell()
     private lazy var ownText = popup(ThemeText.allCases.map { $0.title }, #selector(ownChanged))
 
     @objc private func ownChanged() {
@@ -655,7 +687,7 @@ final class ThemePanel: SettingsPanel {
 // MARK: Halo
 
 /// A slider that goes back to its starting value on a double click.
-final class ResettingSlider: NSSlider {
+final class ResettingSlider: ClickCursorSlider {
     var resting = 1.0
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == 2 else { super.mouseDown(with: event); return }
@@ -677,7 +709,7 @@ final class HaloSettingsPanel: SettingsPanel {
 
     private func haloPair(_ background: String, _ text: String, reset layer: Int? = nil) -> NSView {
         let wells = [background, text].map { part -> NSColorWell in
-            let well = NSColorWell()
+            let well = ClickCursorColorWell()
             haloWells.append((well, part))
             return well
         }
@@ -1044,11 +1076,81 @@ final class HistoryPanel: SettingsPanel {
     @objc private func clear() { library.clearHistory() }
 }
 
+/// Metadata defaults are configured once, then applied when native assets are created.
+final class MetadataSettingsPanel: SettingsPanel {
+    private let creation=AnalysisMenu("On Create",[])
+    private let export=AnalysisMenu("On Export",[])
+    private let inspector=AnalysisMenu("Inspector Loadout",[])
+    private let deletePreset=AnalysisMenu("Saved Preset",[])
+    private let editMaster=SwissButton("Edit Master Template…",.quiet)
+    private let editPreset=SwissButton("Create Preset…",.quiet)
+    private let removePreset=SwissButton("Remove Preset",.quiet)
+    override func rows()->[[NSView]] {
+        for control in [creation,export,inspector,deletePreset] {control.frame.size=NSSize(width:310,height:32)}
+        creation.changed={ [weak self] index in var config=MetadataConfiguration.load();config.creationPreset=index>0 ? self?.creation.titleOfSelectedItem:nil;config.save() }
+        export.changed={ [weak self] index in var config=MetadataConfiguration.load();config.exportPreset=index>0 ? self?.export.titleOfSelectedItem:nil;config.save() }
+        inspector.changed={ [weak self] index in var config=MetadataConfiguration.load();config.inspectorPreset=index>0 ? self?.inspector.titleOfSelectedItem:nil;config.save() }
+        editMaster.actionSymbol="slider.horizontal.3";editMaster.target=self;editMaster.action=#selector(openMaster)
+        editPreset.actionSymbol="plus";editPreset.target=self;editPreset.action=#selector(openPreset)
+        removePreset.actionSymbol="trash";removePreset.target=self;removePreset.action=#selector(removeSelectedPreset)
+        return [
+            [heading("Master Metadata"),blank],
+            [label("Defaults:"),editMaster],
+            [blank,note("Creator, rights, keywords and custom fields in this template appear on every new palette and typography asset. Creation and file dates come from the asset itself.")],
+            [heading("Workflow Presets"),blank],
+            [label("On Create:"),creation],
+            [label("On Export:"),export],
+            [label("Inspector:"),inspector],
+            [blank,note("A preset stores metadata values. The create choice adds non-empty preset values over the master template. The export and inspector choices are saved for their workflows.")],
+            [heading("Manage Presets"),blank],
+            [label("Preset:"),deletePreset],
+            [blank,row([editPreset,removePreset])]
+        ]
+    }
+    override func refresh() {
+        let config=MetadataConfiguration.load(),names=MetadataPresetStore.all().keys.sorted()
+        creation.options(["Master Defaults"]+names,selected:names.firstIndex(of:config.creationPreset ?? "").map{$0+1} ?? 0)
+        export.options(["No Export Preset"]+names,selected:names.firstIndex(of:config.exportPreset ?? "").map{$0+1} ?? 0)
+        inspector.options(["All Fields"]+names,selected:names.firstIndex(of:config.inspectorPreset ?? "").map{$0+1} ?? 0)
+        deletePreset.options(["Choose Preset"]+names)
+        removePreset.isEnabled = deletePreset.indexOfSelectedItem>0
+        deletePreset.changed={ [weak self] index in self?.removePreset.isEnabled=index>0 }
+    }
+    @objc private func openMaster() {
+        let config=MetadataConfiguration.load()
+        let sample=Swatch(id:UUID(),name:"New Asset Defaults",createdAt:Date(),entries:[],metadata:config.master)
+        AssetMetadataEditor.present(sample,over:view) { metadata,_ in
+            var updated=MetadataConfiguration.load();updated.master=metadata;updated.save()
+        }
+    }
+    @objc private func openPreset() {
+        let sample=Swatch(id:UUID(),name:"New Metadata Preset",createdAt:Date(),entries:[],metadata:MetadataConfiguration.load().master)
+        AssetMetadataEditor.present(sample,over:view) { [weak self] metadata,_ in
+            let alert=NSAlert();alert.messageText="Name Metadata Preset"
+            let field=NSTextField(string:"New Preset");field.frame=NSRect(x:0,y:0,width:280,height:28)
+            alert.accessoryView=field;alert.addButton(withTitle:"Save");alert.addButton(withTitle:"Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else{return}
+            MetadataPresetStore.save(metadata,named:field.stringValue);self?.refresh()
+        }
+    }
+    @objc private func removeSelectedPreset() {
+        guard deletePreset.indexOfSelectedItem>0,let name=deletePreset.titleOfSelectedItem else{return}
+        MetadataPresetStore.remove(name)
+        var config=MetadataConfiguration.load()
+        if config.creationPreset==name {config.creationPreset=nil}
+        if config.exportPreset==name {config.exportPreset=nil}
+        if config.inspectorPreset==name {config.inspectorPreset=nil}
+        config.save();refresh()
+    }
+}
+
 // MARK: Window
 
 final class SettingsWindowController: NSWindowController {
     private let tabs = NSTabViewController()
     private var panels: [SettingsPanel] = []
+    private var groups: [SettingsGroupController] = []
+    private var themeObserver: NSObjectProtocol?
 
     convenience init(library: LibraryController) {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -1063,7 +1165,7 @@ final class SettingsWindowController: NSWindowController {
             CataloguePanel(library: library, title: "Catalogues", icon: "books.vertical"),
             SyncPanel(library: library, title: "Sync", icon: "arrow.triangle.2.circlepath"),
             ProjectsPanel(library: library, title: "Projects", icon: "folder"),
-            SchemaPanel(library: library, title: "Schema", icon: "list.bullet.indent"),
+            SimpleCatalogueSettingsPanel(library: library, title: "Catalogue Structure", icon: "list.bullet.indent"),
             ExportPanel(library: library, title: "Export", icon: "square.and.arrow.up"),
             HistoryPanel(library: library, title: "History", icon: "clock.arrow.circlepath"),
             AppearancePanel(library: library, title: "Cards & Grid", icon: "square.grid.2x2"),
@@ -1075,26 +1177,311 @@ final class SettingsWindowController: NSWindowController {
         #if APPSTORE
         panels.append(EditionPanel(library: library, title: "Edition", icon: "bag"))
         #endif
+        let colourProfiles = panels[10]
+        let proofing = ProofingDefaultsPanel(library: library, title: "Proofing", icon: "checkmark.seal")
+        let spectral = SpectralViewingPanel(library: library, title: "Measurements & Spectral Viewing", icon: "waveform.path")
+        let display = DisplayViewingPanel(library: library, title: "Display & Viewing Environment", icon: "display")
+        var appPanels = [panels[0], panels[8], panels[9], panels[11], panels[12]]
+        if let permissions = panels.first(where: { $0 is PermissionsPanel }) { appPanels.append(permissions) }
+        #if APPSTORE
+        if let edition = panels.first(where: { $0 is EditionPanel }) { appPanels.append(edition) }
+        #endif
+        let metadata=MetadataSettingsPanel(library: library, title:"Metadata", icon:"info.square")
+        groups = [SettingsGroupController(title: "App & Interaction", icon: "gearshape", panels: appPanels),
+                  SettingsGroupController(title: "Library & Data", icon: "books.vertical", panels: [panels[1], panels[2], panels[5], panels[7], metadata]),
+                  SettingsGroupController(title: "Colour Management", icon: "dial.medium", panels: [colourProfiles, proofing, spectral, display]),
+                  SettingsGroupController(title: "Connections & Sharing", icon: "arrow.triangle.2.circlepath", panels: [panels[3], panels[6]])]
+        panels += [proofing, spectral, display, metadata]
         tabs.tabStyle = .toolbar
-        for p in panels {
-            let item = NSTabViewItem(viewController: p)
-            item.label = p.title ?? ""
-            item.image = symbol(p.icon, p.title ?? "")
+        for group in groups {
+            let item = NSTabViewItem(viewController: group)
+            item.label = group.title ?? ""
+            item.image = symbol(group.icon, group.title ?? "")
             tabs.addTabViewItem(item)
         }
         win.contentViewController = tabs
         win.center()
+        themeObserver = NotificationCenter.default.addObserver(forName: .themeDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.applyCurrentTheme()
+        }
+        Theme.apply(to: win)
+        DispatchQueue.main.async { [weak self] in self?.applyCurrentTheme() }
         shouldCascadeWindows = false
         win.setFrameAutosaveName("MMFFDevColour3Settings")   // comes back where it was left
-        showPanel(AppPreferences.shared.integer(forKey: "settingsPanel"))
-        panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in AppPreferences.shared.set(tabs.selectedTabViewItemIndex, forKey: "settingsPanel") }
+        tabs.selectedTabViewItemIndex = min(max(0, AppPreferences.shared.integer(forKey: "settingsGroup")), groups.count - 1)
+        panelWatch = tabs.observe(\.selectedTabViewItemIndex) { tabs, _ in AppPreferences.shared.set(tabs.selectedTabViewItemIndex, forKey: "settingsGroup") }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .appStateDidChange, object: library)
     }
     private var panelWatch: NSKeyValueObservation?
 
+    deinit {
+        if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
+    }
+
+    private func applyCurrentTheme() {
+        guard let window else { return }
+        Theme.apply(to: window)
+        refresh()
+    }
+
     @objc func refresh() { panels.forEach { if $0.isViewLoaded { $0.refresh() } } }
 
+    func showSpectralViewing() {
+        for (groupIndex, group) in groups.enumerated() {
+            if let index=group.panels.firstIndex(where:{$0 is SpectralViewingPanel}) {
+                tabs.selectedTabViewItemIndex=groupIndex;group.selectedTabViewItemIndex=index;return
+            }
+        }
+    }
+    func showMetadata() {
+        guard let index=panels.firstIndex(where:{$0 is MetadataSettingsPanel}) else{return}
+        showPanel(index)
+    }
     func showPanel(_ index: Int) {
-        if panels.indices.contains(index) { tabs.selectedTabViewItemIndex = index }
+        guard panels.indices.contains(index) else { return }
+        let panel = panels[index]
+        for (groupIndex, group) in groups.enumerated() {
+            if let childIndex = group.panels.firstIndex(where: { $0 === panel }) {
+                tabs.selectedTabViewItemIndex = groupIndex
+                group.selectedTabViewItemIndex = childIndex
+                return
+            }
+        }
+    }
+}
+
+
+/// Toolbar groups keep the existing controllers, including their section controls and stores.
+final class SettingsGroupController: NSTabViewController {
+    let panels: [SettingsPanel]
+    let icon: String
+    private var selectionWatch: NSKeyValueObservation?
+    init(title: String, icon: String, panels: [SettingsPanel]) {
+        self.panels = panels; self.icon = icon
+        super.init(nibName: nil, bundle: nil)
+        self.title = title
+        tabStyle = .segmentedControlOnTop
+        for panel in panels { addTabViewItem(NSTabViewItem(viewController: panel)) }
+        let key = "settingsGroupTab." + title
+        selectedTabViewItemIndex = min(max(0, AppPreferences.shared.integer(forKey: key)), panels.count - 1)
+        selectionWatch = observe(\.selectedTabViewItemIndex) { [weak self] controller, _ in
+            AppPreferences.shared.set(controller.selectedTabViewItemIndex, forKey: key)
+            DispatchQueue.main.async { self?.resizeForSelection() }
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func viewWillAppear() { super.viewWillAppear(); resizeForSelection() }
+    func resizeForSelection() {
+        guard panels.indices.contains(selectedTabViewItemIndex) else { return }
+        let panel = panels[selectedTabViewItemIndex]
+        panel.view.layoutSubtreeIfNeeded()
+        let size = NSSize(width: max(SettingsPanel.minimumWidth, panel.view.fittingSize.width), height: panel.view.fittingSize.height + 52)
+        preferredContentSize = size
+        guard let window = view.window, let content = window.contentView else { return }
+        let desired = window.frameRect(forContentRect: NSRect(origin: .zero, size: size)).size
+        let maxHeight = window.screen?.visibleFrame.height ?? desired.height
+        var frame = window.frame
+        let height = min(maxHeight, desired.height)
+        frame.origin.y += frame.height - height; frame.size.height = height
+        frame.size.width = max(frame.width, desired.width)
+        if abs(content.frame.height - size.height) > 1 { window.setFrame(frame, display: true) }
+    }
+}
+
+final class ProofingDefaultsPanel: SettingsPanel {
+    private lazy var output = check("Show Output Proof", #selector(changeOutput))
+    override func rows() -> [[NSView]] {
+        [[label("Palette Comparison:"), output],
+         [blank, note("Compare the original preview with the selected output target across palettes and swatches. The actionbar controls this same global choice. A predicted colour difference is not a measured approval.")],
+         [blank, note("Saved viewing profiles, the active output target, rendering intent and difference tolerance are managed in the palette workspace’s Preset dropdown. Colour Profiles in these settings manages delivery channel sets.")]]
+    }
+    override func refresh() { output.state = Prefs.deltaWarningsEnabled ? .on : .off }
+    @objc private func changeOutput() { Prefs.deltaWarningsEnabled = output.state == .on }
+}
+
+final class SpectralViewingPanel: SettingsPanel {
+    private lazy var enable = check("Enable Spectral Viewing", #selector(enableChanged))
+    private lazy var material = check("This Is An Opaque, Non-Fluorescent Material", #selector(materialChanged))
+    private let sampleMenu = AnalysisMenu("Measured Sample", [])
+    private let paletteMenu = AnalysisMenu("Link To Palette", [])
+    private let colourMenu = AnalysisMenu("Link To Swatch", [])
+    private let observerMenu = AnalysisMenu("Spectral Calculation Observer", SpectralEngine.Observer.allCases.map(\.label))
+    private let status = note("")
+    private let review = note("Choose a CxF3 file containing spectral reflectance measurements.")
+    private let detail = note("")
+    private let linkStatus = note("")
+    private lazy var add = button("Add Measurements", #selector(addImport))
+    private lazy var cancel = button("Cancel Import", #selector(cancelImport))
+    private lazy var link = button("Link Sample To Swatch", #selector(linkSample))
+    private lazy var unlink = button("Remove Swatch Link", #selector(removeLink))
+    private var staged: CxFReflectance.Import?
+    private var samples: [SpectralSample] = []
+    private var palettes: [Swatch] = []
+    private var entries: [SwatchEntry] = []
+    private var spectralState = SpectralStore.State()
+    private var catalogueID: UUID? { CatalogueTree.catalogue(in: library.store.root)?.id }
+    override func rows() -> [[NSView]] {
+        sampleMenu.changed = { [weak self] _ in self?.material.state = .off; self?.updateDetails() }
+        paletteMenu.changed = { [weak self] _ in self?.updateSwatches() }
+        colourMenu.changed = { [weak self] _ in self?.material.state = .off; self?.updateDetails() }
+        observerMenu.changed = { [weak self] index in self?.save { $0.observer = SpectralEngine.Observer.allCases[index] } }
+        add.isEnabled = false; cancel.isEnabled = false
+        return [[heading("Measurements"), blank],
+                [label("Spectral Viewing:"), enable],
+                [label("Observer:"), observerMenu],
+                [blank, status],
+                [blank, button("Import Spectral Measurements…", #selector(importFile))],
+                [blank, review],
+                [blank, row([add,cancel])],
+                [blank, note("CxF3 reflectance fractions, 1–10 nm sampling, covering at least 380–730 nm. Original files and declared measurement metadata are retained. No RGB matching or invented wavelengths.")],
+                [heading("Swatch Links"), blank],
+                [label("Measured Sample:"), sampleMenu],
+                [label("Palette:"), paletteMenu],
+                [label("Swatch:"), colourMenu],
+                [blank, material],
+                [blank, row([link,unlink])],
+                [blank, row([button("Export Source CxF…", #selector(exportSource)),button("Remove Source…", #selector(removeSource))])],
+                [blank, linkStatus],
+                [blank, detail],
+                [blank, note("Preview: ICC LWL spectral weights; fixed D65 display reference, including the illuminant cast. It is a predicted display colour, not an ambient-adaptation model or a physical approval. Out-of-display-gamut results are clipped. 10° XYZ values use standard 2° RGB for an approximate screen preview, not an exact observer conversion. Links belong to this workspace, catalogue, palette and swatch; changing a colour’s definition invalidates its link.")]]
+    }
+    override func refresh() {
+        SpectralStore.shared.reload(); spectralState = SpectralStore.shared.snapshot()
+        samples = spectralState.samples
+        let selectedColour = entries.indices.contains(colourMenu.indexOfSelectedItem) ? entries[colourMenu.indexOfSelectedItem].hex : nil
+        let selectedSample = sampleMenu.indexOfSelectedItem
+        sampleMenu.options(samples.map { $0.name + " · " + $0.objectID }, selected: max(0, min(selectedSample, samples.count-1)))
+        let previous = palettes.indices.contains(paletteMenu.indexOfSelectedItem) ? palettes[paletteMenu.indexOfSelectedItem].id : nil
+        palettes = library.library.swatches.filter { !$0.isTypography && !$0.entries.isEmpty }
+        paletteMenu.options(palettes.map(\.name), selected: previous.flatMap { id in palettes.firstIndex { $0.id == id } } ?? 0)
+        enable.state = spectralState.enabled ? .on : .off
+        observerMenu.selectItem(at: SpectralEngine.Observer.allCases.firstIndex(of: spectralState.observer) ?? 0)
+        status.stringValue = SpectralStore.shared.problem ?? "\(samples.count) Measured Samples · \(spectralState.links.count) Saved Links · " + (spectralState.enabled ? "Enabled" : "Off")
+        updateSwatches(preserving: selectedColour)
+    }
+    private func save(_ change: (inout SpectralStore.State) throws -> Void) {
+        do { try SpectralStore.shared.update(change); refresh() }
+        catch { status.stringValue = error.localizedDescription; enable.state = spectralState.enabled ? .on : .off }
+    }
+    @objc private func enableChanged() {
+        if enable.state == .on && spectralState.links.isEmpty {
+            enable.state = .off
+            status.stringValue = "Import measurements, then use Swatch Links to link a sample before enabling Spectral Viewing."
+            if samples.isEmpty { importFile() }
+            return
+        }
+        let enabled = enable.state == .on
+        if enabled {
+            do {try SpectralEngine.validateReferenceTables()}
+            catch {status.stringValue=error.localizedDescription;enable.state = .off;return}
+        }
+        save { $0.enabled = enabled }
+        if !enabled { PaletteViewing.illuminant = .normal }
+    }
+    @objc private func importFile() {
+        guard let window = view.window else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.init(filenameExtension: "cxf") ?? .xml]; panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            do {
+                let granted = url.startAccessingSecurityScopedResource(); defer { if granted { url.stopAccessingSecurityScopedResource() } }
+                guard (try url.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? Int.max <= CxFReflectance.maximumBytes else { throw failure("Choose a CxF file smaller than 4 MB.") }
+                self.staged = try CxFReflectance.read(Data(contentsOf: url), name: url.lastPathComponent)
+                guard let staged = self.staged else { return }
+                self.review.stringValue = "Review: \(staged.name) · \(staged.samples.count) Validated Reflectance Measurements. First sample: \(staged.samples[0].name), \(staged.samples[0].start)–\(staged.samples[0].end) nm at \(staged.samples[0].interval) nm. Add Measurements keeps these records and the original file; it does not alter any master colour or create links."
+                self.add.isEnabled = true; self.cancel.isEnabled = true
+                (self.parent as? SettingsGroupController)?.resizeForSelection()
+            } catch {
+                self.staged = nil; self.add.isEnabled = false; self.cancel.isEnabled = false
+                self.review.stringValue = "Import Failed: " + error.localizedDescription
+                (self.parent as? SettingsGroupController)?.resizeForSelection()
+            }
+        }
+    }
+    @objc private func addImport() {
+        guard let staged else { return }
+        do {
+            try SpectralStore.shared.update { state in
+                if !state.imports.contains(where: { $0.digest == staged.digest }) { state.imports.append(staged) }
+            }
+            self.staged = nil; add.isEnabled = false; cancel.isEnabled = false
+            review.stringValue = "Measurements added. Choose Swatch Links, select a measured sample and its actual palette swatch, then confirm the material and link them."
+            refresh()
+        } catch { review.stringValue = error.localizedDescription }
+    }
+    @objc private func cancelImport() { staged = nil; add.isEnabled = false; cancel.isEnabled = false; review.stringValue = "Import Cancelled. No measurements were added." }
+    private func updateSwatches(preserving key: String? = nil) {
+        entries = palettes.indices.contains(paletteMenu.indexOfSelectedItem) ? palettes[paletteMenu.indexOfSelectedItem].entries : []
+        colourMenu.options(entries.map { ($0.name ?? library.library.name(of: $0.hex, in: nil)) + " · " + ColourKeys.label($0.hex) }, selected: key.flatMap { key in entries.firstIndex { $0.hex == key } } ?? 0)
+        material.state = .off; updateDetails()
+    }
+    private func context() -> (UUID,UUID,SwatchEntry,ColourDefinition)? {
+        guard let catalogueID, palettes.indices.contains(paletteMenu.indexOfSelectedItem), entries.indices.contains(colourMenu.indexOfSelectedItem) else { return nil }
+        let entry=entries[colourMenu.indexOfSelectedItem]
+        guard library.library.swatch(palettes[paletteMenu.indexOfSelectedItem].id)?.entries.contains(where:{$0.hex == entry.hex}) == true,let definition=library.library.definition(of:entry.hex) else { return nil }
+        return (catalogueID,palettes[paletteMenu.indexOfSelectedItem].id,entry,definition)
+    }
+    private func updateDetails() {
+        let sample = samples.indices.contains(sampleMenu.indexOfSelectedItem) ? samples[sampleMenu.indexOfSelectedItem] : nil
+        if let sample {
+            let condition = sample.metadata.filter { $0.key.hasSuffix("Observer") || $0.key.hasSuffix("Illuminant") || $0.key.hasSuffix("DeviceIllumination") || $0.key.hasSuffix("Backing") || $0.key.hasSuffix("Model") }.sorted { $0.key < $1.key }.map { $0.key.components(separatedBy:"/").last!+": "+$0.value }.joined(separator:" · ")
+            let predictions = [PaletteViewing.Illuminant.d50,.d65,.a].compactMap { light -> String? in
+                guard let prediction=try? SpectralEngine.predict(sample,light:light,observer:spectralState.observer) else{return nil}
+                return String(format:"%@ · XYZ %.5f, %.5f, %.5f%@",light.rawValue,prediction.xyz.x,prediction.xyz.y,prediction.xyz.z,prediction.clipped ? " · Display Gamut Clipped":"")
+            }.joined(separator:"\n")
+            detail.stringValue = "\(sample.fileName) · Object \(sample.objectID) · \(sample.start)–\(sample.end) nm / \(sample.interval) nm. Source SHA-256: \(sample.fileDigest.prefix(16))…\n" + (condition.isEmpty ? "Measurement conditions: Not Declared. Original CxF retained." : condition) + "\nCalculated \(spectralState.observer.label), white Y = 1:\n" + predictions
+        } else { detail.stringValue = "Import a spectral measurement file first." }
+        let c=context()
+        let saved=c.flatMap { spectralState.links[SpectralStore.key(catalogue:$0.0,palette:$0.1,colour:$0.2.hex)] }
+        let valid=c.map { saved?.stamp == SpectralStore.Stamp($0.3) } ?? false
+        linkStatus.stringValue = saved.map { linked in "Linked: " + (spectralState.samples.first { $0.id == linked.sampleID }?.name ?? linked.sampleID) + (valid ? "" : " · Colour Changed — Relink Required") } ?? "This swatch has no spectral link."
+        link.isEnabled = sample != nil && c?.3.kind == .surface && material.state == .on
+        unlink.isEnabled = saved != nil
+        if c?.3.kind == .light { linkStatus.stringValue = "Emissive colours cannot use a surface-reflectance measurement." }
+        (parent as? SettingsGroupController)?.resizeForSelection()
+    }
+    @objc private func materialChanged() { updateDetails() }
+    @objc private func linkSample() {
+        guard material.state == .on, samples.indices.contains(sampleMenu.indexOfSelectedItem), let c=context(), c.3.kind == .surface else { return }
+        let sample=samples[sampleMenu.indexOfSelectedItem], key=SpectralStore.key(catalogue:c.0,palette:c.1,colour:c.2.hex)
+        save { state in state.links[key] = .init(sampleID:sample.id,stamp:.init(c.3),materialConfirmed:true) }
+    }
+    @objc private func exportSource() {
+        guard samples.indices.contains(sampleMenu.indexOfSelectedItem),let window=view.window,
+              let source=spectralState.imports.first(where:{$0.digest == samples[sampleMenu.indexOfSelectedItem].fileDigest}) else{return}
+        let panel=NSSavePanel();panel.nameFieldStringValue=source.name;panel.allowedContentTypes=[.init(filenameExtension:"cxf") ?? .xml]
+        panel.beginSheetModal(for:window){ [weak self] response in
+            guard response == .OK,let url=panel.url else{return}
+            do {
+                let granted=url.startAccessingSecurityScopedResource();defer{if granted{url.stopAccessingSecurityScopedResource()}}
+                try Handler_File_Manager.shared.publishRaw(source.original,to:url)
+                self?.linkStatus.stringValue="Original CxF exported byte for byte."
+            }catch{self?.linkStatus.stringValue=error.localizedDescription}
+        }
+    }
+    @objc private func removeSource() {
+        guard samples.indices.contains(sampleMenu.indexOfSelectedItem),let window=view.window else{return}
+        let sample=samples[sampleMenu.indexOfSelectedItem]
+        let ids=Set(spectralState.samples.filter{$0.fileDigest == sample.fileDigest}.map(\.id))
+        let count=spectralState.links.values.filter{ids.contains($0.sampleID)}.count
+        SwissConfirm.ask(over:window,title:"Remove Spectral Source",note:"Remove \(sample.fileName) from this workspace, its measurements and \(count) swatch links. The original external file and master colours remain unchanged. Slide across to remove.",commit:"Remove"){ [weak self] in
+            self?.save { state in
+                state.imports.removeAll{$0.digest == sample.fileDigest}
+                state.links=state.links.filter{!ids.contains($0.value.sampleID)}
+                if state.links.isEmpty {state.enabled=false}
+            }
+        }
+    }
+    @objc private func removeLink() {
+        guard let c=context() else { return }
+        save { state in state.links.removeValue(forKey:SpectralStore.key(catalogue:c.0,palette:c.1,colour:c.2.hex)); if state.links.isEmpty { state.enabled=false } }
+    }
+}
+
+final class DisplayViewingPanel: SettingsPanel {
+    override func rows() -> [[NSView]] {
+        [[label("Display Calibration:"), note("Colorgain does not measure or calibrate your display. Manage its profile and calibration using macOS or your calibration software.")],
+         [label("Viewing Illuminant:"), note("D50 and D65 are standard daylight illuminants; A is a different standard illuminant. Selecting one does not calibrate the monitor or determine the appearance of an unmeasured material.")],
+         [label("Preview Status:"), note("An on-screen prediction depends on the display and declared viewing assumptions. It is separate from physical measurement and human approval.")]]
     }
 }

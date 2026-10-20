@@ -23,6 +23,32 @@ func runSelfTest() -> Never {
     preferences.set(savedCatalogue, forKey: Catalogues.currentKey)
     preferences.set(savedCatalogueID, forKey: "currentCatalogueID")
 
+    do {
+        let original:[NSColor]=[.red,.blue],proof:[NSColor]=[.orange,.cyan]
+        for output in [false,true] {for light in PaletteViewing.Illuminant.allCases {
+            let rows=PaletteViewing.rows(original:original,proof:proof,output:output,illuminant:light)
+            check(rows.map(\.label) == ["Original"]+(output ? ["Output Proof"]:[])+(light == .normal ? []:[light.rawValue]),"palette comparison rows keep their order for output=\(output), illuminant=\(light.rawValue)")
+            check(rows[0].colours == original,"comparison preserves master previews")
+            if light != .normal{check(rows.last?.colours == nil && rows.last?.unavailable == "Unavailable — Link Spectral Measurement","illuminant requests never fabricate a relit colour")}
+        }}
+        let missing=PaletteViewing.rows(original:original,proof:nil,output:true,illuminant:.normal)
+        check(missing[1].colours == nil,"missing target transform never substitutes an original as a proof")
+        check(PaletteViewing.rows(original:original,proof:[.red],output:true,illuminant:.normal)[1].colours == nil,"misaligned proof bands are unavailable rather than assigned to the wrong swatches")
+        let old=PaletteViewing.illuminant
+        PaletteViewing.illuminant = .d65
+        check(AppPreferences.shared.string(forKey:"workspace.viewingIlluminant") == "D65" && PaletteViewing.illuminant == .d65,"viewing illuminant persists in shared app preferences rather than a palette or swatch")
+        PaletteViewing.illuminant=old
+    }
+    for width:CGFloat in [1200,1366,1440,1600,1920] {
+        let rails=WorkspaceResponsiveGeometry.rails(width:width,selection:0,library:true,analysis:true)
+        check(width-rails.0-rails.1-2 >= 720,"responsive workspace preserves at least 720 pt for the viewport at \(Int(width)) pt")
+    }
+    let analysisOnly=WorkspaceResponsiveGeometry.rails(width:1200,selection:1,library:true,analysis:true)
+    check(analysisOnly.0 == 0 && analysisOnly.1 == Design.App.railWidth,"narrow workspace can switch to the full-width analysis rail")
+    let neitherRail=WorkspaceResponsiveGeometry.rails(width:1200,selection:2,library:true,analysis:true)
+    check(neitherRail.0 == 0 && neitherRail.1 == 0,"narrow workspace can reclaim both rails without changing wide-layout preferences")
+    check(PaletteFilterControls.height(for:600) == 32 && PaletteFilterControls.actionbarHeight(for:838) == 52,"filters remain one compact row in a narrow window with one full-width rail")
+    runSpectralTests(check:check)
     runColourTargetTests(check:check)
     runICCProfileTests(check:check)
     runPaletteAssetTests(check: check)
@@ -145,6 +171,43 @@ func runSelfTest() -> Never {
                   "Bundled " + name + " evaluates without a confirmation click")
             check(target.metadata["FILTER"] == (name == "FOGRA39" ? "M0" : "M1"), "Bundled " + name + " records its measurement mode")
         }
+        let gateReference = try ProofReferences.read("FOGRA51", directory:referenceDirectory)
+        let matching = PrePressPage.verify(reference:gateReference,measurement:gateReference)
+        if case .passed = matching.verdict { check(true,"PrePress compatible complete reference passes all seven checks") }
+        else { check(false,"PrePress compatible complete reference passes all seven checks") }
+        for (key,value) in [("FILTER","M0"),("MEASUREMENT_BACKING","Black"),("ILLUMINATION_NAME","D65"),("OBSERVER_ANGLE","10")] {
+            var wrong = gateReference; wrong.metadata[key] = value
+            let rejected = PrePressPage.verify(reference:gateReference,measurement:wrong,confirmed:true)
+            check(!rejected.review.canEvaluate && rejected.checks.allSatisfy { $0.value == nil }, "PrePress blocks explicit " + key + " mismatch even after confirmation")
+            if case .notEvaluated = rejected.verdict { check(true,"Incompatible " + key + " is not evaluated") }
+            else { check(false,"Incompatible " + key + " is not evaluated") }
+        }
+        var undeclared = gateReference; undeclared.metadata = [:]
+        let unconfirmed = PrePressPage.verify(reference:gateReference,measurement:undeclared)
+        check(unconfirmed.review.needsConfirmation && unconfirmed.checks.allSatisfy { $0.value == nil },"PrePress undeclared conditions never produce numerical pass")
+        let confirmed = PrePressPage.verify(reference:gateReference,measurement:undeclared,confirmed:true)
+        check(confirmed.review.canEvaluate && confirmed.review.assumptions.count == 4 && undeclared.metadata.isEmpty,"User confirmation records four assumptions without inventing file declarations")
+        if case .passed = confirmed.verdict { check(true,"PrePress explicit missing-condition confirmation enables evaluation") }
+        else { check(false,"PrePress explicit missing-condition confirmation enables evaluation") }
+        var partial = gateReference; partial.metadata.removeValue(forKey:"MEASUREMENT_BACKING")
+        check(PrePressPage.verify(reference:gateReference,measurement:partial).review.needsConfirmation,"Missing backing alone needs confirmation")
+        var aliasMode = gateReference; aliasMode.metadata.removeValue(forKey:"FILTER");aliasMode.metadata["MEASUREMENT_CONDITION"]=" m1 ";aliasMode.metadata["MEASUREMENT_BACKING"]="white backing";aliasMode.metadata["OBSERVER_ANGLE"]="2.0"
+        check(PrePressPage.verify(reference:gateReference,measurement:aliasMode).review.canEvaluate,"Equivalent condition spellings and mode alias match")
+        aliasMode.metadata["FILTER"]="M0"
+        check(!PrePressPage.verify(reference:gateReference,measurement:aliasMode,confirmed:true).review.canEvaluate,"Contradictory measurement mode aliases cannot pass")
+        var incomplete = gateReference; incomplete.patches.removeLast()
+        if case .failed = PrePressPage.verify(reference:gateReference,measurement:incomplete).verdict { check(true,"PrePress incomplete strip cannot pass") }
+        else { check(false,"PrePress incomplete strip cannot pass") }
+        var duplicate = gateReference; duplicate.patches.append(duplicate.patches[0])
+        if case .notEvaluated = PrePressPage.verify(reference:gateReference,measurement:duplicate).verdict { check(true,"PrePress duplicate IDs cannot pass or crash") }
+        else { check(false,"PrePress duplicate IDs cannot pass or crash") }
+        var drifted = gateReference;drifted.patches[0].l += 15
+        if case .failed = PrePressPage.verify(reference:gateReference,measurement:drifted).verdict { check(true,"Compatible conditions still fail excessive measured drift") }
+        else { check(false,"Compatible conditions still fail excessive measured drift") }
+        check(!ProofConditions.review(reference:gateReference,measurement:undeclared).canEvaluate,"Single-reading gate also blocks undeclared conditions")
+        check(ProofConditions.review(reference:gateReference,measurement:undeclared,confirmed:true).canEvaluate,"Single-reading gate records explicit assumptions")
+        let conflictingHeaders = "CGATS.17\nFILTER M1\n" + proofText.replacingOccurrences(of:"CGATS.17",with:"FILTER M0")
+        check((try? ProofImport.read(Data(conflictingHeaders.utf8),name:"Conflicting header")) == nil,"Duplicate contradictory condition headers are rejected")
         var mixedOptions = ProofOptions(); mixedOptions.mode = "Measurement"
         let mixed = ProofSession(reference: try ProofReferences.read("FOGRA39", directory: referenceDirectory),
                                  measurement: try ProofReferences.read("FOGRA51", directory: referenceDirectory), options: mixedOptions)
@@ -175,6 +238,25 @@ func runSelfTest() -> Never {
         let configuration = ProofConfiguration(name:"Portable proof",session:session)
         let portable = try ProofConfiguration.decode(JSONEncoder().encode(configuration))
         check(portable.session.reference == reference && portable.session.measurement == session.measurement && portable.session.options.tolerance == session.options.tolerance, "Colcal preserves reference, measurements and settings")
+        var predictionSession = session
+        predictionSession.options.mode = "Prediction"; predictionSession.options.confirmD50 = true
+        predictionSession.options.profile = PressProfiles.generic
+        let predictedConfiguration = ProofConfiguration(name:"PCS provenance",session:predictionSession)
+        let predictionData = try JSONEncoder().encode(predictedConfiguration)
+        let predictionCopy = try ProofConfiguration.decode(predictionData)
+        check(predictionCopy.conversion == predictedConfiguration.conversion && predictionCopy.conversion?.engine == "Apple ColorSync",
+              "new prediction configurations preserve engine, platform and exact ICC identity")
+        var legacyObject = try JSONSerialization.jsonObject(with:predictionData) as! [String:Any]
+        legacyObject.removeValue(forKey:"conversion")
+        check(try ProofConfiguration.decode(JSONSerialization.data(withJSONObject:legacyObject)).conversion == nil,
+              "legacy configurations keep unknown engine provenance instead of inventing it")
+        let predictions = ProofEngine.evaluate(predictionSession)
+        let report = ProofEngine.csv(predictions,session:predictionSession)
+        check(predictions.allSatisfy{$0.conversion?.engine == "Apple ColorSync" && $0.difference != nil}
+              && report.contains("Apple ColorSync") && report.contains(predictedConfiguration.conversion!.profileSHA256)
+              && configuration.conversion == nil,
+              "predictions and reports capture ICC engine identity while measurement comparisons do not")
+
         var future = configuration; future.version = 999
         check((try? ProofConfiguration.decode(JSONEncoder().encode(future))) == nil, "Future colcal versions rejected")
         var invalidProfile = configuration; invalidProfile.session.embeddedProfile = Data("invalid".utf8)
@@ -396,6 +478,8 @@ func runSelfTest() -> Never {
 
     runProjectTests(check: check)
     runImportTests(check: check)
+    runSimpleCatalogueTests(check:check)
+    runWorkspaceImportTests(check: check)
     runColourSpaceTests(check: check)
     runTagTests(check: check)
     runNameTests(check: check)
@@ -2500,13 +2584,13 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && (Rendering.of(steel, in: ProfileChannel(space: "rec709")).value ?? "").hasSuffix("(10-bit, full range)"),
           "video black and white read 64 and 940 in legal range, 0 and 1023 in full range, and every video value names its range")
     let blackMaster = XYZ(x: 0, y: 0, z: 0), darkMaster = RGBSpace.srgb.master(of: [0.06, 0.06, 0.06])
-    if let plainWhite = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true),
-       let lifted = PrintBuild.of(darkMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true),
+    if let lifted = PrintBuild.of(darkMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true),
        let clipped = PrintBuild.of(darkMaster, press: PressProfiles.generic, intent: .relative),
        let deepest = PrintBuild.of(blackMaster, press: PressProfiles.generic, intent: .relative, blackPoint: true) {
-        let level = PressProfiles.blackLevel(of: PressProfiles.generic)
-        check(plainWhite.totalInk < 1 && level > 0 && level < 0.2 && lifted.printed.y >= clipped.printed.y && near(deepest.printed.y, level, 0.01),
-              "with black point compensation white still takes no ink, black lands on the press's darkest black, and a dark colour is no darker than without it")
+        check(lifted.inks != clipped.inks && lifted.printed.y > deepest.printed.y
+              && lifted.inks.allSatisfy { $0.isFinite && (0...1).contains($0) }
+              && lifted.provenance?.engine == "Apple ColorSync",
+              "native relative BPC changes separation, retains shadow ordering and records its engine")
     } else { check(false, "black point compensation gives a build") }
     var icc = Data(count: 128)
     func bytes(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24), UInt8((v >> 16) & 0xFF), UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
@@ -2514,12 +2598,48 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let readWhite = PressProfiles.mediaWhite(inProfile: icc)
     check(readWhite.map { near($0.x, 0.90, 0.0001) && near($0.y, 0.95, 0.0001) && near($0.z, 0.80, 0.0001) } == true && PressProfiles.mediaWhite(inProfile: Data(count: 60)) == nil,
           "the paper white is read from a press profile's own data, and data that is no profile gives none")
-    let paper2 = PressProfiles.paperWhite(of: PressProfiles.generic)
-    if let onPaper = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .absolute), let against = PrintBuild.of(whiteMaster, press: PressProfiles.generic, intent: .relative) {
-        check(paper2.y > 0.5 && paper2.y <= 1.01 && onPaper.totalInk < 1 && close(onPaper.printed, against.printed.x * paper2.x / XYZ.d50.x, against.printed.y * paper2.y / XYZ.d50.y, against.printed.z * paper2.z / XYZ.d50.z, 0.001)
-              && PressProfiles.paperWhite(of: "No Such Press") == XYZ.d50,
-              "an absolute proof shows white as the paper itself, with no ink; a profile that is not here is taken as a perfect white")
+    if let absolutePaper = PrintBuild.master(ofInks: [0,0,0,0], press: PressProfiles.generic, intent: .absolute),
+       let relativePaper = PrintBuild.master(ofInks: [0,0,0,0], press: PressProfiles.generic),
+       let absolute = PrintBuild.of(steel.master, press: PressProfiles.generic, intent: .absolute),
+       let withBPC = PrintBuild.of(steel.master, press: PressProfiles.generic, intent: .absolute, blackPoint: true) {
+        let paperWhite = PressProfiles.paperWhite(of: PressProfiles.generic)
+        check(absolutePaper.y < relativePaper.y && close(absolutePaper,paperWhite.x,paperWhite.y,paperWhite.z,0.015)
+              && absolute.inks == withBPC.inks && absolute.printed == withBPC.printed,
+              "native absolute readback reflects the profile paper white and ignores inapplicable BPC")
     } else { check(false, "an absolute colorimetric proof gives a build") }
+    if let perceptual = PrintBuild.of(steel.master,press:PressProfiles.generic,intent:.perceptual),
+       let actual = PrintBuild.master(ofInks:perceptual.inks,press:PressProfiles.generic) {
+        check(perceptual.printed == actual,"perceptual separation is evaluated with a colorimetric return, without undoing the mapping")
+    } else {check(false,"perceptual separation has a colorimetric readback")}
+    let srgbICC = CGColorSpace(name:CGColorSpace.sRGB)!
+    if let white = PCSConversion.decode([1,1,1],from:srgbICC),
+       let red = PCSConversion.decode([1,0,0],from:srgbICC),
+       let encoded = PCSConversion.encode(RGBSpace.srgb.master(of:[0.2,0.4,0.6]),to:srgbICC,intent:.relative) {
+        check(close(white,XYZ.d50.x,1,XYZ.d50.z,0.001)
+              && close(red,0.43607,0.22250,0.01393,0.001)
+              && zip(encoded,[0.2,0.4,0.6]).allSatisfy{near($0,$1,0.001)},
+              "ICC float channel scaling matches independent D50 sRGB white, red primary and matrix encoding")
+    } else {check(false,"the PCS adapter converts an RGB ICC profile")}
+    check(PCSConversion.encode(XYZ(x:.nan,y:0,z:0),to:srgbICC,intent:.relative) == nil
+          && PCSConversion.decode([0,0],from:srgbICC) == nil
+          && PCSConversion.decode([0,0,1.01],from:srgbICC) == nil
+          && PrintBuild.master(ofInks:[0,0,0,-0.1],press:PressProfiles.generic) == nil
+          && PrintBuild.master(ofInks:[0,0,0,0],press:"No Such Press") == nil,
+          "PCS conversion rejects nonfinite, mis-sized, invalid recipes and missing profiles without fabricated values")
+    let greyICC = CGColorSpace(name:CGColorSpace.genericGrayGamma2_2)!
+    if let greyWhite = PCSConversion.decode([1],from:greyICC), let greyBlack = PCSConversion.decode([0],from:greyICC),
+       let greyPrediction = PCSConversion.predict(steel.master,in:greyICC,intent:.relative) {
+        check(close(greyWhite,XYZ.d50.x,1,XYZ.d50.z,0.002) && greyBlack.y < 0.001 && greyPrediction.values.count == 1,
+              "greyscale ICC uses one normalised channel and the shared D50 PCS")
+    } else {check(false,"the PCS adapter converts a grey ICC profile")}
+    let missingRecipe = ColourDefinition(source:ColourSource(space:"cmyk",values:[0,0.9,0.85,0],press:"No Such Press"),master:steel.master,kind:.surface)
+    let missingRecipeResult = Rendering.of(missingRecipe,in:ProfileChannel(space:ProfileChannel.print,press:"No Such Press"))
+    check(missingRecipeResult.value == nil && missingRecipeResult.difference == nil && !missingRecipeResult.inRange,
+          "a preserved recipe cannot claim a passing proof when its own press profile is missing")
+    let beforeReset = PrintBuild.of(steel.master,press:PressProfiles.generic,intent:.relative)
+    PCSConversion.resetCache()
+    check(beforeReset == PrintBuild.of(steel.master,press:PressProfiles.generic,intent:.relative),
+          "discarding cached PCS transforms preserves conversion and provenance")
     let typedBuild = ColourDefinition(source: ColourSource(space: "cmyk", values: [0, 0.9, 0.85, 0], press: PressProfiles.generic),
                                       master: PrintBuild.master(ofInks: [0, 0.9, 0.85, 0], press: PressProfiles.generic) ?? XYZ.d50, kind: .surface)
     let asGiven = Rendering.of(typedBuild, in: generic), otherPress = Rendering.of(typedBuild, in: ProfileChannel(space: ProfileChannel.print, press: "No Such Press"))
@@ -2620,8 +2740,16 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           "Viewport output previews name the actual CMYK profile or RGB space")
     check([ColourFormat.cmyk,.lab,.xyz,.linear].allSatisfy{StudioPage.models.contains($0)} && StudioPage.valueFormatTitle(.linear) == "Linear RGB (sRGB)",
           "Colour value formats remain separate from output preview channels")
-    check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255]).count == 2 && WorkspaceHistogramPane.findings(type:.rgb,values:[16,128,235]).isEmpty,
-          "Histogram findings match inclusive RGB guard bands")
+    let analysisPrefs=AppPreferences.shared,oldAnalysisCategory=AppPreferences.shared.object(forKey:"workspace.analysisCategory"),oldAnalysisVideo=AppPreferences.shared.object(forKey:"workspace.analysisSpace.2")
+    analysisPrefs.set(0,forKey:"workspace.analysisCategory")
+    check(Set(AnalysisTarget.labels).count == AnalysisTarget.labels.count && AnalysisTarget.choices.contains{$0.rgb == .srgb} && AnalysisTarget.choices.contains{$0.rgb == .prophoto},"Shared analysis offers screen and photographic RGB targets")
+    analysisPrefs.set(2,forKey:"workspace.analysisCategory");analysisPrefs.set(ColourTargetSpace.pq.rawValue+"|",forKey:"workspace.analysisSpace.2")
+    check(AnalysisTarget.metric == "ΔE ITP" && AnalysisTarget.hasSignalRange && AnalysisTarget.choices.contains{$0.rgb == .rec709},"Shared video analysis uses HDR delta ITP and explicit signal ranges")
+    analysisPrefs.set(3,forKey:"workspace.analysisCategory")
+    check(AnalysisTarget.choices.contains{$0.rgb == .acescg} && AnalysisTarget.choices.contains{$0.target == .aces2065},"Shared analysis offers scene-linear and ACES interchange targets")
+    analysisPrefs.set(oldAnalysisCategory,forKey:"workspace.analysisCategory");analysisPrefs.set(oldAnalysisVideo,forKey:"workspace.analysisSpace.2")
+    check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255]).isEmpty && WorkspaceHistogramPane.findings(type:.rgb,values:[16,128,235]).isEmpty,
+          "Full-range RGB endpoints never trigger restricted signal advisories")
     check(WorkspaceHistogramPane.findings(type:.ycbcr,values:[940,960,961]).count == 1 && WorkspaceHistogramPane.findings(type:.cmyk,values:[0,2,96,50]).count == 2,
           "Histogram findings respect chroma legal range and zero ink")
     check(WorkspaceHistogramPane.findings(type:.rgb,values:[0,128,255],channel:1).isEmpty && WorkspaceHistogramPane.findings(type:.lab,values:[0,-128,127]).isEmpty,
@@ -2639,9 +2767,9 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && HistogramType.rgb.values(of: vividKey) == [255, 0, 0] && HistogramType.cmyk.channels.count == HistogramType.cmyk.colours.count,
           "a swatch's own values are its sRGB bytes or its ink percentages for the press in force")
 
-    check(HistogramType.rgb.warnings(for: [163, 233, 0]) == ["Blue In Black"] && HistogramType.rgb.warnings(for: [255, 128, 16]) == ["Red In White Out"] && HistogramType.rgb.warnings(for: [16, 128, 235]).isEmpty
+    check(HistogramType.rgb.warnings(for: [163, 233, 0]).isEmpty && HistogramType.rgb.warnings(for: [255, 128, 16]).isEmpty && HistogramType.rgb.warnings(for: [16, 128, 235]).isEmpty
           && HistogramType.cmyk.warnings(for: [2, 50, 96, 0]) == ["Cyan In White Out", "Yellow In Black"],
-          "a channel outside the safe range is named with the zone it is in: black and white out for a screen, dot loss and fill-in for a press")
+          "RGB retains its full range while CMYK retains dot-loss and fill-in advisories")
 
     check(HistogramType.offered.map { $0.title } == ["RGB", "HSL", "HSV", "CMYK", "P3", "Adobe", "BT.2020", "L*a*b*", "Y\u{2032}CbCr"] && Set(HistogramType.offered) == Set(HistogramType.allCases)
           && HistogramType.allCases.allSatisfy { $0.channels.count == $0.ranges.count && $0.channels.count == $0.colours.count && $0.values(of: "#4F8093")?.count == $0.channels.count },
@@ -2651,8 +2779,8 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
           && hueSpread[0].count == 361 && hueSpread[0][197] == 1 && labSpread[1].count == 256 && labSpread[1][73 + 128] == 1 && labSpread[2][-83 + 128] == 1,
           "their values are the numbers on the card, counted on each channel's own scale; a* and b* run below nothing")
     check(HistogramType.lab.place(-128, in: 1) == 0 && HistogramType.lab.place(127, in: 2) == 1 && HistogramType.hsl.place(180, in: 0) == 0.5 && HistogramType.rgb.place(999, in: 0) == 1
-          && HistogramType.hsl.safe == nil && HistogramType.lab.warnings(for: [0, -128, 127]).isEmpty && HistogramType.p3.warnings(for: [255, 128, 128]) == ["Red In White Out"],
-          "each value is placed along its own scale; hue, saturation, lightness and Lab have no unsafe ends, the RGB spaces all do")
+          && HistogramType.hsl.safe == nil && HistogramType.lab.warnings(for: [0, -128, 127]).isEmpty && HistogramType.p3.warnings(for: [255, 128, 128]).isEmpty,
+          "each value uses its own scale and full-range RGB spaces have no restricted signal bands")
 
     print("analysis")
     let seenRed = ColourVision.protanopia.seen("#FF0000") ?? [], seenGrey = ColourVision.deuteranopia.seen("#808080") ?? []
@@ -3097,6 +3225,9 @@ private func runAppDataTests(check: (Bool, String) -> Void) {
         let updated = try store.read()
         check((updated["settings"] as? [String: Bool])?["sounds"] == false && updated["futureField"] as? String == "preserve", "catalogue updates preserve settings and unknown manifest fields")
         check(catalogues.registry.count == 2, "registry reads the new manifest")
+        check(catalogues.registry.first(where: { $0.name == "Second" })?.path == "Second" &&
+              catalogues.directory(for: "Second") == root.appendingPathComponent("Second"),
+              "catalogues inside app data retain portable relative registrations")
         let profile = KeyProfile(name: "Test Profile", description: "Round trip", shortcuts: [:], quickKeys: ["pick": "3"])
         let file = root.appendingPathComponent("test.colkeys")
         try KeyProfiles.write(profile, to: file)
@@ -3125,7 +3256,7 @@ private func runGlobalAssetsTests(check: (Bool, String) -> Void) {
     do {
         let cats = Catalogues(root: root, legacyURL: nil)
         let first = try CatalogueSetup.createBlank("A", under: cats.folder, catalogues: cats)
-        check(fm.fileExists(atPath: root.appendingPathComponent("Assets/Assets.colcat").path) && fm.fileExists(atPath: root.appendingPathComponent("Keys/default.colkeys").path) && fm.fileExists(atPath: root.appendingPathComponent("Global.colhis").path), "setup seeds Assets, Keys and global history before catalogue use")
+        check(fm.fileExists(atPath: root.appendingPathComponent("Assets/my_library.collib").path) && fm.fileExists(atPath: root.appendingPathComponent("Keys/default.colkeys").path) && fm.fileExists(atPath: root.appendingPathComponent("Global.colhis").path), "setup seeds Assets, Keys and global history before catalogue use")
         let store = cats.store(for: first)
         var lib = try store.load()
         let palette = Swatch(id: UUID(), name: "Global Test", createdAt: Date(), entries: [])
@@ -3286,9 +3417,9 @@ private func runWorkspaceStartupTests(check: (Bool, String) -> Void) {
         check((try? WorkspaceInventory.read(root:root)) == nil && !fm.fileExists(atPath:root.path), "Reading absent app data does not create a workspace or Main catalogue")
         try AppHomeSeed.ensure(at:root)
         let empty=try WorkspaceInventory.read(root:root)
-        check(empty.genuinelyEmpty && fm.fileExists(atPath:root.appendingPathComponent("Assets/Assets.colcat").path), "App-wide Assets.colcat is excluded from an empty user catalogue list")
+        check(empty.genuinelyEmpty && fm.fileExists(atPath:root.appendingPathComponent("Assets/my_library.collib").path), "App-wide Assets.colcat is excluded from an empty user catalogue list")
         let internalEntry=WorkspaceInventory.probe(name:"Assets",folder:root.appendingPathComponent("Assets"))
-        check(internalEntry.state == .ready, "Catalogue parsing does not reject a valid index solely because its name is Assets")
+        check(internalEntry.state != .ready, "A standalone library is not offered as a client catalogue")
         let first=try CatalogueSetup.createBlank("First",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
         let second=try CatalogueSetup.createBlank("Second",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
         var inventory=try WorkspaceInventory.read(root:root)
@@ -3423,6 +3554,25 @@ private func runPaletteSelectionAndClaimDeletionTests(check: (Bool, String) -> V
     check(!selected.ids.contains(order[1]) && selected.ids.count == 3, "Command selection deselects one palette without losing the others")
     selected.click(order[3], order: order, extend: false, toggle: false)
     check(selected.ids == [order[3]], "plain palette selection resets the group")
+    var assets=AssetSelection<String>()
+    let keys=["a","b","c","d","e"]
+    assets.click("d",order:keys,extend:false,toggle:false)
+    assets.click("b",order:keys,extend:true,toggle:false)
+    check(assets.ids == Set(["b","c","d"]),"asset range selection works backwards across rows")
+    assets.click("c",order:keys,extend:false,toggle:true)
+    assets.click("a",order:keys,extend:false,toggle:true)
+    check(assets.ids == Set(["a","b","d"]),"asset Command-click removes a range member and adds another")
+    assets.retain(["e","d","b","a"])
+    check(assets.ids == Set(["a","b","d"]),"asset identities survive display sorting")
+    assets.click("e",order:["e","d","b","a"],extend:true,toggle:false)
+    check(assets.ids == Set(["e","d","b","a"]),"asset range uses the new visible order")
+    assets.retain(["b","d"])
+    check(assets.ids == Set(["b","d"]) && assets.anchor == nil,"filtered-out selection and stale anchors are removed")
+    assets.click("d",order:["b","d"],extend:true,toggle:false)
+    check(assets.ids == ["d"],"Shift with a missing anchor safely starts a new selection")
+    let dated=[TileGrid.Item(title:"Item 10",caption:"",colours:[],hex:nil,id:nil,createdAt:Date(timeIntervalSince1970:20)),TileGrid.Item(title:"Item 2",caption:"",colours:[],hex:nil,id:nil),TileGrid.Item(title:"Item 1",caption:"",colours:[],hex:nil,id:nil,createdAt:Date(timeIntervalSince1970:10))]
+    check(GridAssetOrder.name.sorted(dated).map(\.title) == ["Item 1","Item 2","Item 10"],"asset name ordering uses natural numeric comparison")
+    check(GridAssetOrder.oldest.sorted(dated).map(\.title) == ["Item 1","Item 10","Item 2"] && GridAssetOrder.newest.sorted(dated).last?.title == "Item 2","unknown asset dates stay last in both sort directions")
     var lib = Library()
     let source = lib.createSwatch(named: "Claim Cleanup", hexes: ["#123456"])
     let project = lib.createProject(named: "Project")
@@ -3450,6 +3600,22 @@ private func runHelpHandlerTests(check:(Bool,String)->Void){
         if Bundle.main.bundleURL.pathExtension == "app" {check(Help_Handler.resource(page) != nil,"Installed bundle contains help for "+page.title)}
         check(page.sections.allSatisfy{source.contains("id=\""+$0+"\"")},"Help section anchors exist for "+page.title)
     }
+    for id in ["palette-page","halo"]{
+        check(Help_Handler.page(id) != nil,"Palette workflow help is indexed: "+id)
+    }
+    for page in Help_Handler.pages{
+        let url=Help_Handler.resource(page) ?? resources.appendingPathComponent(page.file+".html")
+        let source=(try? String(contentsOf:url,encoding:.utf8)) ?? ""
+        let pattern="help://([a-z-]+)(?:#([a-z-]+))?"
+        let regex=try! NSRegularExpression(pattern:pattern)
+        let matches=regex.matches(in:source,range:NSRange(source.startIndex...,in:source))
+        let valid=matches.allSatisfy{match in
+            guard let range=Range(match.range(at:1),in:source),let destination=Help_Handler.page(String(source[range])) else{return false}
+            guard let anchor=Range(match.range(at:2),in:source) else{return true}
+            return destination.sections.contains(String(source[anchor]))
+        }
+        check(valid,"Help links resolve to registered pages and anchors: "+page.title)
+    }
     let panel=Help_HexButton.frame(width:360,height:34),section=Help_HexButton.frame(width:360,height:28)
     check(panel.midX == section.midX && panel.height == 28 && section.height == 28,"Panel and section help align without changing header heights")
     let libraryURL=Help_Handler.page("catalogues").flatMap{Help_Handler.resource($0)} ?? resources.appendingPathComponent("Help_Library.html")
@@ -3460,6 +3626,31 @@ private func runHelpHandlerTests(check:(Bool,String)->Void){
 
 /// Layout-only checks: no catalogue/controller construction and no user data access.
 private func runLibraryPageLayoutTests(check:(Bool,String)->Void){
+    check(WorkspaceSidebarStructure.sectionTitles(catalogue:"Master Catalogue") == ["Catalogues","My Favourites","Master Catalogue","My Library"],"workspace navigation places the active catalogue files before the shared library")
+    check(WorkspaceSidebarStructure.summary(catalogue:"Master Catalogue").contains("ICC Profiles") && WorkspaceSidebarStructure.summary(catalogue:"Master Catalogue").contains("Palettes"),"schema workspace reference includes both shared library asset branches")
+    let capped=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
+    capped.layoutSubtreeIfNeeded()
+    check(!capped.primary.splitButton.isHidden && !capped.primary.belowButton.isHidden,"single pane permits either initial split direction")
+    capped.primary.splitButton.run?();let rightSide=capped.active
+    capped.primary.splitButton.run?()
+    check(capped.paneIDs.count == 2,"a second left/right split is refused")
+    capped.primary.belowButton.run?();let leftBottom=capped.active
+    capped.layoutSubtreeIfNeeded()
+    check(capped.paneIDs.count == 3 && capped.primary.belowButton.isHidden && leftBottom.belowButton.isHidden && !rightSide.belowButton.isHidden,"splitting left top/bottom hides only the left split controls")
+    rightSide.belowButton.run?();let rightBottom=capped.active
+    rightBottom.belowButton.run?();rightBottom.splitButton.run?();capped.layoutSubtreeIfNeeded()
+    check(capped.paneIDs.count == 4 && rightSide.belowButton.isHidden && rightBottom.belowButton.isHidden,"four panes is the enforced maximum")
+    check(rightBottom.newButton.frame.minY == 0 && rightBottom.closeButton.frame.minY == 0 && abs(rightBottom.closeButton.frame.maxX-(rightBottom.bounds.width-16)) < 0.5 && abs(rightBottom.closeButton.frame.minX-rightBottom.newButton.frame.maxX-4) < 0.5,"pane controls touch the top border and pack to the right without missing-icon gaps")
+    check(Layout_Handler.supportsSplitTree(capped.snapshot()),"four-pane layout remains restorable")
+    check(capped.setTargetPane(rightSide.id) && capped.targetPaneID == rightSide.id && capped.active === rightSide,"setting the target retains its stable pane UUID and focuses it")
+    check(!capped.setTargetPane(UUID()) && capped.targetPaneID == rightSide.id,"unknown target pane IDs leave the target unchanged")
+    rightSide.closeButton.run?()
+    check(capped.paneIDs.contains(capped.targetPaneID),"closing the target chooses a surviving pane")
+    let firstHorizontal=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
+    firstHorizontal.primary.belowButton.run?()
+    let lower=firstHorizontal.active
+    firstHorizontal.primary.splitButton.run?();lower.splitButton.run?()
+    check(firstHorizontal.paneIDs.count == 4 && Layout_Handler.supportsSplitTree(firstHorizontal.snapshot()),"upper/lower first also permits one left/right split in each half")
     let layout=LibraryPageLayout(frame:NSRect(x:0,y:0,width:900,height:700))
     layout.currentPlace={.palettes};layout.layoutSubtreeIfNeeded()
     let icons=layout.primary.subviews.compactMap{$0 as? PaletteAssetIcon}
@@ -3510,6 +3701,27 @@ private func runLibraryPageLayoutTests(check:(Bool,String)->Void){
         let decoded=try ColourFiles.decoder().decode(WorkspaceLayoutTemplate.self,from:ColourFiles.encoder().encode(record))
         check(decoded == record,"workspace templates round-trip stable pane/tab identities and split structure")
         try Layout_Handler.validate(decoded.state)
+        let sessionDomain="com.mmffdev.colorgain.session-test."+UUID().uuidString
+        let sessionDefaults=UserDefaults(suiteName:sessionDomain)!
+        defer{sessionDefaults.removePersistentDomain(forName:sessionDomain)}
+        let sessionURL=URL(fileURLWithPath:"/temporary/session-a/catalogue.colcat")
+        var sessionState=state
+        sessionState.panels=[.init(id:"bloom",rail:0,order:0,closed:true,height:430),.init(id:"catalogues",rail:1,order:0,closed:false,height:620)]
+        var sessionPage=WorkspaceLayoutTemplate.Page();sessionPage.scrollY=248
+        let session=WorkspaceSession(route:.colourManagement(1),layout:sessionState,page:sessionPage,settingsReturn:.palettes,
+            lastSettings:.colourManagement(1),railScroll:[140,65,0,0],wideLibrary:false,wideAnalysis:true,compactRail:1,
+            targetPane:activeID,focusedFolder:"folder:test",inspectedPalette:nil,selectedPalettes:[])
+        try session.write(for:sessionURL,defaults:sessionDefaults)
+        check(WorkspaceSession.read(for:sessionURL,defaults:sessionDefaults) == session,"restart session preserves settings route, scroll, moved/collapsed panels and pane tree")
+        check(WorkspaceSession.read(for:sessionURL.appendingPathExtension("other"),defaults:sessionDefaults) == nil,"restart sessions remain catalogue-scoped")
+        var future=session;future.version=99
+        sessionDefaults.set(try JSONEncoder().encode(future),forKey:WorkspaceSession.key(for:sessionURL))
+        check(WorkspaceSession.read(for:sessionURL,defaults:sessionDefaults) == nil,"unsupported restart sessions do not restore")
+        var invalidSession=session;invalidSession.railScroll=[-1,0,0,0]
+        sessionDefaults.set(try JSONEncoder().encode(invalidSession),forKey:WorkspaceSession.key(for:sessionURL))
+        check(WorkspaceSession.read(for:sessionURL,defaults:sessionDefaults) == nil,"invalid restart scroll coordinates do not restore")
+        sessionDefaults.set(Data("broken".utf8),forKey:WorkspaceSession.key(for:sessionURL))
+        check(WorkspaceSession.read(for:sessionURL,defaults:sessionDefaults) == nil,"damaged session data falls back without affecting catalogue files")
         try ordering.restore(snapshot,activePane:activeID,pageOnly:false)
         check(ordering.snapshot() == snapshot && ordering.active.id == activeID,"full workspace restore preserves tab ordering, selected tabs and active pane")
         let carried=ordering.activeTabID
@@ -3521,7 +3733,7 @@ private func runLibraryPageLayoutTests(check:(Bool,String)->Void){
         check(!hasSubjects(empty) && pageOnly.panels.isEmpty && pageOnly.settings.isEmpty && pageOnly.window == nil,"catalogue page templates contain geometry without saved asset subjects or app settings")
         var invalid=state;invalid.rails=[.nan,1,0]
         check((try? Layout_Handler.validate(invalid)) == nil,"invalid non-finite layout settings are rejected")
-        check(!Layout_Handler.isSetting("Workspace.Library.Favourites") && !Layout_Handler.isSetting("Workspace.Import.FavouriteFolders") && Layout_Handler.isSetting("workspace.targetPress"),"layout settings exclude user-managed favourites while retaining colour target state")
+        check(!Layout_Handler.isSetting("Workspace.Library.Favourites") && !Layout_Handler.isSetting("Workspace.Import.FavouriteFolders") && !Layout_Handler.isSetting("workspace.targetPress") && !Layout_Handler.isSetting("workspace.analysisCategory") && !Layout_Handler.isSetting("workspace.channelProfile"),"layouts exclude user-managed favourites and preserve the global colour target settings")
         let temporary=FileManager.default.temporaryDirectory.appendingPathComponent("layout-tests-"+UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:temporary)}
         let url=try CatalogueTree.make(at:temporary.appendingPathComponent("Catalogue"),name:"Layouts")

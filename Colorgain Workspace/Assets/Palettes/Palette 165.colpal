@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#DEE2D7",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.70827245553384999,
+        "y" : 0.74823219559231235,
+        "z" : 0.56836038256580368
+      },
+      "pickedAt" : 1791696049980.8281,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.8735351562,
+          0.8852539062,
+          0.8461914062
+        ]
+      }
+    },
+    {
+      "hex" : "#000112",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.0009868593104879603,
+        "y" : 0.0005913575405187811,
+        "z" : 0.004493127384143332
+      },
+      "pickedAt" : 1791696043128.9539,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          5.9008589229999999e-06,
+          0.0039367671120000003,
+          0.06762695312
+        ]
+      }
+    },
+    {
+      "hex" : "#1F003F",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.012807279242045758,
+        "y" : 0.005851216742629511,
+        "z" : 0.035245833285940803
+      },
+      "pickedAt" : 1791696238931.8198,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.1060180664,
+          0.0039329528810000004,
+          0.2346191406
+        ]
+      }
+    },
+    {
+      "hex" : "#246676",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.084645844429059827,
+        "y" : 0.11030522564306491,
+        "z" : 0.14169306643255425
+      },
+      "pickedAt" : 1791696240858.1919,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.2149658203,
+          0.3950195312,
+          0.4538574219
+        ]
+      }
+    },
+    {
+      "hex" : "#1F0512",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.007418075646677625,
+        "y" : 0.004448959431609262,
+        "z" : 0.0045447386890764803
+      },
+      "pickedAt" : 1791696242179.4099,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.1098632812,
+          0.023620609189999999,
+          0.06762695312
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 165",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.421Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "5B7535B3-2148-4A01-BA5C-FC44C3199352",
+    "documentID" : "281EF996-1DAF-4207-89FF-015A066EA2AD",
+    "lastSavedAt" : "2026-10-19T23:43:09.312Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "5B7535B3-2148-4A01-BA5C-FC44C3199352",
+    "createdAt" : 1791696232456.1919,
+    "entries" : [
+      {
+        "addedAt" : 1791696234963.696,
+        "hex" : "#DEE2D7"
+      },
+      {
+        "addedAt" : 1791696236968.5959,
+        "hex" : "#000112"
+      },
+      {
+        "addedAt" : 1791696238931.8198,
+        "hex" : "#1F003F"
+      },
+      {
+        "addedAt" : 1791696240858.1919,
+        "hex" : "#246676"
+      },
+      {
+        "addedAt" : 1791696242179.4099,
+        "hex" : "#1F0512"
+      }
+    ],
+    "id" : "281EF996-1DAF-4207-89FF-015A066EA2AD",
+    "name" : "Palette 165",
+    "placedAt" : 1792453388446.5771,
+    "position" : 15,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791696232456.5671,
+    "purposes" : [
+      {
+        "changedAt" : 1791696232456.5671,
+        "id" : "B36C4830-E333-4902-BF05-EFE49C040653",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

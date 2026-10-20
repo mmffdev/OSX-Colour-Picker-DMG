@@ -12,19 +12,39 @@ enum AppearancePresets {
     ]
     static func index(for id: String?) -> Int { all.firstIndex { $0.id == id } ?? 1 }
     static func next(after index: Int) -> Int { (index+1)%all.count }
-    static var selectedIndex: Int { index(for:AppPreferences.shared.string(forKey:"theme.preset")) }
+    // Design colours are read throughout every draw pass. Resolving the portable settings
+    // file for each token turns a single theme change into hundreds of filesystem stats.
+    private static var cachedIndex: Int?
+    private static let persistenceQueue = DispatchQueue(label: "Colorgain.AppearancePreset.Persistence", qos: .utility)
+    private static let preferenceObserver = NotificationCenter.default.addObserver(
+        forName:.prefsDidChange,object:nil,queue:.main
+    ) { _ in cachedIndex=nil }
+    static var selectedIndex: Int {
+        _ = preferenceObserver
+        if let cachedIndex {return cachedIndex}
+        let value=index(for:AppPreferences.shared.string(forKey:"theme.preset"))
+        cachedIndex=value
+        return value
+    }
     static var selected: Preset { all[selectedIndex] }
     static func select(_ index: Int) {
         guard all.indices.contains(index) else { return }
-        AppPreferences.shared.set(all[index].id,forKey:"theme.preset")
+        cachedIndex=index
         NotificationCenter.default.post(name:.themeDidChange,object:nil)
+        let id=all[index].id
+        if CommandLine.arguments.contains("--self-test") {
+            AppPreferences.shared.set(id,forKey:"theme.preset")
+        } else {
+            // File coordination must not block the user's colour preview.
+            persistenceQueue.async { AppPreferences.shared.set(id,forKey:"theme.preset") }
+        }
     }
     static func cycle() { select(next(after:selectedIndex)) }
 }
 
 final class AppearancePresetControl: NSView {
     private var buttons: [Swatch] = []
-    private final class Swatch: NSButton {
+    private final class Swatch: ClickCursorButton {
         var colour: NSColor = .white
         override var isFlipped: Bool { true }
         override func draw(_ dirtyRect: NSRect) {

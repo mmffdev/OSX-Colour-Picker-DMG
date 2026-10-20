@@ -1,0 +1,236 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "colours" : [
+    {
+      "hex" : "#135B44",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.051398290612036664,
+        "y" : 0.079952589357680875,
+        "z" : 0.051530967820453778
+      },
+      "pickedAt" : 1791482348966.292,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.074509803921568626,
+          0.35686274509803922,
+          0.26666666666666666
+        ]
+      }
+    },
+    {
+      "hex" : "#2B9B47",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.14577603229968458,
+        "y" : 0.24417817541676881,
+        "z" : 0.077160565959381894
+      },
+      "pickedAt" : 1791482349588.959,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.16862745098039217,
+          0.60784313725490191,
+          0.27843137254901962
+        ]
+      }
+    },
+    {
+      "hex" : "#A7C93E",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.40031366921707828,
+        "y" : 0.50761754321321773,
+        "z" : 0.096492891638315675
+      },
+      "pickedAt" : 1791482350409.1958,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.65490196078431373,
+          0.78823529411764703,
+          0.24313725490196078
+        ]
+      }
+    },
+    {
+      "hex" : "#DDE093",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.64407355392404786,
+        "y" : 0.71293134295267035,
+        "z" : 0.29081533939794491
+      },
+      "pickedAt" : 1791482351230.592,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.8666666666666667,
+          0.8784313725490196,
+          0.57647058823529407
+        ]
+      }
+    },
+    {
+      "hex" : "#EEC218",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.58185875934882225,
+        "y" : 0.57752298908505251,
+        "z" : 0.070808286781369745
+      },
+      "pickedAt" : 1791482352245.688,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.93333333333333335,
+          0.76078431372549016,
+          0.094117647058823528
+        ]
+      }
+    },
+    {
+      "hex" : "#EB8D3A",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.47086479518620211,
+        "y" : 0.37834305859010303,
+        "z" : 0.067647522205798102
+      },
+      "pickedAt" : 1791482353026.832,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.92156862745098034,
+          0.55294117647058827,
+          0.22745098039215686
+        ]
+      }
+    },
+    {
+      "hex" : "#B4203E",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.21146230198094876,
+        "y" : 0.11481648034029819,
+        "z" : 0.042161284124910069
+      },
+      "pickedAt" : 1791482354049.6489,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.70588235294117652,
+          0.12549019607843137,
+          0.24313725490196078
+        ]
+      }
+    },
+    {
+      "hex" : "#883F70",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.14967655428418783,
+        "y" : 0.10023167359500866,
+        "z" : 0.12397142878377788
+      },
+      "pickedAt" : 1791482354920.0339,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.53333333333333333,
+          0.24705882352941178,
+          0.4392156862745098
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 100 2",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T23:43:10.126Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "FA2646D3-6F57-4231-BC17-EEF6F2D4FFD7",
+    "documentID" : "E4D57C14-6D86-4264-9686-F8656B3450CF",
+    "lastSavedAt" : "2026-10-19T23:43:10.503Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "bucketID" : "19FCF6E9-CC1E-4671-921B-2777BC776962",
+    "copiedFrom" : "FA2646D3-6F57-4231-BC17-EEF6F2D4FFD7",
+    "createdAt" : 1791482346597.6819,
+    "entries" : [
+      {
+        "addedAt" : 1791482348966.292,
+        "hex" : "#135B44"
+      },
+      {
+        "addedAt" : 1791482349588.959,
+        "hex" : "#2B9B47"
+      },
+      {
+        "addedAt" : 1791482350409.1958,
+        "hex" : "#A7C93E"
+      },
+      {
+        "addedAt" : 1791482351230.592,
+        "hex" : "#DDE093"
+      },
+      {
+        "addedAt" : 1791482352245.688,
+        "hex" : "#EEC218"
+      },
+      {
+        "addedAt" : 1791482353026.832,
+        "hex" : "#EB8D3A"
+      },
+      {
+        "addedAt" : 1791482354049.6489,
+        "hex" : "#B4203E"
+      },
+      {
+        "addedAt" : 1791482354920.0339,
+        "hex" : "#883F70"
+      }
+    ],
+    "id" : "E4D57C14-6D86-4264-9686-F8656B3450CF",
+    "name" : "Palette 100 2",
+    "placedAt" : 1792453388540.1301,
+    "position" : 88,
+    "projectID" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "purposes" : [
+      {
+        "changedAt" : 1791482346597.937,
+        "id" : "02D349A9-10C4-444A-8534-8343707EB87A",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "project" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+  "version" : 1
+}

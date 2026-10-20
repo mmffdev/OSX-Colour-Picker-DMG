@@ -36,21 +36,23 @@ final class StudioColourPicker: NSView, Overlay {
     private let cancel = SwissButton("Cancel", .secondary)
     private let reset = SwissButton("Clear Colour", .secondary)
     private var resetAction:(()->Void)?
+    private let commitOnPick:Bool
     private weak var previous: NSResponder?
     var onDismiss: (() -> Void)?
     var overlayWindows: [NSWindow] { window.map { [$0] } ?? [] }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     private var railEdge: CGFloat { LibraryRail.collapsedWidth + Design.App.column(5, in: bounds.width) - Design.App.column(3, in: bounds.width) }
-    init(target: String, targets: [Target]? = nil,onReset:(()->Void)? = nil) {
+    init(target: String, targets: [Target]? = nil,onReset:(()->Void)? = nil,commitOnPick:Bool=false) {
         let choices=targets ?? Self.targets
         items=choices
         resetAction=onReset
+        self.commitOnPick=commitOnPick
         let index = choices.firstIndex { $0.key == target } ?? 0
         selected = index; proposed = hexOf(choices[index].read()) ?? "#000000"
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
-        setAccessibilityRole(.group); setAccessibilityLabel(targets == nil ? "Settings Colour Picker":"Favourite Colour Picker")
+        setAccessibilityRole(.group); setAccessibilityLabel(targets == nil ? "Settings Colour Picker":(choices.first?.group ?? "Asset")+" Colour Picker")
         scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
         scroll.documentView = list; addSubview(scroll)
         var y: CGFloat = 0, previousGroup = ""
@@ -98,7 +100,7 @@ final class StudioColourPicker: NSView, Overlay {
     @objc private func targetPicked(_ sender: NSButton) {
         selected = sender.tag; proposed = hexOf(items[selected].read()) ?? "#000000"; refresh()
     }
-    @objc private func picked(_ sender: NSButton) { proposed = Self.samples[sender.tag].3; refresh() }
+    @objc private func picked(_ sender: NSButton) { proposed = Self.samples[sender.tag].3; refresh();if commitOnPick {commit()} }
     private func refresh() {
         for (i, button) in targetButtons.enumerated() { button.chosen = i == selected; button.needsDisplay = true }
         for dot in dots { dot.chosen = dot.hex == proposed; dot.needsDisplay = true }
@@ -138,7 +140,7 @@ final class StudioColourPicker: NSView, Overlay {
         hairline(x: 0, y: top, width: bounds.width)
         fill(NSRect(x: edge, y: top, width: 1, height: bounds.height - top), Design.rule)
         Design.attributed("Colour Picker", .heading).draw(x: Design.App.margin, baseline: 39)
-        Design.attributed("Settings Colours", .heading).draw(x: LibraryRail.collapsedWidth + 16, baseline: top + AreaHeader.headingBaseline)
+        Design.attributed(items.count == 1 ? items[0].group+" Colours":"Settings Colours", .heading).draw(x: LibraryRail.collapsedWidth + 16, baseline: top + AreaHeader.headingBaseline)
         Design.attributed("Spiral Spectrum", .heading).draw(x: edge + 16, baseline: top + AreaHeader.headingBaseline)
         Design.attributed(items[selected].group + " / " + items[selected].name, .label, colour: Design.quiet).draw(x: edge + 16, baseline: top + AreaHeader.rule - 10, width: bounds.width - edge - 32)
         hairline(x: LibraryRail.collapsedWidth + 16, y: top + AreaHeader.rule, width: bounds.width - LibraryRail.collapsedWidth - 40)
@@ -146,7 +148,7 @@ final class StudioColourPicker: NSView, Overlay {
         Design.hex(proposed).setFill(); NSBezierPath(ovalIn: preview).fill()
         Design.attributed(proposed, .bodyStrong).draw(x: preview.maxX + 12, baseline: preview.midY + 5)
     }
-    private final class Dot: NSButton {
+    private final class Dot: ClickCursorButton {
         var hex = "#000000", chosen = false
         var onDouble: (() -> Void)?
         private var hover = false
@@ -168,7 +170,7 @@ final class StudioColourPicker: NSView, Overlay {
             }
         }
     }
-    private final class TargetButton: NSButton {
+    private final class TargetButton: ClickCursorButton {
         var colour = NSColor.black, chosen = false
         override var isFlipped: Bool { true }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }

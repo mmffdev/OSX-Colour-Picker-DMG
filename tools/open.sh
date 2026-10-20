@@ -14,7 +14,7 @@
 # A new user keeps everything in the throwaway home; Screen Recording is offered by the wizard.
 # Permission-triggered restarts resume the draft; a fresh "new" launch starts over.
 set -euo pipefail
-APP="/Applications/MMFFDev Colour 3.app"
+APP="/Applications/Colorgain.app"
 BUNDLE_ID="com.mmffdev.mmffdevcolour3"
 
 case "${1:-}" in

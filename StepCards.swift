@@ -9,7 +9,9 @@ import QuartzCore
 // their colour. On first open they fly in from the right and settle together. Chosen by Rick on
 // 2026-10-07 from the Spotify concept he loves; built for every version of the app.
 
-final class StepCards: NSView {
+final class StepCards: ClickCursorView {
+    override var handCursorRects:[NSRect]{cards.prefix(step).map{$0.frame}}
+
     static let labelHeight: CGFloat = 58, chipHeight: CGFloat = 66, gap: CGFloat = 4
     static var height: CGFloat { labelHeight + chipHeight }
     static let slimHeight: CGFloat = 12

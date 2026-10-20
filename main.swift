@@ -39,9 +39,11 @@ func runPickMode() -> Never {
 
 // ---------- The app ----------
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
-        if main != nil { library.finishWorkspaceSession() }
+        FileEditAccess.releaseOwned()
+        StudioWindowController.shared?.frame.saveWorkspaceSession(flush:true)
+        if main != nil || StudioWindowController.shared != nil {library.finishWorkspaceSession()}
         FileHandlerNativeQA.cleanup()
     }
     lazy var library = LibraryController()
@@ -52,14 +54,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                     updaterDelegate: nil, userDriverDelegate: nil)
     #endif
     var main: MainWindowController?
+    private let classicMenuSentinel=NSObject()
+    private var classicMenuActions:[ObjectIdentifier:Selector]=[:]
+    private let lazyCatalogueMenu=NSMenu(title:"Catalogue")
     var settings: SettingsWindowController?
     private var splash: SplashWindowController?
     private var setupWindow: NSWindowController?
+    private var simpleSetup: SimpleSetupController?
     private var opening = true
     private var workspaceStartup: WorkspaceStartupController?
     private var pendingWorkspace: URL?
     private var pendingDocuments: [URL] = []
     private var didLaunch = false
+    private var libraryPrepared=false
 
     /// The standard About panel, with the credit the colour name list's licence asks for.
     @objc func showAbout() {
@@ -74,8 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings?.showWindow(nil)
         settings?.window?.makeKeyAndOrderFront(nil)
     }
+    @objc func showMetadataSettings() {
+        showSettings()
+        settings?.showMetadata()
+    }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        SwissBlockTextField.installGlobalCursor()
         NSApp.setActivationPolicy(.regular)
         installStartupMenu()
         FolderAccess.restoreAll()   // the Store build: folders the user chose before stay reachable
@@ -85,7 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = ScreenAccess.grantedAtLaunch   // read now: macOS applies a grant only to a copy started after it
         didLaunch=true
         let initialWorkspace = pendingWorkspace; pendingWorkspace = nil
-        showWorkspaceChooser(selection: initialWorkspace)
+        if preferences.bool(forKey:SimpleSetupController.requestKey) || initialWorkspace == nil && !FileManager.default.fileExists(atPath:AppDataStore(root:Catalogues.standard.root).url.path) {
+            showSimpleSetup()
+        } else { showWorkspaceChooser(selection: initialWorkspace) }
         NSApp.activate(ignoringOtherApps:true)
     }
 
@@ -104,40 +118,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller=WorkspaceStartupController(root:FolderAccess.held[Catalogues.standard.root.standardizedFileURL.path] ?? Catalogues.standard.root,selection:requested,ready: { [weak self] root,entry in
             self?.openWorkspace(root:root,name:entry.name,id:entry.id)
         },create: { [weak self] root,name in
-            guard let self else { return }
-            do {
-                try AppDataStore(root:root).update { manifest in
-                    var settings=manifest["settings"] as? [String:Any] ?? [:]
-                    settings[Catalogues.currentKey]=name
-                    let id=WorkspaceInventory.probe(name:name,folder:root.appendingPathComponent("Catalogues").appendingPathComponent(name)).id?.uuidString
-                    if let id { settings["currentCatalogueID"]=id }
-                    var preferred: [String:Any] = ["name":name]
-                    if let id { preferred["id"]=id }
-                    manifest["defaultCatalogue"]=preferred
-                    settings["assistantDone"]=false;settings["setupDone"]=false
-                    manifest["settings"]=settings
-                }
-            } catch { NSApp.presentError(error);return }
-            self.prepareWorkspace(root:root,name:name)
-            self.showSetupJourney(workspacePrepared:true,createdCatalogue:name)
+            guard let self else{return}
             self.workspaceStartup?.finishClosing();self.workspaceStartup=nil
+            self.showSimpleSetup(home:root,name:name)
         },cancel: { [weak self] in
             guard let self else { return }
             self.workspaceStartup=nil
-            if let main=self.main {
-                NSApp.mainMenu=self.menus(for:main);Shortcuts.install(on:NSApp.mainMenu!)
+            if self.main != nil || StudioWindowController.shared != nil {
+                NSApp.mainMenu=self.menus(for:self.classicMenuSentinel);Shortcuts.install(on:NSApp.mainMenu!)
                 StudioWindowController.shared?.showWindow(nil);self.opening=false
             } else if let setup=self.setupWindow { setup.showWindow(nil) }
             else { NSApp.terminate(nil) }
         })
         controller.content.onWorkspaceSelected = { [weak self] root in
-            if self?.main == nil && self?.setupWindow == nil { Catalogues.home=root }
+            if self?.main == nil && StudioWindowController.shared == nil && self?.setupWindow == nil { Catalogues.home=root }
         }
         workspaceStartup=controller;controller.start(chooseWorkspace: chooseWorkspace)
     }
 
     private func prepareWorkspace(root:URL,name:String) {
-        if main != nil {
+        if main != nil || StudioWindowController.shared != nil {
             library.finishWorkspaceSession()
             StudioWindowController.closeWorkspace();main?.close();main=nil
             settings?.close();settings=nil
@@ -146,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Catalogues.home=root
         library=LibraryController(catalogue:name)
         library.reload()
+        libraryPrepared=true
     }
 
     private func openWorkspace(root:URL,name:String,id:UUID?) {
@@ -167,13 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openUp() {
-        #if APPSTORE
         AppleMenubar.shared.bind(to: library) {
             StudioWindowController.shared?.showWindow(nil)
             StudioWindowController.shared?.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
-        #endif
         let splash=SplashWindowController();self.splash=splash
         if !Prefs.splash { prepareMainWindow() }
         splash.present { [weak self] in self?.revealMainWindow() }
@@ -203,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let ext = url.pathExtension.lowercased()
                 if ["colshr", "colshare", "zip"].contains(ext) { StudioWindowController.shared?.frame.startImport(url: url) }
+                else if ext == "collib" { MyLibraryFile.reviewImport(url,library:self.library,over:view) }
                 else if ext == "colqr" { QRSharing.review(try ColourQR.document(Handler_File_Manager.shared.read(url)), library: self.library, over: view) }
                 else if ["colcat", "coldata"].contains(ext) || (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { self.showWorkspaceChooser(selection: url) }
                 else if ["colpal", "colpalette", "coltyp", "colswatch"].contains(ext) {
@@ -270,8 +270,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One setup surface: locations, the existing nested choices, then a final review/build.
     @objc func runSetupAssistant() { showWorkspaceChooser(chooseWorkspace: true) }
+    @objc func showCatalogueStructure() {
+        showSettings();settings?.showPanel(5)
+    }
     @objc func fileCreatorDetails() { if let window = StudioWindowController.shared?.window ?? main?.window { FileRecoveryPresenter.creatorDetails(over: window) } }
     @objc func learnHalo() { SetupAssistant.show(from: SetupAssistant.Step.halo) { _ in } }
+    @objc func editSelectedMetadata(){StudioWindowController.shared?.frame.editMetadata()}
+
+    func showSimpleSetup(home:URL?=nil,name:String="") {
+        if let simpleSetup {simpleSetup.showWindow(nil);return}
+        StudioWindowController.shared?.frame.saveWorkspaceSession(flush:true)
+        let wizard=SimpleSetupController(home:home,name:name,done:{[weak self] made in
+            guard let self else{return};self.simpleSetup=nil
+            self.openWorkspace(root:made.home,name:made.name,id:made.id)
+        },cancel:{[weak self] in self?.simpleSetup=nil;self?.showWorkspaceChooser(chooseWorkspace:true)},openExisting:{[weak self] url in self?.simpleSetup=nil;self?.showWorkspaceChooser(selection:url)})
+        simpleSetup=wizard;wizard.showWindow(nil);wizard.window?.makeKeyAndOrderFront(nil)
+    }
 
     private func showSetupJourney(workspacePrepared:Bool = false,createdCatalogue:String? = nil) {
         if let existing = setupWindow { existing.showWindow(nil); return }
@@ -303,27 +317,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func prepareMainWindow() {
         library.watchPrintCondition()
-        let main = MainWindowController(library: library)
-        self.main = main
-        let bar = menus(for: main)
+        if !libraryPrepared{library.reload();libraryPrepared=true}
+        let bar = menus(for: classicMenuSentinel)
         Shortcuts.install(on: bar)   // before macOS adds its own items to the Edit menu
         NSApp.mainMenu = bar
     }
 
+    private func classicWindow() -> MainWindowController {
+        if let main{return main}
+        let studioWindow=StudioWindowController.shared?.window
+        let made=MainWindowController(library:library)
+        main=made
+        if let studioWindow{library.window=studioWindow}
+        return made
+    }
+    @objc private func forwardClassicMenu(_ sender:NSMenuItem) {
+        guard let action=classicMenuActions[ObjectIdentifier(sender)] else{return}
+        _ = NSApp.sendAction(action,to:classicWindow(),from:sender)
+    }
+    private func routeClassicMenuItems(_ menu:NSMenu) {
+        for item in menu.items {
+            if item.target === classicMenuSentinel,let action=item.action {
+                classicMenuActions[ObjectIdentifier(item)]=action
+                item.target=self;item.action=#selector(forwardClassicMenu(_:))
+            }
+            if let submenu=item.submenu{routeClassicMenuItems(submenu)}
+        }
+    }
+    func menuNeedsUpdate(_ menu:NSMenu) {
+        guard menu === lazyCatalogueMenu else{return}
+        menu.removeAllItems()
+        for name in library.availableCatalogues() {
+            let item=menu.addItem(withTitle:name,action:#selector(catalogueChosen(_:)),keyEquivalent:"")
+            item.target=self;item.state=name == library.catalogue ? .on:.off
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle:"New Catalogue…",action:#selector(LibraryController.newCatalogue),keyEquivalent:"").target=library
+        menu.addItem(withTitle:"Rename \(library.catalogue)…",action:#selector(LibraryController.renameCatalogue),keyEquivalent:"").target=library
+        menu.addItem(withTitle:"Open Catalogue File…",action:#selector(LibraryController.openCatalogueFile),keyEquivalent:"").target=library
+    }
+    @objc private func catalogueChosen(_ item:NSMenuItem){library.open(catalogue:item.title)}
+
     private func revealMainWindow() {
-        guard let main = main else { return }
         // The Studio window, Colorgain's own, is the window; the old one opens only with --classic, for the few pages not yet redrawn.
-        if CommandLine.arguments.contains("--classic") { main.showWindow(nil) } else { StudioWindowController.show(library: library) }
+        if CommandLine.arguments.contains("--classic") { classicWindow().showWindow(nil) } else { StudioWindowController.show(library: library) }
         opening = false
         splash?.close()
         splash = nil
         NSApp.activate(ignoringOtherApps: true)
         if Permission.all.isEmpty { Prefs.setupDone = true }   // nothing to ask: the Store build
-        else if !Prefs.setupDone, let w = main.window, w.isVisible { SetupWindowController.show(over: w) }   // the old window only, never dragged into view for a sheet
+        else if !Prefs.setupDone, let w = main?.window, w.isVisible { SetupWindowController.show(over: w) }   // the old window only, never dragged into view for a sheet
         DispatchQueue.main.async { self.library.sync() } // on open: look for changes from the other Mac
-        rehearse(main)
+        if ProcessInfo.processInfo.environment["MMFFDEV_COLOUR3_SHOW"] != nil {rehearse(classicWindow())}
         openPendingDocument()
-        FileHandlerNativeQA.present(library: library, window: StudioWindowController.shared?.window ?? main.window)
+        FileHandlerNativeQA.present(library: library, window: StudioWindowController.shared?.window ?? main?.window)
     }
 
     /// For checking screens during a trial run (MMFFDEV_COLOUR3_HOME set): MMFFDEV_COLOUR3_SHOW may be
@@ -388,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool) -> Bool {
+        if let simpleSetup {simpleSetup.showWindow(nil);simpleSetup.window?.makeKeyAndOrderFront(nil);return false}
         if !hasVisibleWindows {
             if let studio=StudioWindowController.shared,main != nil { studio.showWindow(nil);studio.window?.makeKeyAndOrderFront(nil) }
             else { showWorkspaceChooser() }
@@ -403,7 +451,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    private func menus(for main: MainWindowController) -> NSMenu {
+    private var assetImportMenu: WorkspaceImportMenu?
+    private func menus(for main: AnyObject) -> NSMenu {
         let bar = NSMenu()
         func menu(_ title: String, _ build: (NSMenu) -> Void) {
             let item = NSMenuItem()
@@ -435,35 +484,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Hide \(Brand.name)", #selector(NSApplication.hide(_:)), "h")
             add(m, "Quit \(Brand.name)", #selector(NSApplication.terminate(_:)), "q")
         }
+        assetImportMenu = WorkspaceImportMenu(controller: library)
+        assetImportMenu?.onWorkspace = { [weak self] url in self?.showWorkspaceChooser(selection: url) }
         menu("File") { m in
-            add(m, "Open Workspace\u{2026}", #selector(runSetupAssistant), "o", self)
+            add(m, "Open Workspace…", #selector(runSetupAssistant), "o", self)
             m.addItem(.separator())
             add(m, "Pick Colours", #selector(LibraryController.togglePicking), "p", library)
             add(m, "Sample An Area", #selector(LibraryController.sampleArea), "P", library)
-            add(m, "New Colour\u{2026}", #selector(LibraryController.newColour), "k", library, [.command, .shift])
+            add(m, "New Colour…", #selector(LibraryController.newColour), "k", library, [.command, .shift])
             m.addItem(.separator())
             add(m, "New Palette", #selector(LibraryController.newPalette), "n", library)
             add(m, "New Typography Palette", #selector(LibraryController.newTypography), "", library)
-            add(m, "New Project\u{2026}", #selector(LibraryController.newProject), "n", library, [.command, .option])
-            add(m, "Project Templates\u{2026}", #selector(LibraryController.manageProjectTemplates), "", library)
-            add(m, "Build Palette from Swatches\u{2026}", #selector(MainWindowController.buildPalette), "n", main, [.command, .shift])
-            add(m, "New Palette from Image\u{2026}", #selector(LibraryController.paletteFromImage), "i", library)
+            add(m, "New Project…", #selector(LibraryController.newProject), "n", library, [.command, .option])
+            add(m, "Project Templates…", #selector(LibraryController.manageProjectTemplates), "", library)
+            add(m, "Build Palette from Swatches…", #selector(MainWindowController.buildPalette), "n", main, [.command, .shift])
+            add(m, "New Palette from Image…", #selector(LibraryController.paletteFromImage), "i", library)
             add(m, "New Palette from Clipboard", #selector(LibraryController.paletteFromClipboard), "v", library, [.command, .shift])
             m.addItem(.separator())
             let catalogue = NSMenuItem(title: "Catalogue", action: nil, keyEquivalent: "")
-            catalogue.submenu = main.catalogueMenu
+            lazyCatalogueMenu.delegate=self
+            catalogue.submenu = lazyCatalogueMenu
             m.addItem(catalogue)
             add(m, "Sync Now", #selector(LibraryController.syncNow), "s", library, [.command, .shift])
             m.addItem(.separator())
-            add(m, "Export\u{2026}", #selector(MainWindowController.exportShown), "e", main)
-            add(m, "Export Palette File\u{2026}", #selector(MainWindowController.exportShownPaletteFile), "", main)
-            add(m, "Export Design Pack\u{2026}", #selector(MainWindowController.exportDesignPack), "e", main, [.command, .option])
+            add(m, "Export…", #selector(MainWindowController.exportShown), "e", main)
+            add(m, "Export Palette File…", #selector(MainWindowController.exportShownPaletteFile), "", main)
+            add(m, "Export Design Pack…", #selector(MainWindowController.exportDesignPack), "e", main, [.command, .option])
             add(m, "Add to macOS Colour Panel", #selector(MainWindowController.addShownToColourPanel), "", main)
             m.addItem(adobeMenuItem(target: main, action: #selector(MainWindowController.addShownToAdobe(_:))))
-            add(m, "Export Library\u{2026}", #selector(LibraryController.exportLibrary), "e", library, [.command, .shift])
+            add(m, "Export Library…", #selector(LibraryController.exportLibrary), "e", library, [.command, .shift])
             m.addItem(.separator())
-            add(m, "Import Palette Files\u{2026}", #selector(MainWindowController.importPaletteFilesShown), "", main)
-            add(m, "Import CSS Tokens\u{2026}", #selector(MainWindowController.importTokensShown), "", main)
+            assetImportMenu?.appendImportItems(to: m)
             add(m, "Import from MMFFDev Colour 2", #selector(LibraryController.importFromV2), "", library)
         }
         menu("Edit") { m in
@@ -473,6 +524,145 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "Select All", #selector(NSText.selectAll(_:)), "a")
             m.addItem(.separator())
             add(m, "Find", #selector(MainWindowController.focusSearch), "f", main)
+        }
+        // These are additional routes. File retains its established commands and shortcuts.
+        func planned(_ m: NSMenu, _ titles: [String]) {
+            for title in titles {
+                let item = NSMenuItem(title: "! " + title, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                item.toolTip = "Planned. This command is not connected yet."
+                m.addItem(item)
+            }
+        }
+        func group(_ m: NSMenu, _ title: String, _ build: (NSMenu) -> Void) {
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let child = NSMenu(title: title); build(child); item.submenu = child; m.addItem(item)
+        }
+        func route(_ m: NSMenu, _ title: String, _ place: StudioFrame.Place) {
+            m.addItem(ApplicationCommandItem(title, enabled: { StudioWindowController.shared != nil }) {
+                StudioWindowController.shared?.frame.go(place)
+            })
+        }
+        let assetFrame: () -> StudioFrame? = { StudioWindowController.shared?.frame.activeAssetFrame }
+        let selectedPalettes: () -> [UUID] = { assetFrame()?.commandPalettes ?? [] }
+        let editablePalette: () -> Bool = { assetFrame()?.canEditCommandPalettes == true }
+        func paletteAction(_ m: NSMenu, _ title: String, editing: Bool = true, singleOnly: Bool = false, _ run: @escaping (UUID) -> Void) {
+            m.addItem(ApplicationCommandItem(title, enabled: {
+                let ids=selectedPalettes()
+                return !ids.isEmpty && (!singleOnly || ids.count == 1) && (!editing || editablePalette())
+            }) {
+                let ids=selectedPalettes()
+                for id in ids { run(id) }
+            })
+        }
+        menu("Catalogue") { m in
+            route(m, "Show Catalogue", .catalogue)
+            route(m, "Manage Catalogues…", .settings)
+            add(m, "New Catalogue…", #selector(LibraryController.newCatalogue), "", library)
+            add(m, "Clients And Work Items…", #selector(showCatalogueStructure), "", self)
+            add(m, "Rename Catalogue…", #selector(LibraryController.renameCatalogue), "", library)
+            m.addItem(ApplicationCommandItem("Show Catalogue in Finder") { [weak library] in
+                if let url = library?.store.url { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            })
+            m.addItem(.separator())
+            add(m, "Edit Catalogue Structure…", #selector(showCatalogueStructure), "", self)
+            add(m, "New Member…", #selector(LibraryController.newProject), "", library)
+            add(m, "Member Templates…", #selector(LibraryController.manageProjectTemplates), "", library)
+            planned(m, ["New Smart Collection…", "New Saved Search…"])
+            m.addItem(.separator())
+            add(m, "Find…", #selector(MainWindowController.focusSearch), "", main)
+            group(m, "Filters") { planned($0, ["Filter by Rating", "Filter by Flag", "Filter by Asset Type", "Filter by Metadata", "Show Assets in Nested Folders", "Clear All Filters"]) }
+            m.addItem(.separator())
+            add(m, "Sync Now", #selector(LibraryController.syncNow), "", library)
+            add(m, "Export Library…", #selector(LibraryController.exportLibrary), "", library)
+            planned(m, ["Find Missing Assets…", "Relink Missing Assets…", "Validate Catalogue…", "Back Up Catalogue…", "Restore Catalogue Backup…"])
+        }
+        menu("Assets") { m in
+            if let imports = assetImportMenu?.assetMenuItem() { m.addItem(imports) }
+            group(m, "Create") { sub in
+                add(sub, "New Colour…", #selector(LibraryController.newColour), "", library)
+                add(sub, "New Palette", #selector(LibraryController.newPalette), "", library)
+                add(sub, "New Typography Palette", #selector(LibraryController.newTypography), "", library)
+                add(sub, "Palette from Image…", #selector(LibraryController.paletteFromImage), "", library)
+                add(sub, "Palette from Clipboard", #selector(LibraryController.paletteFromClipboard), "", library)
+                add(sub, "Palette from Swatches…", #selector(MainWindowController.buildPalette), "", main)
+            }
+            m.addItem(.separator())
+            m.addItem(ApplicationCommandItem("Show Selected Palettes in Finder",enabled:{!selectedPalettes().isEmpty}) { [weak library] in
+                guard let library else{return}
+                let urls=selectedPalettes().compactMap { id -> URL? in
+                    if let source=library.store.linkedPalettes.sources[id] {return try? source.record.url(in:source.index.deletingLastPathComponent())}
+                    return library.paletteFileURL(id)
+                }
+                if !urls.isEmpty {NSWorkspace.shared.activateFileViewerSelecting(urls)}
+            })
+            m.addItem(ApplicationCommandItem("Duplicate Selected Palettes", enabled: { !selectedPalettes().isEmpty }) { [weak library] in
+                guard let library else {return};let ids=selectedPalettes()
+                library.apply("Duplicate \(ids.count) Selected Palettes") { lib in
+                    for id in ids { guard let source=lib.swatch(id),let copy=lib.copyPalette(id,to:source.projectID,withNotes:true) else {continue};lib.renameSwatch(copy,to:source.name+" copy") }
+                }
+            })
+            m.addItem(ApplicationCommandItem("Toggle Selected Favourites", enabled: editablePalette) { [weak library] in
+                guard let library else {return};let ids=selectedPalettes();let value = !ids.allSatisfy { library.library.swatch($0)?.favourite == true }
+                library.apply("Set Selected Favourites") { lib in for id in ids {lib.setFavourite(id,value)} }
+            })
+            planned(m, ["Rename Assets…", "Go to Containing Folder", "Create Virtual Copy", "Open in Reference View", "Show on Second Display"])
+            m.addItem(.separator())
+            group(m, "Set Palette Rating") { sub in
+                for value in 0...5 {
+                    sub.addItem(ApplicationCommandItem(value == 0 ? "No Rating":"\(value) Star"+(value == 1 ? "":"s"),enabled:editablePalette) { [weak library] in
+                        let ids=selectedPalettes();library?.apply("Rate \(ids.count) Selected Palettes") { lib in for id in ids {PaletteAssetHandler.setRating(value,on:id,in:&lib)} }
+                    })
+                }
+            }
+            group(m, "Set Palette Flag") { sub in
+                for flag in [nil] + PaletteReview.Flag.allCases.map(Optional.some) {
+                    sub.addItem(ApplicationCommandItem(flag?.title ?? "No Flag",enabled:editablePalette) { [weak library] in
+                        let ids=selectedPalettes();library?.apply("Flag \(ids.count) Selected Palettes") { lib in for id in ids {PaletteAssetHandler.setFlag(flag,on:id,in:&lib)} }
+                    })
+                }
+            }
+            m.addItem(.separator())
+            group(m, "Edit In") { planned($0, ["Choose External Editor…", "Adobe Lightroom…", "Adobe Photoshop…"]) }
+            group(m, "Image Adjustments") { planned($0, ["Rotate Left", "Rotate Right", "Flip Horizontal", "Flip Vertical", "Restore Original Orientation", "Enhance…", "Merge HDR…", "Merge Panorama…", "Reset Adjustments…"]) }
+            group(m, "Stacking") { planned($0, ["Group into Stack", "Ungroup Stack", "Expand All Stacks", "Collapse All Stacks"]) }
+            group(m, "Previews") { planned($0, ["Build Standard Previews", "Build Full Resolution Previews", "Discard Previews", "Update DNG Preview…"]) }
+            m.addItem(.separator())
+            add(m, "Export…", #selector(MainWindowController.exportShown), "", main)
+            add(m, "Export Palette File…", #selector(MainWindowController.exportShownPaletteFile), "", main)
+            m.addItem(adobeMenuItem(target: main, action: #selector(MainWindowController.addShownToAdobe(_:))))
+            planned(m, ["Convert to DNG…"])
+            m.addItem(.separator())
+            m.addItem(ApplicationCommandItem("Delete Selected Assets…", enabled: {assetFrame()?.canDeleteGridSelection == true || editablePalette()}) { [weak library] in
+                guard let frame=assetFrame() else {return}
+                if !frame.page.grid.selectedItems.isEmpty {frame.deleteGridSelection()}
+                else {library?.delete(palettes:Set(selectedPalettes()))}
+            })
+            planned(m, ["Remove Assets from Catalogue…", "Move Original Files to Trash…", "Remove Rejected Assets…"])
+        }
+        menu("Metadata") { m in
+            route(m, "Manage Tags…", .tags)
+            add(m,"Edit Asset Metadata…",#selector(editSelectedMetadata),"",self)
+            add(m,"Metadata Settings…",#selector(showMetadataSettings),"",self)
+            m.addItem(ApplicationCommandItem("Edit Selected Tags…", enabled: { editablePalette() || (assetFrame()?.canDeleteGridSelection == true && assetFrame()?.page.grid.selectedItems.allSatisfy{$0.hex != nil} == true) }) { [weak library] in
+                guard let library,let frame=assetFrame() else {return}
+                let ids=selectedPalettes()
+                if !ids.isEmpty {TagPanel.palettes(ids,library:library,over:frame.window)}
+                else {TagPanel.colours(frame.page.grid.selectedItems.compactMap(\.hex),library:library,over:frame.window)}
+            })
+            planned(m, ["Inspect Asset Metadata…", "Show Metadata for Selected Asset Only"])
+            m.addItem(.separator())
+            group(m, "Keywords") { planned($0, ["Set Keyword Shortcut…", "Apply Keyword Shortcut", "Edit Keyword Sets…", "Import Keywords…", "Export Keywords…", "Purge Unused Keywords…"]) }
+            group(m, "Presets") { presets in
+                add(presets,"Manage Metadata Presets…",#selector(showMetadataSettings),"",self)
+            }
+            m.addItem(.separator())
+            planned(m, ["Copy Metadata…", "Paste Metadata…", "Synchronise Metadata…", "Enable Automatic Metadata Sync"])
+            m.addItem(.separator())
+            planned(m, ["Edit IPTC and Copyright…", "Edit Capture Time…", "Restore Original Capture Time", "Edit Location…"])
+            m.addItem(.separator())
+            planned(m, ["Save Metadata to File", "Read Metadata from File", "Resolve Metadata Conflicts…", "Manage XMP and Sidecars…", "View Asset History…", "Create Copy from History…"])
+            add(m,"Manage Keywords…",NSSelectorFromString("showTagEditor"),"",library)
         }
         menu("View") { m in
             add(m, "All Swatches", #selector(MainWindowController.showAll), "0", main)
@@ -496,8 +686,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let helpItem=NSMenuItem();let helpMenu=Help_Handler.shared.menu()
         helpItem.submenu=helpMenu;bar.addItem(helpItem);NSApp.helpMenu=helpMenu
         bar.addItem(developmentMenu())
+        routeClassicMenuItems(bar)
         return bar
     }
+}
+
+/// A native menu command validates its current context both when opening and invoking.
+private final class ApplicationCommandItem: NSMenuItem, NSMenuItemValidation {
+    private let canPerform: () -> Bool
+    private let run: () -> Void
+    init(_ title: String, enabled: @escaping () -> Bool = { true }, run: @escaping () -> Void) {
+        self.canPerform = enabled; self.run = run
+        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError() }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { canPerform() }
+    @objc private func invoke() { guard canPerform() else { return }; run() }
 }
 
 // ---------- Entry point ----------
@@ -548,6 +753,22 @@ if CommandLine.arguments.contains("--self-test") {
         for n in store.notes { print("note: \(n)") }
         exit(0)
     } catch { print("could not bring it across: \(error.localizedDescription)"); exit(1) }
+} else if let at=CommandLine.arguments.firstIndex(of:"--migrate-simple-catalogue"),CommandLine.arguments.indices.contains(at+1) {
+    do {
+        let args=CommandLine.arguments,root=URL(fileURLWithPath:args[at+1],isDirectory:true)
+        guard let homeAt=args.firstIndex(of:"--app-data"),args.indices.contains(homeAt+1) else{throw failure("Supply --app-data <workspace folder>.")}
+        let home=URL(fileURLWithPath:args[homeAt+1],isDirectory:true)
+        let backup=try SimpleCatalogue.migrate(root:root,home:home)
+        print(backup.map{"Converted with recovery copy: \($0.path)"} ?? "Already uses the simplified structure")
+        if let archiveAt=args.firstIndex(of:"--archive-to"),args.indices.contains(archiveAt+1) {
+            let cats=Catalogues(root:home,legacyURL:nil)
+            guard let name=cats.names().first(where:{cats.directory(for:$0).standardizedFileURL == root.standardizedFileURL}) else{throw failure("The converted catalogue is not registered in this workspace.")}
+            let destination=URL(fileURLWithPath:args[archiveAt+1])
+            try Handler_File_Manager.shared.createCatalogueArchive(name:name,catalogues:cats,to:destination,includeShared:true)
+            print("Portable catalogue with My Library: \(destination.path)")
+        }
+        exit(0)
+    }catch{print(error.localizedDescription);exit(1)}
 } else if CommandLine.arguments.contains("--pick") {
     runPickMode()
 } else if CommandLine.arguments.contains("--halo-demo") {

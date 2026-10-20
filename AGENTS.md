@@ -1,4 +1,5 @@
 # MMFFDev Colour Picker
+Shared style authority: [styles.md](styles.md). Read its lazy-loading index before UI work, including the dropdown/dropup and panel contracts for relevant changes.
 
 App layout lookup: [Component registry](.codex/c_layout_registry.md) — canonical region names, hierarchy, source symbols and panel primitive. Read it before locating or changing app sections.
 

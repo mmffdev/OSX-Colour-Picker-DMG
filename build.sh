@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and install MMFFDev Colour 3.app into /Applications.
+# Build and install Colorgain.app into /Applications.
 # Re-run after editing any .swift file here.
 #
 # /Applications, not ~/Applications: the Adobe helper only works from there, and the .pkg installs
@@ -9,8 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./signing.sh
 
-APP="/Applications/MMFFDev Colour 3.app"
-OLD="$HOME/Applications/MMFFDev Colour 3.app"
+APP="/Applications/Colorgain.app"
 
 echo "compiling swift..."
 compile_app MMFFDevColour3
@@ -29,7 +28,6 @@ on run argv
 end run
 EOS
 fi
-[ -d "$OLD" ] && rm -rf "$OLD" && echo "removed the old copy in ~/Applications"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
 cp MMFFDevColour3 "$APP/Contents/MacOS/MMFFDevColour3"
@@ -49,6 +47,44 @@ sign_app "$APP"
 rm MMFFDevColour3
 
 echo "installed: $APP"
+
+# Rick’s development machine has one visible installed edition. Retire only known
+# Colorgain predecessors after the new app has built, passed and been signed.
+python3 - "$APP" <<'PY_CLEANUP'
+import datetime, os, plistlib, shutil, signal, subprocess, sys
+from pathlib import Path
+keep = Path(sys.argv[1])
+trash = Path.home() / '.Trash'
+identities = {'com.mmffdev.mmffdevcolour', 'com.mmffdev.mmffdevcolour2', 'com.mmffdev.mmffdevcolour3'}
+for root in [Path('/Applications'), Path.home() / 'Applications']:
+    if not root.is_dir():
+        continue
+    for candidate in root.glob('*.app'):
+        if candidate == keep or candidate.is_symlink():
+            continue
+        try:
+            metadata = plistlib.loads((candidate / 'Contents/Info.plist').read_bytes())
+        except (OSError, plistlib.InvalidFileException):
+            continue
+        if metadata.get('CFBundleIdentifier') not in identities:
+            continue
+        for process in subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True).splitlines():
+            fields = process.strip().split(None, 1)
+            if len(fields) == 2 and fields[1].startswith(str(candidate) + '/Contents/MacOS/'):
+                try:
+                    os.kill(int(fields[0]), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        trash.mkdir(exist_ok=True)
+        destination = trash / candidate.name
+        if destination.exists():
+            destination = trash / (candidate.stem + ' ' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.app')
+        try:
+            shutil.move(str(candidate), str(destination))
+            print('moved old app to Trash:', candidate)
+        except PermissionError:
+            print('old app requires Finder authentication to remove:', candidate, file=sys.stderr)
+PY_CLEANUP
 
 # What Rick sees after every build is the Studio window, Colorgain's own. OPEN=0 skips it.
 if [ "${OPEN:-1}" = "1" ]; then

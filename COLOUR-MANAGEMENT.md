@@ -1,5 +1,23 @@
 # Colour management: what this product is, and how its colour works
 
+**Current ICC pipeline, 17 October 2026:** [ColorSync PCS implementation](.codex/c_pcs_pipeline.md). ColorSync now owns ICC rendering intents, paper white and BPC through one shared adapter. This supersedes historical manual-adjustment descriptions and the earlier LittleCMS replacement recommendation below.
+
+### Open issue: black point compensation, 17 October 2026
+
+**BPC is not yet validated.** Standalone ColorSync tests on macOS 26.3.1 (a), build 25D771280a, reproduce a blue-magenta cast in neutral colours with relative colorimetric+BPC. FOGRA39, Generic CMYK and Japan Color 2001 Coated are affected in these tests. For FOGRA39, middle grey changes from predicted Lab approximately `(53.15, −0.19, −0.40)` with BPC off to `(54.16, +3.59, −8.21)` with it on. LittleCMS independently reads the generated inks as similarly shifted, while its own BPC conversion remains approximately neutral.
+
+The cast occurs in calculated CMYK values before display or ΔE evaluation. No printer driver or print dialog participates in the reproducer. Existing finite-value and shadow-ordering tests missed this; neutral-chroma regression coverage is required. The exact cause remains unresolved: API usage and an OS implementation issue still need distinguishing, including reproduction on another macOS version.
+
+Triage conclusions:
+
+- **Double colour management:** valid general printing advice, but does not explain this standalone failure. When Photoshop manages printing, Adobe specifies disabling printer colour management. Correctly tagged exports subsequently displayed through ColorSync do not inherently apply BPC twice. [Adobe printing guidance](https://helpx.adobe.com/photoshop/desktop/print/print-with-color-management.html)
+- **Perceptual intent:** an alternative reproduction choice, not a repair for relative+BPC. Its mapping depends on profile design, rather than universally scaling the gamut proportionally. Never silently substitute it for the user's selected intent. [ICC BPC explanation](https://www.color.org/WP40-Black_Point_Compensation_2010-07-27.pdf)
+- **Profile verification:** Apple's read-only `ColorSyncProfileVerify` passed all five profiles used, without errors or warnings: Generic XYZ, sRGB, FOGRA39, Generic CMYK and Japan Color 2001 Coated. Structural verification does not prove colour accuracy, but there is no evidence here warranting repair or forced root overwrites. [Apple verification guidance](https://support.apple.com/en-gb/guide/colorsync-utility/csync003/mac)
+
+Keep BPC off for current reviews pending validation. Do not introduce hand-tuned colour corrections, silently ignore saved BPC settings, or describe the cast as normal profile variation. The investigation changed no app conversion code or installed profiles and performed no app build, installation or relaunch. Full evidence, diagnostic commands and next steps: [BPC investigation](.codex/c_c_pcs_bpc_investigation.md).
+
+---
+
 The reference for the product's direction and its colour foundation. It records what Rick defined, what was proposed, the questions raised and the answers given, so the reasoning is never lost.
 
 **Status on 2026-10-03:** sections 1 and 2 are Rick's definition. Rick approved the design the same day ("I agree with your findings. Build it"), adding that a palette selects a named profile because one project can need different options per palette. Section 8 says what is built and what is not.
@@ -296,3 +314,12 @@ References: [Apple Display Calibrator Assistant](https://support.apple.com/en-ie
 Engine pivot and licence review (2026-10-12): [implementation and migration notes](.codex/c_colour_engine_pivot.md). LittleCMS core is the recommended transform replacement; ArgyllCMS hardware integration requires separate commercial-licence assessment. Neither is integrated yet.
 
 Consolidated research (2026-10-12): [Proofing, image palettes and print handover](PROOFING-AND-PRINT-HANDOVER-RESEARCH.md) records printer requirements, embedded/separate ICC workflows, saved-result gaps, the confirmed image-to-palette-and-proof direction, licences and implementation order.
+
+
+### Spectral viewing delivery — 17 October 2026
+
+Operational scope: bounded CxF3-core reflectance import with staged review, original-byte retention and export, explicit catalogue/palette/swatch links, material confirmation, source removal, workspace persistence, optional activation, and D50/D65/A calculation for CIE 1931 2° or CIE 1964 10°. Global preview controls carry through palette and swatch views; missing/invalidated links stay unavailable. Settings owns Measurements and Swatch Links sections.
+
+This is a supported CxF subset, not full ISO/XSD compliance or instrument control. Inputs cover at least 380–730 nm at 1/2/5/10 nm intervals, fractions 0–1; fluorescence, transmission, emission and missing spectral tails are unsupported. ICC LWL 10 nm tables are integrity-checked. Twelve independent 1 nm CIE integrations verify a synthetic fixture, with maximum absolute XYZ discrepancy 0.00104796 (white Y = 1); that is fixture agreement, not a general accuracy bound.
+
+The display uses a fixed D65 reference and includes the illuminant cast; it does not model ambient adaptation. Out-of-display-gamut predictions clip. 10° spectral XYZ is computed directly, but standard 2° RGB encoding makes its screen rendering approximate, not an exact observer conversion. This does not resolve unrelated existing non-spectral observer-conversion limitations. No preview is a physical approval. See [sources and method](ProofingResources/Spectral/SPECTRAL-REFERENCES.md) and [UJ-004](UserJourney.md#uj-004--preview-a-measured-material-under-different-illuminants).

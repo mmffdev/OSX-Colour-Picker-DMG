@@ -1,6 +1,18 @@
 # Colorgain — Codex working guidance
 
+## `<userjourney>` — shared user-journey skill
+
+When Rick invokes `<userjourney>` or asks to document an app journey, read the [shared skill and memory](c_userjourney.md) and follow it to maintain `UserJourney.md`. Both Codex and Claude use that same file.
+
+Shared style authority: [styles.md](../styles.md). Read this lazy-loading index before any UI work and load its dropdown/dropup contract before creating or changing any selector. It supersedes conflicting older control examples.
+
 App layout lookup: [Component registry](c_layout_registry.md) — canonical region names, hierarchy, source symbols and panel primitive. Read it before locating or changing app sections.
+
+**UI start hook:** Before creating or changing a native page, panel, rail, tree, grid, card, palette, swatch or control, read the [UI framework index](c_ui_framework.md). Load only the child contract for the region being changed. Select the existing primitive and its props before coding. An edge case extends the shared primitive; update its focused contract, the component registry and the [HTML catalogue](../design/ui-primitives-catalogue/index.html) in the same change. Verify Library and the changed route in the installed app. Never create a second local actionbar, tab, barberpole, panel frame, tree renderer or grid engine.
+
+## Current settings authority
+
+Rick, 18 October 2026: settings belong in the macOS-style `SettingsWindowController` window (`SettingsWindow.swift`), using `SettingsPanel` and its toolbar/section groups. Do not add or route users to legacy in-page `SettingsSheet` settings. Shared Swiss components remain valid for workspace panels and asset-management modals.
 
 ## Design authority
 
@@ -37,6 +49,12 @@ Text action buttons use the All Workflows reference: a leading diagonal arrow, l
 ## Verification and builds
 
 Inspect the rendered result, including baseline, spacing, clipping and contrast, before declaring layout complete. Backslash toggles the native grid overlay. Check current branch/build target before building; Store code uses `./make_appstore.sh`, direct download `./build.sh`. Preserve existing trial data when launching: `--new-user --resume-new-user --no-splash`; never restart a trial with `--new-user` alone. Do not commit unless requested; after a Swift commit follow the project's build requirements.
+
+Rick’s build rule (17 October 2026): after every app-code change, build and install the appropriate target, then relaunch that exact installed app and verify its build identity before reporting completion. Do not leave only a debug/QA build running or routinely suppress launch with OPEN=0. If a background build needs launch suppressed temporarily, explicitly complete the relaunch afterwards. The product and installed bundle are **Colorgain**, at `/Applications/Colorgain.app`, for either deliberately chosen target. Keep internal executable/bundle identifiers and existing data directories stable. Use the exact installed path rather than app-name/bundle-ID launch resolution. Rick explicitly requested one visible installed app on 17 October 2026: on the current direct-download branch, keep `/Applications/Colorgain.app` and retire older installed Colorgain editions to Trash after a successful build. Do not leave QA copies running or visible as alternatives. A deliberate future Store build must follow that target’s rules and replace the chosen installed edition rather than recreate confusing alternatives. A replaced bundle does not update an already-running process.
+
+Rick wants to see what is shipping after each build, without choosing between development copies. Resolve the branch-appropriate release target yourself, install it at the canonical path above, and open that exact installed app without creating duplicate instances. Keep test builds headless or temporary; restore the canonical app after verification. Ask about distribution only when an actual product decision is needed.
+
+Rick’s concurrent-edit rule (17 October 2026): if another session or process is changing project files, ask Rick whether to build before starting or restarting a build. Do not automatically freeze a snapshot or restart compilation to work around concurrent edits. Establish which updates he wants included first. This takes precedence over the automatic rebuild rule while concurrent editing is detected.
 
 ## Workspace startup and development sessions
 
@@ -78,7 +96,7 @@ Settings replaces Rail 1 with the diagonal grey/white cover immediately, without
 
 ### Selection ribbon primitive
 
-Use `SelectionRibbon` in Design.swift for setup, Rail 2 and Schema yellow row panels: 14-point head, 10-point left notch, head entry 0.48 seconds, tail starts at 0.56 seconds and takes 0.30 seconds. `Rollover` owns row state and the shared clock; preserve the bottom divider and honour Reduce Motion. Do not copy the ribbon path or timing into individual pages.
+Use `SelectionRibbon` in UIPrimitives/Design.swift for setup, Rail 2 and Schema yellow row panels: 14-point head, 10-point left notch, head entry 0.48 seconds, tail starts at 0.56 seconds and takes 0.30 seconds. `Rollover` owns row state and the shared clock; preserve the bottom divider and honour Reduce Motion. Do not copy the ribbon path or timing into individual pages.
 
 ### App manifest and key profiles
 
@@ -122,6 +140,8 @@ Rectangle sampling overlays use explicit global display frames, including negati
 
 ### Proofing
 
+ICC transforms must use the [shared ColorSync PCS pipeline](c_pcs_pipeline.md). Read it before changing conversion, proof readback or engine provenance; do not reintroduce manual paper-white/BPC corrections.
+
 `Proofing.swift` keeps original D50/2° Lab, exact patch IDs, import validation, profile predictions and measured comparisons separate; `StudioProofing.swift` uses SettingsSheet and the house grid. Bundled unmodified Fogra subsets carry attribution in `ProofingResources/SOURCE.txt`. Sessions preserve data/settings; exports record provenance and user tolerances. Never describe these results as certification. Missing patches/known incompatible conditions cannot pass. RGB previews never feed comparison maths.
 
 Rick’s chart references are retained in `.codex/references/proofing/`: `density-and-error.png` (density vs ΔE operating range and component error), `heritage-distribution.png` (a*/b* sample distribution against reference points), `grouped-distribution.png` (same projection by sample group). Density optimisation needs measured density-series data; never invent a parabola or press adjustment from Lab alone. Grouped historical charts are design references, not bundled measurement datasets.
@@ -142,9 +162,9 @@ Palette halos and Swiss cascading context menus share `HaloAction` trees. The ha
 
 Fullscreen retains reference-width rails and a fixed header navigation origin; additional width belongs to the page. Library Rail 2 starts closed on All Colours, lists unclaimed palettes on the palette route and scopes project branches to the selected schema node. General settings owns explicit preference reset and setup-wizard actions; completed valid workspaces resume normally, independently of the development flag. Will It Print? keeps Rail 1 collapsed and adds Rail 3 after Rail 2 on the left, with a palette-only collection/project tree; History retains its own right rail, excluding claimed copies, typography, information and tags. Selection drives the combined 01 Palette settings/result section; 02 carries the note.
 
-App Store Apple Menubar uses one native status item, shared picker controllers, `ColourCopies` history and `Prefs.copyFormat`. Its Swiss settings, sound scoping and print bloom chart are described in [c_apple_menubar.md](c_apple_menubar.md). Do not introduce a second colour conversion, sample or sound pipeline.
+Apple Menubar uses one native status item in both editions, shared picker controllers, `ColourCopies` history and `Prefs.copyFormat`. Its Swiss settings, sound scoping and print bloom chart are described in [c_apple_menubar.md](c_apple_menubar.md). Do not introduce a second colour conversion, sample or sound pipeline.
 
-Palette and swatch tiles have no inner hover halo. Their caption halo mark opens the main HaloMenu: View and Print are first-ring actions, alongside existing Copy and QR; palettes also offer Open Swatches. Print toggles the matching tile’s local preview without changing the global Delta preference. Shared QR exchange details live in [c_qr_sharing.md](c_qr_sharing.md).
+Palette and swatch tiles have no inner hover halo. Their caption halo mark opens the main HaloMenu: View and Print are first-ring actions, alongside existing Copy and QR; palettes also offer Open Swatches. Print toggles the shared Output Proof preference, matching the global palette/swatch comparison controls. Shared QR exchange details live in [c_qr_sharing.md](c_qr_sharing.md).
 
 Saved print settings, palette Delta controls and .colpro exchange use the shared [.coldata profile workflow](c_print_profiles.md). Dropdown values and menu rows use the 13-point body style.
 
@@ -157,3 +177,5 @@ The `osx-full-app` branch trials the canvas-centred Library shell. Its current r
 Use a warm, supportive, personable voice. Be a candid collaborator: offer a clear design opinion and explain why it helps, disagree constructively when needed, and acknowledge progress naturally. Avoid nicknames or familiar forms of address such as “buddy”, “mate” or “dude”; conversational warmth should come from the wording itself. Keep updates concise and human; avoid stiff ceremony, empty praise, and repetitive build narration.
 
 Halo destination actions use `HaloDestinationGallery` in TileHoverHalo.swift over the dial, clamped to the visible screen. `HaloAction.destinationGallery` adapts the existing destination callbacks through `HaloGalleryRequest`: named palette/member tiles show actual spectra, parent context and counts. Search/filter precedes 100-item pagination; `FittedScrollView`, `QuietScroller`, `SwissButton` and `SwissDropdown` own controls. Escape/Back restores the first ring; commit closes both and calls the existing controller operation once. Never turn destination lists into unbounded radial rings.
+
+Global colour-management actionbar: Preset / Workflow / Target / Tolerance / Rendering Intent exists once above split panes, outside Viewport-*. Never duplicate it in an embedded page or capture/recall its settings in layout templates (Rick, 17 October 2026).

@@ -1,5 +1,7 @@
 # Controls
 
+Current shared authority: [styles.md](../styles.md). For dropdowns/dropups, load its [contract](../.codex/c_styles_dropdowns.md); that contract supersedes the historical dropdown row below.
+
 Every control is drawn by the app, in the family and the greys. No `NSButton` bezel, no `NSPopUpButton`, no `NSSlider` look survives into a screen. One height for a row of controls, 32, except the lead button at 34.
 
 | Control | Shape | States |

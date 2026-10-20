@@ -140,7 +140,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
             note.textColor = .systemOrange
             note.lineBreakMode = .byTruncatingTail
             note.toolTip = "\(family) Is Not Installed On This Mac, So The System Font Is Shown In Its Place"
-            let replace = NSPopUpButton(frame: .zero, pullsDown: true)
+            let replace = ClickCursorPopupButton(frame: .zero, pullsDown: true)
             replace.addItem(withTitle: "Replace")
             replace.addItem(withTitle: "System Font")
             replace.menu?.addItem(.separator())
@@ -148,7 +148,7 @@ private final class TypeCard: NSView, NSTextFieldDelegate {
             replace.target = self
             replace.action = #selector(replaceChosen(_:))
             replace.toolTip = "Use Another Font In Place Of \(family), Throughout This Typography Palette"
-            let get = NSPopUpButton(frame: .zero, pullsDown: true)
+            let get = ClickCursorPopupButton(frame: .zero, pullsDown: true)
             get.addItem(withTitle: "Get Font")
             for (title, action) in [("Copy The Name \u{201C}\(family)\u{201D}", #selector(copyFontName(_:))),
                                     ("Open Font Book", #selector(fontBookChosen(_:))),

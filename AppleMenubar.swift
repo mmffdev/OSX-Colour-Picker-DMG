@@ -1,4 +1,3 @@
-#if APPSTORE
 import AppKit
 
 /// One status item keeps the swatches, shared copy format and app icon together as a single movable cluster.
@@ -122,7 +121,7 @@ final class AppleMenubar: NSObject {
     @objc private func settings() { showApp?(); StudioWindowController.shared?.frame.go(.appleMenubar) }
 }
 
-private final class MenubarCountSlider: NSSlider {
+private final class MenubarCountSlider: ClickCursorSlider {
     override func draw(_ dirtyRect: NSRect) {
         let fraction = CGFloat((doubleValue - minValue) / max(1, maxValue - minValue))
         let x = 4 + (bounds.width - 8) * fraction, y = bounds.midY
@@ -191,4 +190,3 @@ final class AppleMenubarSettings: NSView, PageSection {
     @objc private func toggleSound() { Prefs.appleMenubarSound.toggle(); reload() }
     @objc private func changeCount() { Prefs.appleMenubarCount = count.integerValue; needsDisplay = true }
 }
-#endif

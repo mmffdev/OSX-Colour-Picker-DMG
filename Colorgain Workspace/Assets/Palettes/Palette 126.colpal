@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#C44654",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.27696274822307354,
+        "y" : 0.17209216186242121,
+        "z" : 0.076949025021033887
+      },
+      "pickedAt" : 1791482673798.3069,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.7686274509803922,
+          0.27450980392156865,
+          0.32941176470588235
+        ]
+      }
+    },
+    {
+      "hex" : "#FE5D5D",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.48996269966561279,
+        "y" : 0.30560723395911449,
+        "z" : 0.10260422446856303
+      },
+      "pickedAt" : 1791482674583.9739,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.99607843137254903,
+          0.36470588235294116,
+          0.36470588235294116
+        ]
+      }
+    },
+    {
+      "hex" : "#FFA075",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.59685446736220804,
+        "y" : 0.48527542561863429,
+        "z" : 0.17509936331998605
+      },
+      "pickedAt" : 1791482675363.7119,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          1,
+          0.62745098039215685,
+          0.45882352941176469
+        ]
+      }
+    },
+    {
+      "hex" : "#FFDB93",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.75056922718172714,
+        "y" : 0.74799982112316743,
+        "z" : 0.29107695421253654
+      },
+      "pickedAt" : 1791482676213.9768,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          1,
+          0.85882352941176465,
+          0.57647058823529407
+        ]
+      }
+    },
+    {
+      "hex" : "#A3C6FF",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.52025268775201794,
+        "y" : 0.54694733341692137,
+        "z" : 0.77410030684681796
+      },
+      "pickedAt" : 1791482677083.6211,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.63921568627450975,
+          0.77647058823529413,
+          1
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 126",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.454Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "32D59E92-B8A2-4334-A4A4-BA4E94DA5DDD",
+    "documentID" : "68EAF31D-E3B2-4EB2-B6CD-F38983203798",
+    "lastSavedAt" : "2026-10-19T23:43:09.470Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "32D59E92-B8A2-4334-A4A4-BA4E94DA5DDD",
+    "createdAt" : 1791482672747.834,
+    "entries" : [
+      {
+        "addedAt" : 1791482673798.3069,
+        "hex" : "#C44654"
+      },
+      {
+        "addedAt" : 1791482674583.9739,
+        "hex" : "#FE5D5D"
+      },
+      {
+        "addedAt" : 1791482675363.7119,
+        "hex" : "#FFA075"
+      },
+      {
+        "addedAt" : 1791482676213.9768,
+        "hex" : "#FFDB93"
+      },
+      {
+        "addedAt" : 1791482677083.6211,
+        "hex" : "#A3C6FF"
+      }
+    ],
+    "id" : "68EAF31D-E3B2-4EB2-B6CD-F38983203798",
+    "name" : "Palette 126",
+    "placedAt" : 1792453388446.5771,
+    "position" : 55,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791482672748.063,
+    "purposes" : [
+      {
+        "changedAt" : 1791482672748.063,
+        "id" : "53ACA09D-8339-4DE1-AF46-7C12C052DE05",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

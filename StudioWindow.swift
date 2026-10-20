@@ -15,6 +15,7 @@ import ImageIO
 final class StudioWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    var onSessionInteraction:(()->Void)?
     /// A click anywhere that is not a field ends whatever field was being typed in, the search above all: otherwise the
     /// quick keys, 1 and 2, go on typing into it and the page is filtered by "22" while the picks land elsewhere.
     override func sendEvent(_ event: NSEvent) {
@@ -25,12 +26,34 @@ final class StudioWindow: NSWindow {
             if !inField { makeFirstResponder(content) }
         }
         super.sendEvent(event)
+        switch event.type {
+        case .leftMouseUp,.rightMouseUp,.keyUp,.scrollWheel,.magnify,.swipe:onSessionInteraction?()
+        default:break
+        }
     }
 }
 
 final class StudioWindowController: NSWindowController {
     static var shared: StudioWindowController?
     let frame: StudioFrame
+    private var sessionTimer: Timer?
+    private var sessionObservers: [NSObjectProtocol] = []
+
+    private func startSessionMemory() {
+        guard sessionObservers.isEmpty else{return}
+        (window as? StudioWindow)?.onSessionInteraction={ [weak self] in self?.scheduleSessionSave() }
+        for name in [NSWindow.didMoveNotification,NSWindow.didResizeNotification] {
+            sessionObservers.append(NotificationCenter.default.addObserver(forName:name,object:window,queue:.main){[weak self] _ in self?.scheduleSessionSave()})
+        }
+        for name in [NSWindow.willCloseNotification,NSWindow.didResignKeyNotification] {
+            sessionObservers.append(NotificationCenter.default.addObserver(forName:name,object:window,queue:.main){[weak self] _ in self?.sessionTimer?.invalidate();self?.sessionTimer=nil;self?.frame.saveWorkspaceSession(flush:true)})
+        }
+    }
+    private func scheduleSessionSave() {
+        sessionTimer?.invalidate()
+        sessionTimer=Timer.scheduledTimer(withTimeInterval:1,repeats:false){[weak self] _ in self?.sessionTimer=nil;self?.frame.saveWorkspaceSession()}
+    }
+    deinit {sessionTimer?.invalidate();sessionObservers.forEach{NotificationCenter.default.removeObserver($0)}}
 
     init(library: LibraryController) {
         frame = StudioFrame(library: library)
@@ -53,30 +76,39 @@ final class StudioWindowController: NSWindowController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    @objc func editSelectedMetadata(){frame.editMetadata()}
+
     private static var gridKey: Any?
 
     static func closeWorkspace() {
+        shared?.frame.saveWorkspaceSession(flush:true)
+        shared?.sessionTimer?.invalidate()
         Overlays.closeAll()
         if let gridKey { NSEvent.removeMonitor(gridKey) }
         gridKey=nil;shared?.close();shared=nil
     }
 
     static func show(library: LibraryController, setupJourney: Bool = false) {
+        let alreadyOpen=shared != nil
         let c = shared ?? StudioWindowController(library: library)
         shared = c
         // --palettes opens on the palettes view, --palette "<name>" on that palette, for looking at a screen straight away.
         let args = CommandLine.arguments
+        let resumeRestart=alreadyOpen || (args.contains("--resume-workspace-session") && c.frame.restoreWorkspaceSession())
         let named = args.firstIndex(of: "--palette").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
         let project = args.firstIndex(of: "--project").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
-        if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
+        if resumeRestart { /* Explicit permission restart takes priority over old launch navigation flags. */ }
+        else if let name = named, let s = library.library.swatches.first(where: { $0.name == name }) { c.frame.go(.palette(s.id)) }
         else if let name = project, let p = library.library.projects.first(where: { $0.name == name }) { c.frame.go(.project(p.id)) }
         else {
             let views: [(String, StudioFrame.Place)] = [("--settings", .settings), ("--schema", .schema), ("--shortcuts", .shortcuts), ("--halo", .halo), ("--tags", .tags), ("--lab", .lab), ("--contrast", .contrast), ("--prepress", .prepress(0)), ("--prepress-verify", .prepress(1)), ("--prepress-check", .prepress(2)), ("--prepress-print", .prepress(3)), ("--prepress-press", .prepress(4)), ("--projects", .projects), ("--palettes", .palettes), ("--share", .share), ("--appbridge", .appbridge), ("--appbridge-settings", .appbridgeSettings)]
-            c.frame.go(views.first { args.contains($0.0) }?.1 ?? c.frame.restoredLibraryPlace())
+            if let destination=views.first(where:{args.contains($0.0)})?.1 {c.frame.go(destination)}
+            else if !c.frame.restoreWorkspaceSession() {c.frame.go(c.frame.restoredLibraryPlace())}
         }
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        c.frame.enableSessionMemory();c.startSessionMemory()
         // The splash that sets up the work (TH-299): over the whole window when the catalogue has no structure yet, or when --splash asks; --no-splash keeps it away.
         // While the splash is being designed, the loop keeps the app in it: every launch opens on it, and Set starts it again instead of
         // building anything. --splash-loop for one run, or `defaults write ~/Library/Preferences/com.mmffdev.mmffdevcolour3 splashLoop -bool YES` until it is deleted
@@ -114,6 +146,9 @@ final class StudioWindowController: NSWindowController {
                 case "newPalette"?: library?.newPalette(); return nil
                 case "pick"?: library?.togglePicking(); return nil
                 case "sample"?: library?.sampleArea(); return nil
+                case "outputProof"?: if !e.isARepeat { Prefs.deltaWarningsEnabled.toggle() }; return nil
+                case "rail1"?: if !e.isARepeat { c.frame.toggleRail(1) }; return nil
+                case "rail2"?: if !e.isARepeat { c.frame.toggleRail(2) }; return nil
                 default: return e
                 }
             }
@@ -199,8 +234,82 @@ final class StudioFrame: NSView {
     /// What the page shows and the rails point at. The levels are the schema's: a collection, a folder
     /// in it where it groups its members, a member (the app's project), and the palettes inside.
     /// A group inside a member, by the member and the group: Palettes, Typography, Information, or any of the member's own.
-    enum Place: Hashable, Codable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, imageIntake, designer, settings, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
+    enum Place: Hashable, Codable { case catalogue, collection(UUID), folder(UUID, UUID), project(UUID), overview(UUID, UUID), group(UUID, UUID), palette(UUID), palettes, projects, imageIntake, designer, settings, schema, shortcuts, halo, sounds, general, colourManagement(Int), appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress(Int), contrast, share, appbridge, appbridgeSettings }
     private(set) var place: Place = .catalogue
+    private var linkedPalettes: WorkspaceLinkedPalettes { library.store.linkedPalettes }
+    private var displayLibrary: Library { library.library }
+    func isLinkedPalette(_ id: UUID) -> Bool { linkedPalettes.sources[id] != nil }
+    func canEditLinkedPalette(_ id: UUID) -> Bool { linkedPalettes.canEdit(id) }
+    func toggleLinkedPaletteEditing(_ id: UUID) {
+        do {
+            let unlock = !linkedPalettes.canEdit(id)
+            if !unlock, library.library.activeSwatchID == id { library.setTarget(nil) }
+            try linkedPalettes.setEditing(unlock, id: id)
+            library.reload()
+            pageLayout.needsLayout = true
+        } catch { library.flash(error.localizedDescription) }
+    }
+    var showsLinkedPalette: Bool { if case .palette(let id) = place { return isLinkedPalette(id) }; return false }
+    private func openLinkedPalette(_ record: UUID) {
+        library.reload()
+        go(.palette(record))
+    }
+
+    var activeAssetFrame: StudioFrame { embeddedPage ? self : pageLayout.active.controller ?? self }
+    var selectedGridPalettes: [UUID] {
+        let selected=page.grid.selectedItems
+        guard !selected.isEmpty, selected.allSatisfy({$0.id.flatMap{library.library.swatch($0)} != nil}) else { return [] }
+        return selected.compactMap(\.id)
+    }
+    var commandPalettes: [UUID] {
+        if !page.grid.selectedItems.isEmpty { return selectedGridPalettes }
+        if case .palette(let id)=place, library.library.swatch(id) != nil { return [id] }
+        return []
+    }
+    var canEditCommandPalettes: Bool {
+        !commandPalettes.isEmpty && commandPalettes.allSatisfy { !library.isLocked(palette:$0) && (!isLinkedPalette($0) || canEditLinkedPalette($0)) }
+    }
+    var selectedGridMembers:[UUID] {
+        let selected=page.grid.selectedItems
+        guard !selected.isEmpty,selected.allSatisfy({$0.id.flatMap{library.library.project($0)} != nil}) else{return []}
+        return selected.compactMap(\.id)
+    }
+    var canDeleteGridSelection: Bool {
+        let selected=page.grid.selectedItems
+        if selected.isEmpty { return false }
+        if !selectedGridPalettes.isEmpty { return canEditCommandPalettes }
+        if !selectedGridMembers.isEmpty {return selectedGridMembers.allSatisfy{library.library.project($0)?.isLocked != true}}
+        if selected.allSatisfy({$0.hex != nil}) {
+            if case .palette(let id)=place { return !library.isLocked(palette:id) && (!isLinkedPalette(id) || canEditLinkedPalette(id)) }
+            return place != .appbridge
+        }
+        return false
+    }
+    func deleteGridSelection() {
+        guard canDeleteGridSelection else { return }
+        if !selectedGridPalettes.isEmpty { library.delete(palettes:Set(selectedGridPalettes)); return }
+        if !selectedGridMembers.isEmpty {
+            let ids=selectedGridMembers
+            let count=ids.reduce(0){$0+library.library.palettes(in:$1).count}
+            SwissConfirm.ask(over:window,title:"Delete \(ids.count) Selected Members",note:"Their \(count) palettes move to My Library. The colours remain in this catalogue.",commit:"Delete") { [weak self] in
+                guard let self else{return}
+                self.library.apply("Delete Selected Members") { lib in
+                    for id in ids {
+                        if Prefs.libraryRemoveClaimed {lib.removeClaimedCopies(assignedTo:Set(lib.palettes(in:id).map(\.id)),catalogue:self.library.catalogue)}
+                        lib.deleteProject(id)
+                    }
+                }
+            }
+            return
+        }
+        let hexes=page.grid.selectedItems.compactMap(\.hex)
+        let title="Delete \(hexes.count) Selected Swatch"+(hexes.count == 1 ? "":"es")
+        if case .palette(let id)=place {
+            SwissConfirm.ask(over:window,title:title,note:"Remove these \(hexes.count) swatches from this palette. Their catalogue colours remain available.",commit:"Remove") { [weak self] in self?.library.remove(hexes,from:id) }
+        } else {
+            SwissConfirm.ask(over:window,title:title,note:"Delete these \(hexes.count) colours from the catalogue and every palette using them.",commit:"Delete") { [weak self] in self?.library.apply("Delete Selected Swatches") { $0.deleteColours(Set(hexes)) } }
+        }
+    }
     private var paletteSelection = PaletteSelection()
     private var selectionHalo: HaloMenu?
     private func selectPalette(_ id: UUID, order: [UUID], modifiers: NSEvent.ModifierFlags) {
@@ -218,8 +327,9 @@ final class StudioFrame: NSView {
         let palettes = lib.swatches.filter { ids.contains($0.id) }
         guard palettes.count > 1 else { return [] }
         let star = !palettes.allSatisfy { $0.favourite }
-        let locked = ids.contains { library.isLocked(palette: $0) }
+        let locked = ids.contains { library.isLocked(palette: $0) || (isLinkedPalette($0) && !canEditLinkedPalette($0)) }
         var actions = [
+            HaloAction(id:"metadata",label:"Edit Metadata…",symbol:"info.circle",disabled:locked,onSelect:{ [weak self] in self?.editMetadata(for:ids.sorted{$0.uuidString<$1.uuidString}.first) }),
             HaloAction(id: "copy-colours", label: "Copy Colours", symbol: "doc.on.doc") { [weak self] in
                 guard let self else { return }; self.library.copy(Array(Set(palettes.flatMap { $0.entries.map { $0.hex } })).sorted())
             },
@@ -232,6 +342,7 @@ final class StudioFrame: NSView {
                     HaloAction(id: project.id.uuidString, label: project.name, symbol: "folder", disabled: project.isLocked) { [weak self] in self?.library.copy(palettes: ids, to: project.id) }
                 }
             }),
+            addToCollectionAction(palettes.map{.palette($0.id,name:$0.name)}),
             HaloAction(id: "delete", label: "Delete Selected Palettes", symbol: "trash", disabled: locked,
                 confirmation: ("Slide to delete", "Hold the arrow key")) { [weak self] in self?.library.delete(palettes: ids, confirmed: true) }
         ]
@@ -262,13 +373,130 @@ final class StudioFrame: NSView {
     private var onOutsidePage:((Place)->Void)?
     private let pageLayout=LibraryPageLayout(frame:.zero)
     private var routingPrimary=false
+    private var sessionCatalogue: URL?
+    private var restoringSession=false
+    private var lastLibrarySessionLayout: WorkspaceLayoutTemplate.State?
+    private var lastSessionRecord:WorkspaceSession?
+
+    func enableSessionMemory() {
+        if sessionCatalogue != library.store.url {lastLibrarySessionLayout=nil;lastSessionRecord=nil}
+        sessionCatalogue=library.store.url
+    }
+    func saveWorkspaceSession(flush:Bool=false) {
+        guard !embeddedPage,!restoringSession,splash == nil,sessionCatalogue == library.store.url,window != nil else{return}
+        if libraryLayoutAvailable {lastLibrarySessionLayout=captureWorkspaceLayout(forSession:true)}
+        // The library tab tree stays intact while a settings or tools page is visible.
+        var state=lastLibrarySessionLayout ?? captureWorkspaceLayout(forSession:true)!
+        captureSessionRails(into:&state)
+        state.settings=[:];state.printProfile=nil
+        let record=WorkspaceSession(route:place,layout:state,page:captureLayoutPage(),settingsReturn:settingsReturn,
+            lastSettings:lastSettingsPage,railScroll:sessionRails.map(\.sessionScroll),wideLibrary:wideLibraryRailVisible,
+            wideAnalysis:wideAnalysisRailVisible,compactRail:compactRailSelection,targetPane:pageLayout.targetPaneID,
+            focusedFolder:cataloguePane.sessionFocusedFolder,inspectedPalette:inspectedPalette,selectedPalettes:paletteSelection.ids)
+        if record == lastSessionRecord {if flush{preferences.synchronize()};return}
+        do {try record.write(for:library.store.url);lastSessionRecord=record;if flush{preferences.synchronize()}}
+        catch {Diagnostics.log("workspace-session",error:error)}
+    }
+    private var sessionRails:[WorkspaceRail] {[leftPanelRail,rightPanelRail,intakeSourceRail,intakeTargetRail]}
+    private func captureSessionRails(into state:inout WorkspaceLayoutTemplate.State) {
+        state.panels=[]
+        for (r,rail) in sessionRails.enumerated(){for (i,panel) in rail.panels.enumerated(){state.panels.append(.init(id:panel.panelID,rail:r,order:i,closed:panel.collapsed,height:Double(panel.preferredHeight)))}}
+        state.rails=[Double(goal.rail1),Double(goal.rail2),Double(goal.history)]
+        state.expanded=expanded;state.pageExpanded=page.expanded;state.window=window.map{.init($0.frame)}
+    }
+    @discardableResult func restoreWorkspaceSession()->Bool {
+        guard !embeddedPage,let saved=WorkspaceSession.read(for:library.store.url) else{return false}
+        enableSessionMemory()
+        restoringSession=true;defer{restoringSession=false}
+        do {
+            routingPrimary=true;go(.catalogue);routingPrimary=false
+            wideLibraryRailVisible=saved.wideLibrary;wideAnalysisRailVisible=saved.wideAnalysis;compactRailSelection=saved.compactRail
+            // Session recovery must not roll back portable colour or appearance preferences.
+            try restoreWorkspaceLayout(.init(name:"Last Session",state:saved.layout),scope:.app,session:true)
+            lastLibrarySessionLayout=saved.layout
+            let destination:Place
+            switch saved.route {
+            case .palette,.project,.overview,.group,.collection,.folder:destination=resolvedLayoutRoute(saved.route)
+            default:destination=saved.route
+            }
+            if destination != place {routingPrimary=true;go(destination);routingPrimary=false}
+            settingsReturn=saved.settingsReturn;lastSettingsPage=saved.lastSettings
+            if !libraryLayoutAvailable {restoreLayoutPage(saved.page)}
+            slideClock?.invalidate();slideClock=nil
+            goal=(CGFloat(saved.layout.rails[0]),CGFloat(saved.layout.rails[1]),CGFloat(saved.layout.rails[2]));open=goal
+            cataloguePane.sessionFocusedFolder=saved.focusedFolder
+            paletteSelection.ids=saved.selectedPalettes.intersection(Set(library.library.swatches.map(\.id)))
+            if let id=saved.inspectedPalette,library.library.swatch(id) != nil {
+                inspectedPalette=id;inspectorPane.palette=library.library.swatch(id);page.grid.selectedPalette=id
+            }
+            pageLayout.restoreSessionTarget(saved.targetPane)
+            needsLayout=true;layoutSubtreeIfNeeded()
+            pageLayout.restoreSessionViews(saved.layout.tree,includePrimary:libraryLayoutAvailable){page.restoreLayoutView($0)}
+            // Reapply the active tool's scroll after rail geometry has settled.
+            if !libraryLayoutAvailable {page.restoreLayoutView(saved.page)}
+            for (rail,y) in zip(sessionRails,saved.railScroll){rail.sessionScroll=y}
+            return true
+        } catch {routingPrimary=false;Diagnostics.log("workspace-session-restore",error:error);return false}
+    }
     private var libraryLayoutAvailable:Bool {
         switch place {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:return true;default:return false}
     }
     let history = HistoryRail()
     let footer = StudioFooter()
     private let cataloguePane = WorkspaceCatalogues()
+    func configureAssetImport(_ form: WorkspaceImportPane) {
+        form.onSourceFilesChanged = { [weak self] files in
+            guard let self else{return}
+            self.importRenamePane.sampleFile=files.first ?? URL(fileURLWithPath:self.importKind == "ASE" ? "Palette.ase":"Palette.colpal")
+        }
+        form.onOpenPalette = { [weak self] id in self?.openLinkedPalette(id) }
+        form.onFilesChanged = { [weak self] in
+            guard let self else{return}
+            self.appbridge.reloadImportedConnections()
+            self.collectionsPane.refresh()
+            if self.imageIntakeWorkspace{self.intakeSourcePane.refreshSelectedSource()}
+        }
+        form.onOpenASE = { [weak self] url in
+            guard let self else { return }; self.appbridge.openImported(url); self.go(.appbridge)
+        }
+    }
+    private lazy var importPane = WorkspaceImportPane(controller: library)
+    private lazy var collectionsPane = WorkspaceCollectionsPane(controller:library)
+    private lazy var collectionsPanel:WorkspacePanel = {
+        let panel=WorkspacePanel(id:"asset-collections",title:"Collections",content:collectionsPane,resizable:false)
+        panel.setHeaderAction(symbol:"plus",title:"New Collection"){[weak self] in self?.collectionsPane.createCollection()}
+        return panel
+    }()
+    private lazy var importHandlingPane:WorkspaceImportHandlingPane = {
+        let pane=WorkspaceImportHandlingPane(frame:.zero)
+        pane.onChange={[weak self] value in self?.importPane.skipExisting=value}
+        return pane
+    }()
+    private lazy var importRenamePane:WorkspaceImportRenamePane = {
+        let pane=WorkspaceImportRenamePane(frame:.zero)
+        pane.onChange={[weak self] options in self?.importPane.renaming=options}
+        return pane
+    }()
+    private lazy var importCollectionPane:WorkspaceImportCollectionPane = {
+        let pane=WorkspaceImportCollectionPane(controller:library)
+        pane.onChange={[weak self] id in self?.importPane.collectionID=id}
+        pane.onCreated={[weak self] in self?.collectionsPane.refresh()}
+        return pane
+    }()
+    private lazy var importHandlingPanel=WorkspacePanel(id:"import-file-handling",title:"File Handling",content:importHandlingPane,resizable:false,draggable:false)
+    private lazy var importRenamePanel=WorkspacePanel(id:"import-file-renaming",title:"File Renaming",content:importRenamePane,resizable:false,draggable:false)
+    private lazy var importCollectionPanel:WorkspacePanel = {
+        let panel=WorkspacePanel(id:"import-collection",title:"Add to Collection",content:importCollectionPane,resizable:false,draggable:false)
+        panel.setHeaderAction(symbol:"plus",title:"New Collection"){[weak self] in self?.importCollectionPane.createCollection()}
+        return panel
+    }()
+    private lazy var assetImportTargetPanel:WorkspacePanel = {
+        importPane.typeInActionbar=true
+        let panel=WorkspacePanel(id:"asset-import-target",title:"Destination",content:importPane,resizable:false,draggable:false)
+        return panel
+    }()
     private let iccProfilePane=ICCProfilePanel(frame:.zero)
+    private let metadataPane=AssetMetadataPanel(frame:.zero)
     private var paletteFilter=PaletteAssetHandler.Filter(order:PaletteAssetHandler.Order(rawValue:AppPreferences.shared.string(forKey:"Workspace.Library.PaletteOrder") ?? "") ?? .newest)
     private let inspectorPane = WorkspaceInspector()
     private let histogramPane=WorkspaceHistogramPane(frame:.zero)
@@ -280,14 +508,54 @@ final class StudioFrame: NSView {
     private var expandedAnalysis:ExpandedAnalysis?
     private var analysisColour:String?
     private var analysisPalettes:[Swatch]=[]
+    private struct AnalysisKey:Equatable {
+        let revision:Int
+        let palette:UUID?
+        let colour:String?
+        let channel:ProfileChannel?
+        let print:ProfileChannel
+        let expanded:ExpandedAnalysis?
+    }
+    private var lastAnalysisKey:AnalysisKey?
     private let filmstrip = WorkspaceFilmstrip()
     private let designerWorkspace=DesignerWorkspace(frame:.zero)
+    private var onboardingRailPrepared=false
     private let leftPanelRail = WorkspaceRail(scrollbarOnLeft:true)
     private let rightPanelRail = WorkspaceRail(scrollbarOnLeft:false)
+    /// Keyboard and footer buttons share rail state, including the narrow-window single-rail layout.
+    func toggleRail(_ index:Int){
+        if canvasWorkspace {
+            guard !imageIntakeWorkspace,place != .designer else{return}
+            if WorkspaceResponsiveGeometry.singleRail(bounds.width) {
+                let selected=index == 1 ? 0:1
+                compactRailSelection=compactRailSelection == selected ? 2:selected
+            } else if index == 1 {wideLibraryRailVisible.toggle()}
+            else {wideAnalysisRailVisible.toggle()}
+            needsLayout=true
+        } else {
+            if index == 1 {goal.rail1=goal.rail1 < 1 ? 1:0}
+            else {goal.rail2=goal.rail2 < 1 ? 1:0}
+            slide()
+        }
+    }
+    private var compactRailSelection = 0 // Library / Analysis / Neither.
+    private var wideLibraryRailVisible = true
+    private var wideAnalysisRailVisible = true
+    private let railProfile=WorkspaceRail(scrollbarOnLeft:false)
+    private let profileEditor=ProfileRailPane(frame:.zero)
+    private let profileHeader=WorkspacePanelHeader(frame:.zero)
+    private let profileHeaderContent=NSView(frame:.zero)
+    private var profileOpen:CGFloat=0,profileGoal:CGFloat=0
     private let intakeSourceRail = WorkspaceRail(scrollbarOnLeft:true)
     private let intakeTargetRail = WorkspaceRail(scrollbarOnLeft:false)
     private let intakeSourcePane = WorkspaceImageIntakePane()
     private let intakeTargetPane = WorkspaceImageDestinationPane()
+    private var imageImportTargetPanel:WorkspacePanel?
+    private var importKind="Palettes"
+    private var importsImages:Bool{importKind == "Photographs" || importKind == "Images"}
+    private var intakeAssetFiles:[URL]=[]
+    private var intakeAssetPreviews:[String:[NSColor]]=[:]
+    private var intakeAssetColourCounts:[String:Int]=[:]
     private var intakeReturnPlace:Place = .catalogue
     private var intakeLinking=false
     private var intakeImages:[TileGrid.Item]=[]
@@ -304,6 +572,12 @@ final class StudioFrame: NSView {
     private var intakePreviews:[String:TileGrid.Item]=[:]
     private var intakePendingBatches=0
     private var intakeScanComplete=false
+    private var photoFullView=false
+    private var photoSort:WorkspaceImageSort = .off
+    private let photoThumbnails:NSCache<NSString,NSImage>={let cache=NSCache<NSString,NSImage>();cache.countLimit=512;cache.totalCostLimit=128*1024*1024;return cache}()
+    private var failedPhotoThumbnails:[String:Date]=[:]
+    private var pendingPhotoThumbnails=Set<String>()
+    private let photoPreviewQueue:OperationQueue={let queue=OperationQueue();queue.name="Colorgain.PhotoLibrary.Previews";queue.qualityOfService = .userInitiated;queue.maxConcurrentOperationCount=3;return queue}()
     private let intakePreviewQueue:OperationQueue = {let q=OperationQueue();q.name="Colorgain.ImageIntake.Previews";q.qualityOfService = .userInitiated;q.maxConcurrentOperationCount=4;return q}()
     private let workspaceDragShade=WorkspaceDragShade()
     private let viewportHeader = WorkspaceViewportBar(footer: false)
@@ -319,16 +593,108 @@ final class StudioFrame: NSView {
               let node=SchemaTrial.rows(of:SchemaTrial.schema(for:projectID)).first(where:{$0.node.id==nodeID})?.node else{return false}
         return node.name.trimmingCharacters(in:.whitespacesAndNewlines).caseInsensitiveCompare("Photography") == .orderedSame
             || node.kind?.trimmingCharacters(in:.whitespacesAndNewlines).caseInsensitiveCompare("Photography") == .orderedSame
+            || SchemaTrial.type(of:node).caseInsensitiveCompare("Images") == .orderedSame
     }
-    private func beginImageIntake(){
+    private func photoRecords(project:UUID,bucket:UUID)->[(WorkspaceImportedAsset,URL)] {
+        WorkspaceImport.records(store:library.store).filter{record,_ in
+            record.member == project && record.bucket == bucket && (record.type == "Photographs" || record.type == "Images")
+        }
+    }
+    private func photoThumbnail(for url:URL,modifiedAt:Date?)->NSImage? {
+        let path=url.standardizedFileURL.path
+        let key=path+"|"+String(modifiedAt?.timeIntervalSince1970 ?? 0)
+        if let cached=photoThumbnails.object(forKey:key as NSString){return cached}
+        if let failed=failedPhotoThumbnails[key],Date().timeIntervalSince(failed) < 10{return nil}
+        guard pendingPhotoThumbnails.count < 128 else{return nil}
+        guard pendingPhotoThumbnails.insert(key).inserted else{return nil}
+        photoPreviewQueue.addOperation{[weak self] in
+            let source=CGImageSourceCreateWithURL(url as CFURL,nil)
+            let options:[CFString:Any]=[kCGImageSourceCreateThumbnailFromImageIfAbsent:true,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:520]
+            let thumbnail=source.flatMap{CGImageSourceCreateThumbnailAtIndex($0,0,options as CFDictionary)}
+            DispatchQueue.main.async{[weak self] in
+                guard let self else{return}
+                self.pendingPhotoThumbnails.remove(key)
+                if let thumbnail{
+                    let image=NSImage(cgImage:thumbnail,size:NSSize(width:CGFloat(thumbnail.width),height:CGFloat(thumbnail.height)))
+                    self.photoThumbnails.setObject(image,forKey:key as NSString,cost:thumbnail.width*thumbnail.height*4)
+                } else {
+                    self.failedPhotoThumbnails[key]=Date()
+                    if self.failedPhotoThumbnails.count > 512 {self.failedPhotoThumbnails=self.failedPhotoThumbnails.filter{Date().timeIntervalSince($0.value)<10}}
+                }
+                self.page.grid.imagePreviewReady(at:path)
+                // A request may have been deferred while the decode queue was full.
+                self.page.grid.setNeedsDisplay(self.page.grid.visibleRect)
+            }
+        }
+        return nil
+    }
+    private func loadFullPhoto(){
+        guard photoFullView,let path=page.grid.currentImagePath else{return}
+        if page.grid.fullResolutionPath == path{return}
+        page.grid.fullResolutionImage=nil;page.grid.fullResolutionPath=path
+        photoPreviewQueue.addOperation{[weak self] in
+            let image=NSImage(contentsOfFile:path)
+            DispatchQueue.main.async{[weak self] in
+                guard let self,self.photoFullView,self.page.grid.currentImagePath == path else{return}
+                self.page.grid.fullResolutionImage=image
+            }
+        }
+    }
+    private func beginImageIntake(kind:String="Palettes"){
+        importKind=(WorkspaceImport.types+["Photographs","Images"]).contains(kind) ? kind:"Palettes"
         intakeReturnPlace=place;intakeLinking=false
         intakeFullView=false;page.grid.across=intakeGridColumns
         intakePreviewGeneration+=1;intakePreviewQueue.cancelAllOperations()
         intakeImages=[];intakePreviewOrder=[];intakePreviews=[:];intakePendingBatches=0;intakeScanComplete=false
         intakeFolder=nil;intakeImageLoading=false
-        intakeTargetPane.catalogue=library.catalogue;intakeTargetPane.linking=false
+        intakeAssetFiles=[]
+        intakeAssetPreviews=[:]
+        intakeAssetColourCounts=[:]
+        importPane.sourceFiles=[]
+        importPane.requiresGridSelection=true
+        intakeTargetPane.transfer = .copy
+        let preferred:(UUID,UUID)? = {if case .group(let member,let bucket)=intakeReturnPlace{return (member,bucket)};return nil}()
+        intakeTargetPane.configure(library:library.library,schema:library.store.schema,preselect:preferred,catalogueName:library.store.url.deletingPathExtension().lastPathComponent,assetKind:importKind)
+        configureImportTarget()
         viewportHeader.setIntakeMode(true)
         go(.imageIntake)
+        intakeSourcePane.assetKind=importKind
+        intakeSourcePane.openAtImportLanding()
+        intakeSourcePane.refreshSelectedSource()
+    }
+    func openImageImport(kind:String="Palettes"){beginImageIntake(kind:kind)}
+    private func configureImportTarget(){
+        guard let imageImportTargetPanel else{return}
+        if importsImages {
+            intakeTargetRail.remove(importHandlingPanel)
+            intakeTargetRail.remove(importRenamePanel)
+            intakeTargetRail.remove(importCollectionPanel)
+            intakeTargetRail.remove(assetImportTargetPanel)
+            importCollectionPane.refresh()
+            if !intakeTargetRail.panels.contains(where:{$0 === importCollectionPanel}){intakeTargetRail.add(importCollectionPanel,at:0)}
+            if !intakeTargetRail.panels.contains(where:{$0 === imageImportTargetPanel}){intakeTargetRail.add(imageImportTargetPanel)}
+        } else {
+            intakeTargetRail.remove(imageImportTargetPanel)
+            importPane.selectType(importKind)
+            importCollectionPane.refresh()
+            if !intakeTargetRail.panels.contains(where:{$0 === importHandlingPanel}){intakeTargetRail.add(importHandlingPanel,at:0)}
+            if !intakeTargetRail.panels.contains(where:{$0 === importRenamePanel}){intakeTargetRail.add(importRenamePanel,at:1)}
+            if !intakeTargetRail.panels.contains(where:{$0 === importCollectionPanel}){intakeTargetRail.add(importCollectionPanel,at:2)}
+            if !intakeTargetRail.panels.contains(where:{$0 === assetImportTargetPanel}){intakeTargetRail.add(assetImportTargetPanel)}
+        }
+        intakeTargetRail.needsLayout=true
+    }
+    private func changeImportKind(_ kind:String){
+        guard kind != importKind else{return}
+        importKind=kind;intakeLinking=false
+        intakeAssetFiles=[]
+        intakeAssetPreviews=[:]
+        intakeAssetColourCounts=[:]
+        intakeSelectedPaths=[];intakeSelectAll=true
+        importPane.sourceFiles=[]
+        intakeSourcePane.assetKind=kind
+        intakeTargetPane.setContext(catalogue:library.store.url.deletingPathExtension().lastPathComponent,kind:kind)
+        configureImportTarget();fillPage();needsLayout=true
     }
     private func cancelImageIntake(){
         let destination=intakeReturnPlace
@@ -337,8 +703,8 @@ final class StudioFrame: NSView {
     }
     private func setImageIntakeLinking(_ linking:Bool){
         intakeLinking=linking
-        intakeTargetPane.catalogue=library.catalogue;intakeTargetPane.linking=linking
-        page.grid.note=linking ? "Link mode keeps files at their source locations. File linking is not connected yet." : "Select a source folder to review images here. Folder browsing is not connected yet."
+        intakeTargetPane.transfer=linking ? .reference:.copy
+        page.grid.note=linking ? "Selected images will stay at their source locations." : "Choose a source folder and select images to add."
         page.needsDisplay=true
         page.needsLayout=true
         fillPage()
@@ -356,13 +722,8 @@ final class StudioFrame: NSView {
             intakePreviewOrder += files.map{$0.standardizedFileURL.path}
             intakePendingBatches+=1;intakeImageLoading=true
             intakePreviewQueue.addOperation{[weak self] in
-                let decoded:[(URL,CGImage,Date?,[String:String])]=files.compactMap{url in
+                let decoded:[(URL,Date?,[String:String])]=files.compactMap{url in
                     guard let source=CGImageSourceCreateWithURL(url as CFURL,nil) else{return nil}
-                    let options:[CFString:Any]=[kCGImageSourceCreateThumbnailFromImageIfAbsent:true,
-                        kCGImageSourceCreateThumbnailWithTransform:true,
-                        kCGImageSourceThumbnailMaxPixelSize:480,
-                        kCGImageSourceShouldCacheImmediately:true]
-                    guard let image=CGImageSourceCreateThumbnailAtIndex(source,0,options as CFDictionary) else{return nil}
                     let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any]
                     let exif=props?[kCGImagePropertyExifDictionary] as? [CFString:Any]
                     let tiff=props?[kCGImagePropertyTIFFDictionary] as? [CFString:Any]
@@ -370,26 +731,37 @@ final class StudioFrame: NSView {
                     var metadata=Self.flattenMetadata(props ?? [:])
                     metadata.merge(Self.readImageSidecars(for:url),uniquingKeysWith:{_,sidecar in sidecar})
                     if let doi=metadata.first(where:{$0.key.localizedCaseInsensitiveContains("doi")})?.value {metadata["DOI"]=doi}
-                    return (url,image,dateString.flatMap{Self.imageCaptureDate.date(from:$0)},metadata)
+                    return (url,dateString.flatMap{Self.imageCaptureDate.date(from:$0)},metadata)
                 }
                 DispatchQueue.main.async{[weak self] in
                     guard let self,self.intakePreviewGeneration==generation else{return}
-                    for (url,thumbnail,captureDate,metadata) in decoded{
+                    for (url,captureDate,metadata) in decoded{
                         let path=url.standardizedFileURL.path
                         let root=self.intakeFolder?.standardizedFileURL.path
                         let relative=root.map{path.hasPrefix($0.hasSuffix("/") ? $0 : $0+"/") ? String(path.dropFirst($0.count+1)) : url.lastPathComponent} ?? url.lastPathComponent
                         let parent=(relative as NSString).deletingLastPathComponent
                         let caption=parent == "." ? "" : parent
-                        let image=NSImage(cgImage:thumbnail,size:NSSize(width:CGFloat(thumbnail.width),height:CGFloat(thumbnail.height)))
-                        self.intakePreviews[path]=TileGrid.Item(title:url.lastPathComponent,caption:caption,colours:[],hex:nil,id:nil,image:image,imagePath:path,captureDate:captureDate,metadata:metadata)
+                        let dates=try? url.resourceValues(forKeys:[.creationDateKey,.contentModificationDateKey])
+                        self.intakePreviews[path]=TileGrid.Item(title:url.lastPathComponent,caption:caption,colours:[],hex:nil,id:nil,imagePath:path,captureDate:captureDate,metadata:metadata,createdAt:dates?.creationDate,modifiedAt:dates?.contentModificationDate)
                         if self.intakeSelectAll { self.intakeSelectedPaths.insert(path) }
                     }
                     self.intakePendingBatches=max(0,self.intakePendingBatches-1)
-                    self.refreshIntakeImages()
+                    self.scheduleIntakeRefresh()
                 }
             }
         case .completed:
-            intakeScanComplete=true;refreshIntakeImages()
+            intakeScanComplete=true;scheduleIntakeRefresh()
+        }
+    }
+
+    private var intakeRefreshPending=false
+    private func scheduleIntakeRefresh() {
+        guard !intakeRefreshPending else{return}
+        intakeRefreshPending=true
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.05){[weak self] in
+            guard let self else{return}
+            self.intakeRefreshPending=false
+            self.refreshIntakeImages()
         }
     }
 
@@ -408,11 +780,53 @@ final class StudioFrame: NSView {
         intakeImageLoading = !intakeScanComplete || intakePendingBatches > 0
         fillPage()
     }
+    private func visibleImportFiles()->[URL] {
+        let known=intakeNewOnly ? WorkspaceImport.seenSources(in:library.store.root):[]
+        var files=intakeAssetFiles.filter{!known.contains($0.standardizedFileURL.path)}
+        switch intakeSort {
+        case .checkedState:
+            files=files.enumerated().sorted{a,b in
+                let selectedA=intakeSelectedPaths.contains(a.element.standardizedFileURL.path)
+                let selectedB=intakeSelectedPaths.contains(b.element.standardizedFileURL.path)
+                return selectedA == selectedB ? a.offset < b.offset:selectedA
+            }.map(\.element)
+        case .fileName:files.sort{$0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending}
+        case .fileType:files.sort{a,b in
+            let order=a.pathExtension.localizedCaseInsensitiveCompare(b.pathExtension)
+            return order == .orderedSame ? a.lastPathComponent.localizedStandardCompare(b.lastPathComponent) == .orderedAscending:order == .orderedAscending
+        }
+        default:break
+        }
+        return files
+    }
     /// Selection is independent of the preview dataset and its current order/scroll position.
     private func updateIntakeSelection(){
         page.grid.selectedImagePaths=intakeSelectedPaths
+        if !importsImages {
+            importPane.sourceFiles=visibleImportFiles().filter{intakeSelectedPaths.contains($0.standardizedFileURL.path)}
+        }
+        intakeTargetPane.selectedCount=intakeSelectedPaths.count
         for bar in [viewportHeader,viewportFooter] {
-            bar.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+            bar.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        }
+    }
+    /// File-card previews are optional; selecting and importing can proceed while they load.
+    private func previewIntakeAssets(_ files:[URL]){
+        guard importKind == "Palettes",!files.isEmpty else{return}
+        let generation=intakePreviewGeneration
+        intakePreviewQueue.addOperation{[weak self] in
+            let previews:[(String,[String],Int)]=files.compactMap{url in
+                guard let size=(try? url.resourceValues(forKeys:[.fileSizeKey]))?.fileSize,size<=16*1024*1024,
+                      let data=try? Data(contentsOf:url) else{return nil}
+                let palette=PaletteImport.read(data,fallback:url.deletingPathExtension().lastPathComponent)
+                let colours=palette.flatMap{$0.colours.map(\.hex)}
+                return (url.standardizedFileURL.path,Array(colours.prefix(colours.count <= 10 ? 10:8)),colours.count)
+            }
+            DispatchQueue.main.async{[weak self] in
+                guard let self,self.intakePreviewGeneration==generation,self.imageIntakeWorkspace else{return}
+                for (path,hexes,count) in previews{self.intakeAssetPreviews[path]=hexes.map(Design.hex);self.intakeAssetColourCounts[path]=count}
+                self.fillPage()
+            }
         }
     }
     private func isRawImage(_ name:String)->Bool { UTType(filenameExtension:URL(fileURLWithPath:name).pathExtension)?.conforms(to:.rawImage) == true }
@@ -427,14 +841,18 @@ final class StudioFrame: NSView {
     }
     private static func readImageSidecars(for image:URL)->[String:String]{
         var result:[String:String]=[:]
+        let maximumSidecarBytes=2*1024*1024
         for ext in ["json","xml","xmp","csv","tsv"]{
             let url=image.deletingPathExtension().appendingPathExtension(ext)
-            guard let data=try? Data(contentsOf:url) else{continue}
+            guard let size=try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize else{continue}
+            guard size <= maximumSidecarBytes else{result["Sidecar.\(ext).Error"]="File exceeds 2 MB";continue}
+            guard let data=try? Data(contentsOf:url) else{result["Sidecar.\(ext).Error"]="Could not read file";continue}
             switch ext{
             case "json":
                 if let object=try? JSONSerialization.jsonObject(with:data){result.merge(flattenMetadata(object)){_,new in new}}
+                else{result["Sidecar.json.Error"]="Invalid JSON"}
             case "csv","tsv":
-                guard let text=String(data:data,encoding:.utf8) else{continue}
+                guard let text=String(data:data,encoding:.utf8) else{result["Sidecar.\(ext).Error"]="Invalid text encoding";continue}
                 let rows=text.components(separatedBy:.newlines).filter{!$0.isEmpty}.map{$0.components(separatedBy:ext == "tsv" ? "\t":",")}
                 guard rows.count>1 else{continue}
                 for row in rows.dropFirst(){for column in 0..<min(rows[0].count,row.count){result["Sidecar.\(rows[0][column].trimmingCharacters(in:.whitespacesAndNewlines))"] = row[column].trimmingCharacters(in:.whitespacesAndNewlines)}}
@@ -453,14 +871,23 @@ final class StudioFrame: NSView {
         }
         return values
     }
+    private var paletteGridReturn:(route:Place,view:WorkspaceLayoutTemplate.Page,selected:UUID,filter:PaletteAssetHandler.Filter)?
+    @objc private func backToPaletteGrid(){
+        guard let saved=paletteGridReturn else{return}
+        inspectedPalette=saved.selected
+        go(saved.route)
+        restoreLayoutPage(saved.view)
+        paletteFilter=saved.filter;fillPage();page.layoutSubtreeIfNeeded();page.restoreLayoutView(saved.view)
+        page.grid.selectedPalette=saved.selected
+    }
     private func inspectPalette(_ id: UUID) {
         if inspectedPalette != id { analysisColour=nil }
         inspectedPalette = id
-        inspectorPane.palette = library.library.swatch(id)
+        inspectorPane.palette = displayLibrary.swatch(id)
         page.grid.selectedPalette = id
-        viewportHeader.channels.configure(library:library.library,palette:id)
+        viewportHeader.channels.configure(library:displayLibrary,palette:id)
         if viewportHeader.channels.selectedChannel != nil { fillPage() } else { refreshAnalysis() }
-        filmstrip.update(palettes(library.library.swatches), selected: id, colours: shade)
+        filmstrip.update(palettes(displayLibrary.swatches), selected: id, colours: shade)
     }
     /// Master Inner over everything: the columns and the beat, in the grid's orange, when it is on.
     let overlay = GridOverlay()
@@ -497,33 +924,86 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
-        for view in [leftPanelRail, rightPanelRail, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
-        let cataloguesPanel=WorkspacePanel(id: "catalogues", title: "Library", content: cataloguePane,resizable:false)
+        for view in [leftPanelRail, rightPanelRail, railProfile, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
+        let cataloguesPanel=WorkspacePanel(id: "catalogues", title: WorkspaceSidebarStructure.title, content: cataloguePane,resizable:false)
         cataloguePane.setCatalogueAction { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
-        let iccPanel=WorkspacePanel(id:"icc-profiles",title:"ICC Profiles",content:iccProfilePane,resizable:false)
-        iccPanel.setHeaderAction(symbol:"arrow.clockwise",title:"Refresh ICC Profiles") { [weak self] in self?.iccProfilePane.refresh() }
-        leftPanelRail.add(iccPanel)
+        leftPanelRail.add(collectionsPanel)
+        collectionsPane.onOpenAsset={[weak self] item in self?.openCollectedAsset(item)}
+        collectionsPane.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
+        collectionsPane.onRename = { [weak self] id,name in self?.library.rename(id,to:name) }
+        collectionsPane.onTarget = { [weak self] id in guard let self else{return};self.library.setTarget(self.library.library.activeSwatchID == id ? nil:id) }
+        collectionsPane.onRating = { [weak self] id,rating in self?.library.apply("Rate Palette"){PaletteAssetHandler.setRating(rating,on:id,in:&$0)} }
+        collectionsPane.onFlag = { [weak self] id,flag in self?.library.apply("Flag Palette"){PaletteAssetHandler.setFlag(flag,on:id,in:&$0)} }
+        collectionsPane.onColourChanged = { [weak self] in
+            guard let self else{return}
+            self.cataloguePane.configureCollections(AssetCollections.list(in:self.library.store),linkedPaletteRecords:self.linkedPalettes.sources.mapValues{$0.record.id})
+        }
+        collectionsPane.onChanged = { [weak self] in
+            guard let self else{return}
+            self.cataloguePane.configureCollections(AssetCollections.list(in:self.library.store),linkedPaletteRecords:self.linkedPalettes.sources.mapValues{$0.record.id})
+        }
+        cataloguePane.onImportLibrary = { [weak self] in guard let self else{return};MyLibraryFile.chooseImport(library:self.library,over:self) }
+        cataloguePane.onExportLibrary = { [weak self] in guard let self else{return};MyLibraryFile.chooseExport(over:self) }
+        cataloguePane.onCreateClient = { [weak self] in guard let self else{return};CatalogueJourneyView.present(library:self.library,over:self,kind:"client") }
+        cataloguePane.onCreateWork = { [weak self] client in guard let self else{return};CatalogueJourneyView.present(library:self.library,over:self,client:client,kind:"work") }
+        cataloguePane.onAssetContext = { [weak self] id, view, point in self?.openContext(.palette(id), in: view, at: point) }
+        cataloguePane.onOpenImportedAsset = { [weak self] id in self?.importPane.open(id: id) }
+        configureAssetImport(importPane)
+        cataloguePane.installICCProfiles(iccProfilePane)
+        rightPanelRail.add(WorkspacePanel(id:"metadata",title:"Metadata",content:metadataPane,resizable:false))
+        metadataPane.onEdit={ [weak self] id in self?.editMetadata(for:id) }
+        metadataPane.onSettings={ (NSApp.delegate as? AppDelegate)?.showMetadataSettings() }
         iccProfilePane.onTarget = { [weak self] profile in
             if !ICCProfileLibrary.shared.profiles.contains(where:{$0.id == profile.id}) {ICCProfileLibrary.shared.add([profile])}
             self?.viewportHeader.channels.useICC(profile);self?.fillPage()
         }
-        viewportHeader.channels.onLocateICC = { [weak self] id in self?.iccProfilePane.locate(id) }
+        iccProfilePane.onCollectionActions={[weak self] profile in
+            self?.addToCollectionAction(.init(kind:"ICC Profile",identity:profile.id,name:profile.name)) ?? HaloAction(id:"collections",label:"Add To Collection",symbol:"square.grid.2x2",disabled:true)
+        }
+        viewportHeader.channels.onLocateICC = { [weak self] id in self?.cataloguePane.revealICCProfiles();DispatchQueue.main.async { [weak self] in self?.iccProfilePane.locate(id) } }
         NotificationCenter.default.addObserver(self,selector:#selector(iccLibraryChanged),name:ICCProfileLibrary.changed,object:nil)
-        rightPanelRail.add(WorkspacePanel(id:"histograms",title:"Histograms",content:histogramPane,resizable:false))
-        let bloomPanel=WorkspacePanel(id:"bloom",title:"Delta Bloom",content:bloomPane,resizable:false)
+        let histogramPanel=WorkspacePanel(id:"histograms",title:"Histograms · Channel Levels",content:histogramPane,resizable:false)
+        histogramPanel.setHeaderAction(symbol:"slider.horizontal.3",title:"Configure Viewing Proof"){[weak self] in self?.showProfileRail()};rightPanelRail.add(histogramPanel)
+        let proofPanel=WorkspacePanel(id:"railProfile",title:"Viewing Proof Profiles",content:profileEditor,resizable:false,draggable:false)
+        proofPanel.fillsRail=true;proofPanel.setHeaderAction(symbol:"xmark",title:"Close Viewing Proof Profiles"){[weak self] in self?.profileGoal=0;if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion{self?.profileOpen=0;self?.needsLayout=true}else{self?.slide()}};railProfile.add(proofPanel)
+        NotificationCenter.default.addObserver(self,selector:#selector(openProfileRail(_:)),name:.openProfileRail,object:nil)
+        let bloomPanel=WorkspacePanel(id:"bloom",title:"Delta Bloom · Output Difference",content:bloomPane,resizable:false)
 
-        rightPanelRail.add(bloomPanel)
+        bloomPanel.setHeaderAction(symbol:"slider.horizontal.3",title:"Configure Viewing Proof"){[weak self] in self?.showProfileRail()};rightPanelRail.add(bloomPanel)
         let inspectorPanel=WorkspacePanel(id:"inspector",title:"Inspector",content:inspectorPane)
         inspectorPanel.collapsed=true;rightPanelRail.add(inspectorPanel)
-        let sourcePanel=WorkspacePanel(id:"image-source",title:"From",content:intakeSourcePane)
+        let sourcePanel=WorkspacePanel(id:"image-source",title:"Source",content:intakeSourcePane)
         sourcePanel.fillsRail=true;sourcePanel.pinsHeader=true
         sourcePanel.setHeaderAction(symbol:"plus",title:"Choose Folder…") { [weak self] in self?.intakeSourcePane.chooseFolder() }
         intakeSourceRail.add(sourcePanel)
-        intakeTargetRail.add(WorkspacePanel(id:"image-target",title:"To",content:intakeTargetPane))
+        let destinationPanel=WorkspacePanel(id:"image-target",title:"Destination",content:intakeTargetPane)
+        destinationPanel.fillsRail=true;destinationPanel.pinsHeader=true
+        imageImportTargetPanel=destinationPanel
+        intakeTargetRail.add(destinationPanel)
+        intakeTargetPane.onAdd={ [weak self] destination,transfer in self?.importSelectedImages(to:destination,transfer:transfer) }
+        intakeTargetPane.onTransfer={ [weak self] transfer in guard let self else{return};self.intakeLinking=transfer == .reference;self.fillPage() }
         intakeSourcePane.onImageFiles = { [weak self] folder, files, event in
             guard let self,self.imageIntakeWorkspace else{return}
-            self.showIntakeImages(folder:folder,files:files,event:event)
+            if self.importsImages {self.showIntakeImages(folder:folder,files:files,event:event)}
+            else {
+                switch event {
+                case .began:
+                    self.intakePreviewGeneration+=1;self.intakePreviewQueue.cancelAllOperations()
+                    self.intakeFolder=folder;self.intakeAssetFiles=[];self.intakeAssetPreviews=[:];self.intakeAssetColourCounts=[:]
+                    self.intakeSelectedPaths=[];self.intakeSelectAll=true
+                case .batch:
+                    self.intakeAssetFiles += files
+                    if self.intakeSelectAll {
+                        let seen=self.intakeNewOnly ? WorkspaceImport.seenSources(in:self.library.store.root):[]
+                        self.intakeSelectedPaths.formUnion(files.map{$0.standardizedFileURL.path}.filter{!seen.contains($0)})
+                    }
+                    self.previewIntakeAssets(files)
+                case .completed:break
+                }
+                self.updateIntakeSelection()
+                self.fillPage()
+            }
         }
         addSubview(designerWorkspace);designerWorkspace.isHidden=true
         addSubview(bloomWorkspace);bloomWorkspace.isHidden=true
@@ -539,28 +1019,56 @@ final class StudioFrame: NSView {
         bloomWorkspace.onPick = { [weak self] in self?.inspectPalette($0) }
         histogramPane.onColour = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }
         for chart in [bloomPane.chart,expandedBloom.chart] {chart.onSelect = { [weak self] key in self?.analysisColour=key;self?.refreshAnalysis() }}
-        header.proofingControl=viewportHeader.channels
+        addSubview(profileHeader);profileHeader.addSubview(profileHeaderContent);profileHeaderContent.addSubview(viewportHeader.channels);viewportHeader.channels.headerMode=true
         if !embeddedPage {
             header.layoutControl.capture={ [weak self] in self?.captureWorkspaceLayout() }
             header.layoutControl.restore={ [weak self] record,scope in try self?.restoreWorkspaceLayout(record,scope:scope) }
         }
-        viewportHeader.channels.onChange = { [weak self] in self?.fillPage();self?.pageLayout.refreshPages() }
-        viewportHeader.onImport = { [weak self] in self?.beginImageIntake() }
+        viewportHeader.channels.onChange = { [weak self] in self?.page.grid.invalidatePrintPreviews();self?.fillPage();self?.pageLayout.refreshPages() }
+        page.importPanel.onImport = { [weak self] in self?.beginImageIntake(kind:"Photographs") }
         viewportHeader.onImportLinking = { [weak self] linking in self?.setImageIntakeLinking(linking) }
         viewportHeader.onSelectAllImages = { [weak self] select in
             guard let self else{return};self.intakeSelectAll=select
-            if select { self.intakeSelectedPaths.formUnion(self.intakePreviewOrder) } else { self.intakeSelectedPaths=[] }
+            if select { self.intakeSelectedPaths.formUnion(self.importsImages ? self.intakePreviewOrder:self.visibleImportFiles().map{$0.standardizedFileURL.path}) } else { self.intakeSelectedPaths=[] }
             self.updateIntakeSelection()
         }
-        viewportHeader.onImageFilter = { [weak self] newOnly in self?.intakeNewOnly=newOnly;self?.refreshIntakeImages() }
-        viewportHeader.onImageSort = { [weak self] sort in self?.intakeSort=sort;self?.refreshIntakeImages() }
+        viewportHeader.onImageFilter = { [weak self] newOnly in
+            guard let self else{return};self.intakeNewOnly=newOnly
+            if !self.importsImages {
+                self.intakeSelectedPaths.formIntersection(Set(self.visibleImportFiles().map{$0.standardizedFileURL.path}))
+                self.updateIntakeSelection();self.fillPage()
+            } else {self.refreshIntakeImages()}
+        }
+        viewportHeader.onImageSort = { [weak self] sort in
+            guard let self else{return};self.intakeSort=sort
+            if self.importsImages{self.refreshIntakeImages()}else{self.fillPage()}
+        }
         viewportHeader.onImageView = { [weak self] full in
             guard let self else{return};self.intakeFullView=full;self.page.grid.imageFullView=full
             if full {self.window?.makeFirstResponder(self.page.grid)}
             self.page.needsLayout=true
         }
-        viewportFooter.onImageView = viewportHeader.onImageView
-        viewportFooter.onImageSort = viewportHeader.onImageSort
+        viewportHeader.onImportType = { [weak self] kind in self?.changeImportKind(kind) }
+        viewportFooter.onImageView = { [weak self] full in
+            guard let self else{return}
+            if self.imageIntakeWorkspace {self.viewportHeader.onImageView?(full);return}
+            guard self.canImportImagesFromCurrentPlace() else{return}
+            self.photoFullView=full;self.page.grid.imageFullView=full
+            self.viewportFooter.configureImageBrowser(active:true,fullView:full,index:self.page.grid.currentImageIndex+1,total:self.page.grid.items.count,sort:self.photoSort)
+            if full{self.window?.makeFirstResponder(self.page.grid);self.loadFullPhoto()}
+            self.page.needsLayout=true
+        }
+        viewportFooter.onImagePage = { [weak self] offset in self?.page.grid.changeImagePage(offset) }
+        page.grid.onImagePageChanged = { [weak self] index,total in
+            guard let self,self.canImportImagesFromCurrentPlace() else{return}
+            self.viewportFooter.configureImageBrowser(active:true,fullView:self.photoFullView,index:index,total:total,sort:self.photoSort)
+            self.loadFullPhoto()
+        }
+        viewportFooter.onImageSort = { [weak self] sort in
+            guard let self else{return}
+            if self.canImportImagesFromCurrentPlace(){self.photoSort=sort;self.fillPage()}
+            else{self.viewportHeader.onImageSort?(sort)}
+        }
         viewportHeader.onMetadataFilter = { [weak self] in self?.page.toggleMetadataFilter() }
         if CommandLine.arguments.contains("--ui-test-panels") {
             WorkspacePanelUITest.load(into:[leftPanelRail,rightPanelRail])
@@ -569,17 +1077,66 @@ final class StudioFrame: NSView {
         for rail in [leftPanelRail,rightPanelRail] {
             rail.onDragging = { [weak self] dragging in self?.workspaceDragShade.isHidden = !dragging }
         }
+        page.grid.onSelectionChanged = { [weak self] in
+            guard let self else { return }
+            self.viewportFooter.setSelectionCount(self.page.grid.selectedCount,total:self.page.grid.items.count)
+        }
+        page.grid.onSelectionEdited = { [weak self] in guard let self else{return};self.paletteSelection.ids=Set(self.selectedGridPalettes) }
+        page.grid.onDeleteSelection = { [weak self] in self?.deleteGridSelection() }
+        page.grid.onCopySelection = { [weak self] in
+            guard let self else{return}
+            let selected=self.page.grid.selectedItems
+            let keys=selected.flatMap{ item -> [String] in
+                if let hex=item.hex{return [hex]}
+                return item.id.flatMap{self.library.library.swatch($0)}?.entries.map(\.hex) ?? []
+            }
+            if !keys.isEmpty {var seen=Set<String>();self.library.copy(keys.filter{seen.insert($0).inserted})}
+        }
         page.workspaceToolbar = viewportFooter
         page.workspaceActionbar = viewportHeader
+        viewportHeader.onAssetOrder = { [weak self] order in self?.page.assetOrder=order;self?.needsLayout=true }
         let setPaletteFilter:(PaletteAssetHandler.Filter)->Void={ [weak self] value in
             guard let self else{return};self.paletteFilter=value
             AppPreferences.shared.set(value.order.rawValue,forKey:"Workspace.Library.PaletteOrder")
             self.reload();self.needsLayout=true
         }
         cataloguePane.onPaletteFilter=setPaletteFilter
+        page.paletteFilters.showsOrder=false
         page.paletteFilters.onChange=setPaletteFilter
         viewportFooter.onMode = { [weak self] list in self?.closeExpandedPanel(); self?.page.grid.listView = list; self?.page.needsLayout = true }
+        viewportFooter.onLibraryRail = { [weak self] in self?.toggleRail(1) }
+        viewportFooter.onAnalysisRail = { [weak self] in self?.toggleRail(2) }
         cataloguePane.onPick = { [weak self] in self?.go($0) }
+        cataloguePane.onReorderAsset = { [weak self] action in
+            guard let self else{return}
+            switch action {
+            case .library(let visible):
+                let assets=GlobalAssets(home:Catalogues.standard.root)
+                let original=assets.assetTypes
+                let ordered=visible+original.filter{!visible.contains($0)}
+                do {
+                    try assets.setAssetTypes(ordered)
+                    AppPreferences.shared.set(true,forKey:"Workspace.AssetTree.ManualOrder.Library")
+                } catch {NSApp.presentError(error);return}
+            case .catalogue(let project,let ids):
+                let positions=Dictionary(uniqueKeysWithValues:ids.enumerated().map{($0.element,$0.offset)})
+                func reordered(_ original:SchemaNode)->SchemaNode {
+                    var node=original
+                    if node.kind == "Simple Assets" {
+                        node.children.sort{(positions[$0.id] ?? Int.max) < (positions[$1.id] ?? Int.max)}
+                    } else {node.children=node.children.map(reordered)}
+                    return node
+                }
+                var file=SchemaTrial.schema(for:self.library.store.root) ?? SchemaTrial.read(in:self.library.store.root)
+                var stacks=file.stacks ?? [:]
+                stacks[project.uuidString]=reordered(SchemaTrial.schema(for:project))
+                file.stacks=stacks
+                do {try self.library.store.save(self.library.library,schema:file)}
+                catch {NSApp.presentError(error);return}
+                AppPreferences.shared.set(true,forKey:"Workspace.AssetTree.ManualOrder."+project.uuidString)
+            }
+            self.library.reload();self.reload();self.needsLayout=true
+        }
         cataloguePane.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
         cataloguePane.onRename = { [weak self] id,name in self?.library.rename(id,to:name) }
         cataloguePane.onTarget = { [weak self] id in guard let self else{return};self.library.setTarget(self.library.library.activeSwatchID == id ? nil:id) }
@@ -653,7 +1210,7 @@ final class StudioFrame: NSView {
         }
         page.add(StudioHelpPage(), as: .help)
         header.searchStorageKey = "Studio.Searches." + library.catalogue
-        header.onSearch = { [weak self] _ in self?.fillPage() }
+        header.onSearch = { [weak self] _ in self?.scheduleSearchRefresh() }
         header.onSearchCommitted = { [weak self] in self?.fillHistory() }
         header.searchResults = { [weak self] query in
             guard let self else { return [] }
@@ -686,10 +1243,18 @@ final class StudioFrame: NSView {
             guard let self else{return};self.page.grid.across=n
             if self.imageIntakeWorkspace && !self.intakeFullView {self.intakeGridColumns=n;self.page.grid.needsLayout=true}
         }
+        page.grid.onImageSelectionChanged = { [weak self] paths in
+            guard let self else { return }
+            self.intakeSelectedPaths=paths
+            let available=self.importsImages ? self.intakePreviewOrder:self.visibleImportFiles().map{$0.standardizedFileURL.path}
+            self.intakeSelectAll = !available.isEmpty && available.allSatisfy(paths.contains)
+            self.updateIntakeSelection()
+        }
         page.grid.onImageSelectionToggle = { [weak self] path in
             guard let self else{return}
             if self.intakeSelectedPaths.contains(path){self.intakeSelectedPaths.remove(path)}else{self.intakeSelectedPaths.insert(path)}
-            self.intakeSelectAll = !self.intakePreviewOrder.isEmpty && self.intakePreviewOrder.allSatisfy(self.intakeSelectedPaths.contains)
+            let available=self.importsImages ? self.intakePreviewOrder:self.visibleImportFiles().map{$0.standardizedFileURL.path}
+            self.intakeSelectAll = !available.isEmpty && available.allSatisfy(self.intakeSelectedPaths.contains)
             self.updateIntakeSelection()
         }
         page.grid.onImageContextAction = { [weak self] path, action in
@@ -702,9 +1267,21 @@ final class StudioFrame: NSView {
             case 1:
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)])
             case 2:
-                self.intakeFullView=true;self.page.grid.showImageFull(path);self.page.needsLayout=true;self.fillPage()
+                if self.imageIntakeWorkspace {self.intakeFullView=true}else{self.photoFullView=true}
+                self.page.grid.showImageFull(path);self.page.needsLayout=true;self.fillPage()
+                if !self.imageIntakeWorkspace {self.loadFullPhoto()}
+            case 3:
+                if self.imageIntakeWorkspace {self.intakeFullView=false}else{self.photoFullView=false}
+                self.page.grid.imageFullView=false;self.fillPage()
             default:break
             }
+        }
+        page.grid.onImageContextActions = { [weak self] path in self?.imageContextActions(for: path) ?? [] }
+        page.grid.onImageHalo = { [weak self] path, rect in self?.openImageHalo(for: path, rect: rect) }
+        page.grid.onNotes = { [weak self] item in self?.openNotes(for: item) }
+        page.grid.onTags = { [weak self] item in
+            if let id=item.id {self?.tag(palette:id)}
+            else if let hex=item.hex {self?.tag(swatches:[hex])}
         }
         rail1.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
         rail2.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
@@ -772,28 +1349,21 @@ final class StudioFrame: NSView {
         }
         contrastPage.onPaletteChange = { [weak self] in if self?.place == .contrast { self?.fillContextRail() } }
         page.grid.onPick = { [weak self] hex in self?.choose(hex) }
-        page.grid.palettePresentation={ [weak self] id in guard let self,let palette=self.library.library.swatch(id) else{return nil};return PaletteAssetHandler.presentation(palette,in:self.library.library) }
-        page.grid.onPaletteRating={ [weak self] id,rating in self?.library.apply("Rate Palette"){PaletteAssetHandler.setRating(rating,on:id,in:&$0)} }
-        page.grid.onPaletteFlag={ [weak self] id,flag in self?.library.apply("Flag Palette"){PaletteAssetHandler.setFlag(flag,on:id,in:&$0)} }
-        page.grid.canHover = { [weak self] item in item.hex != nil || item.id.flatMap { self?.library.library.swatch($0) } != nil }
-        page.grid.onPaletteHalo = { [weak self] id,rect in guard let self else{return};self.openHalo(for:id,from:self.page.grid,rect:rect) }
+        page.grid.onImagePreview={ [weak self] path,date in self?.photoThumbnail(for:URL(fileURLWithPath:path),modifiedAt:date) }
+        page.grid.onPaletteRating={ [weak self] id,rating in self?.library.ratePalette(id,rating) }
+        page.grid.onPaletteFlag={ [weak self] id,flag in self?.library.flagPalette(id,flag) }
+        page.grid.onPaletteHalo = { [weak self] id,rect in guard let self else{return};if self.selectedGridPalettes.count > 1,self.selectedGridPalettes.contains(id) {self.paletteSelection.ids=Set(self.selectedGridPalettes);self.openSelectionHalo(from:self.page.grid,rect:rect)} else {self.openHalo(for:id,from:self.page.grid,rect:rect)} }
         page.onDeltaToggle = { [weak self] in Prefs.deltaWarningsEnabled.toggle();self?.page.applyDeltaState(Prefs.deltaWarningsEnabled) }
         NotificationCenter.default.addObserver(self,selector:#selector(printProfilesChanged),name:.printProfilesChanged,object:nil)
         if let settings=try? SavedPrintProfiles.load().current {PrintCondition.current=settings.channel;page.grid.deltaTolerance=settings.tolerance}
-        page.grid.onPrint = { [weak self] item in
-            guard let self,item.sourceCMYK == nil else { return [] }
-            let keys = item.hex.map { [$0] } ?? item.id.flatMap { self.library.library.swatch($0)?.entries.map { $0.hex } } ?? []
-            let channel = self.viewportHeader.channels.selectedChannel
-            let result = keys.map { key -> TileGrid.PrintPreview? in
-                guard let definition=self.library.library.definition(of:key) ?? ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key) else { return nil }
-                guard let channel else {return .init(colour:definition.master.display,delta:0)}
-                let rendering=Rendering.of(definition,in:channel)
-                guard let shown=rendering.shown,let difference=rendering.difference else{return nil}
-                return .init(colour:shown.display,delta:difference)
-            }
-            guard result.allSatisfy({$0 != nil}) else { return [] }
-            return result.compactMap{$0}
+        page.grid.onSpectral = { [weak self] item in
+            guard let self else { return [] }
+            let palette:UUID? = item.id ?? { if case .palette(let id)=self.place {return id};return nil }()
+            guard let palette else {return []}
+            let keys=item.hex.map{[$0]} ?? self.displayLibrary.swatch(palette)?.entries.map(\.hex) ?? []
+            return Array(keys.prefix(item.colours.count)).map { self.viewerSpectral($0,palette:palette)?.colour }
         }
+        page.grid.onPreviewPaletteColour = { [weak self] id,index in self?.showPaletteViewer(id,colourIndex:index) }
         page.grid.onPreviewSwatch = { [weak self] in self?.showSwatchViewer($0) }
         page.grid.onCopy = { [weak self] text in self?.library.flash("Copied \(text)") }
         page.grid.onHalo = { [weak self] hex, rect in self?.openColourHalo(hex, rect: rect) }
@@ -810,12 +1380,22 @@ final class StudioFrame: NSView {
             default:return false
             }
         }
-        page.onFormat = { [weak self] in self?.fillPage() }
+        page.onFormat = { [weak self] in
+            guard let self else{return}
+            if self.canvasWorkspace {self.page.grid.needsDisplay=true}
+            else{self.fillPage()}
+        }
         header.onPick = { [weak self] in self?.library.togglePicking() }
         header.onSample = { [weak self] in self?.library.sampleArea() }
+        page.grid.onSelectPalette = { [weak self] id in self?.inspectPalette(id) }
+        page.paletteActions.back.target=self
+        page.paletteActions.back.action=#selector(backToPaletteGrid)
         page.grid.onOpen = { [weak self] id in
             guard let self = self else { return }
-            self.go(self.library.library.project(id) != nil ? .project(id) : .palette(id))
+            if self.displayLibrary.swatch(id) != nil {
+                self.paletteGridReturn=(self.place,self.captureLayoutPage(),id,self.paletteFilter)
+            }
+            self.go(self.displayLibrary.project(id) != nil ? .project(id) : .palette(id))
         }
         page.settings.library = library
         page.settings.onChange = { [weak self] in self?.reload() }
@@ -830,9 +1410,18 @@ final class StudioFrame: NSView {
         general.onWizard = { [weak self] in self?.showSplash() }
         general.onReset = { [weak self] in self?.reload() }
         page.add(general, as: .general)
-        #if APPSTORE
+        for index in 0..<3 {
+            let colour = ColourManagementSettings(index: index)
+            colour.onProfiles = { [weak self] in
+                guard let self else { return }
+                self.go(self.settingsReturn ?? .catalogue)
+                self.layoutSubtreeIfNeeded()
+                self.showProfileRail()
+            }
+            page.add(colour, as: .colourManagement(index))
+        }
+        page.onSettingsTab = { [weak self] destination in self?.go(destination) }
         page.add(AppleMenubarSettings(), as: .appleMenubar)
-        #endif
         page.add(SharingSettings(), as: .sharingSettings)
         let qrImport = QRImportPage()
         qrImport.onDocument = { [weak self] document in guard let self else { return }; QRSharing.review(document, library:self.library, over:self) }
@@ -893,10 +1482,14 @@ final class StudioFrame: NSView {
         } }
         if !embeddedPage {
             addSubview(pageLayout,positioned:.below,relativeTo:bloomWorkspace)
+            pageLayout.canEditLinkedPalette={ [weak self] id in self?.canEditLinkedPalette(id) ?? false }
+            pageLayout.toggleLinkedPaletteEditing={ [weak self] id in self?.toggleLinkedPaletteEditing(id) }
+            pageLayout.isLinkedPalette={ [weak self] id in self?.isLinkedPalette(id) ?? false }
             pageLayout.currentPlace={ [weak self] in self?.place ?? .catalogue }
             pageLayout.capturePrimary={ [weak self] in self?.captureLayoutPage() ?? .init() }
             pageLayout.restorePrimary={ [weak self] in self?.restoreLayoutPage($0) }
             pageLayout.resolveRoute={ [weak self] in self?.resolvedLayoutRoute($0) ?? .catalogue }
+            pageLayout.hidePageControls={ [weak self] in self?.onboardingActive == true }
             pageLayout.titleForPlace={ [weak self] place in self?.pageTitle(for:place) ?? "Library" }
             pageLayout.navigatePrimary={ [weak self] place in guard let self else{return};self.routingPrimary=true;self.go(place);self.routingPrimary=false }
             pageLayout.renamePrimary={ [weak self] name in self?.page.onRenamePalette?(name) }
@@ -924,8 +1517,26 @@ final class StudioFrame: NSView {
     override var isFlipped: Bool { true }
 
     private var pendingPickerRefresh = false
-    @objc private func libraryChanged() {
+    private var pendingSearchRefresh:DispatchWorkItem?
+    private func scheduleSearchRefresh() {
+        pendingSearchRefresh?.cancel()
+        let work=DispatchWorkItem{[weak self] in self?.fillPage(reuseGridIfSame:true)}
+        pendingSearchRefresh=work
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.12,execute:work)
+    }
+    @objc private func libraryChanged(_ notice:Notification) {
         if library.picking { pendingPickerRefresh = true; return }
+        if let scope=notice.userInfo?["scope"] as? String,scope == "review" || scope == "notes" {
+            let snapshots=Dictionary(displayLibrary.swatches.map{($0.id,($0.name,$0.review ?? PaletteReview()))},uniquingKeysWith:{first,_ in first})
+            page.grid.paletteReview={id in snapshots[id]}
+            cataloguePane.refreshAssetPresentation(displayLibrary)
+            page.grid.refreshReviewControls()
+            if case .palette(let id)=place,let palette=displayLibrary.swatch(id) {
+                page.paletteActions.review.configure(name:palette.name,review:palette.review)
+            }
+            if scope == "review" && (paletteFilter.rating != nil || paletteFilter.flag != nil || paletteFilter.order == .rating || paletteFilter.order == .flag) {fillPage()}
+            return
+        }
         reload()
     }
     @objc private func historyChanged() {
@@ -938,11 +1549,13 @@ final class StudioFrame: NSView {
         page.grid.chosenHex = chosenHex
     }
 
+    @objc private func openProfileRail(_ notification:Notification){guard !embeddedPage,let source=notification.object as? NSView,source.window === window else{return};showProfileRail()}
+    private func showProfileRail(){guard !embeddedPage else{return};viewportHeader.channels.showProfiles()}
     /// Slides every panel towards where it is going, a quarter of a second for the whole way, eased; stops when all have arrived.
     private func slide() {
         if embeddedPage {open=goal;needsLayout=true;return}
         header.historyOpen = goal.history > 0
-        guard open != goal else { needsLayout = true; return }
+        guard open != goal || profileOpen != profileGoal else { needsLayout = true; return }
         guard slideClock == nil else { return }
         page.layoutFrozen = true
         lastSlide = Date()
@@ -951,11 +1564,12 @@ final class StudioFrame: NSView {
             let now = Date(), step = CGFloat(now.timeIntervalSince(self.lastSlide) / 0.25)
             self.lastSlide = now
             func toward(_ v: CGFloat, _ g: CGFloat) -> CGFloat { v < g ? min(g, v + step) : max(g, v - step) }
+            self.profileOpen=toward(self.profileOpen,self.profileGoal)
             self.open = (toward(self.open.rail1, self.goal.rail1), toward(self.open.rail2, self.goal.rail2), toward(self.open.history, self.goal.history))
             self.needsLayout = true
             self.layoutSubtreeIfNeeded()
             self.needsDisplay = true
-            if self.open == self.goal {
+            if self.open == self.goal && self.profileOpen == self.profileGoal {
                 t.invalidate(); self.slideClock = nil
                 let transition = CATransition(); transition.type = .fade; transition.duration = 0.12
                 if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { self.page.layer?.add(transition, forKey: "RailContentReflow") }
@@ -966,24 +1580,25 @@ final class StudioFrame: NSView {
         RunLoop.main.add(slideClock!, forMode: .common)
     }
 
+    var onboardingActive:Bool {place == .catalogue && SchemaTrial.structure != nil && !page.onboardingDismissed && (library.library.projects.isEmpty || page.journey != nil)}
     private func pageTitle(for place:Place)->String {
         switch place {
-        case .palette(let id):return library.library.swatch(id)?.name ?? "Missing Palette"
-        case .project(let id):return library.library.project(id)?.name ?? "Missing Project"
+        case .palette(let id):return displayLibrary.swatch(id)?.name ?? "Missing Palette"
+        case .project(let id):return displayLibrary.project(id)?.name ?? "Missing Project"
         case .group(let project,let node),.overview(let project,let node):return SchemaTrial.rows(of:SchemaTrial.schema(for:project)).first(where:{$0.node.id == node})?.node.name ?? "Missing Section"
         case .collection(let id):return SchemaTrial.collections.first(where:{$0.id == id})?.name ?? "Collection"
         case .folder(let collection,let id):return SchemaTrial.collections.first(where:{$0.id == collection})?.folders.first(where:{$0.id == id})?.name ?? "Folder"
         case .palettes:return "Library Palettes"
-        case .catalogue:return library.catalogue
+        case .catalogue:return onboardingActive ? (SchemaTrial.personalMode ? "Personal":SchemaTrial.structure?.clientName ?? "Client")+" Onboarding":library.catalogue
         default:return "Library"
         }
     }
     private func arrangePageStack(in rect:NSRect){
         let width=rect.width,height=rect.height
-        page.isHidden=false;viewportHeader.isHidden=false;viewportFooter.isHidden=false
+        page.isHidden=false;viewportHeader.isHidden=onboardingActive;viewportFooter.isHidden=onboardingActive
         page.compactWorkspace=true;page.paneHeaderControls=true;page.inset=16;page.insetRight=16
-        page.frame=NSRect(x:0,y:0,width:width,height:max(0,height-WorkspaceViewportBar.footerHeight))
-        viewportHeader.preferredHeight=page.showsPaletteFilters ? PaletteFilterControls.actionbarHeight(for:width):WorkspaceViewportBar.actionbarHeight
+        page.frame=NSRect(x:0,y:0,width:width,height:max(0,height-(onboardingActive ? 0:WorkspaceViewportBar.footerHeight)))
+        viewportHeader.preferredHeight=page.actionbarHeight(for:width)
         viewportHeader.frame=NSRect(x:0,y:AreaHeader.rule,width:width,height:viewportHeader.preferredHeight)
         viewportFooter.frame=NSRect(x:0,y:max(0,height-WorkspaceViewportBar.footerHeight),width:width,height:WorkspaceViewportBar.footerHeight)
     }
@@ -993,7 +1608,7 @@ final class StudioFrame: NSView {
         super.layout()
         let w = bounds.width, h = bounds.height
         if embeddedPage {
-            for view in [header,rail1,rail2,history,footer,strip,printPaletteRail,leftPanelRail,rightPanelRail,intakeSourceRail,intakeTargetRail,filmstrip,designerWorkspace,bloomWorkspace,overlay,settingsCurtainClip] as [NSView] {view.isHidden=true}
+            for view in [header,rail1,rail2,history,footer,strip,profileHeader,printPaletteRail,leftPanelRail,rightPanelRail,railProfile,intakeSourceRail,intakeTargetRail,filmstrip,designerWorkspace,bloomWorkspace,overlay,settingsCurtainClip] as [NSView] {view.isHidden=true}
             arrangePageStack(in:bounds);return
         }
         pageLayout.isHidden = !libraryLayoutAvailable
@@ -1001,10 +1616,16 @@ final class StudioFrame: NSView {
         if libraryLayoutAvailable {
             for view in [page,viewportHeader,viewportFooter] where view.superview !== pageLayout.primaryContent {pageLayout.primaryContent.addSubview(view)}
         } else {
-            for view in [page,viewportHeader,viewportFooter] where view.superview !== self {addSubview(view)}
+            // Moving the shared viewport out of LibraryPageLayout must keep it below
+            // the fixed header and rails. A plain addSubview puts it on top of them,
+            // hiding From and the navigation when Import is opened from Library.
+            for view in [page,viewportHeader,viewportFooter] where view.superview !== self {
+                addSubview(view, positioned:.below, relativeTo:header)
+            }
         }
         leftPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace
         rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
+        railProfile.isHidden=rightPanelRail.isHidden || profileOpen == 0
         designerWorkspace.isHidden = place != .designer
         page.isHidden = place == .designer
         intakeSourceRail.isHidden = !imageIntakeWorkspace
@@ -1014,28 +1635,44 @@ final class StudioFrame: NSView {
         viewportFooter.isHidden = !canvasWorkspace || place == .designer
         bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil || place == .designer
         footer.isHidden = false
+        profileHeader.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
         if canvasWorkspace {
-            let top = A.header + 1, bottom: CGFloat = A.footer + (imageIntakeWorkspace || place == .designer ? 0 : 120)
-            let left=A.railWidth,right=A.railWidth
+            let adaptive = !imageIntakeWorkspace && place != .designer
+            let rails = WorkspaceResponsiveGeometry.rails(width:w, selection:compactRailSelection, library:wideLibraryRailVisible, analysis:wideAnalysisRailVisible)
+            let left = adaptive ? rails.0:A.railWidth, right = adaptive ? rails.1:A.railWidth
+            leftPanelRail.isHidden = leftPanelRail.isHidden || left == 0
+            rightPanelRail.isHidden = rightPanelRail.isHidden || right == 0
+            railProfile.isHidden = rightPanelRail.isHidden || profileOpen == 0
+            viewportFooter.setRailControls(library:left > 0, analysis:right > 0, visible:adaptive)
+            let proofWidth = right > 0 ? min(A.railWidth,max(0,w-left-right-280))*profileOpen:0
+            let profileHeight:CGFloat=profileHeader.isHidden ? 0:viewportHeader.channels.headerHeight(forWidth:max(0,w-left-right-proofWidth-34))
+            let intakeBarHeight:CGFloat=imageIntakeWorkspace ? page.actionbarHeight(for:max(0,w-left-right-proofWidth-2)):0
+            let top = A.header + 1 + profileHeight + intakeBarHeight, bottom: CGFloat = A.footer + (imageIntakeWorkspace || place == .designer ? 0 : 120)
             let workspaceFooterY=h-bottom-WorkspaceViewportBar.footerHeight
             footer.frame=NSRect(x:0,y:h-A.footer,width:w,height:A.footer)
             footer.grid=(A.column(1,in:w),A.columnWidth(in:w),A.column(5,in:w))
             header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
-            header.grid = (16, A.columnWidth(in: w)); header.railEdge = left
-            leftPanelRail.frame = NSRect(x: 0, y: top, width: left, height: h-top-bottom)
-            rightPanelRail.frame = NSRect(x: w-right, y: top, width: right, height: h-top-bottom)
+            header.grid = (16, A.columnWidth(in: w)); header.railEdge = imageIntakeWorkspace ? A.railWidth:left
+            let railTop=A.header+1
+            profileHeader.frame=NSRect(x:left+1,y:railTop,width:w-left-right-proofWidth-2,height:profileHeight)
+            profileHeaderContent.frame=NSRect(x:16,y:0,width:max(0,profileHeader.bounds.width-32),height:profileHeight)
+            viewportHeader.channels.frame=profileHeaderContent.bounds
+            leftPanelRail.frame = NSRect(x: 0, y: railTop, width: left, height: h-railTop-bottom)
+            rightPanelRail.frame = NSRect(x: w-right, y: railTop, width: right, height: h-railTop-bottom)
+            railProfile.frame=NSRect(x:w-right-proofWidth,y:railTop,width:proofWidth,height:h-railTop-bottom)
             intakeSourceRail.frame=leftPanelRail.frame
             intakeTargetRail.frame=rightPanelRail.frame
             designerWorkspace.frame=NSRect(x:left+1,y:top,width:w-left-1,height:h-top-bottom)
-            page.frame = NSRect(x: left+1, y: top, width: w-left-right-2, height: max(0,workspaceFooterY-top))
-            viewportHeader.preferredHeight=page.showsPaletteFilters ? PaletteFilterControls.actionbarHeight(for:w-left-right-2):WorkspaceViewportBar.actionbarHeight
-            viewportHeader.frame=NSRect(x:left+1,y:top+AreaHeader.rule,width:w-left-right-2,height:viewportHeader.preferredHeight)
-            viewportFooter.frame=NSRect(x:left+1,y:workspaceFooterY,width:w-left-right-2,height:WorkspaceViewportBar.footerHeight)
-            workspaceDragShade.frame=NSRect(x:left+1,y:top,width:w-left-right-2,height:h-top-bottom)
-            bloomWorkspace.frame=NSRect(x:left+1,y:viewportHeader.frame.maxY,width:w-left-right-2,height:max(0,viewportFooter.frame.minY-viewportHeader.frame.maxY))
+            page.frame = NSRect(x: left+1, y: top, width: w-left-right-proofWidth-2, height: max(0,workspaceFooterY-top))
+            viewportHeader.usesHeaderSurface=imageIntakeWorkspace
+            viewportHeader.preferredHeight=imageIntakeWorkspace ? intakeBarHeight:page.actionbarHeight(for:w-left-right-proofWidth-2)
+            viewportHeader.frame=NSRect(x:left+1,y:imageIntakeWorkspace ? railTop:top+AreaHeader.rule,width:w-left-right-proofWidth-2,height:viewportHeader.preferredHeight)
+            viewportFooter.frame=NSRect(x:left+1,y:workspaceFooterY,width:w-left-right-proofWidth-2,height:WorkspaceViewportBar.footerHeight)
+            workspaceDragShade.frame=NSRect(x:left+1,y:top,width:w-left-right-proofWidth-2,height:h-top-bottom)
+            bloomWorkspace.frame=NSRect(x:left+1,y:viewportHeader.frame.maxY,width:w-left-right-proofWidth-2,height:max(0,viewportFooter.frame.minY-viewportHeader.frame.maxY))
             expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
             if libraryLayoutAvailable {
-                pageLayout.frame=NSRect(x:left+1,y:top,width:w-left-right-2,height:max(0,h-top-bottom))
+                pageLayout.frame=NSRect(x:left+1,y:top,width:w-left-right-proofWidth-2,height:max(0,h-top-bottom))
                 pageLayout.needsLayout=true;pageLayout.layoutSubtreeIfNeeded()
                 arrangePageStack(in:pageLayout.primaryContent.bounds)
             }
@@ -1046,7 +1683,7 @@ final class StudioFrame: NSView {
             settingsCurtainClip.isHidden=true
             strip.frame=NSRect(x:0,y:0,width:w,height:TitleStrip.height)
             paletteWheel.frame=bounds;paletteWheel.availableRect=page.convert(page.bounds,to:self);paletteWheel.anchor=NSPoint(x:left,y:page.convert(page.bounds,to:self).midY)
-            if swatchViewer.superview != nil {swatchViewer.frame=bounds;swatchViewer.availableRect=page.convert(page.bounds,to:self)}
+            if swatchViewer.superview != nil { layoutSwatchViewer() }
             overlay.frame=bounds;overlay.isHidden=true
             return
         }
@@ -1093,11 +1730,7 @@ final class StudioFrame: NSView {
         overlay.page = NSRect(x: page.frame.minX + page.inset, y: 0, width: page.frame.width - page.inset - page.insetRight, height: 0)
         (history.inset, history.insetRight) = (A.gutter / 2, A.margin)
         strip.frame = NSRect(x: 0, y: 0, width: w, height: TitleStrip.height)
-        if swatchViewer.superview != nil {
-            swatchViewer.frame = bounds
-            swatchViewer.availableRect = NSRect(x: page.frame.minX + page.inset, y: page.frame.minY + AreaHeader.height,
-                width: max(1, page.frame.width - page.inset - page.insetRight), height: max(1, page.frame.height - AreaHeader.height))
-        }
+        if swatchViewer.superview != nil { layoutSwatchViewer() }
         paletteWheel.frame = bounds
         paletteWheel.availableRect = NSRect(x: 0, y: top + AreaHeader.rule + 1, width: w, height: max(0, bodyH - AreaHeader.rule - 1))
         paletteWheel.anchor = NSPoint(x: rail1.frame.maxX, y: paletteWheel.availableRect.midY)
@@ -1150,7 +1783,7 @@ final class StudioFrame: NSView {
     // MARK: What is shown
 
     private func isSettings(_ p: Place) -> Bool {
-        switch p { case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .appbridgeSettings: return true; default: return false }
+        switch p { case .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .appbridgeSettings: return true; default: return false }
     }
 
     /// The Settings entry point resumes the last section; Catalogues remains an explicit rail destination.
@@ -1178,8 +1811,8 @@ final class StudioFrame: NSView {
         }
         guard let place else { return .catalogue }
         switch place {
-        case .palette(let id): return library.library.swatch(id) == nil ? .catalogue : place
-        case .project(let id), .overview(let id, _), .group(let id, _): return library.library.project(id) == nil ? .catalogue : place
+        case .palette(let id): return displayLibrary.swatch(id) == nil ? .catalogue : place
+        case .project(let id), .overview(let id, _), .group(let id, _): return displayLibrary.project(id) == nil ? .catalogue : place
         case .collection(let id): return SchemaTrial.collections.contains { $0.id == id } ? place : .catalogue
         case .folder(let c, let f): return SchemaTrial.collections.first { $0.id == c }?.folders.contains { $0.id == f } == true ? place : .catalogue
         default: return place
@@ -1221,7 +1854,13 @@ final class StudioFrame: NSView {
         needsLayout = true
     }
 
-    func go(_ p: Place) {
+    func go(_ requested: Place) {
+        var p=requested
+        let previousRoute=place
+        if SchemaTrial.personalMode {switch p {case .collection,.folder:p = .catalogue;default:break}}
+        if p == .schema {(NSApp.delegate as? AppDelegate)?.showCatalogueStructure();return}
+
+        if !embeddedPage,!restoringSession,sessionCatalogue == library.store.url,libraryLayoutAvailable,p != place {lastLibrarySessionLayout=captureWorkspaceLayout(forSession:true)}
         if embeddedPage {
             switch p {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:break
             default:if let onOutsidePage{onOutsidePage(p);return}}
@@ -1267,7 +1906,10 @@ final class StudioFrame: NSView {
         if !embeddedPage{pageLayout.updatePrimary(p)}
         saveLibraryPlace(p)
         slide()
-        reload()
+        func libraryRoute(_ route:Place)->Bool {
+            switch route {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:return true;default:return false}
+        }
+        reload(routeOnly:libraryRoute(previousRoute) && libraryRoute(p))
     }
 
     private func beginNewASE() {
@@ -1318,32 +1960,30 @@ final class StudioFrame: NSView {
     private func resolvedLayoutRoute(_ route:Place)->Place {
         switch route {
         case .catalogue,.palettes:return route
-        case .palette(let id):return library.library.swatch(id) == nil ? .catalogue:route
-        case .project(let id),.overview(let id,_),.group(let id,_):return library.library.project(id) == nil ? .catalogue:route
+        case .palette(let id):return displayLibrary.swatch(id) == nil ? .catalogue:route
+        case .project(let id),.overview(let id,_),.group(let id,_):return displayLibrary.project(id) == nil ? .catalogue:route
         case .collection(let id):return SchemaTrial.collections.contains{$0.id == id} ? route:.catalogue
         case .folder(let c,let f):return SchemaTrial.collections.first{$0.id == c}?.folders.contains{$0.id == f} == true ? route:.catalogue
         default:return .catalogue
         }
     }
-    private func captureWorkspaceLayout()->WorkspaceLayoutTemplate.State? {
-        guard libraryLayoutAvailable else{return nil}
+    private func captureWorkspaceLayout(forSession:Bool=false)->WorkspaceLayoutTemplate.State? {
+        guard libraryLayoutAvailable || forSession else{return nil}
         var state=WorkspaceLayoutTemplate.State(tree:pageLayout.snapshot(),activePane:pageLayout.active.id)
         for (railIndex,rail) in [leftPanelRail,rightPanelRail,intakeSourceRail,intakeTargetRail].enumerated(){for (index,panel) in rail.panels.enumerated(){state.panels.append(.init(id:panel.panelID,rail:railIndex,order:index,closed:panel.collapsed,height:Double(panel.preferredHeight)))}}
-        state.rails=[Double(goal.rail1),Double(goal.rail2),Double(goal.history)];state.expanded=expanded;state.pageExpanded=page.expanded;state.settings=Layout_Handler.captureSettings();state.histogram=histogramPane.layoutSelection
-        state.printProfile=try? SavedPrintProfiles.load().current;state.window=window.map{.init($0.frame)};return state
+        state.rails=[Double(goal.rail1),Double(goal.rail2),Double(goal.history)];state.expanded=expanded;state.pageExpanded=page.expanded;state.settings=forSession ? [:]:Layout_Handler.captureSettings();state.histogram=histogramPane.layoutSelection
+        state.profileRailOpen=profileGoal > 0;state.window=window.map{.init($0.frame)};return state
     }
-    private func restoreWorkspaceLayout(_ record:WorkspaceLayoutTemplate,scope:Layout_Handler.Scope)throws {
+    private func restoreWorkspaceLayout(_ record:WorkspaceLayoutTemplate,scope:Layout_Handler.Scope,session:Bool=false)throws {
         try Layout_Handler.validate(record.state)
         guard record.state.version == 1 else{throw failure("This layout needs a newer version of Colorgain.")}
         guard libraryLayoutAvailable else{throw failure("Open Library Before Applying A Layout")}
         let state=record.state
-        if scope == .app {
+        if scope == .app && !session {
             Layout_Handler.restoreSettings(state.settings)
-            if let settings=state.printProfile{try SavedPrintProfiles.setCurrent(settings)}
             cataloguePane.restoreLayoutPreferences()
             NotificationCenter.default.post(name:.themeDidChange,object:nil)
         }
-        try pageLayout.restore(state.tree,activePane:state.activePane,pageOnly:scope == .catalogue)
         if scope == .app {
             let rails=[leftPanelRail,rightPanelRail,intakeSourceRail,intakeTargetRail],panels=rails.flatMap(\.panels)
             for saved in state.panels.sorted(by:{$0.order < $1.order}) {
@@ -1351,6 +1991,7 @@ final class StudioFrame: NSView {
                 panel.collapsed=saved.closed;panel.preferredHeight=max(0,CGFloat(saved.height));rails[saved.rail].add(panel,at:saved.order)
             }
             histogramPane.layoutSelection=state.histogram;expandedHistogram.copyConfiguration(from:histogramPane)
+            profileGoal=0;profileOpen=0
             expanded=state.expanded;page.expanded=state.pageExpanded
             if state.rails.count == 3 {slideClock?.invalidate();slideClock=nil;goal=(CGFloat(state.rails[0]),CGFloat(state.rails[1]),CGFloat(state.rails[2]));open=goal}
             if let rect=state.window?.rect,rect.width.isFinite,rect.height.isFinite,rect.minX.isFinite,rect.minY.isFinite,let window,let screen=NSScreen.screens.first(where:{$0.visibleFrame.intersects(rect)}) ?? window.screen {
@@ -1358,14 +1999,39 @@ final class StudioFrame: NSView {
                 window.setFrame(NSRect(x:max(visible.minX,min(rect.minX,visible.maxX-w)),y:max(visible.minY,min(rect.minY,visible.maxY-h)),width:w,height:h),display:true)
             }
         }
+        needsLayout=true;layoutSubtreeIfNeeded()
+        try pageLayout.restore(state.tree,activePane:state.activePane,pageOnly:scope == .catalogue)
         needsLayout=true;layoutSubtreeIfNeeded();followPane(pageLayout.active.controller ?? self)
+        if session,SchemaTrial.structure != nil,library.library.projects.isEmpty {
+            for panel in leftPanelRail.panels {panel.collapsed=panel.panelID != "catalogues"}
+            cataloguePane.beginOnboarding()
+        }
     }
-    /// Rebuilds every region from the library and the schema. Cheap enough to do whole on any change.
-    func reload() {
+    /// A route change reuses the library tree and colour table; model changes rebuild them.
+    func reload(routeOnly:Bool=false) {
+        if !routeOnly{page.grid.invalidatePrintPreviews()}
         if !embeddedPage{header.layoutControl.catalogueURL=library.store.url}
         if !embeddedPage {appbridge.bind(to: library.store.root)}
-        let lib = library.library
-        shade = lib.displayTable()
+        // A restored Import tab can arrive without beginImageIntake(). Rebuild its
+        // destination rail from the active catalogue on every full workspace reload.
+        if imageIntakeWorkspace {
+            intakeTargetPane.configure(library:library.library,schema:library.store.schema,catalogueName:library.store.url.deletingPathExtension().lastPathComponent,assetKind:importKind)
+            configureImportTarget()
+            viewportHeader.setIntakeMode(true,linking:intakeLinking)
+            // Restored Import tabs bypass beginImageIntake; keep the source scanner's
+            // file filter in sync with the type shown by the action bar.
+            intakeSourcePane.assetKind=importKind
+            if intakeFolder == nil {intakeSourcePane.refreshSelectedSource()}
+        }
+        let lib = displayLibrary
+        if SchemaTrial.structure != nil,lib.projects.isEmpty {
+            if !onboardingRailPrepared, !embeddedPage {
+                for panel in leftPanelRail.panels {panel.collapsed=panel.panelID != "catalogues"}
+                cataloguePane.beginOnboarding();onboardingRailPrepared=true
+            }
+        }
+        if !routeOnly{shade = lib.displayTable()}
+        if SchemaTrial.personalMode {switch place {case .collection,.folder:place = .catalogue;default:break}}
         // A place that is gone goes back to the catalogue.
         switch place {
         case .palette(let id) where lib.swatch(id) == nil: place = .catalogue
@@ -1385,7 +2051,14 @@ final class StudioFrame: NSView {
         rail1.selectedPalettes = paletteSelection.ids
         rail2.selectedPalettes = paletteSelection.ids
         rail1.selectionHeight = paletteSelection.ids.contains { library.library.swatch($0)?.claim != nil } ? Design.App.unit * 2 : Design.App.unit
-        fillLibraryRail()
+        if routeOnly {
+            let selection:Place
+            if case .overview(let id,_)=place{selection = .project(id)}else{selection=place}
+            cataloguePane.selectRoute(selection,key:workspaceFilter)
+        } else {
+            fillLibraryRail()
+            if !leftPanelRail.isHidden {collectionsPane.refreshIfCatalogueChanged()}
+        }
         fillContextRail()
         fillPage()
         if slideClock != nil {
@@ -1393,7 +2066,7 @@ final class StudioFrame: NSView {
         }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -1425,24 +2098,44 @@ final class StudioFrame: NSView {
 
     // MARK: The palette's halo
 
+    private func viewerSpectral(_ key:String,palette:UUID)->SpectralEngine.Prediction? {
+        guard let catalogue=CatalogueTree.catalogue(in:library.store.root)?.id,
+              let definition=displayLibrary.definition(of:key) else{return nil}
+        return SpectralStore.shared.prediction(catalogue:catalogue,palette:palette,colour:key,definition:definition,light:PaletteViewing.illuminant)
+    }
+    private func viewerProof(_ key:String)->NSColor?{
+        guard let channel=viewportHeader.channels.selectedChannel,
+              let definition=displayLibrary.definition(of:key) ?? ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key) else{return nil}
+        let rendering=Rendering.of(definition,in:channel)
+        guard let difference=rendering.difference,difference.isFinite else{return nil}
+        return rendering.shown?.display
+    }
     private let swatchViewer = PaletteWheel()
+    private func layoutSwatchViewer() {
+        page.layoutSubtreeIfNeeded()
+        swatchViewer.frame = bounds
+        // Page may be nested inside a split-pane container; never treat its frame as root coordinates.
+        swatchViewer.availableRect = page.convert(page.previewViewport, to: swatchViewer).intersection(swatchViewer.bounds)
+        swatchViewer.controlsRect = viewportHeader.convert(viewportHeader.bounds,to:swatchViewer)
+    }
     private func showSwatchViewer(_ hex: String) {
         let list = page.grid.items.filter { $0.hex != nil }
         guard !list.isEmpty else { return }
-        let palette: Swatch? = { if case .palette(let id) = place { return library.library.swatch(id) }; return nil }()
+        let palette: Swatch? = { if case .palette(let id) = place { return displayLibrary.swatch(id) }; return nil }()
         let item = PaletteWheel.Item(id: palette?.id ?? UUID(), name: palette?.name ?? "All Colours",
-            colours: list.map { $0.colours.first ?? Design.hex($0.hex!) },
+            colours: list.map { item in item.sourceCMYK == nil ? (displayLibrary.definition(of:item.hex!) ?? ColourKeys.definition(of:item.hex!) ?? ColourDefinition.of(hex:item.hex!))?.master.display ?? item.colours.first ?? Design.hex(item.hex!) : item.colours.first ?? Design.hex(item.hex!) },
             details: list.map { .init(name: $0.title.components(separatedBy: " / ").first ?? $0.title, hex: $0.hex!) })
+        let unprofiled=Set(list.filter{$0.sourceCMYK != nil}.compactMap(\.hex))
+        swatchViewer.onProof={ [weak self] key in unprofiled.contains(key) ? nil:self?.viewerProof(key) }
+        swatchViewer.onSpectral={ [weak self] key in palette.flatMap{self?.viewerSpectral(key,palette:$0.id)?.colour} }
         swatchViewer.backdropView = self
         addSubview(swatchViewer, positioned: .above, relativeTo: nil)
-        swatchViewer.frame = bounds
-        swatchViewer.availableRect = NSRect(x: page.frame.minX + page.inset, y: page.frame.minY + AreaHeader.height,
-            width: max(1, page.frame.width - page.inset - page.insetRight), height: max(1, page.frame.height - AreaHeader.height))
+        layoutSwatchViewer()
         swatchViewer.onDismiss = { [weak self] in self?.swatchViewer.removeFromSuperview() }
         swatchViewer.presentSwatch(item, hex: hex)
     }
     private func shareQR(hex:String? = nil,palette:UUID? = nil) {
-        let lib=library.library
+        let lib=displayLibrary
         if hex != nil,place == .appbridge,page.grid.items.first(where:{$0.hex==hex})?.sourceCMYK != nil { library.flash("This ASE swatch has no embedded ICC profile. Import it with a defined print condition before sharing its master colour.");return }
         let origin:UUID? = { if let palette{return palette};if case .palette(let id)=place{return id};return nil }()
         let name=palette.flatMap { lib.swatch($0)?.name } ?? hex.map { lib.name(of:$0,in:origin) } ?? "Colour"
@@ -1454,30 +2147,76 @@ final class StudioFrame: NSView {
         guard entries.count==keys.count,!entries.isEmpty else { library.flash("There are no complete colour records to share.");return }
         QRSharing.show(.init(type:palette == nil ? "swatch" : "palette",name:name,colours:entries),over:self)
     }
-    private func showPaletteViewer(_ id:UUID) {
-        guard let palette=library.library.swatch(id),!palette.entries.isEmpty else { return }
-        let item=PaletteWheel.Item(id:id,name:palette.name,colours:palette.entries.map{shade[$0.hex] ?? Design.hex($0.hex)},details:palette.entries.map{.init(name:library.library.name(of:$0.hex,in:id),hex:$0.hex)})
-        swatchViewer.backdropView=self;addSubview(swatchViewer,positioned:.above,relativeTo:nil);swatchViewer.frame=bounds
-        swatchViewer.availableRect=NSRect(x:page.frame.minX+page.inset,y:page.frame.minY+AreaHeader.height,width:max(1,page.frame.width-page.inset-page.insetRight),height:max(1,page.frame.height-AreaHeader.height))
+    private func showPaletteViewer(_ id:UUID,colourIndex:Int? = nil) {
+        guard let palette=displayLibrary.swatch(id),!palette.entries.isEmpty else { return }
+        let item=PaletteWheel.Item(id:id,name:palette.name,colours:palette.entries.map{shade[$0.hex] ?? Design.hex($0.hex)},details:palette.entries.map{.init(name:displayLibrary.name(of:$0.hex,in:id),hex:$0.hex)})
+        swatchViewer.onProof={ [weak self] in self?.viewerProof($0) }
+        swatchViewer.onSpectral={ [weak self] in self?.viewerSpectral($0,palette:id)?.colour }
+        swatchViewer.backdropView=self;addSubview(swatchViewer,positioned:.above,relativeTo:nil)
+        layoutSwatchViewer()
         swatchViewer.onDismiss={ [weak self] in self?.swatchViewer.removeFromSuperview() }
-        swatchViewer.presentPalette(item)
+        if let colourIndex,palette.entries.indices.contains(colourIndex) {swatchViewer.presentSwatch(item,hex:palette.entries[colourIndex].hex)} else {swatchViewer.presentPalette(item)}
     }
     private let contextMenu = SwissContextMenu()
+    private func addToCollectionAction(_ item:AssetCollectionItem)->HaloAction {addToCollectionAction([item])}
+    private func addToCollectionAction(_ items:[AssetCollectionItem])->HaloAction {
+        HaloAction(id:"collections",label:"Add To Collection",symbol:"square.grid.2x2",children:{[weak self] in
+            guard let self else{return []}
+            let collections=AssetCollections.list(in:self.library.store)
+            let existing=collections.map { collection in
+                let held=Set(collection.items.map(\.key)),included=items.allSatisfy{held.contains($0.key)}
+                return HaloAction(id:collection.id.uuidString,label:collection.name,symbol:"folder",checked:included,onSelect:{[weak self] in
+                    guard let self else{return}
+                    do {
+                        if included {try AssetCollections.remove(items,from:collection.id,in:self.library.store)}
+                        else {try AssetCollections.add(items,to:collection.id,in:self.library.store)}
+                        self.collectionsPane.refresh()
+                        self.library.flash(included ? "Removed from \(collection.name).":"Added to \(collection.name).")
+                    } catch {self.library.flash(error.localizedDescription)}
+                })
+            }
+            let create=HaloAction(id:"new",label:"New Collection…",symbol:"plus",onSelect:{[weak self] in
+                guard let self else{return}
+                self.collectionsPane.createCollection { [weak self] id in
+                    guard let self else{return}
+                    do {try AssetCollections.add(items,to:id,in:self.library.store);self.collectionsPane.refresh();self.library.flash("Added to Collection.")}
+                    catch {self.library.flash(error.localizedDescription)}
+                }
+            })
+            return existing + [create]
+        })
+    }
+    private func openCollectedAsset(_ item:AssetCollectionItem){
+        if item.kind == "Palette",let id=UUID(uuidString:item.identity),library.library.swatch(id) != nil {go(.palette(id));return}
+        if item.kind == "Colour" {go(.catalogue);showSwatchViewer(item.identity);return}
+        if item.kind == "ICC Profile" {showProfileRail();iccProfilePane.locate(item.identity);return}
+        if item.kind == "ASE",let id=UUID(uuidString:item.identity),appbridge.files.contains(where:{$0.id == id}){appbridge.selected=id;go(.appbridge);return}
+        if let id=UUID(uuidString:item.identity),WorkspaceImport.records(store:library.store).contains(where:{$0.0.id == id}) {importPane.open(id:id);return}
+        if FileManager.default.fileExists(atPath:item.identity){NSWorkspace.shared.open(URL(fileURLWithPath:item.identity));return}
+        library.flash("This asset is no longer available. Remove its Collection entry or locate the original.")
+    }
     private func openContext(_ place: Place, in view: NSView, at point: NSPoint) {
+        if view === page.grid {paletteSelection.ids=Set(selectedGridPalettes)}
         let actions: [HaloAction]
         switch place {
         case .palette(let id):
             if library.library.swatch(id) != nil {
                 if paletteSelection.ids.contains(id), paletteSelection.ids.count > 1 { actions = batchActions() }
-                else { paletteSelection.ids = [id]; paletteSelection.anchor = id; reload(); actions = paletteActions(for: id) }
+                else { paletteSelection.ids = [id]; paletteSelection.anchor = id; reload(); actions = paletteContextActions(for: id) }
             }
             else if let file = appbridge.files.first(where: { $0.id == id }) {
                 actions = [
                     HaloAction(id: "open", label: "Open", symbol: "arrow.up.right", onSelect: { [weak self] in self?.appbridge.selected = id; self?.go(.appbridge) }),
                     HaloAction(id: "duplicate", label: "Duplicate", symbol: "doc.on.doc", disabled: file.problem != nil) { [weak self] in self?.appbridge.duplicate(file) },
                     HaloAction(id: "locate", label: "Locate File…", symbol: "folder") { [weak self] in self?.appbridge.locate(file) { self?.reload() } },
+                    addToCollectionAction(.init(kind:"ASE",identity:file.id.uuidString,name:file.url.lastPathComponent)),
                     HaloAction(id: "detach", label: "Detach", symbol: "minus.circle") { [weak self] in self?.appbridge.detach(file) },
                     HaloAction(id: "delete", label: "Move File To Trash…", symbol: "trash") { [weak self] in self?.appbridge.confirmDelete(file, over: view) }
+                ]
+            } else if let record=WorkspaceImport.records(store:library.store).first(where:{$0.0.id == id})?.0 {
+                actions=[
+                    HaloAction(id:"open",label:"Open",symbol:"arrow.up.right",onSelect:{[weak self] in self?.importPane.open(id:id)}),
+                    addToCollectionAction(.imported(record))
                 ]
             } else { return }
         case .project(let id), .overview(let id, _), .group(let id, _):
@@ -1491,7 +2230,34 @@ final class StudioFrame: NSView {
         }
         contextMenu.open(actions, at: point, in: view)
     }
+    func editMetadata(for id:UUID? = nil) {
+        let target=id ?? { if case .palette(let id)=place{return id};return nil }()
+        guard let target,let palette=library.library.swatch(target),let root=window?.contentView else{return}
+        let targets=paletteSelection.ids.contains(target) && paletteSelection.ids.count>1 ? Array(paletteSelection.ids):[target]
+        AssetMetadataEditor.present(palette,selectedCount:targets.count,over:root){ [weak self] metadata,included in
+            guard let self else{return}
+            self.library.apply("Edit Asset Metadata") { lib in
+                for id in targets {
+                    guard let index=lib.swatches.firstIndex(where:{$0.id==id}) else{continue}
+                    var value=lib.swatches[index].metadata ?? AssetMetadata()
+                    AssetMetadataSchema.apply(metadata,to:&value,including:included)
+                    value.tidy();lib.swatches[index].metadata=value.isEmpty ? nil:value
+                    if included.contains(10){lib.setTags(ofPalette:id,metadata.keywords ?? [])}
+                }
+            }
+            self.metadataPane.palette=self.library.library.swatch(target)
+        }
+    }
+    func editMetadata(forColour hex:String) {
+        guard let colour=library.library.colours.first(where:{$0.hex==hex}),let root=window?.contentView else{return}
+        let sample=Swatch(id:UUID(),name:colourName(hex),createdAt:Date(),entries:[SwatchEntry(hex:hex,addedAt:Date())],metadata:colour.metadata)
+        AssetMetadataEditor.present(sample,over:root){ [weak self] metadata,included in
+            guard let self else{return}
+            self.library.apply("Edit Colour Metadata") { lib in if let i=lib.colours.firstIndex(where:{$0.hex==hex}){var value=lib.colours[i].metadata ?? AssetMetadata();AssetMetadataSchema.apply(metadata,to:&value,including:included);value.tidy();lib.colours[i].metadata=value.isEmpty ? nil:value} }
+        }
+    }
     private func openSwatchContext(_ hex: String, in view: NSView, at point: NSPoint) {
+        if let actions=selectedSwatchActions(hex) {contextMenu.open(actions,at:point,in:view);return}
         let palette: UUID? = { if case .palette(let id) = place { return id }; return nil }()
         var actions = place == .appbridge ? StudioPage.models.map { format in
             HaloAction(id: format.rawValue, label: "Copy " + format.label, symbol: "doc.on.doc", onSelect: { [weak self] in
@@ -1500,27 +2266,42 @@ final class StudioFrame: NSView {
             })
         } : SwatchMenu.ring(for: hex, in: palette, library: library, editTags: { [weak self] in self?.tag(swatches: $0) })
         actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
+        actions.append(HaloAction(id:"notes",label:"Add Notes…",symbol:"note.text",onSelect:{ [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.hex == hex})) }))
+        actions.append(addToCollectionAction(.colour(hex,name:library.library.name(of:hex,in:nil))))
+        actions.append(HaloAction(id:"metadata",label:"Edit Metadata…",symbol:"info.circle",onSelect:{ [weak self] in self?.editMetadata(forColour:hex) }))
         contextMenu.open(actions, at: point, in: view)
     }
 
     private var halo: HaloMenu?
 
-    /// The old window's palette menu as a halo over the gear: rename, favourite, picks here, duplicate, copy to a member or a new one, move to a
-    /// collection's member on a second ring, copy all, export, delete.
+    private func paletteFileLocation(_ id: UUID) -> (file: URL?, root: URL?) {
+        if let source = linkedPalettes.sources[id] {
+            let root = source.index.deletingLastPathComponent()
+            return (try? source.record.url(in: root), source.record.external ? nil : root)
+        }
+        let roots = [library.store.root, library.store.assetsHome].compactMap { $0 }
+        let file = roots.compactMap { CatalogueTree.file(ofPalette: id, in: $0) }.first
+        return (file, roots.first { root in file.flatMap { AssetFileActions.relativePath(of: $0, under: root) } != nil })
+    }
+
+    /// One action tree drives the palette's context menu and halo.
     private func paletteActions(for id: UUID) -> [HaloAction] {
         let lib = library.library
         guard let s = lib.swatch(id) else { return [] }
         let library = self.library
+        let location = paletteFileLocation(id)
+        let feedback: (String) -> Void = { [weak self] in self?.library.flash($0) }
         func group(_ id: String, _ label: String, _ symbol: String, _ inner: @escaping () -> [HaloAction]) -> HaloAction { HaloAction(id: id, label: label, symbol: symbol, children: inner) }
         var actions: [HaloAction] = [
             HaloAction(id:"view",label:"View",symbol:"eye",onSelect:{ [weak self] in self?.showPaletteViewer(id) }),
             HaloAction(id:"swatches",label:"Open Swatches",symbol:"square.grid.2x2",onSelect:{ [weak self] in self?.go(.palette(id)) }),
-            HaloAction(id:"print-preview",label:"Print",symbol:"exclamationmark.triangle",description:"Toggle the tile’s printed colour preview",onSelect:{ [weak self] in self?.page.grid.togglePrintPreview(palette:id) }),
-            HaloAction(id: "qr", label: "Share Palette QR", symbol: "qrcode", onSelect: { [weak self] in self?.shareQR(palette:id) }),
+            HaloAction(id:"print-preview",label:"Output Proof",symbol:"exclamationmark.triangle",description:"Toggle output proof comparisons across palettes and swatches",onSelect:{ [weak self] in self?.page.grid.togglePrintPreview(palette:id) }),
             HaloAction(id: "rename", label: "Rename", symbol: "pencil", edit: (s.name, "Palette name", "Return keeps it", { library.rename(id, to: $0) })),
             HaloAction(id: "fav", label: s.favourite ? "Remove From Favourites" : "Add To Favourites", symbol: "star", checked: s.favourite) { library.toggleFavourite(id) },
             HaloAction(id: "target", label: lib.activeSwatchID == id ? "Stop Sending Picks Here" : "Send Picks Here", symbol: "scope", checked: lib.activeSwatchID == id) { library.setTarget(lib.activeSwatchID == id ? nil : id) },
             HaloAction(id: "tags", label: "Tags\u{2026}", symbol: "tag", onSelect: { [weak self] in self?.tag(palette: id) }),
+            HaloAction(id: "notes", label: "Add Notes…", symbol: "note.text", onSelect: { [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.id == id}) ?? TileGrid.Item(title:s.name,caption:"",colours:s.entries.compactMap{lib.definition(of:$0.hex)?.master.display},hex:nil,id:id)) }),
+            HaloAction(id: "metadata", label: "Edit Metadata\u{2026}", symbol: "info.circle", onSelect: { [weak self] in self?.editMetadata(for:id) }),
             HaloAction(id: "duplicate", label: "Duplicate", symbol: "plus.square.on.square") { library.duplicate(id) },
             group("copy-to", "Copy To Member", "folder.badge.plus") {
                 var inner: [HaloAction] = lib.orderedProjects.filter { $0.id != s.projectID }.map { p in HaloAction(id: p.id.uuidString, label: p.name, symbol: "folder") { library.move(palette: id, to: p.id, index: Int.max) } }
@@ -1528,32 +2309,121 @@ final class StudioFrame: NSView {
                 inner.append(HaloAction(id: "new", label: "New Member\u{2026}", symbol: "plus") { library.startProject(moving: id) })
                 return inner
             },
-            group("collections", "Add To Collection", "square.grid.2x2") {
-                // The second ring: each collection, and inside it a third ring of its members.
-                SchemaTrial.collections.map { c in
-                    HaloAction(id: c.id.uuidString, label: c.name, symbol: "folder", children: {
-                        let places = SchemaTrial.places, all = SchemaTrial.collections
-                        return lib.orderedProjects.filter { SchemaTrial.collection(of: $0.id, among: all, places: places).id == c.id }
-                            .map { p in HaloAction(id: p.id.uuidString, label: p.name, symbol: "folder") { library.move(palette: id, to: p.id, index: Int.max) } }
-                    })
-                }
+            addToCollectionAction(linkedPalettes.sources[id].map{.imported($0.record)} ?? .palette(id,name:s.name)),
+            HaloAction(id: "reveal", label: "Reveal in Finder", symbol: "folder", disabled: location.file == nil) {
+                AssetFileActions.reveal(location.file, feedback: feedback)
+            },
+            group("copy-path", "Copy Path", "doc.on.doc") {
+                AssetFileActions.pathActions(file: location.file, root: location.root, feedback: feedback)
+            },
+            group("share", "Share", "square.and.arrow.up") { [weak self] in
+                AssetFileActions.sharingActions(file: location.file, title: s.name, feedback: feedback) + [
+                    HaloAction(id: "qr", label: "Share Palette QR", symbol: "qrcode", onSelect: { [weak self] in self?.shareQR(palette: id) })
+                ]
             },
             HaloAction(id: "copy-all", label: "Copy All", symbol: "doc.on.doc") { library.copy(lib.hexes(inSwatch: id, by: .oldest), from: s.name) },
             HaloAction(id: "export", label: "Export Palette\u{2026}", symbol: "square.and.arrow.up", onSelect: { [weak self] in self?.startExport(.palette, subject: id, name: s.name) }),
             HaloAction(id: "delete", label: "Delete Palette", symbol: "trash", confirmation: ("Slide to delete", "Hold the arrow key")) { library.delete(palette: id, confirmed: true) },
         ]
         if s.projectID != nil { actions.insert(HaloAction(id: "open", label: "Open Member", symbol: "arrow.up.right", onSelect: { [weak self] in if let p = s.projectID { self?.go(.project(p)) } }), at: 0) }
-        for id in ["copy-to","collections"] {
+        for id in ["copy-to"] {
             if let i=actions.firstIndex(where:{$0.id==id}),let children=actions[i].children {
                 let title=actions[i].label
                 actions[i].destinationGallery={HaloGalleryRequest.destinations(children(),title:title,source:s.name+" · \(s.entries.count) Colours",commit:"Copy Here",library:library,sourceColours:s.entries.map{lib.definition(of:$0.hex)?.master.display ?? Design.hex($0.hex)})}
             }
         }
         if let i = actions.firstIndex(where: { $0.id == "delete" }) { actions[i].onMenuSelect = { library.delete(palette: id) } }
+        if let source = linkedPalettes.sources[id] {
+            actions.insert(HaloAction(id: "reference", label: "Manage Reference…", symbol: "link", onSelect: { [weak self] in self?.importPane.manage(id: source.record.id) }), at: 0)
+            if !linkedPalettes.canEdit(id) {
+                let allowed:Set<String> = ["view", "swatches", "print-preview", "reference", "reveal", "copy-path", "share", "copy-all", "export", "notes", "collections"]
+                actions = actions.filter { allowed.contains($0.id) }
+            }
+        }
         return actions
     }
+    private func paletteContextActions(for id: UUID) -> [HaloAction] {
+        let sections: [String: Int] = [
+            "reference": 0, "open": 0, "view": 0, "swatches": 0, "print-preview": 0,
+            "rename": 1, "fav": 1, "target": 1, "tags": 1, "notes": 1, "duplicate": 1, "copy-to": 1, "collections": 1,
+            "reveal": 2, "copy-path": 2, "share": 3, "copy-all": 4, "export": 4, "delete": 5
+        ]
+        return sectionedActions(paletteActions(for: id), sections: sections)
+    }
+    private func sectionedActions(_ actions: [HaloAction], sections: [String: Int]) -> [HaloAction] {
+        var result: [HaloAction] = [], previous: Int?
+        for action in actions {
+            let section = sections[action.id] ?? 0
+            if let previous, previous != section {
+                result.append(HaloAction(id: "divider-\(result.count)", label: SwissDropdown.MenuPanel.divider, symbol: "minus", disabled: true))
+            }
+            result.append(action); previous = section
+        }
+        return result
+    }
+    private func imageActions(for path: String) -> [HaloAction] {
+        let file = URL(fileURLWithPath: path)
+        let roots = [library.store.root, library.store.assetsHome].compactMap { $0 }
+        let root = roots.first { AssetFileActions.relativePath(of: file, under: $0) != nil }
+        let feedback: (String) -> Void = { [weak self] in self?.library.flash($0) }
+        var actions: [HaloAction] = []
+        if imageIntakeWorkspace {
+            actions.append(HaloAction(id: "import-file", label: "Import File", symbol: "square.and.arrow.down") { [weak self] in self?.page.grid.onImageContextAction?(path, 0) })
+        }
+        if !page.grid.imageFullView {
+            actions.append(HaloAction(id: "full-view", label: "Show in Full", symbol: "arrow.up.left.and.arrow.down.right") { [weak self] in self?.page.grid.onImageContextAction?(path, 2) })
+        }
+        actions.append(HaloAction(id: "notes", label: "Add Notes…", symbol: "note.text") { [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.imagePath == path})) })
+        let imported=WorkspaceImport.records(store:library.store).first{
+            (try? $0.0.url(in:$0.1.deletingLastPathComponent()).standardizedFileURL.path) == file.standardizedFileURL.path
+        }?.0
+        actions.append(addToCollectionAction(imported.map(AssetCollectionItem.imported) ?? .file(path,kind:"Image",name:file.lastPathComponent)))
+        actions.append(HaloAction(id: "reveal", label: "Reveal in Finder", symbol: "folder") {
+            AssetFileActions.reveal(file, feedback: feedback)
+        })
+        actions.append(HaloAction(id: "copy-path", label: "Copy Path", symbol: "doc.on.doc", children: {
+            AssetFileActions.pathActions(file: file, root: root, feedback: feedback)
+        }))
+        actions.append(HaloAction(id: "share", label: "Share", symbol: "square.and.arrow.up", children: {
+            AssetFileActions.sharingActions(file: file, title: file.lastPathComponent, feedback: feedback)
+        }))
+        return actions
+    }
+    private func imageContextActions(for path: String) -> [HaloAction] {
+        sectionedActions(imageActions(for: path), sections: ["import-file": 0, "full-view": 0, "notes": 0, "collections": 0, "reveal": 1, "copy-path": 1, "share": 2])
+    }
+    private var imageHalo: HaloMenu?
+    private func openNotes(for item: TileGrid.Item?) {
+        guard let item else { return }
+        AssetNotes.configureLooseStore(beside:library.store.url)
+        if let id=item.id, library.isLocked(palette:id) || (linkedPalettes.sources[id] != nil && !linkedPalettes.canEdit(id)) {
+            library.flash("Unlock this palette before editing its notes."); return
+        }
+        let palette: UUID? = { if case .palette(let id) = place { return id }; return nil }()
+        guard let key = AssetNotes.key(for: item, palette: palette, scope: library.store.url.path) else { return }
+        if let id=item.id { AssetNotes.cache(library.library.swatch(id)?.assetNotes,for:key) }
+        if let hex=item.hex,let palette {
+            let record=library.library.note(of:hex,in:palette).map{AssetNotes.Record(name:library.library.name(of:hex,in:palette),description:$0)}
+            AssetNotes.cache(record,for:key)
+        }
+        let displayName=item.hex.map{library.library.name(of:$0,in:palette)} ?? item.title
+        let editor = AssetNotesEditor(item: item, key: key, name: displayName) { [weak self] message in self?.library.flash(message) }
+        let modal = SwissFocusModal(content: editor, size: NSSize(width: 748, height: 520))
+        editor.modal = modal
+        if let id=item.id { editor.onSave={ [weak self] record in self?.library.setPaletteNotes(id,record) } }
+        else if let hex=item.hex,let palette { editor.onSave={ [weak self] record in self?.library.setColourNotes(hex,in:palette,record) } }
+        editor.onChange = { [weak self] in self?.page.grid.needsDisplay = true }
+        modal.present(over: self)
+    }
+    private func openImageHalo(for path: String, rect: NSRect) {
+        let h = imageHalo ?? HaloMenu(label: "Image", hint: "Scroll to turn, click to choose", actions: [])
+        imageHalo = h
+        h.label = URL(fileURLWithPath: path).lastPathComponent
+        h.actions = imageActions(for: path)
+        h.open(centredOn: rect, in: page.grid)
+    }
     private func openHalo(for id: UUID, from view: NSView, rect: NSRect) {
-        guard let s = library.library.swatch(id) else { return }
+        guard let s = displayLibrary.swatch(id) else { return }
         let actions = paletteActions(for: id)
         let h = halo ?? HaloMenu(label: "Palette", hint: "Scroll to turn, click to choose", actions: [])
         halo = h
@@ -1563,8 +2433,23 @@ final class StudioFrame: NSView {
     }
 
     /// The halo on a colour: the old swatch ring, over the tile that was clicked.
+    private func selectedSwatchActions(_ hex:String)->[HaloAction]? {
+        let selected=page.grid.selectedItems
+        guard selected.count > 1,selected.allSatisfy({$0.hex != nil}),selected.contains(where:{$0.hex == hex}) else{return nil}
+        let keys=selected.compactMap(\.hex)
+        return [
+            HaloAction(id:"copy-selected",label:"Copy \(keys.count) Swatches",symbol:"doc.on.doc") { [weak self] in self?.library.copy(keys) },
+            HaloAction(id:"tag-selected",label:"Tag \(keys.count) Swatches…",symbol:"tag",disabled:!canDeleteGridSelection) { [weak self] in guard let self else{return};TagPanel.colours(keys,library:self.library,over:self.window) },
+            addToCollectionAction(keys.map{.colour($0,name:colourName($0))}),
+            HaloAction(id:"delete-selected",label:"Delete \(keys.count) Swatches…",symbol:"trash",disabled:!canDeleteGridSelection) { [weak self] in self?.deleteGridSelection() }
+        ]
+    }
     private var colourHalo: HaloMenu?
     private func openColourHalo(_ hex: String, rect: NSRect) {
+        if let actions=selectedSwatchActions(hex) {
+            let h=colourHalo ?? HaloMenu(label:"Selected Swatches",hint:"Actions for this selection",actions:[])
+            colourHalo=h;h.label="\(page.grid.selectedCount) Swatches Selected";h.actions=actions;h.open(centredOn:rect,in:page.grid);return
+        }
         let inPalette: UUID? = { if case .palette(let id) = place { return id }; return nil }()
         let h = colourHalo ?? HaloMenu(label: "Colour", hint: "Scroll to turn, click to choose", actions: [])
         colourHalo = h
@@ -1582,9 +2467,12 @@ final class StudioFrame: NSView {
         }
         h.actions.insert(contentsOf:[
             HaloAction(id:"view",label:"View",symbol:"eye",onSelect:{ [weak self] in self?.showSwatchViewer(hex) }),
-            HaloAction(id:"print-preview",label:"Print",symbol:"exclamationmark.triangle",description:"Toggle the tile’s printed colour preview",onSelect:{ [weak self] in self?.page.grid.togglePrintPreview(hex:hex) })
+            HaloAction(id:"print-preview",label:"Output Proof",symbol:"exclamationmark.triangle",description:"Toggle output proof comparisons across palettes and swatches",onSelect:{ [weak self] in self?.page.grid.togglePrintPreview(hex:hex) })
         ],at:0)
         h.actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
+        h.actions.append(HaloAction(id:"notes",label:"Add Notes…",symbol:"note.text",onSelect:{ [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.hex == hex})) }))
+        h.actions.append(addToCollectionAction(.colour(hex,name:colourName(hex))))
+        h.actions.append(HaloAction(id:"metadata",label:"Edit Metadata…",symbol:"info.circle",onSelect:{ [weak self] in self?.editMetadata(forColour:hex) }))
         h.open(centredOn: rect, in: page.grid)
     }
     /// Tags typed on the window's own panel, separated by commas, with the scope a new one takes (StudioTags.swift).
@@ -1593,6 +2481,11 @@ final class StudioFrame: NSView {
 
     /// New on the page: on a member's Typography group, a typography palette in that member, opened in Contrast for its first pairing; anywhere else, a member.
     private func newFromPage() {
+        if canImportImagesFromCurrentPlace(),case .group(let member,let bucket)=place {
+            let node=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first{$0.node.id == bucket}?.node
+            beginImageIntake(kind:node.map{SchemaTrial.type(of:$0).caseInsensitiveCompare("Images") == .orderedSame} == true ? "Images":"Photographs")
+            return
+        }
         if case .group(let pid, let nid) = place, let node = SchemaTrial.rows(of: SchemaTrial.schema(for: pid)).first(where: { $0.node.id == nid })?.node,
            SchemaTrial.role(of: node) == .typography {
             var made: UUID?
@@ -1604,9 +2497,56 @@ final class StudioFrame: NSView {
         }
         newMember()
     }
+    private func importSelectedImages(to destination:WorkspaceImport.ImageDestination,transfer:WorkspaceImport.ImageTransfer){
+        let selected=intakeImages.compactMap{item -> URL? in
+            guard let path=item.imagePath,intakeSelectedPaths.contains(path) else{return nil}
+            return URL(fileURLWithPath:path)
+        }
+        guard !selected.isEmpty else{library.flash("Select images in the viewport first.");return}
+        let kind:String
+        switch destination {
+        case .catalogue(let member,let bucket):
+            guard let node=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first(where:{$0.node.id == bucket})?.node else{library.flash("The image destination changed. Select it again.");return}
+            kind=SchemaTrial.type(of:node).caseInsensitiveCompare("Images") == .orderedSame ? "Images":"Photographs"
+        case .library,.custom:kind="Photographs"
+        }
+        commitImages(selected,to:destination,kind:kind,transfer:transfer)
+    }
+    private func commitImages(_ selected:[URL],to destination:WorkspaceImport.ImageDestination,kind:String,transfer:WorkspaceImport.ImageTransfer){
+        let store=library.store
+        let collectionID=importCollectionPane.selectedID
+        do{
+            if transfer == .reference{for source in selected{try FolderAccess.authorize(source)}}
+            if case .custom(let folder)=destination{try FolderAccess.authorize(folder)}
+        }catch{library.flash(error.localizedDescription);return}
+        let progress=SwissFocusModal(title:"Importing \(kind)",message:"Processing \(plural(selected.count,"image"))…")
+        let bar=NSProgressIndicator(frame:.zero);bar.style = .bar;bar.isIndeterminate=true
+        progress.content(bar,height:20);progress.present(over:self);bar.startAnimation(nil)
+        DispatchQueue.global(qos:.userInitiated).async{[weak self] in
+            let result=Result{try WorkspaceImport.addImages(selected,destination:destination,kind:kind,transfer:transfer,store:store,collectionID:collectionID)}
+            DispatchQueue.main.async{[weak self] in
+                bar.stopAnimation(nil);progress.dismissOverlay()
+                guard let self else{return}
+                guard self.library.store === store else{self.library.flash("The catalogue changed while images were being added. Reopen it to review the result.");return}
+                switch result {
+                case .success(let count):
+                    self.library.reload();self.collectionsPane.refresh();self.reload()
+                    if self.imageIntakeWorkspace {
+                        switch destination {
+                        case .catalogue(let member,let bucket):self.go(.group(member,bucket))
+                        case .library,.custom:self.go(.catalogue)
+                        }
+                    }
+                    self.library.flash("Added \(count) \(count == 1 ? "image":"images")")
+                case .failure(let error):self.library.flash(error.localizedDescription)
+                }
+            }
+        }
+    }
 
     /// A member made where the page stands: in the collection or folder in view, else the first collection, made now if there is none; named on the window's own panel.
     private func newMember() {
+        if SchemaTrial.structure != nil {CatalogueJourneyView.present(library:library,over:self,client:SchemaTrial.personalMode ? SchemaTrial.structure?.personalCollectionID:nil,kind:SchemaTrial.collections.isEmpty ? "client":"work");return}
         let all = SchemaTrial.collections
         var c = all.first ?? SchemaTrial.SchemaFile.fresh.collections[0], folder: UUID? = nil
         switch place {
@@ -1632,25 +2572,8 @@ final class StudioFrame: NSView {
     }
 
     private func locateWorkspaceCatalogue() {
-        guard let window else { return }
-        let panel=NSOpenPanel()
-        panel.canChooseFiles=true; panel.canChooseDirectories=false; panel.allowsMultipleSelection=false
-        panel.allowedContentTypes=[UTType(filenameExtension:ColourFiles.catalogue),UTType(filenameExtension:ColourFiles.legacyCatalogue),.json].compactMap{$0}
-        panel.prompt="Open"
-        panel.message="Choose a catalogue file to open it where it is, or a library.json to import."
-        panel.beginSheetModal(for:window) { [weak self] response in
-            guard response == .OK,let self,let url=panel.url else{return}
-            CatalogueOpen.selected(url, over: window) { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .success(let name):
-                    guard let name else { return }
-                    self.library.open(catalogue:name)
-                    self.go(.catalogue)
-                case .failure(let error): self.library.show(error)
-                }
-            }
-        }
+        guard let window else{return}
+        SimpleCatalogueImport.choose(over:window,library:library)
     }
 
     private func fillLibraryRail() {
@@ -1734,8 +2657,12 @@ final class StudioFrame: NSView {
         let treeSelection: Place
         if case .overview(let id, _) = place { treeSelection = .project(id) } else { treeSelection = place }
         rail1.set(rows: rows, chosen: treeSelection)
+        leftPanelRail.arrange(); rightPanelRail.arrange()
+        importPane.refresh()
+        cataloguePane.importedAssets = WorkspaceImport.records(store: library.store).map { $0.0 }
         cataloguePane.filter=paletteFilter
         cataloguePane.configureAssets(lib)
+        cataloguePane.configureCollections(AssetCollections.list(in:library.store),linkedPaletteRecords:linkedPalettes.sources.mapValues{$0.record.id})
         cataloguePane.update(names: library.availableCatalogues(), active: library.catalogue, rows: rows, selected: treeSelection, selectedKey: workspaceFilter,allFavourites:lib.orderedFavourites)
         if printWorkspace {
             var allowedGroup = false
@@ -1827,16 +2754,11 @@ final class StudioFrame: NSView {
                 }
             }
             rows.append(.item("Appbridge Settings", nil, 0, .appbridgeSettings, false))
-        case .settings, .schema, .shortcuts, .halo, .sounds, .general, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings:
+        case .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings:
             heading = "Settings"; labels = ("Section", "")
-            rows = [.item("General", nil, 0, .general, place == .general), .item("Catalogues", nil, 0, .settings, place == .settings), .item("Schema", nil, 0, .schema, place == .schema),
-                    .item("Shortcuts", nil, 0, .shortcuts, place == .shortcuts), .item("Halo", nil, 0, .halo, place == .halo), .item("Sounds", nil, 0, .sounds, place == .sounds), .item("Tags", nil, 0, .tags, place == .tags),
-                    .item("Sharing", nil, 0, .sharingSettings, place == .sharingSettings),
-                    .item("Library", nil, 0, .librarySettings, place == .librarySettings),
-                    .item("Appbridge", nil, 0, .appbridgeSettings, place == .appbridgeSettings)]
-            #if APPSTORE
-            rows.insert(.item("Apple Menubar", nil, 0, .appleMenubar, place == .appleMenubar), at: 1)
-            #endif
+            rows = SettingsNavigation.groups.map { group in
+                .item(group.title, nil, 0, group.tabs[0].1, group.tabs.contains { $0.1 == place })
+            }
         case .prepress(let n):
             heading = "PrePress"; labels = ("Workflow", "Steps")
             rows.append(.item("Which job is it?", nil, 0, .prepress(0), n == 0))
@@ -1931,8 +2853,9 @@ final class StudioFrame: NSView {
         rail2.set(heading: focused.map { project.name + " / " + $0.name } ?? project.name, labels: (SchemaTrial.memberName(of: c), "Items"), rows: rows)
     }
 
-    private func fillPage() {
+    private func fillPage(reuseGridIfSame:Bool=false) {
         if place == .designer {return}
+        page.importImageControls=importsImages
         page.onRenamePalette=nil
         page.paletteSwatchCount=nil
         page.showsPaletteFilters=false
@@ -1943,24 +2866,54 @@ final class StudioFrame: NSView {
             page.showsPaletteFilters=SchemaTrial.rows(of:SchemaTrial.schema(for:project)).first(where:{$0.node.id == node}).map{(SchemaTrial.role(of:$0.node) == .palettes || SchemaTrial.role(of:$0.node) == nil)} ?? false
         default:break
         }
-        viewportHeader.preferredHeight=page.showsPaletteFilters ? PaletteFilterControls.actionbarHeight(for:viewportHeader.bounds.width):WorkspaceViewportBar.actionbarHeight
+        viewportHeader.preferredHeight=page.actionbarHeight(for:viewportHeader.bounds.width)
         page.paletteFilters.isHidden = !page.showsPaletteFilters
         page.paletteActions.isHidden=true
-        if case .palette(let id)=place,let palette=library.library.swatch(id) {
-            page.onRenamePalette={ [weak self] name in self?.library.rename(id,to:name)}
+        page.paletteActions.back.isHidden=paletteGridReturn == nil
+        if case .palette(let id)=place,let palette=displayLibrary.swatch(id) {
+            page.onRenamePalette=linkedPalettes.canEdit(id) ? { [weak self] name in self?.library.rename(id,to:name) } : nil
             page.paletteSwatchCount=palette.entries.count
             page.paletteActions.isHidden=false
-            page.paletteActions.configure(PaletteAssetHandler.presentation(palette,in:library.library))
+            page.paletteActions.configure(PaletteAssetHandler.presentation(palette,in:displayLibrary))
+            page.paletteActions.target.isEnabled=linkedPalettes.canEdit(id)
+            page.paletteActions.favourite.isEnabled=linkedPalettes.canEdit(id)
+            page.paletteActions.review.isReadOnly = !linkedPalettes.canEdit(id)
             page.paletteActions.favourite.run={ [weak self] in self?.library.toggleFavourite(id) }
-            page.paletteActions.target.run={ [weak self] in guard let self else{return};self.library.setTarget(self.library.library.activeSwatchID == id ? nil:id) }
+            page.paletteActions.target.run={ [weak self] in guard let self else{return};self.library.setTarget(self.displayLibrary.activeSwatchID == id ? nil:id) }
             page.paletteActions.review.onRating={ [weak self] rating in self?.library.apply("Rate Palette"){PaletteAssetHandler.setRating(rating,on:id,in:&$0)} }
             page.paletteActions.review.onFlag={ [weak self] flag in self?.library.apply("Flag Palette"){PaletteAssetHandler.setFlag(flag,on:id,in:&$0)} }
         }
+        if !embeddedPage { pageLayout.renamePrimary = page.onRenamePalette }
         page.paletteCount = nil
-        let lib = library.library
+        let lib = displayLibrary
+        let palettesByID=Dictionary(lib.swatches.map{($0.id,$0)},uniquingKeysWith:{first,_ in first})
+        page.grid.paletteReview={id in palettesByID[id].map{($0.name,$0.review ?? PaletteReview())}}
+        let proofChannel=viewportHeader.channels.selectedChannel
+        let proofDefinitions=Dictionary(lib.colours.compactMap{colour -> (String,ColourDefinition)? in
+            colour.definition.map{(colour.hex,$0)}
+        },uniquingKeysWith:{first,_ in first})
+        let proofPalettes=palettesByID.mapValues{$0.entries.map(\.hex)}
+        page.grid.canHover={item in item.hex != nil || item.id.map{proofPalettes[$0] != nil} == true}
+        page.grid.onOriginal={item in
+            guard let keys=item.hex.map({[$0]}) ?? item.id.flatMap({proofPalettes[$0]}) else{return nil}
+            if item.sourceCMYK != nil{return item.colours}
+            return Array(keys.prefix(item.colours.count)).enumerated().map{index,key in
+                (proofDefinitions[key] ?? ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key))?.master.display ?? item.colours[index]
+            }
+        }
+        if let proofChannel {page.grid.onPrint={item in
+            guard item.sourceCMYK == nil else{return []}
+            let keys=item.hex.map{[$0]} ?? item.id.flatMap{proofPalettes[$0]} ?? []
+            let previews=keys.map{key -> TileGrid.PrintPreview? in
+                guard let definition=proofDefinitions[key] ?? ColourKeys.definition(of:key) ?? ColourDefinition.of(hex:key) else{return nil}
+                let rendering=Rendering.of(definition,in:proofChannel)
+                guard let shown=rendering.shown,let difference=rendering.difference,difference.isFinite else{return nil}
+                return .init(colour:shown.display,delta:difference)
+            }
+            return previews.allSatisfy{$0 != nil} ? previews.compactMap{$0}:[]
+        }} else {page.grid.onPrint=nil}
         if case .palette(let id)=place{inspectedPalette=id}
         viewportHeader.channels.configure(library:lib,palette:inspectedPalette)
-        page.grid.invalidatePrintPreviews()
         var shade=self.shade
         var unavailable=0
         if canvasWorkspace, let channel=viewportHeader.channels.selectedChannel {
@@ -1970,11 +2923,17 @@ final class StudioFrame: NSView {
             }
         }
         viewportHeader.channels.reportUnavailable(unavailable)
-        viewportHeader.offerPhotographyImport(canImportImagesFromCurrentPlace())
+        page.configureImportPanel(nil)
         if imageIntakeWorkspace { viewportHeader.setIntakeMode(true,linking:intakeLinking) }
         let search = header.search.lowercased()
+        AssetNotes.configureLooseStore(beside:library.store.url)
         func keep(_ name: String, _ hex: String?) -> Bool { search.isEmpty || name.lowercased().contains(search) || (hex?.lowercased().contains(search) ?? false) }
         // A colour's words: its name, and its value in the model the page's header has chosen.
+        var paletteBars:[String:[NSColor]]=[:]
+        if Prefs.showPaletteBars {
+            for palette in lib.swatches {for key in Set(palette.entries.map(\.hex)){paletteBars[key,default:[]].append(identityColour(palette.id))}}
+        }
+        let coloursByHex=Dictionary(lib.colours.map{($0.hex,$0)},uniquingKeysWith:{first,_ in first})
         func tiles(_ hexes: [String], in palette: UUID?) -> [TileGrid.Item] {
             hexes.compactMap { hex in
                 let name = lib.name(of: hex, in: palette)
@@ -1987,12 +2946,22 @@ final class StudioFrame: NSView {
                         caption=(channel.isPrint ? (channel.space == ProfileChannel.printGrey ? "Grey":"CMYK"):channel.name)+"  "+(written ?? "Unavailable")
                     } else {caption=definition.sourceText}
                 } else {caption=page.format.caption(hex)}
-                return TileGrid.Item(title:name+" / "+ColourFormat.hex.text(hex),caption:caption,colours:[shade[hex] ?? Design.hex(hex)],hex:hex,id:nil)
+                if let palette {
+                    let record=lib.note(of:hex,in:palette).map{AssetNotes.Record(name:name,description:$0)}
+                    AssetNotes.cache(record,for:"colour:"+palette.uuidString+":"+hex.uppercased())
+                }
+                return TileGrid.Item(title:name+" / "+ColourFormat.hex.text(hex),caption:caption,colours:[shade[hex] ?? Design.hex(hex)],hex:hex,id:nil,paletteBars:paletteBars[hex] ?? [],createdAt:coloursByHex[hex]?.pickedAt,modifiedAt:coloursByHex[hex]?.tagsChangedAt)
             }
         }
         func cards(_ list: [Swatch]) -> [TileGrid.Item] {
             PaletteAssetHandler.filtered(list,by:paletteFilter,in:lib).compactMap { s in
-                keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: "\(s.entries.count) " + (s.entries.count == 1 ? "colour" : "colours"), colours: s.entries.prefix(8).map { shade[$0.hex] ?? Design.hex($0.hex) }, hex: nil, id: s.id) : nil
+                AssetNotes.cache(s.assetNotes,for:"asset:"+s.id.uuidString)
+                let m=s.metadata
+                var metadata:[String:String]=[:]
+                func put(_ key:String,_ value:String?){if let value,!value.isEmpty{metadata[key]=value}}
+                put("XMP.Title",m?.title ?? s.name);put("XMP.Description",m?.description);put("XMP.Creator",m?.creator);put("IPTC.CopyrightNotice",m?.rights);put("XMP.Rights",m?.rights);put("IPTC.Source",m?.source);put("XMP.Identifier",m?.identifier);put("IPTC.SubjectCode",m?.subjectCode);put("Colorgain.PrintProcess",m?.printProcess);put("Colorgain.ColourStandard",m?.colourStandard)
+                if let tags=s.tagList.isEmpty ? m?.keywords:s.tagList,!tags.isEmpty{metadata["IPTC.Keywords"]=tags.joined(separator:", ");metadata["XMP.Subject"]=tags.joined(separator:", ")}
+                return keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: "\(s.entries.count) " + (s.entries.count == 1 ? "colour" : "colours"), colours: s.entries.prefix(s.entries.count <= 10 ? 10:8).map { shade[$0.hex] ?? Design.hex($0.hex) }, hex: nil, id: s.id,metadata:metadata,paletteColourCount:s.entries.count,linkedReference:isLinkedPalette(s.id),editingLocked:!linkedPalettes.canEdit(s.id),createdAt:s.createdAt,modifiedAt:[s.createdAt,s.nameChangedAt,s.tagsChangedAt,s.stylesChangedAt,s.review?.ratingChangedAt,s.review?.flagChangedAt,m?.changedAt].compactMap{$0}.max()) : nil
             }
         }
         func cardsOf(_ projects: [Project]) -> ([TileGrid.Item], Int) {
@@ -2003,11 +2972,15 @@ final class StudioFrame: NSView {
         page.show(.tiles)
         page.grid.note = nil
         switch place {
-        case .project(let project):page.acceptsPaletteDrop = library.library.project(project)?.isLocked == false
-        case .group(let project,let bucket):page.acceptsPaletteDrop = library.library.project(project)?.isLocked == false && SchemaTrial.rows(of:SchemaTrial.schema(for:project)).contains(where:{$0.node.id == bucket && SchemaTrial.role(of:$0.node) == .palettes})
+        case .project(let project):page.acceptsPaletteDrop = displayLibrary.project(project)?.isLocked == false
+        case .group(let project,let bucket):page.acceptsPaletteDrop = displayLibrary.project(project)?.isLocked == false && SchemaTrial.rows(of:SchemaTrial.schema(for:project)).contains(where:{$0.node.id == bucket && SchemaTrial.role(of:$0.node) == .palettes})
         default:page.acceptsPaletteDrop = place == .appbridge && appbridge.current?.problem == nil && appbridge.current != nil && !appbridge.writing
         }
-        page.showsFormat = place != .appbridge && !imageIntakeWorkspace
+        let photographPage=canImportImagesFromCurrentPlace()
+        page.assetProps=photographPage ? .photographs:AssetPageProps()
+        page.showsPaletteFilters=page.showsPaletteFilters && page.assetProps.filters.contains(.paletteReview)
+        page.paletteFilters.isHidden = !page.showsPaletteFilters
+        page.showsFormat=page.assetProps.menus.contains(.colourFormat) && place != .appbridge && !imageIntakeWorkspace
         page.grid.showsHalo = true
         // A new member can be made wherever members are listed: the Members view, a collection, a folder.
         func newWord(_ c: SchemaCollection) -> String { "New " + SchemaTrial.memberName(of: c) }
@@ -2016,18 +2989,28 @@ final class StudioFrame: NSView {
                 let own = palettes(lib.palettes(in: p.id))
                 var seen = Set<String>(), hexes: [String] = []
                 for h in own.flatMap({ $0.entries.map { $0.hex } }) where !seen.contains(h) { seen.insert(h); hexes.append(h) }
-                return keep(p.name, nil) ? TileGrid.Item(title: p.name, caption: plural(own.count, "palette"), colours: hexes.prefix(8).map { shade[$0] ?? Design.hex($0) }, hex: nil, id: p.id) : nil
+                return keep(p.name, nil) ? TileGrid.Item(title: p.name, caption: plural(own.count, "palette"), colours: hexes.prefix(8).map { shade[$0] ?? Design.hex($0) }, hex: nil, id: p.id,createdAt:p.createdAt,modifiedAt:[p.createdAt,p.nameChangedAt,p.detailsChangedAt].compactMap{$0}.max()) : nil
             }
         }
         switch place {
         case .designer: break
         case .imageIntake:
-            title = intakeLinking ? "Link Images" : "Import Images"
-            meta = (intakeFolder?.lastPathComponent ?? (intakeLinking ? "Files stay at source" : "Catalogue destination"), library.catalogue)
-            items = intakeImages
-            page.grid.note = intakeImageLoading ? "Reading image files and preparing previews…"
+            title = importsImages ? (intakeLinking ? "Link \(importKind)" : "Import \(importKind)"):"Import \(importKind)"
+            meta = (intakeFolder?.lastPathComponent ?? "Choose a destination", library.catalogue)
+            items = importsImages ? intakeImages:visibleImportFiles().map { url in
+                let root=intakeFolder?.standardizedFileURL.path ?? ""
+                let path=url.standardizedFileURL.path
+                let relative=path.hasPrefix(root+"/") ? String(path.dropFirst(root.count+1)):url.lastPathComponent
+                let parent=(relative as NSString).deletingLastPathComponent
+                let count=intakeAssetColourCounts[path]
+                return TileGrid.Item(title:importKind == "Palettes" ? url.deletingPathExtension().lastPathComponent:url.lastPathComponent,
+                    caption:importKind == "Palettes" ? count.map{plural($0,"colour")} ?? "Reading…" : (parent == "." ? url.pathExtension.uppercased():parent),
+                    colours:intakeAssetPreviews[path] ?? [],hex:nil,id:nil,imagePath:path,paletteColourCount:count ?? 0,selectionID:"import:"+path)
+            }
+            page.grid.note = !importsImages ? (items.isEmpty ? (intakeFolder == nil ? "Choose a source folder in Source to show its \(importKind) files here." : intakeNewOnly && !intakeAssetFiles.isEmpty ? "All compatible files in this folder have already been imported." : "No compatible \(importKind) files found in this folder.") : nil)
+                : intakeImageLoading ? "Reading image files and preparing previews…"
                 : intakeLinking ? "Select a source folder to review linked images here."
-                : intakeFolder == nil ? "Choose a source folder in Rail 1 to show its images here."
+                : intakeFolder == nil ? "Choose a source folder in Source to show its images here."
                 : items.isEmpty ? "No readable images found in this folder."
                 : nil
         case .appbridge:
@@ -2038,9 +3021,9 @@ final class StudioFrame: NSView {
                 meta = ("Directory: " + AppbridgePath.display(file.url.deletingLastPathComponent().path), plural(file.swatches.count, "swatch"))
                 if let problem = file.problem { page.grid.note = problem }
                 else if file.swatches.isEmpty { page.grid.note = "Drop a palette from Rail 1 here to add its swatches." }
-                items = file.swatches.map { swatch in
+                items = file.swatches.enumerated().map { index, swatch in
                     TileGrid.Item(title: (swatch.group.isEmpty ? swatch.name : swatch.group) + " / " + (hexOf(swatch.preview) ?? "—"),
-                        caption: page.format.caption(hexOf(swatch.preview) ?? "#000000", sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil), colours: [swatch.preview], hex: hexOf(swatch.preview), id: nil, sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil)
+                        caption: page.format.caption(hexOf(swatch.preview) ?? "#000000", sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil), colours: [swatch.preview], hex: hexOf(swatch.preview), id: nil, sourceCMYK: swatch.model == "CMYK" ? swatch.cmykText : nil,selectionID:"ase:\(file.id):\(index)")
                 }
             } else { page.grid.note = appbridge.files.isEmpty ? "Import an ASE file in Appbridge Settings to begin." : "Select an ASE file from Rail 2 to open its swatches." }
         case .projects:
@@ -2060,11 +3043,7 @@ final class StudioFrame: NSView {
             page.show(.shortcuts)
         case .appleMenubar:
             title = "Apple Menubar"; meta = ("Colour Tools", "App Store")
-            #if APPSTORE
             page.show(.appleMenubar)
-            #else
-            page.show(.general)
-            #endif
         case .sharingSettings:
             title = "Sharing"; meta = ("QR Generation Settings", "Offline Colour Exchange")
             page.show(.sharingSettings)
@@ -2075,6 +3054,9 @@ final class StudioFrame: NSView {
         case .qrImport:
             title = "Import"; meta = ("QR Colour Exchange", "Camera · Image · Clipboard")
             page.show(.qrImport)
+        case .colourManagement(let index):
+            title = "Colour Management"; meta = ("", "")
+            page.show(.colourManagement(max(0, min(2, index))))
         case .general:
             title = "General"; meta = ("Setup & Preferences", "")
             page.show(.general)
@@ -2106,14 +3088,28 @@ final class StudioFrame: NSView {
             title = "Contrast"; meta = ("Check a pair", "WCAG 2 \u{00B7} APCA")
             page.show(.contrast)
         case .catalogue:
+            if SchemaTrial.structure != nil, !page.onboardingDismissed, (lib.projects.isEmpty || page.journey != nil) {
+                if page.journey == nil {
+                    let journey=CatalogueJourneyView(library:library)
+                    journey.onBrowse={ [weak self] in self?.page.onboardingDismissed=true;self?.reload() }
+                    page.journey=journey;page.addSubview(journey)
+                }
+                page.journey?.refresh();page.show(.welcome);page.showsPaletteFilters=false;page.paletteFilters.isHidden=true
+                title="Welcome to Colorgain";meta=("",library.catalogue)
+            } else {
             items = cards(palettes(lib.swatches))
             title = "All Palettes"; meta = ("\(items.count) palettes", library.catalogue)
+            }
         case .palette(let id):
             let s = lib.swatch(id)
             items = tiles(lib.hexes(inSwatch: id, by: library.paletteSort), in: id)
             title = s?.name ?? "Palette"
+            if let source = linkedPalettes.sources[id] {
+                page.paletteSwatchCount = s?.entries.count
+                page.grid.note = source.problem
+            }
             page.paletteCount = "\(items.count) Colours"
-            meta = (s?.projectID.flatMap { lib.project($0)?.name } ?? "No Project", "")
+            meta = (linkedPalettes.sources[id].map { $0.problem == nil ? "Linked Reference" : "Linked Reference · Unavailable" } ?? s?.projectID.flatMap { lib.project($0)?.name } ?? "No Project", "")
         case .project(let id), .overview(let id, _):
             let list = palettes(lib.palettes(in: id))
             items = cards(list)
@@ -2125,6 +3121,23 @@ final class StudioFrame: NSView {
             let node = SchemaTrial.rows(of: tree).first { $0.node.id == nid }?.node
             let held = lib.palettes(in: id), member = lib.project(id)?.name ?? "Member"
             title = node?.name ?? "Group"
+            if photographPage {
+                let records=photoRecords(project:id,bucket:nid)
+                items=records.compactMap{record,index in
+                    guard let url=try? record.url(in:index.deletingLastPathComponent()),keep(record.name,nil) else{return nil}
+                    let dates=try? url.resourceValues(forKeys:[.creationDateKey,.contentModificationDateKey])
+                    return TileGrid.Item(title:record.name,caption:record.external ? "Linked Original":"Image",colours:[],hex:nil,id:nil,imagePath:url.path,linkedReference:record.external,createdAt:dates?.creationDate,modifiedAt:dates?.contentModificationDate)
+                }
+                switch photoSort {
+                case .fileName:items.sort{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
+                case .fileType:items.sort{URL(fileURLWithPath:$0.title).pathExtension.localizedCaseInsensitiveCompare(URL(fileURLWithPath:$1.title).pathExtension) == .orderedAscending}
+                default:break
+                }
+                meta=(plural(items.count,"image"),member)
+                page.grid.note=records.isEmpty ? "No images yet. Add photographs or images to this folder." : nil
+                page.showNew("Add Images…")
+                break
+            }
             switch node.flatMap({ SchemaTrial.role(of: $0) }) {
             case .palettes?:
                 let list = palettes(lib.palettes(in: id, bucket: nid, buckets: SchemaTrial.rows(of: tree).filter { SchemaTrial.role(of: $0.node) == .palettes }.map { $0.node.id })); items = cards(list)
@@ -2132,7 +3145,7 @@ final class StudioFrame: NSView {
             case .typography?:
                 // A typography palette holds styles, not colours: its card says how many, and the button makes another in this member.
                 let list = held.filter { $0.isTypography }
-                items = list.compactMap { s in keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: plural(s.styles?.count ?? 0, "style"), colours: [], hex: nil, id: s.id) : nil }
+                items = list.compactMap { s in keep(s.name, nil) ? TileGrid.Item(title: s.name, caption: plural(s.styles?.count ?? 0, "style"), colours: [], hex: nil, id: s.id,createdAt:s.createdAt,modifiedAt:[s.createdAt,s.nameChangedAt,s.stylesChangedAt,s.tagsChangedAt].compactMap{$0}.max()) : nil }
                 meta = (plural(list.count, "typography palette"), member)
                 page.showNew("New Typography Palette")
             case .tags?:
@@ -2170,6 +3183,7 @@ final class StudioFrame: NSView {
             case "favourites": list=palettes(lib.orderedFavourites); title="Favourites"
             case "claimed": list=palettes(lib.swatches.filter{$0.claim != nil}); title="Claimed Palettes"
             case "palettes": list=palettes(lib.libraryPalettes); title="Unassigned Palettes"
+            case "typography": list=lib.libraryPalettes.filter(\.isTypography); title="Typography"
             default: list=palettes(lib.swatches); title="All Palettes"
             }
             items = cards(list)
@@ -2185,22 +3199,39 @@ final class StudioFrame: NSView {
         case .project(let id), .overview(let id, _): page.showExport("Export \(SchemaTrial.memberName(of: SchemaTrial.collection(of: id)))\u{2026}")
         default: break
         }
+        page.settingsDestination = isSettings(place) ? place : nil
+        if let group = SettingsNavigation.group(for: place) { title = group.title }
         page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
-        analysisPalettes=items.compactMap{item in item.id.flatMap{lib.swatch($0)}}
+        analysisPalettes=items.compactMap{item in item.id.flatMap{palettesByID[$0]}}
+        if case .palette(let selected)=place { metadataPane.palette=lib.swatch(selected) }
+        else { metadataPane.palette=paletteSelection.ids.count == 1 ? paletteSelection.ids.first.flatMap{lib.swatch($0)} : nil }
         if page.showsPaletteFilters {meta.0=plural(items.count,"palette")}
-        page.set(title: title, meta: meta, items: items)
+        page.grid.selectionScope=String(describing:place)
+        page.grid.notePaletteID = { if case .palette(let id) = place { return id }; return nil }()
+        page.grid.noteScope = library.store.url.path
+        page.set(title: title, meta: meta, items: items,reuseGridIfSame:reuseGridIfSame)
+        page.grid.showsHalo = true
         let catalogueID=CatalogueTree.catalogue(in:library.store.root)?.id ?? UUID()
         page.configureMetadataFilters(store:MetadataFilterStore(catalogueURL:library.store.url),catalogueID:catalogueID)
-        page.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,gridColumns:intakeGridColumns,fullView:intakeFullView)
+        page.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,gridColumns:intakeGridColumns,fullView:intakeFullView)
+        page.grid.imageFullView=photographPage ? photoFullView:(imageIntakeWorkspace && intakeFullView)
         let metadataFilterAvailable:Bool
         switch place {
-        case .catalogue,.palette,.project,.overview,.group,.collection,.folder,.palettes: metadataFilterAvailable=true
+        case .catalogue,.palette,.project,.overview,.group,.collection,.folder,.palettes,.projects,.appbridge: metadataFilterAvailable=true
         default: metadataFilterAvailable=imageIntakeWorkspace
         }
-        viewportHeader.configureMetadataFilter(visible:metadataFilterAvailable,active:page.metadataFilterIsExpanded)
+        viewportHeader.configureMetadataFilter(visible:metadataFilterAvailable && page.assetProps.filters.contains(.metadata),active:page.metadataFilterIsExpanded)
         page.grid.selectedImagePaths=intakeSelectedPaths
-        viewportHeader.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
-        viewportFooter.configureImageIntake(imageIntakeWorkspace,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:intakeImages.count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        intakeTargetPane.selectedCount=intakeSelectedPaths.count
+        intakeTargetPane.setContext(catalogue:library.store.url.deletingPathExtension().lastPathComponent,kind:importKind)
+        viewportHeader.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        viewportFooter.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        viewportFooter.configureImageBrowser(active:photographPage,fullView:photoFullView,index:page.grid.currentImageIndex+1,total:items.count,
+            sort:page.assetProps.menus.contains(.sort) && photographPage ? photoSort:nil,
+            view:page.assetProps.menus.contains(.imageView),paginated:page.assetProps.pagination == .imageByImage)
+        if imageIntakeWorkspace && !importsImages {
+            viewportFooter.setSelectionCount(intakeSelectedPaths.count,total:visibleImportFiles().count)
+        }
         page.grid.chosenHex = chosenHex
         inspectorPane.catalogue=library.catalogue;inspectorPane.total=palettes(lib.swatches).count
         inspectorPane.displayColours=shade
@@ -2223,26 +3254,31 @@ final class StudioFrame: NSView {
         expandedAnalysis=nil;page.expandedPanelTitle=nil;window?.makeFirstResponder(page.grid);needsLayout=true;return true
     }
     private func followPane(_ pane:StudioFrame){
-        if pane === self {refreshAnalysis();inspectorPane.palette=inspectedPalette.flatMap{library.library.swatch($0)};return}
+        if pane === self {refreshAnalysis();inspectorPane.palette=inspectedPalette.flatMap{pane.displayLibrary.swatch($0)};return}
+        lastAnalysisKey=nil
         let previous=place;place=pane.place;fillLibraryRail();fillContextRail();place=previous
-        let palette=pane.inspectedPalette.flatMap{library.library.swatch($0)}
+        let palette=pane.inspectedPalette.flatMap{pane.displayLibrary.swatch($0)}
         inspectedPalette=pane.inspectedPalette
         inspectorPane.palette=palette
-        histogramPane.update(palette,library:library.library,selected:pane.analysisColour)
-        bloomPane.update(palette,library:library.library,selected:pane.analysisColour)
+        histogramPane.update(palette,library:pane.displayLibrary,selected:pane.analysisColour)
+        bloomPane.update(palette,library:pane.displayLibrary,selected:pane.analysisColour)
     }
     private func refreshAnalysis() {
-        let lib=library.library
+        let lib=displayLibrary
         let visible=analysisPalettes
         if case .palette(let id)=place { inspectedPalette=id }
         else if !visible.contains(where:{$0.id==inspectedPalette}) {inspectedPalette=visible.first?.id;analysisColour=nil}
         let palette=inspectedPalette.flatMap{lib.swatch($0)}
         page.expandedPanelTitle=canvasWorkspace ? expandedAnalysis.map{($0 == .bloom ? "Delta Bloom":"Histograms")+" > "+(palette?.name ?? "Select A Palette")} : nil
         expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
-        histogramPane.update(palette,library:lib,selected:analysisColour)
-        bloomPane.update(palette,library:lib,selected:analysisColour)
-        if expandedAnalysis == .bloom {expandedBloom.update(palette,library:lib,selected:analysisColour)}
-        if expandedAnalysis == .histogram {expandedHistogram.update(palette,library:lib,selected:analysisColour)}
+        let key=AnalysisKey(revision:library.revision,palette:palette?.id,colour:analysisColour,channel:viewportHeader.channels.selectedChannel,print:PrintCondition.current,expanded:expandedAnalysis)
+        if key != lastAnalysisKey {
+            lastAnalysisKey=key
+            histogramPane.update(palette,library:lib,selected:analysisColour)
+            bloomPane.update(palette,library:lib,selected:analysisColour)
+            if expandedAnalysis == .bloom {expandedBloom.update(palette,library:lib,selected:analysisColour)}
+            if expandedAnalysis == .histogram {expandedHistogram.update(palette,library:lib,selected:analysisColour)}
+        }
         bloomWorkspace.update(visible.isEmpty ? palette.map{[$0]} ?? []:visible,selected:inspectedPalette)
         onPaneChange?()
     }
@@ -2297,520 +3333,9 @@ final class StudioFrame: NSView {
 // MARK: - The header, 94 high
 
 /// The wordmark, the tabs, Search, the tile-size slider and the avatar, all on one baseline.
-private final class PaletteHaloButton: NSButton {
-    override init(frame: NSRect) { super.init(frame: frame); isBordered = false; title = ""; setButtonType(.momentaryChange) }
-    required init?(coder: NSCoder) { fatalError() }
-    override func draw(_ dirtyRect: NSRect) {
-        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
-        for degree in 0..<180 {
-            let arc = NSBezierPath()
-            arc.appendArc(withCenter: centre, radius: 8, startAngle: CGFloat(degree * 2), endAngle: CGFloat(degree * 2 + 3))
-            arc.lineWidth = 4
-            NSColor(calibratedHue: CGFloat(degree) / 180, saturation: 0.9, brightness: isHighlighted ? 0.75 : 0.95, alpha: 1).setStroke()
-            arc.stroke()
-        }
-        if window?.firstResponder === self {
-            NSFocusRingPlacement.only.set(); NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 2)).fill()
-        }
-    }
-}
+final class MiniSlider: ClickCursorView {
+    override var handCursorRects:[NSRect]{[bounds]}
 
-/// One square drawing box and centre for every header utility glyph.
-private enum HeaderUtilityIcon {
-    static let size: CGFloat = 18
-    private static var images: [String: NSImage] = [:]
-    static func rect(in bounds: NSRect) -> NSRect {
-        NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
-    }
-    static func draw(_ name: String, in bounds: NSRect) {
-        let key = name + (hexOf(Design.ink) ?? "")
-        if let image = images[key] {
-            image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            return
-        }
-        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: name)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [Design.ink]))),
-              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 72, pixelsHigh: 72,
-                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
-        // SF Symbols include differing optical margins. Trim once, then cache;
-        // all utility glyphs occupy the same visible square at every redraw.
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        symbol.draw(in: NSRect(x: 0, y: 0, width: 72, height: 72))
-        NSGraphicsContext.restoreGraphicsState()
-        var minX = 72, minY = 72, maxX = -1, maxY = -1
-        for y in 0..<72 { for x in 0..<72 where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.04 {
-            minX = min(minX, x); minY = min(minY, y); maxX = max(maxX, x); maxY = max(maxY, y)
-        } }
-        guard maxX >= minX, maxY >= minY,
-              let pixels = bitmap.cgImage?.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)) else { return }
-        let image = NSImage(cgImage: pixels, size: NSSize(width: size, height: size))
-        images[key] = image
-        image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-    }
-}
-
-private final class HeaderHelpButton: NSButton {
-    private var hovered = false
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        isBordered = false; title = ""; setButtonType(.momentaryChange)
-        toolTip = "Help"; setAccessibilityLabel("Help")
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach { removeTrackingArea($0) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
-    }
-    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
-    override func draw(_ dirtyRect: NSRect) {
-        if hovered || isHighlighted { fill(bounds, Design.rule.withAlphaComponent(0.25)) }
-        HeaderUtilityIcon.draw("questionmark.circle", in: bounds)
-    }
-}
-
-private final class HeaderNavigationButton:NSButton {
-    var active=false {didSet{needsDisplay=true}}
-    var symbol=""
-    var run:(()->Void)?
-    private var hovered=false
-    static func label(_ title:String,active:Bool)->NSAttributedString {
-        let value=NSMutableAttributedString(attributedString:Design.attributed(title,.lead,colour:Design.ink))
-        value.addAttribute(.font,value:Design.font(Design.Text.lead.size,active ? .medium:.regular),range:NSRange(location:0,length:value.length));return value
-    }
-    var contentWidth:CGFloat {ceil(max(Self.label(title,active:false).size().width,Self.label(title,active:true).size().width))+26}
-    override init(frame:NSRect){super.init(frame:frame);isBordered=false;target=self;action=#selector(pressed)}
-    required init?(coder:NSCoder){fatalError()}
-    @objc private func pressed(){run?()}
-    override var isFlipped:Bool{true}
-    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
-    override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
-    override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
-    override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
-    override func draw(_ dirtyRect:NSRect){
-        if hovered || isHighlighted {fill(bounds,Design.mist)}
-        HeaderUtilityIcon.draw(symbol,in:NSRect(x:0,y:0,width:18,height:bounds.height))
-        let baseline=bounds.midY+7
-        Self.label(title,active:active).draw(x:26,baseline:baseline)
-        if active {fill(NSRect(x:26,y:baseline+6,width:bounds.width-26,height:1),Design.ink)}
-    }
-}
-
-private final class HeaderToolsButton:NSButton {
-    override var isFlipped:Bool{true}
-    var active=false {didSet{needsDisplay=true}}
-    private var hovered=false
-    override init(frame:NSRect){super.init(frame:frame);isBordered=false;title="";toolTip="More Tools";setAccessibilityLabel("More Tools")}
-    required init?(coder:NSCoder){fatalError()}
-    override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
-    override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
-    override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
-    override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
-    override func draw(_ dirtyRect:NSRect){
-        if hovered || isHighlighted {fill(bounds,Design.mist)}
-        HeaderUtilityIcon.draw("square.grid.2x2",in:bounds)
-        if active {fill(NSRect(x:8,y:bounds.height-3,width:bounds.width-16,height:1),Design.ink)}
-    }
-}
-
-final class StudioHeader: NSView, Overlay, NSTextFieldDelegate {
-    let layoutControl=WorkspaceLayoutControl(frame:.zero)
-    var overlayWindows: [NSWindow] { (dropped.map { [$0] } ?? []) + (searchPanel.map { [$0] } ?? []) }
-    func dismissOverlay() { closeMenu(); hideSearch() }
-    func containsOverlayEvent(_ event: NSEvent) -> Bool {
-        if overlayWindows.contains(where: { $0 === event.window }) { return true }
-        guard searchExpanded, event.window === window else { return false }
-        let point = convert(event.locationInWindow, from: nil)
-        return field.frame.insetBy(dx: -6, dy: -10).contains(point) || searchRect.contains(point)
-    }
-    var grid: (x: CGFloat, column: CGFloat) = (24, 96) { didSet { if grid != oldValue { needsLayout = true; needsDisplay = true } } }
-    var live: Int? = 0 { didSet { needsLayout = true; needsDisplay = true } }
-    private var settingsRect = NSRect.zero, searchRect = NSRect.zero
-    struct SavedSearch: Codable { var query: String; var date: Date; var favourite: Bool }
-    var searchStorageKey = "Studio.Searches"
-    var savedSearches: [SavedSearch] {
-        guard let data = UserDefaults.standard.data(forKey: searchStorageKey) else { return [] }
-        return (try? JSONDecoder().decode([SavedSearch].self, from: data)) ?? []
-    }
-    struct SearchResult { let title: String; let detail: String; let select: () -> Void }
-    var searchResults: ((String) -> [SearchResult])?
-    private var visibleResults: [SearchResult] = []
-    var onSearchCommitted: (() -> Void)?
-    private var searchPanel: NSPanel?
-    private var searchExpanded = false
-    private var searchTimer: Timer?
-    private var searchProgress: CGFloat = 0
-    private var commitTimer: Timer?
-    private var dropdownQueries: [String] = []
-
-    var onTab: ((Int) -> Void)?
-    var onPaletteWheel: (() -> Void)?
-    var proofingControl:NSView? {didSet{if let proofingControl {addSubview(proofingControl)};needsLayout=true}}
-    private let paletteHalo = PaletteHaloButton(frame: .zero)
-    /// The expanded Rail1 edge anchors primary navigation.
-    var railEdge: CGFloat = 248 { didSet { if railEdge != oldValue { needsLayout = true; needsDisplay = true } } }
-    private var navigationStart: CGFloat { max(railEdge,Design.App.railWidth)+Logo.headerSidePadding(over:Design.App.railWidth) }
-    private var copyRect = NSRect.zero
-    var onPick: (() -> Void)?
-    var onSample: (() -> Void)?
-    private var pickRects: [NSRect] = []
-    /// The clock: the history slides in or out; it is drawn in ink while the history is in.
-    var onHistory: (() -> Void)?
-    var historyOpen = false { didSet { needsDisplay = true } }
-    /// The three window marks at the top of column 1, where macOS would put its buttons: close, minimise, and arrange, which drops its menu.
-    private var markRects: [NSRect] = []
-    private var markHover: Int?
-    private var dropped: SwissDropdown.MenuPanel?
-    var onSettings: (() -> Void)?
-    var onSearch: ((String) -> Void)?
-    var onAcross: ((Int) -> Void)?
-    var search: String { field.stringValue }
-    func clearFilter() { hideSearch() }
-    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import"]
-    static let secondaryNavigation:[(index:Int,title:String)]=[(2,"Lab"),(4,"Contrast"),(5,"Projects"),(3,"PrePress"),(6,"Appbridge"),(7,"Import")]
-    private let primaryButtons=[HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero)]
-    private let primaryIndices=[0,1,8]
-    private let toolsButton=HeaderToolsButton(frame:.zero)
-    private let field = NSTextField(string: "")
-    static let baseline: CGFloat = 40
-    private static var headerBaseline: CGFloat { let font=Design.Text.body.font();return Design.App.header/2+(font.ascender+font.descender)/2 }
-
-    init() {
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = Design.card.cgColor
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = Design.Text.body.font()
-        field.textColor = Design.ink
-        field.placeholderAttributedString = Design.attributed("Search", .body, colour: Design.soft)
-        field.target = self
-        field.action = #selector(searched)
-        field.delegate = self
-        (field.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
-        field.isHidden = true
-        addSubview(field)
-        for (i,button) in primaryButtons.enumerated(){
-            button.title=i == 2 ? "Designer":tabs[i];button.symbol=["books.vertical","square.stack","pencil.and.outline"][i]
-            button.setAccessibilityLabel(button.title);button.toolTip=button.title
-            button.run={ [weak self] in self?.onTab?(self?.primaryIndices[i] ?? i) };addSubview(button)
-        }
-        toolsButton.target=self;toolsButton.action=#selector(openTools);addSubview(toolsButton)
-        paletteHalo.target = self; paletteHalo.action = #selector(openPaletteWheel)
-        paletteHalo.setAccessibilityLabel("Open palette wheel")
-        paletteHalo.toolTip = "Palette wheel · Tab"
-        addSubview(paletteHalo)
-        addSubview(layoutControl)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    @objc private func openPaletteWheel() { onPaletteWheel?() }
-    override var isFlipped: Bool { true }
-
-    override func layout() {
-        super.layout()
-        let g = Design.App.gutter
-        func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
-        func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        var x=navigationStart
-        for (i,button) in primaryButtons.enumerated(){
-            button.active=live == primaryIndices[i]
-            button.frame=NSRect(x:x,y:bounds.midY-18,width:button.contentWidth,height:36)
-            x=button.frame.maxX+28
-        }
-        toolsButton.active=live.map{$0 > 1 && $0 != 8} ?? false
-        let font=Design.Text.body.font(),textCentre=Self.headerBaseline-(font.ascender+font.descender)/2
-        paletteHalo.frame=NSRect(x:x-6,y:textCentre-14,width:28,height:28)
-        toolsButton.frame=NSRect(x:bounds.width-Design.App.margin-97,y:textCentre-18,width:36,height:36)
-        let proofRight=bounds.width-Design.App.railWidth
-        let available=max(0,proofRight-max(paletteHalo.frame.maxX+24,bounds.midX+72))
-        let layoutWidth=min(280,max(136,available*0.44)),proofWidth=min(360,max(0,available-layoutWidth-20))
-        layoutControl.frame=NSRect(x:proofRight-layoutWidth,y:textCentre-14,width:layoutWidth,height:28)
-        proofingControl?.frame=NSRect(x:layoutControl.frame.minX-20-proofWidth,y:textCentre-14,width:proofWidth,height:28)
-        layoutControl.isHidden=live.map{!([0,1].contains($0))} ?? true
-        // Law 1: the field's text on the baseline.
-        let right = bounds.width - Design.App.margin
-        let end = right - 148
-        let width = max(80, end - max(col(8), (proofingControl?.frame.maxX ?? paletteHalo.frame.maxX) + 24)) * searchProgress
-        field.frame = NSRect(x: end - width, y: textCentre - 10, width: width, height: 20)
-        positionSearchPanel()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        hairline(x:0, y:Design.App.header - 1, width:bounds.width, Design.rule)
-        let g = Design.App.gutter, b = Self.headerBaseline
-        func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
-        func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        Logo.drawHeader(centredOver:Design.App.railWidth,centreY:bounds.midY)
-        let font = Design.Text.body.font()
-        let centreY = b - (font.ascender + font.descender) / 2
-        // Centre the picker pair in the full header, using the utility icon renderer.
-        pickRects = []
-        for (k, name) in ["eyedropper", "rectangle.dashed"].enumerated() {
-            let rect = NSRect(x:bounds.midX-30+CGFloat(k)*36,y:centreY-12,width:24,height:24)
-            HeaderUtilityIcon.draw(name,in:rect)
-            pickRects.append(rect.insetBy(dx:-6,dy:-6))
-        }
-        let right = bounds.width - Design.App.margin + 5
-        searchRect = NSRect(x: right - 132, y: centreY - 12, width: 24, height: 24)
-        settingsRect = NSRect(x: right - 24, y: centreY - 12, width: 24, height: 24)
-        copyRect = .zero
-        if !searchExpanded {
-            let label = Design.attributed("Copy " + Prefs.copyFormat.label + " ▾", .body, colour: Design.quiet)
-            let x = searchRect.minX - Design.App.gutter - label.size().width
-            label.draw(x: x, baseline: b)
-            copyRect = NSRect(x: x - 4, y: centreY - 16, width: label.size().width + 8, height: 32)
-        }
-
-        for (name, rect) in [("magnifyingglass", searchRect), ("gearshape", settingsRect)] {
-            HeaderUtilityIcon.draw(name, in: rect)
-        }
-        if searchProgress > 0 { hairline(x: field.frame.minX, y: b + 7, width: field.frame.width, Design.rule) }
-        markRects = []
-        let historyRect = NSRect(x:right-60,y:centreY-12,width:24,height:24)
-        HeaderUtilityIcon.draw("clock", in:historyRect)
-        markRects.append(historyRect.insetBy(dx:-6,dy:-6))
-    }
-
-    @objc private func openTools(){
-        guard let win=window else{return}
-        if dropped != nil {closeMenu();return}
-        if searchExpanded {hideSearch()}
-        let entries=Self.secondaryNavigation
-        let panel=SwissDropdown.MenuPanel(items:entries.map(\.title),chosen:entries.first{$0.index == live}?.title ?? "",width:220){ [weak self] i in
-            guard let self,entries.indices.contains(i) else{return}
-            self.closeMenu();self.onTab?(entries[i].index)
-        }
-        let anchor=win.convertToScreen(toolsButton.convert(toolsButton.bounds,to:nil))
-        panel.place(below:NSPoint(x:anchor.maxX-220,y:anchor.minY-4))
-        win.addChildWindow(panel,ordered:.above);dropped=panel;Overlays.opened(self)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        let over = markRects.firstIndex { $0.contains(p) }
-        if over != markHover { markHover = over; needsDisplay = true }
-    }
-    override func mouseExited(with event: NSEvent) { if markHover != nil { markHover = nil; needsDisplay = true } }
-
-    private func closeMenu() {
-        if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
-        dropped = nil
-        Overlays.closed(self)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        if copyRect.contains(p), let win = window {
-            if dropped != nil { closeMenu(); return }
-            let formats = StudioPage.models
-            let panel = SwissDropdown.MenuPanel(items: formats.map { $0.label }, chosen: Prefs.copyFormat.label, width: 200) { [weak self] index in
-                Prefs.copyFormat = formats[index]
-                self?.closeMenu(); self?.needsDisplay = true
-            }
-            let anchor = win.convertToScreen(convert(copyRect, to: nil))
-            panel.place(below: NSPoint(x: anchor.minX, y: anchor.minY - 4))
-            win.addChildWindow(panel, ordered: .above)
-            dropped = panel; Overlays.opened(self)
-            return
-        }
-        if searchRect.contains(p) { if searchExpanded { hideSearch() } else { showSearch(focus: true) }; return }
-        if markRects.contains(where: { $0.contains(p) }) { onHistory?(); return }
-        if let i = pickRects.firstIndex(where: { $0.contains(p) }) { if i == 0 { onPick?() } else { onSample?() }; return }
-        if settingsRect.contains(p) { onSettings?(); return }
-        // Window movement belongs to the native macOS title bar.
-    }
-    @objc private func searched() { if !visibleResults.isEmpty { selectResult(0) } }
-    func controlTextDidChange(_ obj: Notification) { showSearchDropdown() }
-    private func selectResult(_ index: Int) {
-        guard visibleResults.indices.contains(index) else { return }
-        let result = visibleResults[index]
-        commitSearch(); hideSearch(); result.select()
-    }
-    private func commitSearch() {
-        let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
-        var entries = savedSearches
-        let favourite = entries.first { $0.query == query }?.favourite ?? false
-        entries.removeAll { $0.query == query }
-        entries.insert(SavedSearch(query: query, date: Date(), favourite: favourite), at: 0)
-        saveSearches(Array(entries.prefix(200)))
-        onSearchCommitted?()
-    }
-    private func saveSearches(_ entries: [SavedSearch]) {
-        if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: searchStorageKey) }
-    }
-    private func showSearch(focus: Bool) {
-        if !searchExpanded { searchExpanded = true; field.isHidden = false; animateSearch(); showSearchDropdown(); Overlays.opened(self) }
-        if focus { window?.makeFirstResponder(field) }
-    }
-    private func hideSearch() {
-        commitTimer?.invalidate()
-        let hadQuery = !field.stringValue.isEmpty
-        field.stringValue = ""; visibleResults = []
-        searchExpanded = false; animateSearch(); Overlays.closed(self)
-        if hadQuery { onSearch?("") }
-        searchPanel?.parent?.removeChildWindow(searchPanel!); searchPanel?.orderOut(nil); searchPanel = nil
-    }
-    private func animateSearch() {
-        searchTimer?.invalidate()
-        searchTimer = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            let target: CGFloat = self.searchExpanded ? 1 : 0
-            self.searchProgress += (target - self.searchProgress) * 0.24
-            if abs(self.searchProgress - target) < 0.002 { self.searchProgress = target; timer.invalidate(); self.field.isHidden = target == 0 }
-            self.needsLayout = true; self.needsDisplay = true
-        }
-        RunLoop.main.add(searchTimer!, forMode: .common)
-    }
-    private func positionSearchPanel() {
-        guard let panel = searchPanel, let win = window else { return }
-        let point = win.convertToScreen(convert(NSRect(x: field.frame.maxX - panel.frame.width, y: bounds.maxY + 1, width: 0, height: 0), to: nil)).origin
-        panel.setFrameOrigin(NSPoint(x: point.x, y: point.y - panel.frame.height))
-    }
-    private func showSearchDropdown() {
-        guard searchExpanded, let win = window else { return }
-        searchPanel?.parent?.removeChildWindow(searchPanel!); searchPanel?.orderOut(nil); searchPanel = nil
-        let end = bounds.width - Design.App.margin - 220
-        let gridStart = grid.x + 7 * (grid.column + Design.App.gutter)
-        let width = max(240, end - max(gridStart, paletteHalo.frame.maxX + 24))
-        let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list: NSView
-        if !query.isEmpty {
-            visibleResults = searchResults?(query) ?? []
-            let results = SearchResultList(results: visibleResults, width: width)
-            results.onSelect = { [weak self] in self?.selectResult($0) }
-            list = results
-        } else {
-            visibleResults = []
-            let entries = savedSearches
-            guard !entries.isEmpty else { return }
-            let ordered = entries.filter { $0.favourite } + entries.filter { !$0.favourite }
-            dropdownQueries = ordered.map { $0.query }
-            let history = SearchHistoryList(entries: ordered, width: width)
-            history.onSelect = { [weak self] i in
-                guard let self, self.dropdownQueries.indices.contains(i) else { return }
-                self.field.stringValue = self.dropdownQueries[i]; self.showSearchDropdown(); self.window?.makeFirstResponder(self.field)
-            }
-            history.onStar = { [weak self] i in
-                guard let self, self.dropdownQueries.indices.contains(i) else { return }
-                var entries = self.savedSearches
-                if let n = entries.firstIndex(where: { $0.query == self.dropdownQueries[i] }) { entries[n].favourite.toggle() }
-                self.saveSearches(entries); self.showSearchDropdown()
-            }
-            list = history
-        }
-        let height = list.frame.height
-        let pageHeight = (win.contentView?.bounds.height ?? 600) - Design.App.header - Design.App.footer
-        let scroll = FittedScrollView(frame: NSRect(x: 0, y: 0, width: width, height: min(height, pageHeight * 0.5)))
-        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = true; scroll.backgroundColor = Design.card; scroll.documentView = list
-        let panel = NSPanel(contentRect: scroll.bounds, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.contentView = scroll; panel.hasShadow = true; panel.backgroundColor = Design.card
-        searchPanel = panel; positionSearchPanel(); win.addChildWindow(panel, ordered: .above); Overlays.opened(self)
-        scroll.contentView.scroll(to: .zero)
-    }
-    @objc private func starSearch(_ sender: NSButton) {
-        guard dropdownQueries.indices.contains(sender.tag) else { return }
-        var entries = savedSearches
-        if let i = entries.firstIndex(where: { $0.query == dropdownQueries[sender.tag] }) { entries[i].favourite.toggle() }
-        saveSearches(entries); showSearchDropdown()
-    }
-    @objc private func repeatSearch(_ sender: NSButton) {
-        guard dropdownQueries.indices.contains(sender.tag) else { return }
-        field.stringValue = dropdownQueries[sender.tag]; showSearchDropdown(); window?.makeFirstResponder(field)
-    }
-    /// Escape in the search clears it and lets go, so the page is whole again and the quick keys work.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
-        guard sel == #selector(NSResponder.cancelOperation(_:)) else { return false }
-        field.stringValue = ""
-        onSearch?(""); hideSearch()
-        window?.makeFirstResponder(window?.contentView)
-        return true
-    }
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        NotificationCenter.default.addObserver(forName: NSControl.textDidBeginEditingNotification, object: field, queue: .main) { [weak self] _ in
-            (self?.field.currentEditor() as? NSTextView)?.insertionPointColor = Design.ink
-            self?.needsDisplay = true
-        }
-        NotificationCenter.default.addObserver(forName: NSControl.textDidEndEditingNotification, object: field, queue: .main) { [weak self] _ in self?.needsDisplay = true }
-    }
-}
-
-private final class SearchResultList: NSView {
-    var onSelect: ((Int) -> Void)?
-    private let empty: Bool
-    override var isFlipped: Bool { true }
-    init(results: [StudioHeader.SearchResult], width: CGFloat) {
-        empty = results.isEmpty
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 56 + CGFloat(max(1, results.count)) * 56))
-        for (i, result) in results.enumerated() {
-            let button = NSButton(frame: NSRect(x: 24, y: 48 + CGFloat(i) * 56, width: width - 48, height: 48))
-            button.isBordered = false; button.alignment = .left
-            let title = NSMutableAttributedString(attributedString: Design.attributed(result.title, .body))
-            title.append(Design.attributed("\n" + result.detail, .caption, colour: Design.quiet))
-            button.attributedTitle = title; button.toolTip = result.title + " / " + result.detail
-            button.setAccessibilityLabel(result.title + ", " + result.detail)
-            button.target = self; button.action = #selector(selected(_:)); button.tag = i
-            addSubview(button)
-        }
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func draw(_ dirtyRect: NSRect) {
-        Design.attributed("Results", .heading).draw(x: 24, baseline: 36)
-        if empty { Design.attributed("No results", .body, colour: Design.quiet).draw(x: 24, baseline: 73) }
-    }
-    @objc private func selected(_ sender: NSButton) { onSelect?(sender.tag) }
-}
-
-private final class SearchHistoryList: NSView {
-    var onSelect: ((Int) -> Void)?
-    var onStar: ((Int) -> Void)?
-    private var headings: [(String, CGFloat)] = []
-    private var dividers: [CGFloat] = []
-    override var isFlipped: Bool { true }
-    init(entries: [StudioHeader.SavedSearch], width: CGFloat) {
-        super.init(frame: .zero)
-        wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
-        var y = AreaHeader.headingBaseline - 16
-        for (i, entry) in entries.enumerated() {
-            if i == 0 || entries[i - 1].favourite != entry.favourite {
-                if i > 0 { y += 12; dividers.append(y); y += 16 }
-                headings.append((entry.favourite ? "Favourites" : "Recent Searches", y + 16)); y += 40
-            }
-            let star = NSButton(frame: NSRect(x: 20, y: y, width: 24, height: 32))
-            star.isBordered = false; star.attributedTitle = Design.attributed(entry.favourite ? "★" : "☆", .body, colour: Design.ink)
-            star.target = self; star.action = #selector(starred(_:)); star.tag = i; star.setAccessibilityLabel("Favourite " + entry.query)
-            addSubview(star)
-            let query = NSButton(frame: NSRect(x: 56, y: y, width: max(24, width - 80), height: 32))
-            query.isBordered = false; query.alignment = .left; query.attributedTitle = Design.attributed(entry.query, .body, colour: Design.ink)
-            query.target = self; query.action = #selector(selected(_:)); query.tag = i
-            addSubview(query); y += 32
-        }
-        frame = NSRect(x: 0, y: 0, width: width, height: y + 16)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func draw(_ dirtyRect: NSRect) {
-        for (title, baseline) in headings { Design.attributed(title, .heading, colour: Design.ink).draw(x: 24, baseline: baseline) }
-        for y in dividers { Design.rule.setFill(); NSRect(x: 24, y: y, width: bounds.width - 48, height: 1).fill() }
-    }
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        for view in subviews { addCursorRect(view.frame, cursor: .pointingHand) }
-    }
-    @objc private func selected(_ sender: NSButton) { onSelect?(sender.tag) }
-    @objc private func starred(_ sender: NSButton) { onStar?(sender.tag) }
-}
-
-/// The mini slider: a hairline track and an 8 square knob. Here it sets how many tiles sit across the page.
-final class MiniSlider: NSView {
     var value: CGFloat = 0.5 { didSet { needsDisplay = true } }
     var onChange: ((CGFloat) -> Void)?
     override var isFlipped: Bool { true }
@@ -2833,98 +3358,6 @@ final class MiniSlider: NSView {
 
 /// A Card with 22 top padding and a heading row with the arrow; rows below are drawn by the subclass.
 /// The rail scrolls when its rows pass its height, the scroller hidden until the wheel moves.
-class StudioRail: NSView {
-    var inset: CGFloat = 24 { didSet { if inset != oldValue { needsLayout = true } } }
-    var insetRight: CGFloat = 24 { didSet { if insetRight != oldValue { needsLayout = true } } }
-    /// The arrow in the header, and what a press on it does.
-    var arrow = AreaHeader.Arrow.open { didSet { needsDisplay = true } }
-    var onArrow: (() -> Void)?
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        if arrow != .none, AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
-        super.mouseDown(with: event)
-    }
-    static let top: CGFloat = 22
-    var expandedWidth: CGFloat? { didSet { if expandedWidth != oldValue { needsLayout = true; needsDisplay = true } } }
-    var contentWidth: CGFloat { expandedWidth ?? bounds.width }
-    var contentOffset: CGFloat = 0
-    let scroll = FittedScrollView()
-    let body: RailBody
-    var heading = "" { didSet { needsDisplay = true } }
-    /// The two Labels under the heading.
-    var labels: (String, String) = ("", "") { didSet { needsDisplay = true } }
-
-    init(body: RailBody) {
-        self.body = body
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = Design.card.cgColor
-        layer?.masksToBounds = true
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = body
-        addSubview(scroll)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override var isFlipped: Bool { true }
-    /// The header stays put; only the rows scroll, under the Rule.
-    override func layout() {
-        super.layout()
-        let scrollFrame = NSRect(x: 0, y: AreaHeader.height + contentOffset, width: contentWidth, height: bounds.height - AreaHeader.height - contentOffset)
-        if scroll.frame != scrollFrame { scroll.frame = scrollFrame }
-        let insetsChanged = body.inset != inset || body.insetRight != max(0, insetRight - QuietScroller.lane)
-        body.inset = inset; body.insetRight = max(0, insetRight - QuietScroller.lane)
-        let bodyFrame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.frame.height, body.height))
-        let resized = body.frame != bodyFrame
-        if resized { body.frame = bodyFrame }
-        scroll.verticalScrollElasticity = body.height > scroll.frame.height ? .allowed : .none
-        if resized || insetsChanged { body.needsDisplay = true }
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        AreaHeader.draw(heading: heading, left: labels.0, right: labels.1, in: NSRect(x: 0, y: 0, width: contentWidth, height: bounds.height), inset: inset, insetRight: insetRight, arrow: arrow)
-    }
-
-    class RailBody: NSView {
-        var inset: CGFloat = 24, insetRight: CGFloat = 24
-        override var isFlipped: Bool { true }
-        var height: CGFloat { 0 }
-        /// Master Inner: a row's top at a count of units from the rule, and the line its text sits on.
-        static var unit: CGFloat { Design.App.unit }
-        static var line: CGFloat { Design.App.textBaseline }
-    }
-}
-
-/// The header of an area, drawn the same in rail1, rail2, the page and the history rail: the Heading
-/// with the arrow on its baseline, a row of two Labels under it, and the Rule beneath, at one height in
-/// every area so the rule reads as one line across the window broken only by each area's side padding.
-/// It never scrolls; what is under it does.
-enum AreaHeader {
-    static let headingBaseline: CGFloat = StudioRail.top + 14
-    static let labelBaseline: CGFloat = headingBaseline + 33
-    static let rule: CGFloat = StudioRail.top + 14 + 16 + 27
-    /// Where an area's own content starts: a unit of air under the Rule, in every rail and on every page (Rick, 2026-10-09).
-    static var height: CGFloat { rule + 1 + Design.App.unit }
-    /// The arrow at the right: none; "open", the stroke up and right, pressed to open or widen; "close", turned 180, pressed to close.
-    enum Arrow { case none, open, close }
-    static func arrowRect(in bounds: NSRect, insetRight: CGFloat) -> NSRect { NSRect(x: bounds.width - insetRight - 16, y: headingBaseline - 13, width: 16, height: 16) }
-    static func draw(heading: String, left: String, right: String, in bounds: NSRect, inset: CGFloat, insetRight: CGFloat? = nil, arrow: Arrow = .open, headingRight:String = "",headingTrailingInset:CGFloat=0) {
-        let r = bounds.width - (insetRight ?? inset)
-        let companion=Design.attributed(headingRight,.body)
-        let companionWidth=headingRight.isEmpty ? 0:companion.size().width+24
-        Design.attributed(heading, .heading).draw(x: inset, baseline: headingBaseline, width: max(0,r - inset - 24-companionWidth-headingTrailingInset))
-        if !headingRight.isEmpty {companion.draw(x:r-companion.size().width,baseline:headingBaseline,width:companion.size().width)}
-        if arrow != .none { Design.arrow(16, back: arrow == .close).draw(in: arrowRect(in: bounds, insetRight: insetRight ?? inset), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
-        // Each Label keeps to its half, cut short rather than running into the other: the words are written to fit, never the box.
-        let half = ((r - inset) / 2 - 8).rounded(.down)
-        Design.attributed(left, .label, colour: Design.quiet).draw(x: inset, baseline: labelBaseline, width: half)
-        let rightText = Design.attributed(right, .label, colour: Design.quiet)
-        rightText.draw(x: r - min(rightText.size().width, half), baseline: labelBaseline, width: half)
-        hairline(x: inset, y: rule, width: r - inset, Design.rule)
-    }
-}
-
 /// The library rail: groups of rows, the name left and a tabular count right; a row one step in sits
 /// inside the row above it, as a member sits in its folder.
 private final class RailSelectionBar: NSView {
@@ -2942,6 +3375,8 @@ private final class RailSelectionBar: NSView {
 }
 
 final class LibraryRail: StudioRail {
+    override var handCursorRects:[NSRect]{super.handCursorRects+(collapsed ? [NSRect(x:0,y:0,width:bounds.width,height:AreaHeader.height)]+markHits.map{$0.0}:[])}
+
     /// A group label; a row with its count; a palette on two lines, its name over its colours with the count on the second line.
     /// A palette row: its name, count, colours, whether it is a favourite and the picks' target, and the member it sits in, at an indent.
     struct DropDestination: Equatable { let project: UUID; let bucket: UUID? }
@@ -3061,6 +3496,8 @@ final class LibraryRail: StudioRail {
     }
 
     final class Body: RailBody, NSDraggingSource {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}+iconHits.map{$0.0}+caretHits.map{$0.0}+nameHits.map{$0.0}+tagLinks.map{$0.0}}
+
         /// Every row the rail has, open or shut; `shown` is what is drawn.
         var rows: [Row] = [] { didSet { rebuild() } }
         /// The buckets shut, by key: what is inside them is not shown.
@@ -3621,6 +4058,8 @@ final class PaletteTable: StudioRail {
     }
 
     final class Body: RailBody, NSDraggingSource {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}+caretHits.map{$0.0}+nameHits.map{$0.0}}
+
         var selectedPalettes: Set<UUID> = [] { didSet { rollover.settle(); needsDisplay = true } }
         var readOnlyRows = false
         var rows: [Row] = [] { didSet { rollover.settle() } }
@@ -3863,6 +4302,8 @@ final class HistoryRail: StudioRail {
     func set(rows: [Row]) { list.rows = rows; needsLayout = true }
 
     final class Body: RailBody {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}}
+
         var rows: [Row] = [] { didSet { needsDisplay = true } }
         var onPick: ((String) -> Void)?
         static var row: CGFloat { unit * 2 }
@@ -3903,833 +4344,7 @@ final class HistoryRail: StudioRail {
 
 // MARK: - The page
 
-/// The page: 34 clear, then a Split header on its own six columns, a hairline, 22 clear, and the grid of tiles.
-final class StudioPage: NSView, Overlay {
-    func captureLayoutView()->WorkspaceLayoutTemplate.Page {
-        var state=WorkspaceLayoutTemplate.Page();state.columns=grid.across;state.list=grid.listView;state.format=format.rawValue;state.selectedColour=grid.chosenHex;state.metadataOpen=metadataFilterExpanded;state.metadata=metadataFilterPanel.layoutColumns
-        state.scrollX=scroll.contentView.bounds.minX;state.scrollY=scroll.contentView.bounds.minY;state.delta=grid.deltaEnabled;return state
-    }
-    func restoreLayoutView(_ state:WorkspaceLayoutTemplate.Page){
-        grid.across=max(1,min(30,state.columns));grid.listView=state.list;format=ColourFormat(rawValue:state.format) ?? .hex;grid.chosenHex=state.selectedColour
-        metadataFilterPanel.layoutColumns=state.metadata;metadataFilterExpanded=state.metadataOpen;metadataFilterPanel.isHidden = !state.metadataOpen;applyDeltaState(state.delta)
-        needsLayout=true;layoutSubtreeIfNeeded();let y=max(0,min(state.scrollY,grid.bounds.height-scroll.contentSize.height));scroll.contentView.scroll(to:NSPoint(x:max(0,state.scrollX),y:y));scroll.reflectScrolledClipView(scroll.contentView)
-    }
-    var compactWorkspace = false
-    var paneHeaderControls=false
-    weak var workspaceToolbar: WorkspaceViewportBar?
-    weak var workspaceActionbar: WorkspaceViewportBar?
-    let paletteActions=PalettePageControls(frame:.zero)
-    let paletteFilters=PaletteFilterControls(frame:.zero)
-    var showsPaletteFilters=false
-    var paletteSwatchCount:Int? {didSet{needsLayout=true;needsDisplay=true}}
-    var imageIntakeMode=false {didSet{grid.imageIntake=imageIntakeMode;if imageIntakeMode{grid.listView=false};needsLayout=true;needsDisplay=true}}
-    private var intakeGridColumns=6
-    private var metadataFilterExpanded=false
-    private let metadataFilterPanel=MetadataFilterPanel(frame:.zero)
-    private var basePageItems:[TileGrid.Item]=[]
-    var metadataFilterIsExpanded:Bool { metadataFilterExpanded }
-    func toggleMetadataFilter(){metadataFilterExpanded.toggle();metadataFilterPanel.isHidden = !metadataFilterExpanded;if metadataFilterExpanded{metadataFilterPanel.refreshIfNeeded()};needsLayout=true}
-    func configureMetadataFilters(store:MetadataFilterStore?,catalogueID:UUID){metadataFilterPanel.configure(records:basePageItems,store:store,catalogueID:catalogueID)}
-    func configureImageIntake(_ active:Bool,linking:Bool,gridColumns:Int,fullView:Bool){imageIntakeMode=active;intakeGridColumns=gridColumns;grid.imageFullView=active && fullView}
-    var layoutFrozen = false
-    /// Palette content heading shares the first rail-row baseline.
-    var paletteCount: String? { didSet { needsLayout = true; needsDisplay = true } }
-    var inset: CGFloat = 8 { didSet { if inset != oldValue { needsLayout = true } } }
-    var insetRight: CGFloat = 8 { didSet { if insetRight != oldValue { needsLayout = true } } }
-    private let deltaButton=DeltaWarningButton()
-    private let profileSelector=PrintProfileSelector(compact:true)
-    var onDeltaToggle:(()->Void)?
-    var showsDeltaTools=false {didSet{deltaButton.isHidden = !showsDeltaTools;profileSelector.isHidden = !showsDeltaTools;needsLayout=true;needsDisplay=true}}
-    func applyDeltaState(_ enabled:Bool){deltaButton.enabledWarnings=enabled;grid.deltaEnabled=enabled;needsDisplay=true}
-    func refreshPrintProfiles(){profileSelector.reload();needsDisplay=true}
-    @objc private func toggleDelta(){onDeltaToggle?()}
-    let grid = TileGrid()
-    let settings = CatalogueSettings()
-    let schema = SchemaSettings()
-    private let scroll = FittedScrollView()
-    /// The settings scroll as one piece, the open accordion and all, when they outgrow the page.
-    private let settingsScroll = FittedScrollView(), schemaScroll = FittedScrollView()
-    /// The way to make a member, under the header when the page lists members.
-    private let newButton = SwissButton("New Project", .primary)
-    var onNew: (() -> Void)?
-    /// Export beside New, where a page shows a level that can go out as one file.
-    private let exportButton = SwissButton("Export\u{2026}", .secondary)
-    var onExport: (() -> Void)?
-    /// How many tiles sit across: the slider in the page's header, right-aligned before the arrow and centred on it, shown with the tiles.
-    private let slider = MiniSlider()
-    var onAcross: ((Int) -> Void)?
-    /// The colour model the tiles' captions are in, chosen on the menu before the slider.
-    var format: ColourFormat = .hex {didSet{needsDisplay=true}}
-    private var valueFormatHelp:String {format == .cmyk ? "Colour Values · CMYK · "+PrintCondition.name():"Master Colour Values · "+Self.valueFormatTitle(format)}
-    static func valueFormatTitle(_ format:ColourFormat)->String {
-        switch format {
-        case .cmyk:return "CMYK · "+(PrintCondition.current.press ?? PressProfiles.generic)
-        case .lab:return "Lab (D50)"
-        case .xyz:return "XYZ (D50)"
-        case .linear:return "Linear RGB (sRGB)"
-        case .rgb:return "RGB (sRGB)"
-        case .float:return "Float RGB (sRGB)"
-        default:return format.label
-        }
-    }
-    var onFormat: (() -> Void)?
-    var showsFormat = true
-    private var formatRect = NSRect.zero
-    private var dropped: SwissDropdown.MenuPanel?
-    static let models: [ColourFormat] = [.hex, .rgb, .hsl, .hsv, .cmyk, .p3, .adobeRGB, .rec2020, .lab, .lch, .luv, .oklch, .oklab, .xyz, .float, .linear]
-    var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
-    func dismissOverlay() { closeFormats() }
-    private func closeFormats() {
-        if let m = dropped { m.parent?.removeChildWindow(m); m.orderOut(nil) }
-        dropped = nil
-        Overlays.closed(self)
-    }
-    @objc private func openFormats() {
-        guard let win = window else { return }
-        closeFormats()
-        let items = Self.models.map { Self.valueFormatTitle($0) }
-        let panel = SwissDropdown.MenuPanel(items: items, chosen: Self.valueFormatTitle(format), width: 320) { [weak self] i in
-            guard let self = self else { return }
-            self.closeFormats()
-            self.format = Self.models[i]
-            self.onFormat?()
-        }
-        let anchor = convert(formatRect,to:nil)
-        let s = win.convertToScreen(anchor)
-        panel.place(anchoredTo:NSRect(x:s.maxX-160,y:s.minY,width:160,height:s.height))
-        win.addChildWindow(panel, ordered: .above)
-        dropped = panel
-        Overlays.opened(self)
-    }
-    var acceptsPaletteDrop = false
-    var onPaletteDrop: ((UUID) -> Bool)?
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        acceptsPaletteDrop && PaletteDrag.palette(on: sender.draggingPasteboard) != nil ? .copy : []
-    }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { draggingEntered(sender) }
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
-        return onPaletteDrop?(id) ?? false
-    }
-    enum Section: Hashable { case tiles, catalogues, schema, shortcuts, halo, sounds, general, appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
-    private var section = Section.tiles
-    private let sectionTabs = NSScrollView()
-    private let tabBody = NSView()
-    private var tabButtons: [NSButton] = []
-    private var tabSignature = ""
-    private var tabObserver: NSObjectProtocol?
-    private var anchoredScroll: NSScrollView? {
-        section == .catalogues ? settingsScroll : section == .schema ? schemaScroll : extras[section]?.scroll
-    }
-    private var anchors: [(String,CGFloat)] {
-        if section == .catalogues { return settings.sectionAnchors }
-        if section == .schema { return schema.sectionAnchors }
-        return extras[section]?.view.sectionAnchors ?? []
-    }
-    private func updateTabs() {
-        let items = anchors
-        sectionTabs.isHidden = items.isEmpty
-        let signature = items.map { $0.0 }.joined(separator:"|")
-        if signature != tabSignature {
-            tabSignature = signature; tabButtons.forEach { $0.removeFromSuperview() }; tabButtons = []
-            var x: CGFloat = 0
-            for (i,item) in items.enumerated() {
-                let b = SectionAnchorButton(title:item.0,target:self,action:#selector(jumpSection(_:)))
-                b.tag=i; b.isBordered=false; b.alignment = .left; b.toolTip="Go to " + item.0
-                let width = Design.attributed(item.0,.body).size().width + 44
-                b.frame=NSRect(x:x,y:0,width:width,height:32); x += width
-                tabBody.addSubview(b); tabButtons.append(b)
-            }
-            tabBody.frame=NSRect(x:0,y:0,width:x,height:32)
-        }
-        sectionTabs.frame=NSRect(x:inset,y:AreaHeader.labelBaseline-17,width:max(0,bounds.width-inset-insetRight),height:32)
-        updateActiveTab()
-    }
-    private func updateActiveTab() {
-        guard let scroll = anchoredScroll else { return }
-        let y = scroll.contentView.bounds.minY
-        let active = anchors.lastIndex { $0.1 <= y+1 } ?? 0
-        for (i,b) in tabButtons.enumerated() where anchors.indices.contains(i) {
-            b.attributedTitle=Design.attributed(anchors[i].0,i == active ? .bodyStrong : .body,colour:i == active ? Design.ink : Design.quiet)
-            (b as? SectionAnchorButton)?.active = i == active
-            b.state = i == active ? .on : .off
-            b.needsDisplay=true
-        }
-    }
-    @objc private func jumpSection(_ sender: NSButton) {
-        guard let scroll = anchoredScroll, anchors.indices.contains(sender.tag) else { return }
-        layoutSubtreeIfNeeded()
-        scroll.contentView.scroll(to:NSPoint(x:0,y:anchors[sender.tag].1))
-        scroll.reflectScrolledClipView(scroll.contentView); updateActiveTab()
-    }
-    deinit { if let tabObserver { NotificationCenter.default.removeObserver(tabObserver) } }
-    /// The sections beyond the tiles, the catalogues and the schema, each in a scroll of its own, laid out like the catalogues.
-    private var extras: [Section: (view: PageSection, scroll: NSScrollView)] = [:]
-    func add(_ view: PageSection, as s: Section) {
-        let scroll = FittedScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = view
-        scroll.isHidden = true
-        addSubview(scroll)
-        view.onResize = { [weak self] in self?.needsLayout = true }
-        extras[s] = (view, scroll)
-    }
-    /// Taking the whole width: the arrow turns to "close", and a press on it gives the rails back.
-    var expanded = false { didSet { needsDisplay = true } }
-    var onArrow: (() -> Void)?
-    var onRenamePalette:((String)->Void)?
-    private var renamingTitle=false
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        let trailingWidth:CGFloat=paneHeaderControls ? 144:(paletteSwatchCount.map{Design.attributed("Swatch Count \($0)",.body).size().width+24} ?? 0)
-        let availableTitleWidth=max(0,bounds.width-inset-insetRight-24-trailingWidth)
-        let titleWidth=min(Design.attributed(title,.heading).size().width,availableTitleWidth)
-        let titleRect=NSRect(x:inset,y:AreaHeader.headingBaseline-Design.Text.heading.font().ascender,width:titleWidth,height:28)
-        if event.clickCount == 2,!paneHeaderControls,onRenamePalette != nil,titleRect.contains(p),!renamingTitle {
-            renamingTitle=true
-            InlineName.edit(title,style:.heading,in:self,x:inset,baseline:AreaHeader.headingBaseline,width:min(availableTitleWidth,max(120,titleWidth)),at:p){ [weak self] name in
-                self?.renamingTitle=false;self?.needsDisplay=true
-                if let name {self?.onRenamePalette?(name)}
-            };needsDisplay=true;return
-        }
-        if !compactWorkspace, AreaHeader.arrowRect(in: bounds, insetRight: insetRight).insetBy(dx: -8, dy: -8).contains(p) { onArrow?(); return }
-        if !compactWorkspace, showsFormat, !slider.isHidden, formatRect.contains(p) { openFormats(); return }
-        super.mouseDown(with: event)
-    }
-    private var aseName: ASENameEditor?
-    func cancelASEName() {
-        if let editor = aseName, window?.firstResponder === editor { window?.makeFirstResponder(nil) }
-        aseName?.removeFromSuperview(); aseName = nil; needsDisplay = true
-    }
-    func beginASEName(save: @escaping (String) -> Bool) {
-        aseName?.removeFromSuperview()
-        title = ""; grid.note = "Name your ASE file, then press Enter to choose its folder."
-        let editor = ASENameEditor(frame: NSRect(x: inset, y: AreaHeader.headingBaseline - Design.Text.heading.font().ascender, width: max(120, bounds.width - inset - insetRight - 180), height: 28))
-        editor.font = Design.Text.heading.font(); editor.textColor = Design.ink
-        editor.drawsBackground = false; editor.isRichText = false
-        editor.textContainerInset = .zero; editor.textContainer?.lineFragmentPadding = 0
-        editor.setAccessibilityLabel("New ASE filename")
-        editor.onSave = { [weak self, weak editor] value in
-            let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains(":"), !name.contains("\n") else { NSSound.beep(); return }
-            let stem = name.lowercased().hasSuffix(".ase") ? String(name.dropLast(4)) : name
-            guard !stem.isEmpty else { NSSound.beep(); return }
-            if save(stem) { editor?.removeFromSuperview(); self?.aseName = nil }
-            else { self?.window?.makeFirstResponder(editor) }
-        }
-        editor.onCancel = { [weak self, weak editor] in editor?.removeFromSuperview(); self?.aseName = nil; self?.title = "Appbridge"; self?.needsDisplay = true }
-        aseName = editor; addSubview(editor); window?.makeFirstResponder(editor); needsDisplay = true
-        DispatchQueue.main.async { [weak self, weak editor] in
-            guard let self, let editor, self.aseName === editor else { return }
-            self.window?.makeFirstResponder(editor)
-        }
-    }
-    var expandedPanelTitle:String? {didSet{needsDisplay=true}}
-    private var title = ""
-    private var meta: (String, String) = ("", "")
-    /// The area header, then 16 clear before the tiles.
-    static var headerHeight: CGFloat { AreaHeader.height }
-
-    init() {
-        super.init(frame: .zero)
-        addSubview(deltaButton);addSubview(profileSelector);deltaButton.target=self;deltaButton.action=#selector(toggleDelta)
-        deltaButton.isHidden=true;profileSelector.isHidden=true
-
-        registerForDraggedTypes([PaletteDrag.type])
-        wantsLayer = true
-        layer?.backgroundColor = Design.card.cgColor
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = grid
-        addSubview(scroll)
-        metadataFilterPanel.isHidden=true
-        metadataFilterPanel.onFiltered = { [weak self] filtered in self?.grid.items=filtered;self?.needsLayout=true }
-        addSubview(metadataFilterPanel)
-        settingsScroll.drawsBackground = false
-        settingsScroll.hasVerticalScroller = true
-        settingsScroll.autohidesScrollers = true
-        settingsScroll.scrollerStyle = .overlay
-        settingsScroll.documentView = settings
-        settingsScroll.isHidden = true
-        addSubview(settingsScroll)
-        schemaScroll.drawsBackground = false
-        schemaScroll.hasVerticalScroller = true
-        schemaScroll.autohidesScrollers = true
-        schemaScroll.scrollerStyle = .overlay
-        schemaScroll.documentView = schema
-        schemaScroll.isHidden = true
-        addSubview(schemaScroll)
-        newButton.isHidden = true
-        newButton.target = self; newButton.action = #selector(makeNew)
-        addSubview(newButton)
-        exportButton.isHidden = true
-        exportButton.target = self; exportButton.action = #selector(exportPressed)
-        addSubview(exportButton)
-        slider.onChange = { [weak self] v in self?.onAcross?(4 + Int((v * 4).rounded())) }
-        addSubview(slider)
-        grid.onResize = { [weak self] in self?.needsLayout = true }
-        settings.onResize = { [weak self] in self?.needsLayout = true }
-        schema.onResize = { [weak self] in self?.needsLayout = true }
-        sectionTabs.drawsBackground=false; sectionTabs.hasHorizontalScroller=false; sectionTabs.hasVerticalScroller=false
-        sectionTabs.documentView=tabBody; addSubview(sectionTabs)
-        tabObserver=NotificationCenter.default.addObserver(forName:NSView.boundsDidChangeNotification,object:nil,queue:.main) { [weak self] note in
-            guard let self, let clip=note.object as? NSClipView, clip === self.anchoredScroll?.contentView else { return }
-            self.updateActiveTab()
-        }
-    }
-
-    /// What the page shows: the tiles, the Catalogues settings or the Schema settings, one in place of the others.
-    func show(_ s: Section) {
-        if s == .schema && section != .schema { schema.enterPage() }
-        section = s
-        layer?.backgroundColor = (s == .halo ? SettingsSheet.ground : Design.card).cgColor
-        scroll.isHidden = s != .tiles
-        settingsScroll.isHidden = s != .catalogues
-        schemaScroll.isHidden = s != .schema
-        for (k, e) in extras { e.scroll.isHidden = k != s; if k == s { e.view.reload() } }
-        if s == .catalogues { settings.reload() }
-        if s == .schema { schema.reload() }
-        newButton.isHidden = true
-        exportButton.isHidden = true
-        needsLayout = true
-    }
-    /// The page that is showing, whole, at the screen's scale: what --snap writes.
-    func snapshot() -> NSBitmapImageRep? {
-        let v: NSView
-        switch section {
-        case .tiles: v = grid
-        case .catalogues: v = settings
-        case .schema: v = schema
-        default: guard let e = extras[section], let view = e.view as? NSView else { return nil }; v = view
-        }
-        v.layoutSubtreeIfNeeded()
-        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
-        v.cacheDisplay(in: v.bounds, to: rep)
-        return rep
-    }
-    /// The Export button beside New; nil takes it away.
-    func showExport(_ title: String?) {
-        exportButton.isHidden = title == nil
-        if let t = title { exportButton.title = t; exportButton.invalidateIntrinsicContentSize() }
-        needsLayout = true
-    }
-    @objc private func exportPressed() { onExport?() }
-    /// The New button under the header, with its word; nil takes it away.
-    func showNew(_ title: String?) {
-        newButton.isHidden = title == nil
-        if let t = title { newButton.title = t; newButton.invalidateIntrinsicContentSize() }
-        needsLayout = true
-    }
-    @objc private func makeNew() { onNew?() }
-    required init?(coder: NSCoder) { fatalError() }
-    override var isFlipped: Bool { true }
-
-    private func canShowDelta(_ item:TileGrid.Item)->Bool { grid.canHover?(item) ?? (item.hex != nil || item.id != nil) }
-    func set(title: String, meta: (String, String), items: [TileGrid.Item]) {
-        self.title = title; self.meta = meta
-        showsDeltaTools = items.contains{canShowDelta($0)}
-        applyDeltaState(Prefs.deltaWarningsEnabled)
-        basePageItems=items
-        grid.items = items
-        metadataFilterPanel.update(records:items)
-        needsDisplay = true
-        needsLayout = true
-    }
-
-    override func layout() {
-        guard !layoutFrozen else { return }
-        let profileWidth=min(240,max(120,(bounds.width-inset-insetRight)*0.32))
-        profileSelector.frame=NSRect(x:bounds.width-insetRight-profileWidth,y:AreaHeader.labelBaseline-17,width:profileWidth,height:28)
-        deltaButton.frame=NSRect(x:profileSelector.frame.minX-116,y:AreaHeader.labelBaseline-17,width:100,height:28)
-
-        super.layout()
-        var top = Self.headerHeight
-        let u = Design.App.unit
-        // The slider: one column wide, its track through the arrow's centre, ending a step before the arrow.
-        slider.isHidden = section != .tiles || (imageIntakeMode && grid.imageFullView)
-        let arrowCentre = AreaHeader.headingBaseline - 5
-        let column = Design.App.columnWidth(in: window?.frame.width ?? Design.App.size.width)
-        slider.frame = NSRect(x: bounds.width - insetRight - 16 - 24 - column, y: arrowCentre - 8, width: column, height: 16)
-        if imageIntakeMode {slider.value=CGFloat(max(0,min(4,intakeGridColumns-4)))/4}
-        if !newButton.isHidden || !exportButton.isHidden {
-            // The buttons stand on the second unit's foot, clear of the rule above it; the tiles a unit below.
-            var x = inset
-            if !newButton.isHidden { newButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: newButton.intrinsicContentSize.width, height: 32); x += newButton.frame.width + 12 }
-            if !exportButton.isHidden { exportButton.frame = NSRect(x: x, y: top + 2 * u - 32, width: exportButton.intrinsicContentSize.width, height: 32) }
-            top += 2 * u
-        }
-        let baseTilesTop = compactWorkspace && section == .tiles ? top - Design.App.unit + (workspaceActionbar?.preferredHeight ?? WorkspaceViewportBar.actionbarHeight) + 12 : top + (section == .tiles ? (paletteCount == nil ? u : 2 * u) : 0)
-        let filterHeight:CGFloat=metadataFilterExpanded && section == .tiles ? 236:0
-        let tilesTop=baseTilesTop+filterHeight
-        let canvasWidth = bounds.width - inset - insetRight
-        metadataFilterPanel.frame=NSRect(x:inset,y:baseTilesTop,width:canvasWidth,height:filterHeight)
-        metadataFilterPanel.isHidden = filterHeight == 0
-        scroll.frame = NSRect(x: inset, y: tilesTop, width: canvasWidth + min(insetRight, QuietScroller.lane), height: max(0,bounds.height - tilesTop))
-        settingsScroll.frame = NSRect(x: inset, y: top, width: scroll.frame.width, height: max(0,bounds.height - top))
-        let sh = settings.height(forWidth: canvasWidth)
-        settings.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, sh))
-        settingsScroll.verticalScrollElasticity = sh > scroll.frame.height ? .allowed : .none
-        // The schema's scroll starts at the page's edge, so a row's ground can reach the rail's divider; its words start a column in.
-        schemaScroll.frame = NSRect(x: 0, y: top, width: inset + scroll.frame.width, height: max(0,bounds.height - top))
-        schema.leading = inset
-        let kh = schema.height(forWidth: inset + canvasWidth)
-        schema.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(schemaScroll.frame.height, kh))
-        schemaScroll.verticalScrollElasticity = kh > scroll.frame.height ? .allowed : .none
-        for (_, e) in extras {
-            e.scroll.frame = settingsScroll.frame
-            let eh = e.view.height(forWidth: canvasWidth)
-            e.view.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(e.scroll.frame.height, eh))
-            // Tags is laid out as the schema is: from the page's edge, its words a column in.
-            if let t = e.view as? TagsSettings {
-                e.scroll.frame = schemaScroll.frame
-                t.leading = inset
-                t.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(e.scroll.frame.height, eh))
-            } else if let sp = e.view as? SharePage {
-                e.scroll.frame = schemaScroll.frame
-                sp.leading = inset
-                sp.frame = NSRect(x: 0, y: 0, width: inset + canvasWidth, height: max(e.scroll.frame.height, eh))
-            }
-            e.scroll.verticalScrollElasticity = eh > e.scroll.frame.height ? .allowed : .none
-        }
-        if paletteSwatchCount == nil {workspaceActionbar?.leadingControls=[];paletteActions.isHidden=true}
-        if showsPaletteFilters,compactWorkspace,let actionbar=workspaceActionbar {
-            if paletteFilters.superview !== actionbar {actionbar.addSubview(paletteFilters)}
-            actionbar.leftInset=inset
-            let width=min(636,max(160,actionbar.bounds.width-actionbar.leadingContentInset-actionbar.rightInset))
-            actionbar.leadingControls=[(paletteFilters,width,PaletteFilterControls.height(for:width),0)]
-        }
-        let controlParent: NSView = compactWorkspace ? (workspaceToolbar ?? self) : self
-        for control in [slider,deltaButton,profileSelector] where control.superview !== controlParent { controlParent.addSubview(control) }
-        profileSelector.opensUpward = compactWorkspace
-        if compactWorkspace,let toolbar=workspaceToolbar {
-            toolbar.leftInset=inset
-            toolbar.rightInset=insetRight
-            if imageIntakeMode {
-                toolbar.rightControls=grid.imageFullView ? [] : [(slider,120,16,0)]
-            } else {
-                let profileWidth=min(profileSelector.preferredControlWidth,min(240,max(140,toolbar.bounds.width-424)))
-                if paletteSwatchCount != nil,let actionbar=workspaceActionbar {
-                    actionbar.leftInset=inset
-                    if paletteActions.superview !== actionbar {actionbar.addSubview(paletteActions)}
-                    actionbar.leadingControls=[(paletteActions,PalettePageControls.width,32,0)]
-                    toolbar.rightControls=[(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
-                } else {
-                    if !showsPaletteFilters {workspaceActionbar?.leadingControls=[]}
-                    toolbar.rightControls=[(slider,96,16,16),(deltaButton,100,28,16),(profileSelector,profileWidth,28,0)]
-                }
-            }
-            slider.alphaValue = grid.listView ? 0.4 : 1
-        } else { slider.alphaValue=1 }
-        grid.contentInset = 0
-        grid.width = canvasWidth
-        grid.fullImageViewportHeight=scroll.frame.height
-        grid.frame = NSRect(x: 0, y: 0, width: canvasWidth, height: max(scroll.frame.height, grid.height))
-        scroll.verticalScrollElasticity = grid.height > scroll.frame.height ? .allowed : .none
-        if let scroll = anchoredScroll, let last = anchors.last, let document = scroll.documentView {
-            document.frame.size.height = max(document.frame.height,last.1 + scroll.contentView.bounds.height)
-            scroll.contentView.postsBoundsChangedNotifications = true
-        }
-        updateTabs()
-        grid.needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
-        let paneCount=paletteSwatchCount.map{"Swatch Count \($0)"} ?? meta.0
-        let paneContext=paletteSwatchCount == nil ? meta.1:meta.0
-        AreaHeader.draw(heading: aseName == nil && !renamingTitle && !paneHeaderControls ? (expandedPanelTitle ?? title) : "", left:paneHeaderControls ? paneContext:(anchors.isEmpty && !showsDeltaTools ? meta.0:""), right:paneHeaderControls ? paneCount:(anchors.isEmpty && !showsDeltaTools ? meta.1:""), in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open),headingRight:paneHeaderControls ? "":(paletteSwatchCount.map{"Swatch Count \($0)"} ?? ""),headingTrailingInset:paneHeaderControls ? 144:0)
-        if showsDeltaTools && !paneHeaderControls {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:compactWorkspace ? bounds.width-inset-insetRight : max(0,deltaButton.frame.minX-inset-16))}
-        if let paletteCount, !compactWorkspace {
-            Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)
-        }
-        // The colour model before the slider, a quiet word with its chevron, on the heading's line.
-        formatRect = .zero
-        if showsFormat, !slider.isHidden, !compactWorkspace {
-            let b = AreaHeader.headingBaseline
-            let t = Design.attributed(format.label, .caption, colour: Design.quiet)
-            let right = slider.frame.minX - 24
-            t.draw(right: right - 14, baseline: b)
-            Design.quiet.setStroke()
-            let c = NSBezierPath(); c.lineWidth = 1
-            c.move(to: NSPoint(x: right - 9, y: b - 6)); c.line(to: NSPoint(x: right - 5, y: b - 2)); c.line(to: NSPoint(x: right - 1, y: b - 6))
-            c.stroke()
-            formatRect = NSRect(x: right - 14 - t.size().width - 8, y: b - 20, width: t.size().width + 24, height: 28)
-        }
-    }
-}
-
-/// The tiles: `across` to a row, or as many as there are when fewer, 16 apart and justified to the block
-/// so the first and last meet the Rule's ends; each a Card with its colour block 116 high over a name and
-/// a caption. A colour tile carries one colour and its hex; a palette card a strip of its colours
-/// and its count, and opens the palette.
-final class TileGrid: NSView, NSDraggingSource {
-    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil; var image:NSImage? = nil; var imagePath:String? = nil; var captureDate:Date? = nil; var metadata:[String:String] = [:] }
-    var palettePresentation:((UUID)->PaletteAssetHandler.Presentation?)?
-    var onPaletteRating:((UUID,Int)->Void)?
-    var onPaletteFlag:((UUID,PaletteReview.Flag?)->Void)?
-    private var reviews:[UUID:PaletteReviewControls]=[:]
-    private var clipObserver:NSObjectProtocol?
-    private func clearReviewControls(){reviews.values.forEach{$0.dismissOverlay();$0.removeFromSuperview()};reviews=[:]}
-    deinit{if let clipObserver{NotificationCenter.default.removeObserver(clipObserver)}}
-    override func viewDidMoveToWindow(){
-        super.viewDidMoveToWindow()
-        if let clipObserver{NotificationCenter.default.removeObserver(clipObserver)};clipObserver=nil
-        if let clip=enclosingScrollView?.contentView,window != nil {
-            clip.postsBoundsChangedNotifications=true
-            clipObserver=NotificationCenter.default.addObserver(forName:NSView.boundsDidChangeNotification,object:clip,queue:.main){ [weak self] _ in self?.syncReviewControls() }
-        }
-        syncReviewControls()
-    }
-    override func layout(){super.layout();syncReviewControls()}
-    private func syncReviewControls(){
-        guard window != nil,!imageIntake else{clearReviewControls();return}
-        let visible=visibleRect
-        let stride:CGFloat=listView ? 64:Self.block+Self.words+Self.rowGap
-        let firstRow=max(0,Int(floor((visible.minY-contentInset)/stride))),lastRow=max(firstRow,Int(ceil((visible.maxY-contentInset)/stride))+1)
-        let multiplier=listView ? 1:columns,first=min(items.count,firstRow*multiplier),last=min(items.count,lastRow*multiplier)
-        var keep=Set<UUID>()
-        for i in first..<last {
-            guard let id=items[i].id,let presentation=palettePresentation?(id) else{continue}
-            keep.insert(id)
-            let controls:PaletteReviewControls
-            if let existing=reviews[id]{controls=existing}else{
-                controls=PaletteReviewControls(frame:.zero);reviews[id]=controls;addSubview(controls)
-                controls.onRating={ [weak self] value in self?.onPaletteRating?(id,value) }
-                controls.onFlag={ [weak self] value in self?.onPaletteFlag?(id,value) }
-            }
-            controls.configure(presentation)
-            let r=rect(i),baseline=listView ? r.minY+25:r.minY+Self.block+Design.App.textBaseline
-            controls.ink=ink(on:id==selectedPalette ? Design.mist:canvasColour)
-            controls.frame=NSRect(x:r.maxX-6-PaletteReviewControls.width,y:baseline-17,width:PaletteReviewControls.width,height:24)
-        }
-        for id in Array(reviews.keys) where !keep.contains(id){reviews[id]?.dismissOverlay();reviews[id]?.removeFromSuperview();reviews.removeValue(forKey:id)}
-    }
-    private var pressedPalette:Item?
-    private var palettePress:(NSPoint,TimeInterval)=(.zero,0)
-    var items: [Item] = [] { didSet {
-        if let focusedImagePath,let index=items.firstIndex(where:{$0.imagePath==focusedImagePath}){currentImageIndex=index}
-        else{currentImageIndex=min(currentImageIndex,max(0,items.count-1))}
-        if items.indices.contains(currentImageIndex){focusedImagePath=items[currentImageIndex].imagePath}
-        clearReviewControls();printPreviews=[:];splitOverrides=[:];onResize?();needsLayout=true
-    } }
-    /// Words shown in place of tiles when there are none, as a member's notes on its Information page; nil says Nothing Found.
-    var note: String? { didSet { needsDisplay = true } }
-    var across = 8 { didSet { onResize?() } }
-    var imageIntake=false {didSet{needsDisplay=true}}
-    var imageFullView=false {didSet{guard oldValue != imageFullView else{return};enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true;onResize?()}}
-    var fullImageViewportHeight:CGFloat=0 {didSet{needsDisplay=true}}
-    var selectedImagePaths=Set<String>() {didSet{
-        let changed=oldValue.symmetricDifference(selectedImagePaths)
-        guard !changed.isEmpty else{return}
-        for (i,item) in items.enumerated() where item.imagePath.map(changed.contains) == true {
-            if imageFullView && i != currentImageIndex {continue}
-            let r=rect(i)
-            let inset:CGFloat = imageFullView ? 16 : 8
-            setNeedsDisplay(NSRect(x:r.minX+inset,y:r.minY+inset,width:16,height:16))
-        }
-    }}
-    var onImageSelectionToggle:((String)->Void)?
-    private(set) var currentImageIndex=0
-    private var focusedImagePath:String?
-    private var lastFullWheelNavigation=Date.distantPast
-    private func moveFullImage(_ offset:Int){
-        guard imageIntake,imageFullView,!items.isEmpty else{return}
-        currentImageIndex=(currentImageIndex+offset+items.count)%items.count
-        focusedImagePath=items[currentImageIndex].imagePath
-        enclosingScrollView?.contentView.scroll(to:.zero);needsDisplay=true
-    }
-    var listView=false { didSet {
-        guard listView != oldValue else{return}
-        enclosingScrollView?.contentView.scroll(to:.zero)
-        onResize?();needsDisplay=true
-    } }
-    var selectedPalette: UUID? { didSet { needsDisplay = true } }
-    var contentInset: CGFloat = 0
-    var canvasColour: NSColor = Design.card { didSet {
-        wantsLayer = true; layer?.backgroundColor = canvasColour.cgColor; needsDisplay = true
-    } }
-    private var contentWidth: CGFloat { max(0, width - contentInset * 2) }
-    /// Use actual sRGB contrast, including saturated grounds, rather than appearance mode.
-    private func ink(on background: NSColor, secondary: Bool = false) -> NSColor {
-        func luminance(_ colour: NSColor) -> CGFloat {
-            let c = colour.usingColorSpace(.sRGB) ?? .white
-            func linear(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v/12.92 : pow((v+0.055)/1.055, 2.4) }
-            return 0.2126*linear(c.redComponent)+0.7152*linear(c.greenComponent)+0.0722*linear(c.blueComponent)
-        }
-        let ground = luminance(background)
-        func contrast(_ colour: NSColor) -> CGFloat {
-            let value = luminance(colour)
-            return (max(value,ground)+0.05)/(min(value,ground)+0.05)
-        }
-        let primary: NSColor = contrast(Design.ink) >= 4.5 ? Design.ink : (ground > 0.179 ? .black : .white)
-        guard secondary else { return primary }
-        if contrast(Design.quiet) >= 4.5 { return Design.quiet }
-        let muted = primary.blended(withFraction: 0.2, of: background) ?? primary
-        return contrast(muted) >= 4.5 ? muted : primary
-    }
-    var width: CGFloat = 600
-    var chosenHex: String? { didSet { needsDisplay = true } }
-    struct PrintPreview { let colour:NSColor; let delta:Double }
-    var deltaTolerance:Double=2 {didSet{needsDisplay=true}}
-    static func hasDeltaWarning(_ previews:[PrintPreview],tolerance:Double)->Bool {
-        previews.contains{$0.delta.isFinite && $0.delta > tolerance}
-    }
-    var canHover:((Item)->Bool)?
-    var onPrint:((Item)->[PrintPreview])?
-    private var printPreviews:[String:[PrintPreview]] = [:]
-    private var splitOverrides:[String:Bool]=[:]
-    var deltaEnabled=false {didSet{if deltaEnabled != oldValue{splitOverrides=[:];needsDisplay=true}}}
-    func invalidatePrintPreviews(){printPreviews=[:];needsDisplay=true}
-    var onPaletteHalo:((UUID,NSRect)->Void)?
-    private let imageContextMenu=SwissContextMenu()
-    var onImageContextAction:((String,Int)->Void)?
-    func showImageFull(_ path:String){
-        guard let index=items.firstIndex(where:{$0.imagePath==path}) else{return}
-        currentImageIndex=index;focusedImagePath=path;imageFullView=true
-        window?.makeFirstResponder(self);needsDisplay=true
-    }
-    private func itemIndex(at point:NSPoint)->Int?{
-        if imageIntake && imageFullView{return items.indices.contains(currentImageIndex) && rect(currentImageIndex).contains(point) ? currentImageIndex:nil}
-        return items.indices.first{rect($0).contains(point)}
-    }
-    private func identity(_ item:Item)->String { item.hex ?? item.id?.uuidString ?? item.title }
-    func togglePrintPreview(hex:String? = nil, palette:UUID? = nil) {
-        guard let item=items.first(where:{ hex != nil ? $0.hex == hex : palette != nil && $0.id == palette }) else{return}
-        let key=identity(item)
-        splitOverrides[key] = !(splitOverrides[key] ?? deltaEnabled)
-        needsDisplay=true
-    }
-    private func pageScroll(_ event:NSEvent) { enclosingScrollView?.scrollWheel(with:event) }
-    override func scrollWheel(with event:NSEvent){
-        if imageIntake && imageFullView {
-            let now=Date()
-            if (event.phase == .began || event.phase == []) && now.timeIntervalSince(lastFullWheelNavigation)>0.22 {
-                let delta=event.scrollingDeltaY == 0 ? event.scrollingDeltaX:event.scrollingDeltaY
-                if delta != 0 {moveFullImage(delta > 0 ? -1:1);lastFullWheelNavigation=now}
-            }
-            return
-        }
-        pageScroll(event)
-    }
-    override func keyDown(with event:NSEvent){
-        if imageIntake && imageFullView {
-            switch event.keyCode {case 123,126:moveFullImage(-1);return;case 124,125:moveFullImage(1);return;default:break}
-        }
-        super.keyDown(with:event)
-    }
-    var onPreviewSwatch: ((String) -> Void)?
-    var onContext: ((String, NSPoint) -> Void)?
-    var onAssetContext: ((UUID, NSPoint) -> Void)?
-    var onPick: ((String) -> Void)?
-    var onOpen: ((UUID) -> Void)?
-    var onResize: (() -> Void)?
-    /// A click on the colour itself copies the caption's value; the halo mark at the right of the caption opens the halo over it.
-    var onCopy: ((String) -> Void)?
-    var onHalo: ((String, NSRect) -> Void)?
-    var showsHalo = true
-    private var markHits: [(NSRect, Int)] = []
-    /// On the beat: a block of five units, two units of words with the title and the caption on their lines, a unit between rows; across, the page's own gutter.
-    static var block: CGFloat { Design.App.unit * 5 }
-    static var words: CGFloat { Design.App.unit * 2 }
-    static var rowGap: CGFloat { Design.App.unit }
-    static let gap: CGFloat = 16
-    override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
-
-    /// How many tiles a row holds: the slider's count, or fewer when there are fewer tiles, so one row always fills the block.
-    var paletteTileWidth:CGFloat {left(1)-Self.gap}
-    private var columns: Int { max(1, min(across, max(1, Int((contentWidth + Self.gap) / 176)), max(items.count, 1))) }
-    /// A column's left edge: the row justified to the block, every edge on a whole point, the last tile's right edge on the block's.
-    private func left(_ c: Int) -> CGFloat { (CGFloat(c) * (contentWidth + Self.gap) / CGFloat(columns)).rounded() }
-    var height: CGFloat {
-        if imageIntake && imageFullView { return max(1,fullImageViewportHeight) }
-        if listView { return CGFloat(items.count)*64 + contentInset*2 }
-        let rows = (items.count + columns - 1) / columns
-        return CGFloat(rows) * (Self.block + Self.words + Self.rowGap) + contentInset*2
-    }
-    func revealPalette(_ id: UUID) {
-        guard let index = items.firstIndex(where: {$0.id == id}) else { return }
-        scrollToVisible(rect(index))
-    }
-    func reveal(_ hex: String) {
-        guard let index = items.firstIndex(where: { $0.hex == hex }) else { return }
-        scrollToVisible(rect(index))
-    }
-    private func rect(_ i: Int) -> NSRect {
-        if imageIntake && imageFullView { return NSRect(x:contentInset,y:contentInset,width:contentWidth,height:max(1,fullImageViewportHeight-contentInset*2)) }
-        if listView { return NSRect(x:contentInset,y:contentInset+CGFloat(i)*64,width:contentWidth,height:64) }
-        let c = i % columns, x = left(c)
-        return NSRect(x: contentInset+x, y: contentInset+CGFloat(i / columns) * (Self.block + Self.words + Self.rowGap), width: left(c + 1) - Self.gap - x, height: Self.block + Self.words)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        markHits = []
-        let visible=visibleRect.union(dirtyRect)
-        let drawRange:Range<Int>
-        if imageIntake && imageFullView {
-            drawRange=items.indices.contains(currentImageIndex) ? currentImageIndex..<(currentImageIndex+1) : 0..<0
-        } else if listView {
-            let first=max(0,Int(floor((visible.minY-contentInset)/64)))
-            let last=min(items.count,Int(ceil((visible.maxY-contentInset)/64))+1)
-            drawRange=first..<max(first,last)
-        } else {
-            let stride=Self.block+Self.words+Self.rowGap
-            let firstRow=max(0,Int(floor((visible.minY-contentInset)/stride)))
-            let lastRow=min((items.count+columns-1)/columns,Int(ceil((visible.maxY-contentInset)/stride))+1)
-            let first=min(items.count,firstRow*columns),last=min(items.count,max(firstRow,lastRow)*columns)
-            drawRange=first..<max(first,last)
-        }
-        for i in drawRange {
-            let it=items[i]
-            if imageIntake && imageFullView && i != currentImageIndex { continue }
-            let r = rect(i)
-            guard r.intersects(dirtyRect) else { continue }
-            if showsHalo, (it.hex != nil || it.id != nil), (canHover?(it) ?? true) {
-                // The halo mark on the caption's line, at the right, for the value beside it.
-                let capB = listView ? r.minY+45 : r.minY + Self.block + Design.App.unit + Design.App.textBaseline
-                let g = NSRect(x: r.maxX - 6 - 16, y: capB - 13, width: 16, height: 16)
-                markHits.append((g.insetBy(dx: -4, dy: -4), i))
-            }
-            guard r.intersects(dirtyRect) else { continue }
-            // No box: the colour block, the words on the ground beneath it, and nothing drawn around them.
-            if it.id != nil && it.id == selectedPalette { fill(r.insetBy(dx: -4, dy: -4), Design.mist) }
-            let block = listView ? NSRect(x:r.minX+8,y:r.minY+8,width:min(120,r.width*0.25),height:48) : (imageIntake && imageFullView ? NSRect(x:r.minX+8,y:r.minY+8,width:max(0,r.width-16),height:max(0,r.height-64)) : NSRect(x: r.minX, y: r.minY, width: r.width, height: Self.block))
-            if let image=it.image, image.size.width > 0, image.size.height > 0 {
-                if imageIntake {
-                    Design.rule.setStroke();let card=NSBezierPath(rect:block.insetBy(dx:0.5,dy:0.5));card.lineWidth=1;card.stroke()
-                    let inner=block.insetBy(dx:8,dy:8)
-                    let scale=min(inner.width/image.size.width,inner.height/image.size.height)
-                    let size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
-                    image.draw(in:NSRect(x:inner.midX-size.width/2,y:inner.midY-size.height/2,width:size.width,height:size.height))
-                    let checked=it.imagePath.map{selectedImagePaths.contains($0)} ?? false
-                    let box=NSRect(x:block.minX+8,y:block.minY+8,width:16,height:16)
-                    Design.card.setFill();NSBezierPath(rect:box).fill();Design.rule.setStroke();NSBezierPath(rect:box.insetBy(dx:0.5,dy:0.5)).stroke()
-                    if checked {Design.ink.setStroke();let tick=NSBezierPath();tick.lineWidth=2;tick.move(to:NSPoint(x:box.minX+3,y:box.midY));tick.line(to:NSPoint(x:box.minX+7,y:box.maxY-3));tick.line(to:NSPoint(x:box.maxX-2,y:box.minY+3));tick.stroke()}
-                } else {
-                    let scale=min(block.width/image.size.width,block.height/image.size.height)
-                    let size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
-                    image.draw(in:NSRect(x:block.midX-size.width/2,y:block.midY-size.height/2,width:size.width,height:size.height))
-                }
-            } else if it.colours.isEmpty { fill(block, Design.mist) }
-            else {
-                // A palette's colours share the block as equal bands, a single colour takes it whole.
-                let bw = block.width / CGFloat(it.colours.count)
-                for (k, c) in it.colours.enumerated() { fill(NSRect(x: block.minX + CGFloat(k) * bw, y: block.minY, width: k == it.colours.count - 1 ? block.width - CGFloat(k) * bw : bw + 0.5, height: block.height), c) }
-            }
-            let key=identity(it)
-            let eligible=canHover?(it) ?? (it.hex != nil || it.id != nil)
-            if eligible,printPreviews[key] == nil {printPreviews[key]=onPrint?(it) ?? []}
-            let prediction=printPreviews[key] ?? []
-            if (splitOverrides[key] ?? deltaEnabled),prediction.count==it.colours.count,!prediction.isEmpty {
-                let bw=block.width/CGFloat(prediction.count)
-                for (k,p) in prediction.enumerated(){fill(NSRect(x:block.minX+CGFloat(k)*bw,y:block.midY,width:bw+0.5,height:block.height/2),p.colour)}
-                Design.card.setStroke();let divider=NSBezierPath();divider.move(to:NSPoint(x:block.minX,y:block.midY));divider.line(to:NSPoint(x:block.maxX,y:block.midY));divider.lineWidth=1;divider.stroke()
-            }
-            let ground = it.id != nil && it.id == selectedPalette ? Design.mist : canvasColour
-            let primaryInk = ink(on: ground), secondaryInk = ink(on: ground, secondary: true)
-            let textX = listView ? block.maxX+16 : r.minX+6
-            Design.attributed(it.title, .bodyStrong, colour: primaryInk).draw(x:textX,baseline:listView ? r.minY+25 : block.maxY+Design.App.textBaseline,width:listView ? max(0,r.maxX-textX-(it.id.flatMap{reviews[$0]} == nil ? 0:PaletteReviewControls.width+14)) : max(0,r.width-12-(it.id.flatMap{reviews[$0]} == nil ? 0:PaletteReviewControls.width+12)))
-            let capB = listView ? r.minY+45 : block.maxY + Design.App.unit + Design.App.textBaseline
-            if listView { hairline(x:r.minX,y:r.maxY-1,width:r.width) }
-            let hasHalo=showsHalo && eligible
-            let delta=eligible ? (prediction.map{$0.delta}.max().map{String(format:it.hex == nil ? "Δmax %.1f":"Δ %.1f",$0)} ?? "Δ —") : ""
-            let deltaText=Design.attributed(delta,.caption,colour:secondaryInk)
-            let warning=eligible && Self.hasDeltaWarning(prediction,tolerance:deltaTolerance)
-            let right=r.maxX-6-(hasHalo ? 24:0)-(warning ? 22:0)
-            let deltaX=max(r.minX+6,right-deltaText.size().width)
-            Design.attributed(it.caption,.caption,colour:secondaryInk).draw(x:textX,baseline:capB,width:max(0,deltaX-textX-8))
-            if eligible{deltaText.draw(x:deltaX,baseline:capB)}
-            if warning {ResultGlyph.warning.draw(in:NSRect(x:r.maxX-6-(hasHalo ? 24:0)-16,y:capB-13,width:16,height:16))}
-            if hasHalo {Design.haloMark(in:NSRect(x:r.maxX-6-16,y:capB-13,width:16,height:16),colour:secondaryInk)}
-            if let h = it.hex, h == chosenHex {
-                // The chosen tile: a one-point ring in the Rule, the same grey that edges the panels.
-                Design.rule.setStroke()
-                let p = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); p.lineWidth = 1; p.stroke()
-            }
-        }
-        if items.isEmpty, let n = note {
-            // Words in place of tiles, a member's notes: the Lead, no wider than 34em, every line on the beat and the first on the first unit's line.
-            let font = Design.Text.lead.font(), p = NSMutableParagraphStyle()
-            p.minimumLineHeight = Design.App.unit; p.maximumLineHeight = Design.App.unit
-            let text = NSAttributedString(string: n, attributes: [.font: font, .foregroundColor: ink(on: canvasColour), .kern: Design.Text.lead.size * Design.Text.lead.tracking, .paragraphStyle: p])
-            // A fixed line sets its glyphs at its foot, the descender clear of it: the first line's top is where that puts the baseline on the line.
-            let top = Design.App.textBaseline - (Design.App.unit + font.descender)
-            text.draw(with: NSRect(x: contentInset, y: top+contentInset, width: min(contentWidth, Design.Text.lead.size * 34), height: max(0,bounds.height - top)), options: [.usesLineFragmentOrigin])
-        } else if items.isEmpty { Design.attributed("Nothing found", .lead, colour: ink(on: canvasColour, secondary: true)).draw(x: contentInset, baseline: contentInset+Design.App.textBaseline) }
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        if let i = itemIndex(at:p), items[i].hex != nil {
-            toolTip = items[i].caption + " · " + (items[i].sourceCMYK == nil ? PrintCondition.name() : "ASE source · No embedded ICC profile") + " · Δ = CIEDE2000 (ΔE00)"
-        } else if imageIntake,let i=itemIndex(at:p) {
-            let values=items[i].metadata
-            toolTip=values.isEmpty ? items[i].title : values.sorted{$0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending}.prefix(8).map{"\($0.key): \($0.value)"}.joined(separator:"\n")
-        } else { toolTip = nil }
-    }
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if imageIntake,let index=itemIndex(at:point),let path=items[index].imagePath {
-            var actions=[
-                HaloAction(id:"import-file",label:"Import File",symbol:"square.and.arrow.down",description:"Select this image for import",onSelect:{[weak self] in self?.onImageContextAction?(path,0)}),
-                HaloAction(id:"finder",label:"Show in Finder",symbol:"folder",onSelect:{[weak self] in self?.onImageContextAction?(path,1)})
-            ]
-            if !imageFullView{actions.append(HaloAction(id:"full-view",label:"Show in Full",symbol:"arrow.up.left.and.arrow.down.right",onSelect:{[weak self] in self?.onImageContextAction?(path,2)}))}
-            imageContextMenu.open(actions,at:point,in:self)
-            return
-        }
-        guard let index=itemIndex(at:point) else{return}
-        if let hex = items[index].hex { onContext?(hex, point) }
-        else if let id = items[index].id { onAssetContext?(id, point) }
-    }
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
-        pressedPalette=nil
-        let p = convert(event.locationInWindow, from: nil)
-        if imageIntake, let i=itemIndex(at:p),let path=items[i].imagePath {
-            let block=NSRect(x:rect(i).minX,y:rect(i).minY,width:rect(i).width,height:Self.block)
-            if NSRect(x:block.minX+4,y:block.minY+4,width:24,height:24).contains(p){onImageSelectionToggle?(path);return}
-        }
-        if let m = markHits.first(where: { $0.0.contains(p) }) {if let h=items[m.1].hex{onPick?(h);onHalo?(h,m.0)}else if let id=items[m.1].id{onPaletteHalo?(id,m.0)};return}
-        guard let i = itemIndex(at:p) else { return }
-        if let h = items[i].hex {
-            onPick?(h)
-            if let onPreviewSwatch { onPreviewSwatch(h); return }
-            // The colour block itself copies its value; the words beneath only choose.
-            let block = NSRect(x: rect(i).minX, y: rect(i).minY, width: rect(i).width, height: Self.block)
-            if block.contains(p) {
-                let text = Prefs.copyFormat == .cmyk ? (items[i].sourceCMYK ?? Prefs.copyText(h)) : Prefs.copyText(h)
-                ColourCopies.copy(h, text: text, sourceCMYK: items[i].sourceCMYK)
-                onCopy?(text)
-            }
-        }
-        else if items[i].id != nil {pressedPalette=items[i];palettePress=(event.locationInWindow,event.timestamp)}
-    }
-    override func mouseDragged(with event:NSEvent){
-        guard let item=pressedPalette,let id=item.id,canHover?(item) == true,PaletteDrag.counts(event,from:palettePress) else{return}
-        pressedPalette=nil
-        PaletteDrag.begin(id,name:item.title,colours:item.colours,event:event,in:self)
-    }
-    override func mouseUp(with event:NSEvent){
-        defer{pressedPalette=nil}
-        guard let item=pressedPalette,let id=item.id,!PaletteDrag.counts(event,from:palettePress),
-              let index=itemIndex(at:convert(event.locationInWindow,from:nil)),items[index].id == id else{return}
-        onOpen?(id)
-    }
-    func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation {.copy}
-}
-
+/// Asset handlers opt into page capabilities while retaining one viewport layout.
 // MARK: - Settings: Catalogues
 
 /// The Catalogues settings on the page. The actions along the top, then one row per catalogue: Set
@@ -4744,7 +4359,9 @@ final class TileGrid: NSView, NSDraggingSource {
 /// other while another catalogue is on the list. Remove asks
 /// on the window's own confirm panel, with what the catalogue holds and the choice of moving all of it
 /// to another catalogue first. The page scrolls as one piece.
-final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
+final class CatalogueSettings: ClickCursorView, NSTextViewDelegate, Overlay {
+    override var handCursorRects:[NSRect]{rowHits.map{$0.0}+activeHits.map{$0.0}+actionHits.map{$0.0}+lineHits.map{$0.0}+lineActionHits.map{$0.0}+barHits.map{$0.0}+addHits.map{$0.0}+(expanded == nil ? []:[spectrum])}
+
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
     func dismissOverlay() { closeMenu() }
     weak var library: LibraryController?
@@ -5507,133 +5124,6 @@ final class CatalogueSettings: NSView, NSTextViewDelegate, Overlay {
     @objc private func showInFinder() {
         guard let lib = library else { return }
         NSWorkspace.shared.activateFileViewerSelecting([lib.store.url])
-    }
-}
-
-// MARK: - The title strip
-
-/// Nothing to see: a full-width band across the top of the window, the height of the title bar, around
-/// Apple's three buttons, which keep their own menus. A press on it moves the window, and over it the
-/// pointer is the open hand.
-final class TitleStrip: NSView {
-    static let height: CGFloat = 24
-    override var mouseDownCanMoveWindow: Bool { true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
-    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
-}
-
-// MARK: - Master Inner, drawn over the window
-
-/// The grid over everything: the twelve columns as faint bands with their edges, the two margins, the
-/// header's baseline, the area header's lines, then the beat under the rule, every unit, with the
-/// line text sits on in each. In the grid's orange, light enough to read through. Takes no clicks.
-final class GridOverlay: NSView {
-    override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    /// The page's content, left edge and width: its columns are drawn as the page lays them, from its own width.
-    var page = NSRect.zero { didSet { needsDisplay = true } }
-    /// While the splash is up: the window's twelve columns the whole way across, the header's baseline, and the beat from the band's top.
-    var splash = false { didSet { needsDisplay = true } }
-    override func draw(_ dirtyRect: NSRect) {
-        typealias A = Design.App
-        let w = bounds.width, h = bounds.height, c = A.gridColour
-        let cw = A.columnWidth(in: w)
-        func column(_ x: CGFloat, _ width: CGFloat) {
-            fill(NSRect(x: x, y: 0, width: width, height: h), c.withAlphaComponent(0.05))
-            fill(NSRect(x: x, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
-            fill(NSRect(x: x + width - 1, y: 0, width: 1, height: h), c.withAlphaComponent(0.45))
-        }
-        if splash {
-            for i in 1...A.columns { column(A.column(i, in: w), cw) }
-            fill(NSRect(x: 0, y: StudioHeader.baseline, width: w, height: 1), c.withAlphaComponent(0.6))
-            var y = StudioSplash.bandTop
-            while y < h {
-                fill(NSRect(x: 0, y: y, width: w, height: 1), c.withAlphaComponent(0.25))
-                fill(NSRect(x: 0, y: y + A.textBaseline, width: w, height: 1), c.withAlphaComponent(0.6))
-                y += A.unit
-            }
-            return
-        }
-        // The window's columns up to the page, then the page's own, then the window's again past it.
-        for i in 1...A.columns {
-            let x = A.column(i, in: w)
-            if page.width > 0, x + cw > page.minX, x < page.maxX { continue }
-            column(x, cw)
-        }
-        if page.width > 0 {
-            let own = A.pageColumns(width: page.width, in: w)
-            for x in own.x { column(page.minX + x, own.width) }
-        }
-        // The header's baseline, the area header's heading and label lines and its rule.
-        let strong = c.withAlphaComponent(0.6), faint = c.withAlphaComponent(0.25)
-        fill(NSRect(x: 0, y: StudioHeader.baseline, width: w, height: 1), strong)
-        let top = A.header + 1
-        for y in [AreaHeader.headingBaseline, AreaHeader.labelBaseline, AreaHeader.rule] { fill(NSRect(x: 0, y: top + y, width: w, height: 1), strong) }
-        // The beat: a unit line and, within each unit, the line text sits on.
-        var y = top + AreaHeader.height
-        let bottom = h - A.footer
-        while y < bottom {
-            fill(NSRect(x: 0, y: y, width: w, height: 1), faint)
-            fill(NSRect(x: 0, y: y + A.textBaseline, width: w, height: 1), strong)
-            y += A.unit
-        }
-        fill(NSRect(x: 0, y: h - A.footer + StudioFooter.baseline, width: w, height: 1), strong)
-    }
-}
-
-// MARK: - The footer, 48 high
-
-/// Left: a 10 square of the current colour, its name, its hex. Centre: three text actions. Right: the release line.
-final class StudioFooter: NSView {
-    var grid: (x: CGFloat, column: CGFloat, centre: CGFloat) = (24, 96, 480) { didSet { if grid != oldValue { needsDisplay = true } } }
-    private(set) var hex = Brand.masterHex
-    private(set) var name = Brand.masterName
-    var onAct: ((Int) -> Void)?
-    /// A word from the controller, "Picked Hemlock", in the actions' place for four seconds.
-    private var flash: String?
-    private var flashTimer: Timer?
-    func flash(_ text: String) {
-        flash = text; needsDisplay = true
-        flashTimer?.invalidate()
-        flashTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in self?.flash = nil; self?.needsDisplay = true }
-    }
-    private var swatchHits: [NSRect] = []
-    private var copyObserver: NSObjectProtocol?
-    static let baseline: CGFloat = 30
-
-    init() {
-        super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
-        copyObserver = NotificationCenter.default.addObserver(forName: ColourCopies.changed, object: nil, queue: .main) { [weak self] _ in self?.needsDisplay = true }
-    }
-    deinit { if let copyObserver { NotificationCenter.default.removeObserver(copyObserver) } }
-    required init?(coder: NSCoder) { fatalError() }
-    override var isFlipped: Bool { true }
-
-    func set(hex: String, name: String) { self.hex = hex; self.name = name; needsDisplay = true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        hairline(x: 0, y: 0, width: bounds.width)
-        let b = Self.baseline
-        swatchHits = []
-        let size = min(24, max(12, (grid.centre - grid.x - 32 - 9 * 8) / 10))
-        for (index, entry) in Array(ColourCopies.recent.suffix(10)).enumerated() {
-            let rect = NSRect(x: grid.x + CGFloat(index) * (size + 8), y: (bounds.height - size) / 2, width: size, height: size)
-            fill(rect, Design.hex(entry.key)); swatchHits.append(rect)
-        }
-        // The actions as text from the page's left edge, the live one Medium; a flash takes their place while it lasts.
-        let x = grid.centre
-        if let f = flash { Design.attributed(f, .body).draw(x: x, baseline: b, width: grid.x + 12 * grid.column + 11 * Design.App.gutter - 200 - x) }
-        Design.attributed(ContentViewController.releaseLine, .caption, colour: Design.quiet).draw(right: grid.x + 12 * grid.column + 11 * Design.App.gutter, baseline: b)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        if let index = swatchHits.firstIndex(where: { $0.contains(p) }) {
-            let entry = Array(ColourCopies.recent.suffix(10))[index]
-            ColourCopies.copy(entry.key, sourceCMYK: entry.sourceCMYK, record: false)
-            return
-        }
-
     }
 }
 

@@ -127,7 +127,7 @@ enum ProjectField: String, CaseIterable {
 
     /// Answers with the blanks and unknown keys dropped, and the rest trimmed.
     static func tidy(_ values: [String: String], templateOnly: Bool = false) -> [String: String] {
-        var out: [String: String] = [:]
+        var out: [String: String] = templateOnly ? [:] : values.filter { $0.key == "customForm" || $0.key.hasPrefix("custom.") }
         for field in allCases where !templateOnly || field.inTemplate {
             let text = (values[field.rawValue] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { out[field.rawValue] = text }
@@ -225,7 +225,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
 
     private let nameField = NSTextField()
     /// "Fill from Template": in the form's own header, or handed to the Overview page for its action bar.
-    let templates = NSPopUpButton(frame: .zero, pullsDown: true)
+    let templates = ClickCursorPopupButton(frame: .zero, pullsDown: true)
     private let message = NSTextField(labelWithString: "")
     private var controls: [(field: ProjectField, control: NSControl)] = []
     /// The saved-values buttons, one per field and one per section; each carries its key as its identifier.
@@ -398,7 +398,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
     private func makeControl(for field: ProjectField) -> NSControl {
         switch field.kind {
         case .choice(let options):
-            let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+            let popup = ClickCursorPopupButton(frame: .zero, pullsDown: false)
             popup.addItems(withTitles: ["Not set"] + options)
             return popup
         case .line, .lines:
@@ -652,7 +652,7 @@ final class ProjectFormController: NSViewController, NSTextFieldDelegate, NSMenu
 
 /// The list of saved templates: look one over, edit it, copy it, delete it, start a new one.
 final class ProjectTemplatesController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    private let table = NSTableView()
+    private let table = ClickCursorTableView()
     private let preview = NSTextView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
     private var list: [ProjectTemplate] = []
     private var buttons: [NSButton] = []

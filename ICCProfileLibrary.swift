@@ -26,10 +26,12 @@ final class ICCProfileLibrary {
     }
     private let lock=NSRecursiveLock()
     private var linked:[Profile]=[]
-    private var cache:[String:(Date,Int,CGColorSpace)]=[:]
+    private var cache:[String:(String,FileVersion,CGColorSpace)]=[:]
     private var systemProfiles:[Profile]=[]
     var system:[Profile] {lock.lock();defer{lock.unlock()};return systemProfiles}
     private var refreshing=false
+    private var checking=false
+    private let checkQueue=DispatchQueue(label:"Colorgain.ICC.LinkedCheck",qos:.utility)
     private var timer:Timer?
     private var observer:NSObjectProtocol?
     private let storage="Workspace.ICC.LinkedProfiles"
@@ -40,7 +42,7 @@ final class ICCProfileLibrary {
     func start(){
         guard timer == nil else{return}
         refresh()
-        timer=Timer.scheduledTimer(withTimeInterval:15,repeats:true){[weak self] _ in self?.checkLinks()}
+        timer=Timer.scheduledTimer(withTimeInterval:60,repeats:true){[weak self] _ in self?.checkLinks()}
         observer=NotificationCenter.default.addObserver(forName:NSApplication.didBecomeActiveNotification,object:nil,queue:.main){[weak self] _ in self?.refresh()}
     }
     deinit{timer?.invalidate();if let observer{NotificationCenter.default.removeObserver(observer)}}
@@ -129,14 +131,19 @@ final class ICCProfileLibrary {
     func space(for key:String)->CGColorSpace? {
         guard key.hasPrefix(Self.prefix),let profile=profile(for:key) else{return nil}
         let url=Self.resolvedURL(profile)
-        lock.lock();defer{lock.unlock()}
-        guard let values=try? url.resourceValues(forKeys:[.contentModificationDateKey,.fileSizeKey]),let modified=values.contentModificationDate,let size=values.fileSize,size <= Self.maximumBytes else{cache[profile.id]=nil;return nil}
-        // URL metadata can be cached, and replacement files can retain size/date.
-        // Validate the linked identity before reusing its expensive colour transform.
-        guard let data=try? Data(contentsOf:url),data.count <= Self.maximumBytes,Sharing.sha256(data) == profile.id else{cache[profile.id]=nil;return nil}
-        if let cached=cache[profile.id]{return cached.2}
-        guard let space=CGColorSpace(iccData:data as CFData) else{cache[profile.id]=nil;return nil}
-        cache[profile.id]=(modified,size,space);return space
+        let path=url.resolvingSymlinksInPath().standardizedFileURL.path
+        guard let version=FileVersion.read(url),version.bytes <= UInt64(Self.maximumBytes) else{lock.lock();cache[profile.id]=nil;lock.unlock();return nil}
+        lock.lock()
+        if let cached=cache[profile.id],cached.0 == path,cached.1 == version {lock.unlock();return cached.2}
+        lock.unlock()
+        // A changed file must retain its exact linked identity before it can be a target.
+        guard let data=try? Data(contentsOf:url),data.count <= Self.maximumBytes,
+              Sharing.sha256(data) == profile.id,FileVersion.read(url) == version,
+              let space=CGColorSpace(iccData:data as CFData) else{
+            lock.lock();cache[profile.id]=nil;lock.unlock();return nil
+        }
+        lock.lock();cache[profile.id]=(path,version,space);lock.unlock()
+        return space
     }
     func needsLocate(_ profile:Profile)->Bool {
         profile.canTarget ? space(for:profile.key) == nil:!FileManager.default.isReadableFile(atPath:Self.resolvedURL(profile).path)
@@ -151,7 +158,20 @@ final class ICCProfileLibrary {
         return space(for:profile.key) == nil ? (FileManager.default.fileExists(atPath:Self.resolvedURL(profile).path) ? "Changed Or Unavailable":"Missing · Locate…"):"Available"
     }
     private var lastStates:[String:Bool]=[:]
-    private func checkLinks(){let states=Dictionary(profiles.map{($0.id,!needsLocate($0))},uniquingKeysWith:{$0 || $1});if states != lastStates{lastStates=states;NotificationCenter.default.post(name:Self.changed,object:self)}}
+    private func checkLinks(){
+        guard !checking else{return}
+        checking=true
+        let snapshot=profiles
+        checkQueue.async {[weak self] in
+            guard let self else{return}
+            let states=Dictionary(snapshot.map{($0.id,!self.needsLocate($0))},uniquingKeysWith:{$0 || $1})
+            DispatchQueue.main.async {
+                self.checking=false
+                guard self.profiles == snapshot else{self.checkLinks();return}
+                if states != self.lastStates{self.lastStates=states;NotificationCenter.default.post(name:Self.changed,object:self)}
+            }
+        }
+    }
     func refresh(){
         guard !refreshing else{return};refreshing=true
         DispatchQueue.global(qos:.utility).async {[weak self] in
@@ -164,15 +184,18 @@ final class ICCProfileLibrary {
 
 /// External RGB ICC targets use the actual file's transform, not a guessed built-in RGB space.
 enum ICCRGBRendering {
+    /// Encoded target components from the same PCS path used by the output prediction.
+    static func components(_ definition:ColourDefinition,in channel:ProfileChannel)->[Double]?{
+        guard channel.space == ProfileChannel.iccRGB,let space=ICCProfileLibrary.shared.space(for:channel.press ?? ""),space.model == .rgb else{return nil}
+        return PCSConversion.encode(definition.master,to:space,intent:channel.intent ?? .relative,blackPoint:channel.blackPoint ?? false)
+    }
     static func render(_ definition:ColourDefinition,in channel:ProfileChannel)->Rendering {
         let key=channel.press ?? "",store=ICCProfileLibrary.shared
         guard let space=store.space(for:key),space.model == .rgb,
-              let source=CGColor(colorSpace:CGColorSpace(name:CGColorSpace.genericXYZ)!,components:[CGFloat(definition.master.x),CGFloat(definition.master.y),CGFloat(definition.master.z),1]),
-              let encoded=source.converted(to:space,intent:(channel.intent ?? .relative).system,options:nil),let values=encoded.components,values.count >= 3,
-              let back=encoded.converted(to:CGColorSpace(name:CGColorSpace.genericXYZ)!,intent:.relativeColorimetric,options:nil)?.components,back.count >= 3 else {
+              let prediction=PCSConversion.predict(definition.master,in:space,intent:channel.intent ?? .relative,blackPoint:channel.blackPoint ?? false) else {
             return Rendering(channel:channel,value:nil,shown:nil,difference:nil,inRange:false,detail:"ICC Profile Missing Or Unavailable · Locate It In ICC Profiles")
         }
-        let shown=XYZ(x:Double(back[0]),y:Double(back[1]),z:Double(back[2])),delta=deltaE2000(definition.master.lab,shown.lab)
-        return Rendering(channel:channel,value:zip(["R","G","B"],values.prefix(3)).map{String(format:"%@ %.4f",$0.0,Double($0.1))}.joined(separator:"  "),shown:shown,difference:delta,inRange:delta <= Rendering.visible,detail:(store.profile(for:key)?.name ?? "ICC")+" · "+(channel.intent ?? .relative).name)
+        let shown=prediction.shown,delta=deltaE2000(definition.master.lab,shown.lab)
+        return Rendering(channel:channel,value:zip(["R","G","B"],prediction.values).map{String(format:"%@ %.4f",$0.0,$0.1)}.joined(separator:"  "),shown:shown,difference:delta,inRange:delta <= Rendering.visible,detail:(store.profile(for:key)?.name ?? "ICC")+" · "+(channel.intent ?? .relative).name)
     }
 }

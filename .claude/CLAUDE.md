@@ -1,5 +1,11 @@
 # MMFFDev Colour Picker
 
+## `<userjourney>` — shared user-journey skill
+
+When Rick invokes `<userjourney>` or asks to document an app journey, read the [shared skill and memory](../.codex/c_userjourney.md) and follow it to maintain `UserJourney.md`. Both Codex and Claude use that same file.
+
+Shared style authority: [styles.md](../styles.md). Read this lazy-loading index before any UI work and load its dropdown/dropup contract before creating or changing any selector. It supersedes conflicting older control examples.
+
 App layout lookup: [Component registry](../.codex/c_layout_registry.md) — canonical region names, hierarchy, source symbols and panel primitive. Read it before locating or changing app sections.
 
 macOS colour picker app (MMFFDev Colour 3). The source is at the repository root; the two earlier apps were removed on 2026-10-02 and live only in git history. Build: `./build.sh` (compiles, runs the self-test, installs); installers: `./make_dmg.sh`, `./make_pkg.sh`. Day to day, open `Colorgain.xcodeproj` at the root in Xcode and Cmd+R: it builds a real signed bundle (Info.plist, icon, Sparkle, the helper, the commit stamped) into DerivedData and runs it, rebuilding only what changed; the installed app still comes from `./build.sh`. The project is generated from `project.yml` by XcodeGen and committed: after adding or removing a `.swift` file, run `xcodegen` at the root and commit the project with the file. `Package.swift` stays the definition `build.sh` compiles. To see the app as a brand-new user, launch it with `--new-user` (in Xcode: Product ▸ Scheme ▸ Edit Scheme ▸ Run ▸ Arguments, tick it for the run) or run `tools/open.sh new` for the installed app (a throwaway home, never your data; add `permissions` to make macOS ask again); `tools/open.sh me` opens it as you. Xcode's Cmd+R copy is signed with the Developer ID like the installed one, so permissions and chosen folders hold between builds; the scheme carries `--new-user`, `--classic` and `--self-test` unticked under Edit Scheme ▸ Run ▸ Arguments.

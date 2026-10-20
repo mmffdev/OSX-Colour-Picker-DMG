@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 
 /// A machine-local development preference. It never marks a workspace complete or bypasses validation.
 enum DevelopmentLaunch {
@@ -174,13 +175,14 @@ final class WorkspaceStartupController: NSWindowController, NSWindowDelegate {
     init(root: URL, selection: URL? = nil, ready: @escaping (URL, WorkspaceCatalogue) -> Void, create: @escaping (URL, String) -> Void, cancel: @escaping () -> Void) {
         self.cancel=cancel
         content = WorkspaceStartupView(root: root, ready: ready, create: create)
-        let window = StudioWindow(contentRect: NSRect(origin: .zero,size:Design.App.size),styleMask:[.closable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
-        window.title = "Open Colorgain Workspace"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        let available=NSScreen.main?.visibleFrame.size ?? NSSize(width:1440,height:900)
+        let width=min(1440,available.width-64,(available.height-64)*1440/875)
+        let size=NSSize(width:width,height:width*875/1440)
+        let window = SetupWindow(contentRect: NSRect(origin:.zero,size:size),styleMask:[.borderless,.resizable],backing:.buffered,defer:false)
+        window.title = "Open Colorgain Workspace"
         window.isReleasedWhenClosed = false; window.backgroundColor = Design.card; window.minSize = Design.App.least
-        let scroll=WorkspaceStartupScroll()
-        scroll.documentView=content;scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;scroll.scrollerStyle = .overlay
-        scroll.frame=NSRect(origin:.zero,size:Design.App.size);scroll.autoresizingMask=[.width,.height]
-        window.contentView=scroll;window.center()
+        window.minSize=NSSize(width:960,height:960*875/1440);window.contentAspectRatio=NSSize(width:1440,height:875)
+        window.installSquareContent(content);window.center()
         super.init(window: window)
         window.delegate=self
         content.onCancel = { [weak self] in self?.close() }
@@ -197,15 +199,11 @@ final class WorkspaceStartupController: NSWindowController, NSWindowDelegate {
     }
 }
 
-private final class WorkspaceStartupScroll: FittedScrollView {
-    override func layout() {
-        super.layout()
-        documentView?.frame=NSRect(x:0,y:0,width:contentSize.width,height:max(contentSize.height,Design.App.header+27*Design.App.unit))
-    }
-}
-
-/// Existing-workspace recovery precedes catalogue creation. Uses the incumbent Swiss grid and controls.
-final class WorkspaceStartupView: NSView {
+/// Recovery shares the approved setup shell; file validation remains native.
+final class WorkspaceStartupView: NSView,WKNavigationDelegate {
+    private let bridge=WorkspaceStartupBridge()
+    private var appearanceIndex=AppearancePresets.selectedIndex
+    private var web:WKWebView!
     private enum Stage { case workspace, catalogues, create }
     private var stage = Stage.workspace
     private var root: URL
@@ -217,33 +215,15 @@ final class WorkspaceStartupView: NSView {
     var onWorkspaceSelected: ((URL) -> Void)?
     private let ready: (URL, WorkspaceCatalogue) -> Void
     private let create: (URL, String) -> Void
-    private let openData = SwissButton("Open Existing App Data…", .primary)
-    private let newData = SwissButton("Create App Data Folder…", .secondary)
-    private let switchData = SwissButton("Choose Another Workspace…", .secondary)
-    private let openCat = SwissButton("Open Catalogue", .primary)
-    private let locateCat = SwissButton("Locate Catalogue…", .secondary)
-    private let createCat = SwissButton("Create Catalogue…", .secondary)
-    private let buildCat = SwissButton("Create And Set Up Catalogue", .primary)
-    private let back = SwissButton("Back", .secondary)
-    private let cancel = SwissButton("Cancel", .secondary)
     private let name = NSTextField(string: "")
-    private var chooser: SwissDropdown?
-    private var options: [String] = []
-    private var gridWidth: CGFloat { window?.contentView?.bounds.width ?? bounds.width }
-    private var x: CGFloat { Design.App.column(7,in:gridWidth) }
-    private var w: CGFloat { Design.App.span(7,12,in:gridWidth) }
-    private var u: CGFloat { Design.App.unit }
-    private func y(_ row: CGFloat) -> CGFloat { Design.App.header + 1 + row*u }
+    private var options:[String]=[]
     override var isFlipped: Bool { true }
     init(root: URL, ready: @escaping (URL, WorkspaceCatalogue) -> Void, create: @escaping (URL, String) -> Void) {
         self.root=root; self.ready=ready; self.create=create
         super.init(frame:.zero)
-        for (button,action) in [(openData,#selector(chooseData)),(newData,#selector(makeData)),(switchData,#selector(chooseData)),(openCat,#selector(openSelected)),(locateCat,#selector(locate)),(createCat,#selector(showCreate)),(buildCat,#selector(build)),(back,#selector(goBack)),(cancel,#selector(cancelPressed))] {
-            button.target=self;button.action=action;addSubview(button)
-        }
-        name.placeholderAttributedString=Design.attributed("Catalogue name",.body,colour:Design.quiet)
-        name.font=Design.Text.body.font();name.textColor=Design.ink;name.isBordered=false;name.drawsBackground=false;name.focusRingType = .none
-        name.setAccessibilityLabel("New catalogue name");addSubview(name)
+        let config=WKWebViewConfiguration();config.userContentController.add(bridge,name:"setup")
+        web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;addSubview(web);bridge.owner=self
+        web.loadHTMLString(ApprovedWorkspaceHTML.document,baseURL:nil)
         setAccessibilityLabel("Workspace and catalogue chooser")
     }
     required init?(coder:NSCoder) { fatalError() }
@@ -290,72 +270,35 @@ final class WorkspaceStartupView: NSView {
         selected=value.lastUsed.flatMap { entry in value.catalogues.firstIndex(where: { $0.folder == entry.folder }) } ?? value.catalogues.firstIndex(where: { $0.canOpen }) ?? 0
         stage=value.genuinelyEmpty ? .create : .catalogues
         rebuildChooser();needsLayout=true;needsDisplay=true
-        window?.makeFirstResponder(stage == .create ? name : self)
+        window?.makeFirstResponder(web)
     }
-    private func rebuildChooser() {
-        chooser?.removeFromSuperview();chooser=nil
-        guard let inventory, !inventory.catalogues.isEmpty else { return }
-        options=inventory.catalogues.enumerated().map { "\($0.offset+1). \($0.element.name) · \($0.element.state.label)" }
-        let dropdown=SwissDropdown("Catalogue",value:options[min(selected,options.count-1)],options:options,allowsOwn:false,width:max(280,w))
-        dropdown.onChange = { [weak self] value in guard let self,let index=self.options.firstIndex(of:value) else { return };self.selected=index;self.message="";self.needsLayout=true;self.needsDisplay=true }
-        addSubview(dropdown);chooser=dropdown
+    private func rebuildChooser(){options=inventory?.catalogues.enumerated().map { "\($0.offset+1). \($0.element.name) · \($0.element.state.label)" } ?? []}
+    override func layout(){super.layout();web.frame=bounds;refreshPage()}
+    func webView(_ webView:WKWebView,didFinish navigation:WKNavigation!){refreshPage()}
+    func webView(_ webView:WKWebView,decidePolicyFor action:WKNavigationAction,decisionHandler:@escaping(WKNavigationActionPolicy)->Void){decisionHandler(action.request.url?.absoluteString == "about:blank" ? .allow:.cancel)}
+    private func refreshPage(){
+        let entry=inventory.flatMap{$0.catalogues.indices.contains(selected) ? $0.catalogues[selected]:nil}
+        let pending=CatalogueSetupSession.load()
+        let continuing=inventory?.setupComplete == false && pending.createdName == entry?.name && pending.createdFolder?.standardizedFileURL == entry?.folder.standardizedFileURL
+        let values:[String:Any]=["stage":stage == .workspace ? "workspace":stage == .catalogues ? "catalogues":"create","root":root.path,"folder":entry?.folder.path ?? "","issue":entry?.issue ?? "","options":options,"selected":selected,"name":name.stringValue,"error":message,"canOpen":entry?.canOpen == true || entry?.recovery != nil,"openTitle":entry?.recovery != nil ? "Recover Catalogue…":continuing ? "Continue Catalogue Setup":"Open Catalogue"]
+        guard let bytes=try? JSONSerialization.data(withJSONObject:values),let json=String(data:bytes,encoding:.utf8) else{return}
+        web.evaluateJavaScript("window.restoreRecovery(\(json));window.setSetupAppearance(\(SetupAppearanceHTML.payload(index:appearanceIndex)))",completionHandler:nil)
     }
-    override func layout() {
-        super.layout()
-        setAccessibilityHelp("App data: " + root.path + (message.isEmpty ? "" : ". " + message))
-        for view in [openData,newData,switchData,openCat,locateCat,createCat,buildCat,back,name,cancel] { view.isHidden=true }
-        chooser?.isHidden=stage != .catalogues
-        func place(_ button:SwissButton,_ row:CGFloat) { button.isHidden=false;button.frame=NSRect(x:x,y:SettingsSheet.buttonTop(baseline:y(row)+Design.App.textBaseline),width:button.intrinsicContentSize.width,height:SwissButton.height) }
-        switch stage {
-        case .workspace:
-            newData.title="Create App Data Folder…"
-            place(openData,9);place(newData,12)
-        case .catalogues:
-            chooser?.frame=NSRect(x:x,y:y(7),width:w,height:56)
-            place(openCat,14);place(locateCat,17);place(createCat,20);place(switchData,23)
-            openCat.isEnabled=inventory?.catalogues.indices.contains(selected) == true && (inventory!.catalogues[selected].canOpen || inventory!.catalogues[selected].recovery != nil)
-            if let inventory,inventory.catalogues.indices.contains(selected) {
-                let entry=inventory.catalogues[selected],pending=CatalogueSetupSession.load()
-                openCat.title = !inventory.setupComplete && pending.createdName == entry.name && pending.createdFolder?.standardizedFileURL == entry.folder.standardizedFileURL ? "Continue Catalogue Setup" : "Open Catalogue"
-                if entry.recovery != nil { openCat.title = "Recover Catalogue…" }
-            }
-            place(openCat,14)
-            newData.title="New Workspace…";place(newData,23)
-            newData.frame.origin.x=switchData.frame.maxX+Design.App.gutter
-            if newData.frame.maxX > x+w { newData.frame.origin.x=x;newData.frame.origin.y += 2*u }
-        case .create:
-            name.isHidden=false;name.frame=NSRect(x:x,y:y(9),width:w,height:32)
-            place(buildCat,14);place(locateCat,17);place(switchData,20)
-            if inventory?.genuinelyEmpty == false { place(back,23) }
+    fileprivate func receive(_ message:WKScriptMessage){
+        guard message.frameInfo.isMainFrame,let value=message.body as? [String:Any],let action=value["action"] as? String else{return}
+        if let text=value["name"] as? String{name.stringValue=text}
+        switch action {
+        case "cycleAppearance":appearanceIndex=AppearancePresets.next(after:appearanceIndex);web.evaluateJavaScript("window.setSetupAppearance(\(SetupAppearanceHTML.payload(index:appearanceIndex)))",completionHandler:nil)
+        case "select":if let index=value["index"] as? Int,options.indices.contains(index){selected=index;self.message="";refreshPage()}
+        case "openData","switchData":chooseData()
+        case "newData":makeData()
+        case "openCat":openSelected()
+        case "locate":locate()
+        case "create":showCreate()
+        case "build":build()
+        case "cancel":cancelPressed()
+        default:break
         }
-        cancel.isHidden=false
-        cancel.frame=NSRect(x:Design.App.margin,y:SettingsSheet.buttonTop(baseline:y(23)+Design.App.textBaseline),width:cancel.intrinsicContentSize.width,height:SwissButton.height)
-    }
-    override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .group }
-    override func accessibilityValue() -> Any? { "App data: " + root.path + (message.isEmpty ? "" : ". " + message) }
-    override func draw(_ dirtyRect:NSRect) {
-        fill(bounds,Design.card);Logo.draw(x:Design.App.margin,baseline:StudioHeader.baseline)
-        Design.attributed("Colorgain Workspace",.heading).draw(x:Design.App.margin,baseline:y(1)+Design.App.textBaseline,width:Design.App.span(1,6,in:gridWidth))
-        let caption = stage == .workspace ? "App data first." : "App Data Folder"
-        Design.attributed(caption,.bodyStrong).draw(x:Design.App.margin,baseline:y(4)+Design.App.textBaseline,width:Design.App.span(1,6,in:gridWidth))
-        SettingsSheet.paragraph(root.path,x:Design.App.margin,firstBaseline:y(6)+Design.App.textBaseline,width:Design.App.span(1,6,in:gridWidth)-32,height:3*u,colour:Design.quiet)
-        let title=stage == .workspace ? "Open your workspace." : stage == .catalogues ? "Choose a catalogue." : inventory?.genuinelyEmpty == true ? "Your first catalogue." : "Create a catalogue."
-        Design.attributed(title,SettingsSheet.titleStyle).draw(x:x,baseline:y(2)+Design.App.textBaseline,width:w)
-        let explanation=stage == .workspace ? "Open colorgain.coldata or its app-data folder to restore your settings and catalogue list. Create a new folder only for a new workspace." : stage == .catalogues ? "Your app data is open. Choose a saved catalogue to continue with its existing structure." : (inventory?.genuinelyEmpty == true ? "No catalogues are registered or found here. Create your first catalogue, or locate an existing one." : "Choose a name for a new catalogue. Its structure is set up next.")
-        SettingsSheet.paragraph(explanation,x:x,firstBaseline:y(4)+Design.App.textBaseline,width:w,height:3*u)
-        if stage == .catalogues, let inventory, inventory.catalogues.indices.contains(selected) {
-            let entry=inventory.catalogues[selected]
-            SettingsSheet.paragraph(entry.folder.path,x:x,firstBaseline:y(10)+Design.App.textBaseline,width:w,height:2*u,colour:Design.quiet)
-            Design.attributed(entry.issue ?? "Validated catalogue index · Existing contents retained",.body).draw(x:x,baseline:y(12)+Design.App.textBaseline,width:w)
-            Design.attributed("\(inventory.catalogues.count) catalogue locations",.body).draw(x:Design.App.margin,baseline:y(10)+Design.App.textBaseline,width:Design.App.span(1,6,in:gridWidth))
-        }
-        if stage == .create {
-            Design.attributed("Catalogue Name",.caption).draw(x:x,baseline:y(8)+Design.App.textBaseline,width:w)
-            hairline(x:x,y:y(10)+4,width:w,Design.rule)
-            SettingsSheet.paragraph("The catalogue will be created inside this workspace’s Catalogues folder. Its structure is set up next.",x:x,firstBaseline:y(12)+Design.App.textBaseline,width:w,height:2*u,colour:Design.quiet)
-        }
-        if !message.isEmpty { SettingsSheet.paragraph(message,x:Design.App.margin,firstBaseline:y(14)+Design.App.textBaseline,width:Design.App.span(1,6,in:gridWidth)-32,height:6*u) }
     }
     @objc private func cancelPressed() { onCancel?() }
     @objc private func chooseData() {
@@ -388,17 +331,17 @@ final class WorkspaceStartupView: NSView {
                 try FolderAccess.authorize(folder)
                 let files=try FileManager.default.contentsOfDirectory(at:folder,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles])
                 guard files.isEmpty else { throw failure("This folder already contains files. Use Open Existing App Data to open a workspace, or choose an empty folder.") }
-                try AppHomeSeed.ensure(at:folder);try self.openWorkspace(folder)
+                self.create(folder,"")
             } catch { self.fail(error) }
         }
     }
-    @objc private func showCreate() { stage = .create;message="";needsLayout=true;needsDisplay=true;window?.makeFirstResponder(name) }
+    @objc private func showCreate() { stage = .create;message="";needsLayout=true;needsDisplay=true;window?.makeFirstResponder(web) }
     @objc private func goBack() { stage = .catalogues;message="";needsLayout=true;needsDisplay=true }
     @objc private func build() {
         guard inventory != nil else { return }
         do {
-            let name=try CatalogueSetup.createBlank(self.name.stringValue,under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
-            create(root,name)
+            try SimpleCatalogue.validateLabel(self.name.stringValue)
+            create(root,self.name.stringValue)
         } catch { fail(error) }
     }
     @objc private func locate() {
@@ -440,4 +383,9 @@ final class WorkspaceStartupView: NSView {
         try Catalogues(root:root,legacyURL:nil).registerChecked(entry.name,at:entry.folder)
         ready(root,entry)
     }
+}
+
+private final class WorkspaceStartupBridge:NSObject,WKScriptMessageHandler {
+    weak var owner:WorkspaceStartupView?
+    func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage){owner?.receive(message)}
 }

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Colorgain · Dense Drive</title>
+<!-- Dense Drive: concentric grey chevrons separated by true 5 CSS pixel curved cuts.
+     The annulus and separator paths share one rotating coordinate system. -->
+<style>
+:root{color-scheme:light;--paper:#fff;--ink:#222;--rule:#cecece;--muted:#626262}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:13px/1.5 'Helvetica Neue',Helvetica,Arial,sans-serif}
+main{max-width:1000px;margin:auto;padding:32px 24px 48px}header{display:flex;justify-content:space-between;align-items:center;gap:24px;padding-bottom:24px;border-bottom:1px solid var(--rule)}h1{font-size:24px;font-weight:500;margin:0 0 6px}p{margin:0;color:var(--muted)}label{display:flex;align-items:center;gap:8px;white-space:nowrap}input{accent-color:#777;width:16px;height:16px}
+.stage{height:180px;position:relative;display:grid;place-items:center;isolation:isolate}.stage:before,.stage:after{content:'';position:absolute;left:0;right:0;height:1px;background:var(--rule);z-index:-1;transition:transform .32s}.stage:before{top:calc(50% - 26px)}.stage:after{top:calc(50% + 26px)}
+.assembly{width:96px;height:96px;position:relative;border-radius:50%;background:var(--paper);display:grid;place-items:center;transition:transform .32s cubic-bezier(.6,0,.8,.3),opacity .2s}.collar{position:absolute;inset:0;width:96px;height:96px;pointer-events:none}.orbit{transform-origin:48px 48px;animation:rotate 60s linear infinite}.paused .orbit{animation-play-state:paused}
+.core{width:48px;height:48px;border:1px solid var(--rule);border-radius:50%;padding:0;position:relative;overflow:hidden;display:grid;place-items:center;background:var(--paper);color:var(--ink);cursor:pointer;isolation:isolate}.core:before{content:'';position:absolute;inset:0;background:var(--rule);z-index:-1;clip-path:circle(0% at 50% 50%);transition:clip-path .45s cubic-bezier(.16,1,.3,1)}.core:hover:before,.core:focus-visible:before{clip-path:circle(72% at 50% 50%)}.core:focus-visible{outline:2px solid #777;outline-offset:3px}.icon{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;transition:transform .4s cubic-bezier(.16,1,.3,1)}.core:hover .icon{transform:translateY(3px)}
+.closing .assembly{transform:scale(0);opacity:0}.closing:before{transform:translateY(26px)}.closing:after{transform:translateY(-26px)}.status{text-align:center;color:var(--muted);min-height:20px}.context{display:flex;justify-content:space-between;margin-top:24px;font-weight:500}.stage{margin-top:-28px}footer{margin-top:28px;border-top:1px solid var(--rule);padding-top:16px;color:var(--muted)}@keyframes rotate{to{transform:rotate(360deg)}}
+@media(max-width:540px){main{padding:24px 18px}header{align-items:start;flex-direction:column;gap:16px}.stage{height:180px}}
+@media(prefers-reduced-motion:reduce){.orbit{animation:none}*{transition:none!important}}
+</style>
+</head>
+<body><main id="dense-drive">
+<header><div><h1>Dense Drive</h1><p>Arced chevrons · 5px gaps · Grey iris fill</p></div><label><input id="motion" type="checkbox" checked>Rotation</label></header>
+<div class="context"><span>Photography</span><span>0 Palettes</span></div><div class="stage"><div class="assembly">
+<svg class="collar" viewBox="0 0 96 96" aria-hidden="true">
+<defs><mask id="chevron-gaps" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96"><circle cx="48" cy="48" r="42" fill="white"/><circle cx="48" cy="48" r="29" fill="black"/><g id="cuts" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></g></mask></defs>
+<circle cx="48" cy="48" r="47.5" fill="var(--paper)" stroke="var(--rule)"/>
+<g class="orbit"><circle cx="48" cy="48" r="42" fill="var(--rule)" mask="url(#chevron-gaps)"/></g>
+</svg>
+<button class="core" aria-label="Preview Import Images"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 9H3v12h18V9h-2"/></svg></button>
+</div></div>
+<div class="status" aria-live="polite">96px diameter · 32px icon · 60s rotation</div>
+<footer>Hover the centre to preview the iris fill. Click to preview closing.</footer>
+</main>
+<script>
+// Each separator is a curved chevron in polar coordinates. A constant 5px
+// mask stroke creates a real normal-distance gap along the entire boundary,
+// including the inner end, centre bend and outer end. The mask trims both
+// ends to concentric circles, leaving 5px clearance beside the fixed rings.
+const cuts=document.getElementById('cuts');
+for(let i=0;i<16;i++){
+ const points=[];
+ for(let j=0;j<=160;j++){
+  const t=-.3+1.6*j/160,r=29+13*t;
+  const phase=.20*Math.sin(Math.PI*t);
+  const angle=i*Math.PI/8-Math.PI/2+phase;
+  points.push(`${j?'L':'M'}${(48+r*Math.cos(angle)).toFixed(5)} ${(48+r*Math.sin(angle)).toFixed(5)}`);
+ }
+ const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+ path.setAttribute('d',points.join(' '));cuts.append(path);
+}
+const root=document.getElementById('dense-drive'),stage=root.querySelector('.stage'),button=root.querySelector('.core'),status=root.querySelector('.status');
+document.getElementById('motion').addEventListener('change',e=>root.classList.toggle('paused',!e.target.checked));
+button.addEventListener('click',()=>{if(button.getAttribute('aria-disabled')==='true')return;button.setAttribute('aria-disabled','true');stage.classList.add('closing');status.textContent='Opening Import Images…';setTimeout(()=>{stage.classList.remove('closing');button.removeAttribute('aria-disabled');status.textContent='96px diameter · 32px icon · 60s rotation';},1100)});
+</script></body></html>

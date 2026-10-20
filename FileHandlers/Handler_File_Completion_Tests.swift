@@ -39,7 +39,10 @@ func runFileHandlerCompletionTests(check: (Bool, String) -> Void) {
         defer { try? FileManager.default.removeItem(at: destination) }
         try Catalogues.relocateHome(from: fixture.root, to: destination)
         let relocated = Catalogues(root: destination, legacyURL: nil)
-        check(relocated.registry.contains { $0.name == "First" && $0.path.hasPrefix(destination.resolvingSymlinksInPath().path) }, "Verified workspace relocation rebases internal catalogue references")
+        check(relocated.registry.contains {
+            $0.name == "First" && $0.url(in: destination)?.resolvingSymlinksInPath() ==
+                destination.appendingPathComponent("Catalogues/First").resolvingSymlinksInPath()
+        }, "Verified workspace relocation retains a portable internal catalogue reference")
         check(try PaletteAssetHandler.read(fixture.palette).palette.id.uuidString == id, "Relocation retains the source workspace as a recovery copy")
         check(try relocated.store(for: "First").load().swatches.count == 2, "The relocated workspace reopens with its original native assets")
         let finderFolder = fixture.first.appendingPathComponent("Finder Collection")
@@ -74,6 +77,7 @@ func runFileHandlerFormatMatrix(check: (Bool, String) -> Void) {
             if (try? manager.handler(for: URL(fileURLWithPath: path))) != nil { examples[ext] = bytes }
         }
         let encoder = ColourFiles.encoder()
+        examples["colcar"] = try JSONSerialization.data(withJSONObject: ["format": "colorgain-sidecar", "version": 1, "id": UUID().uuidString, "sourceFile": "Fixture.jpg", "payload": [String: Any](), "history": [[String: Any]]()])
         let library = try CatalogueTree.read(root: fixture.first).library
         let palette = library.swatches.first { !$0.isTypography }!
         examples["colswatch"] = try encoder.encode(SwatchDocument(palette.entries[0].hex, in: palette.id, of: library)!)

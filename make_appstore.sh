@@ -2,7 +2,7 @@
 # Build the Mac App Store edition of MMFFDev Colour 3.
 #
 #   ./make_appstore.sh            builds a sandboxed Release app, checks its entitlements, runs the
-#                                 self-test inside it, installs it as /Applications/MMFFDev - Colorgain.app
+#                                 self-test inside it, installs it as /Applications/Colorgain.app
 #                                 and opens it as a brand-new user on the Studio window, so the Colorgain
 #                                 setup and window are what you see every time. COLORGAIN_OPEN=0 skips the opening.
 #   ./make_appstore.sh archive    archives with the Apple Distribution identity and exports the .pkg
@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 PROJECT="Colorgain Store.xcodeproj"
 SCHEME="Colorgain"
 DERIVED="appstore/build"
-APP="$DERIVED/Build/Products/Release/MMFFDev Colour 3.app"
+APP="$DERIVED/Build/Products/Release/Colorgain.app"
 MODE="${1:-build}"
 
 command -v xcodegen >/dev/null || { echo "xcodegen is needed: brew install xcodegen"; exit 1; }
@@ -59,14 +59,14 @@ if /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$APP/Contents/Info.plist" >/de
 echo "running self-test..."
 "$APP/Contents/MacOS/MMFFDevColour3" --self-test
 
-# The Store edition installed beside the direct download, under its own name so the two never
-# collide in the Dock or the menu bar. Same bundle identifier: it is the same app, sandboxed.
-COLORGAIN="/Applications/MMFFDev - Colorgain.app"
+# The deliberately selected Store build replaces the single installed Colorgain app.
+# Its sandbox, signing and executable identity remain specific to this build target.
+COLORGAIN="/Applications/Colorgain.app"
 echo "installing $COLORGAIN..."
 pkill -f "$COLORGAIN/Contents/MacOS/" 2>/dev/null && sleep 1 || true
 rm -rf "$COLORGAIN"
 cp -R "$APP" "$COLORGAIN"
-/usr/libexec/PlistBuddy -c "Set :CFBundleName MMFFDev - Colorgain" -c "Set :CFBundleDisplayName MMFFDev - Colorgain" "$COLORGAIN/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName Colorgain" -c "Set :CFBundleDisplayName Colorgain" "$COLORGAIN/Contents/Info.plist"
 if [ -n "$APP_IDENTITY" ]; then
     codesign --force --options runtime --timestamp --sign "$APP_IDENTITY" --preserve-metadata=entitlements "$COLORGAIN" 2>&1 | grep -v "replacing existing signature" || true
 else

@@ -1,0 +1,170 @@
+{
+  "catalogue" : "55174B89-FD8D-4607-BC6E-D96F8FB11F78",
+  "colours" : [
+    {
+      "hex" : "#B1E0D3",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.57196389716862062,
+        "y" : 0.67168375532743541,
+        "z" : 0.54370987528163872
+      },
+      "pickedAt" : 1791482444225.1091,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.69411764705882351,
+          0.8784313725490196,
+          0.82745098039215681
+        ]
+      }
+    },
+    {
+      "hex" : "#7DB2A6",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.31542887529904551,
+        "y" : 0.38790693445451824,
+        "z" : 0.31841302246118075
+      },
+      "pickedAt" : 1791482444768.2148,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.49019607843137253,
+          0.69803921568627447,
+          0.65098039215686276
+        ]
+      }
+    },
+    {
+      "hex" : "#6E9F92",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.2426323278612377,
+        "y" : 0.30066753129653456,
+        "z" : 0.24111524789726646
+      },
+      "pickedAt" : 1791482445593.553,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.43137254901960786,
+          0.62352941176470589,
+          0.5725490196078431
+        ]
+      }
+    },
+    {
+      "hex" : "#D3393C",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.30625194645450943,
+        "y" : 0.17699476482396537,
+        "z" : 0.045314649211644367
+      },
+      "pickedAt" : 1791482446451.616,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.82745098039215681,
+          0.22352941176470589,
+          0.23529411764705882
+        ]
+      }
+    },
+    {
+      "hex" : "#BA0400",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.21456556037484656,
+        "y" : 0.11011169217912917,
+        "z" : 0.0069558232033947506
+      },
+      "pickedAt" : 1791482447777.5491,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.72941176470588232,
+          0.015686274509803921,
+          0
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 106 2",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T23:43:10.109Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "C84DA470-BD96-4361-B60A-8AC766B4D8CC",
+    "documentID" : "A29BCD91-02BC-48E4-B782-003D40C27C9C",
+    "lastSavedAt" : "2026-10-19T23:43:10.426Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "bucketID" : "19FCF6E9-CC1E-4671-921B-2777BC776962",
+    "copiedFrom" : "C84DA470-BD96-4361-B60A-8AC766B4D8CC",
+    "createdAt" : 1791482442438.616,
+    "entries" : [
+      {
+        "addedAt" : 1791482444225.1091,
+        "hex" : "#B1E0D3"
+      },
+      {
+        "addedAt" : 1791482444768.2148,
+        "hex" : "#7DB2A6"
+      },
+      {
+        "addedAt" : 1791482445593.553,
+        "hex" : "#6E9F92"
+      },
+      {
+        "addedAt" : 1791482446451.616,
+        "hex" : "#D3393C"
+      },
+      {
+        "addedAt" : 1791482447777.5491,
+        "hex" : "#BA0400"
+      }
+    ],
+    "id" : "A29BCD91-02BC-48E4-B782-003D40C27C9C",
+    "name" : "Palette 106 2",
+    "placedAt" : 1792453388514.3828,
+    "position" : 67,
+    "projectID" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+    "purposes" : [
+      {
+        "changedAt" : 1791482442438.9028,
+        "id" : "2469E548-CDBD-4411-A849-85C7D75DC782",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "project" : "1A9155AB-2149-447C-B740-F6083C822BF0",
+  "version" : 1
+}

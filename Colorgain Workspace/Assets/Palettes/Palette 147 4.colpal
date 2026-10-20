@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#BFC0B7",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.49705157708520131,
+        "y" : 0.52135118393767232,
+        "z" : 0.39698451046248218
+      },
+      "pickedAt" : 1791684174230.698,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.7490234375,
+          0.751953125,
+          0.7211914062
+        ]
+      }
+    },
+    {
+      "hex" : "#D6C8C5",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.59462626269637076,
+        "y" : 0.59613264055453219,
+        "z" : 0.46324905519256987
+      },
+      "pickedAt" : 1791684191817.6909,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.8295898438,
+          0.78515625,
+          0.7739257812
+        ]
+      }
+    },
+    {
+      "hex" : "#657A77",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.15767176085429091,
+        "y" : 0.17926549029329564,
+        "z" : 0.15333131459434693
+      },
+      "pickedAt" : 1791684194626.9277,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.4108886719,
+          0.4755859375,
+          0.4677734375
+        ]
+      }
+    },
+    {
+      "hex" : "#E0DAD8",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.69391208128684323,
+        "y" : 0.71117680847894305,
+        "z" : 0.56677026092692206
+      },
+      "pickedAt" : 1791684173217.9131,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.875,
+          0.8564453125,
+          0.8466796875
+        ]
+      }
+    },
+    {
+      "hex" : "#8C9A90",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.27965952200639743,
+        "y" : 0.30789216211337717,
+        "z" : 0.23547998602455683
+      },
+      "pickedAt" : 1791684193754.5959,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.5600585938,
+          0.6030273438,
+          0.5688476562
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 147 4",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.434Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "E296DC8B-506D-4D04-B375-211605611D56",
+    "documentID" : "3A06263D-50E8-4D5E-A374-B9B3FF134669",
+    "lastSavedAt" : "2026-10-19T23:43:09.374Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "E296DC8B-506D-4D04-B375-211605611D56",
+    "createdAt" : 1791684170625.877,
+    "entries" : [
+      {
+        "addedAt" : 1791684173217.9131,
+        "hex" : "#E0DAD8"
+      },
+      {
+        "addedAt" : 1791684174230.698,
+        "hex" : "#BFC0B7"
+      },
+      {
+        "addedAt" : 1791684191817.6909,
+        "hex" : "#D6C8C5"
+      },
+      {
+        "addedAt" : 1791684193754.5959,
+        "hex" : "#8C9A90"
+      },
+      {
+        "addedAt" : 1791684194626.9277,
+        "hex" : "#657A77"
+      }
+    ],
+    "id" : "3A06263D-50E8-4D5E-A374-B9B3FF134669",
+    "name" : "Palette 147 4",
+    "placedAt" : 1792453388446.5771,
+    "position" : 31,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791684170626.3088,
+    "purposes" : [
+      {
+        "changedAt" : 1791684170626.3088,
+        "id" : "249B952D-A9F0-468B-8424-22153A1664D5",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

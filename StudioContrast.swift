@@ -12,7 +12,9 @@ import AppKit
 // say. The maths is the old page's (ColourScience.swift, ColourFormats.swift), and so is the state,
 // kept under the same key, so the old window and this page hold one pair.
 
-final class ContrastPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
+final class ContrastPage: ClickCursorView, PageSection, Overlay, NSTextFieldDelegate {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}}
+
     var onResize: (() -> Void)?
     private let library: LibraryController
     private(set) var state: ContrastState

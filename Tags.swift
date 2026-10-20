@@ -174,7 +174,7 @@ final class TagBar: NSView, NSTokenFieldDelegate {
             extras.addArrangedSubview(caption("Matches", size: 11))
             for (at, tag) in found.prefix(6).enumerated() {
                 let home = library.project(ofTag: tag).flatMap { library.project($0)?.name }
-                let chip = NSButton(title: home.map { "\(tag)  \u{00B7}  \($0)" } ?? tag, target: self, action: #selector(matchTapped(_:)))
+                let chip = ClickCursorButton(title: home.map { "\(tag)  \u{00B7}  \($0)" } ?? tag, target: self, action: #selector(matchTapped(_:)))
                 chip.bezelStyle = .recessed
                 chip.controlSize = .small
                 // A dot in the tag's own colour; a button's tint would be overridden by its style.
@@ -194,7 +194,7 @@ final class TagBar: NSView, NSTokenFieldDelegate {
             let fresh = tokens(includingTyped: false).filter { !known($0) }
             if !fresh.isEmpty { extras.addArrangedSubview(caption("New", size: 11)) }
             for tag in fresh {
-                let menu = NSPopUpButton(frame: .zero, pullsDown: false)
+                let menu = ClickCursorPopupButton(frame: .zero, pullsDown: false)
                 menu.controlSize = .small
                 menu.font = NSFont.systemFont(ofSize: TextSize.body)
                 menu.addItem(withTitle: "\(tag): Global")
@@ -354,12 +354,12 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
         let at = names.firstIndex(of: name) ?? 0
         let info = lib.info(forTag: name)
 
-        let tick = NSButton(checkboxWithTitle: "", target: self, action: #selector(tickChanged(_:)))
+        let tick = ClickCursorButton(checkboxWithTitle: "", target: self, action: #selector(tickChanged(_:)))
         tick.tag = at
         tick.state = ticked.contains(name) ? .on : .off
         tick.toolTip = "Tick two or more tags to remove them together"
 
-        let well = NSColorWell()
+        let well = ClickCursorColorWell()
         well.color = tagColour(info)
         well.tag = at
         well.target = self
@@ -371,7 +371,7 @@ final class TagEditorController: NSViewController, NSTextFieldDelegate {
         field.delegate = self
         field.toolTip = "Rename the tag everywhere it is used"
 
-        let scope = NSPopUpButton(frame: .zero, pullsDown: false)
+        let scope = ClickCursorPopupButton(frame: .zero, pullsDown: false)
         scope.controlSize = .small
         scope.font = NSFont.systemFont(ofSize: TextSize.body)
         scope.addItem(withTitle: "Global")

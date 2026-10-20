@@ -21,7 +21,10 @@ enum QuickKeys {
     struct Command { let id: String; let title: String; let fallback: String }
     static let commands = [Command(id: "newPalette", title: "New Palette", fallback: "1"),
                            Command(id: "pick", title: "Picker", fallback: "2"),
-                           Command(id: "sample", title: "Rectangle Picker", fallback: "3")]
+                           Command(id: "sample", title: "Rectangle Picker", fallback: "3"),
+                           Command(id: "outputProof", title: "Output Proof On/Off", fallback: "P"),
+                           Command(id: "rail1", title: "Rail 1 Open/Close", fallback: ","),
+                           Command(id: "rail2", title: "Rail 2 Open/Close", fallback: ".")]
     static func key(for id: String) -> String { Prefs.quickKeys[id] ?? commands.first { $0.id == id }?.fallback ?? "" }
     static func set(_ key: String?, for id: String) { var all = Prefs.quickKeys; all[id] = key; Prefs.quickKeys = all }
     /// The key a press is, as it is written here: a shift arrow before the character when Shift was down.
@@ -36,7 +39,9 @@ enum QuickKeys {
     }
 }
 
-final class ShortcutsSettings: NSView, PageSection {
+final class ShortcutsSettings: ClickCursorView, PageSection {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}+clearHits.map{$0.0}}
+
     var onResize: (() -> Void)?
     private static var u: CGFloat { Design.App.unit }
     private static var line: CGFloat { Design.App.textBaseline }
@@ -203,7 +208,7 @@ final class ShortcutsSettings: NSView, PageSection {
 }
 
 /// Keeps the native colour-panel interaction, with the Studio's square swatch treatment.
-private final class HaloColourWell: NSColorWell {
+private final class HaloColourWell: ClickCursorColorWell {
     var part = "centre.background"
     override func mouseDown(with event: NSEvent) { openPicker() }
     override func accessibilityPerformPress() -> Bool { openPicker(); return true }
@@ -223,7 +228,7 @@ private final class HaloColourWell: NSColorWell {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
-private final class HaloResetButton: NSButton {
+private final class HaloResetButton: ClickCursorButton {
     var symbol = "arrow.counterclockwise"
     private var hovering = false
     override func updateTrackingAreas() {
@@ -635,7 +640,7 @@ final class SoundsSettings: NSView, PageSection {
 }
 
 /// Tabs share a leading direction glyph and a marker below their owning divider.
-final class SectionAnchorButton: NSButton {
+final class SectionAnchorButton: ClickCursorButton {
     var active = false
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
@@ -765,4 +770,90 @@ final class GeneralSettings: NSView, PageSection {
         }
     }
     @objc private func openWizard() { onWizard?() }
+}
+
+/// Settings groups share the existing routes, so bookmarks and Escape keep their meaning.
+enum SettingsNavigation {
+    struct Group {
+        let title: String
+        let tabs: [(String, StudioFrame.Place)]
+    }
+    static var groups: [Group] {
+        var app: [(String, StudioFrame.Place)] = [("General", .general), ("Shortcuts", .shortcuts), ("Halo", .halo), ("Sounds", .sounds)]
+        app.append(("Apple Menubar", .appleMenubar))
+        return [Group(title: "App & Interaction", tabs: app),
+                Group(title: "Library & Data", tabs: [("Library", .librarySettings), ("Catalogues", .settings), ("Tags", .tags), ("Schema", .schema)]),
+                Group(title: "Colour Management", tabs: [("Profiles & Proofing", .colourManagement(0)), ("Measurements & Spectral Viewing", .colourManagement(1)), ("Display & Viewing Environment", .colourManagement(2))]),
+                Group(title: "Connections & Sharing", tabs: [("Appbridge", .appbridgeSettings), ("Sharing", .sharingSettings)])]
+    }
+    static func group(for place: StudioFrame.Place) -> Group? {
+        groups.first { $0.tabs.contains { $0.1 == place } }
+    }
+}
+
+/// Capability setup only: no imported measurements or calculated relighting are claimed.
+final class ColourManagementSettings: NSView, PageSection {
+    var onResize: (() -> Void)?
+    var onProfiles: (() -> Void)?
+    private let index: Int
+    private let action = SwissButton("Open Viewing Profiles…", .secondary)
+    private let output = SwissButton("Output Proof: Off", .secondary)
+    private var x: CGFloat { SettingsSheet.contentColumn(width: bounds.width, window: window?.frame.width ?? Design.App.size.width) }
+    private var descriptions: [String] {
+        switch index {
+        case 0: return ["Manage saved viewing profiles, output targets, rendering intent and difference tolerances in the shared Preset editor. Opens your palette workspace and its Preset dropdown.", "Output Proof compares the stored colour preview with the selected output target. This global choice also applies to palette and swatch views; it is a prediction, not a measured approval."]
+        case 1: return ["Import measured reflectance spectra, link each sample to its actual swatch and enable Spectral Viewing in the shared Settings window. Choose the observer there and D50, D65 or A in the palette actionbar.", "Supported input: CxF3 reflectance fractions, 1–10 nm intervals, covering at least 380–730 nm. Confirm opaque, non-fluorescent material before linking. The original CxF and declared conditions are retained; RGB or Lab values alone are insufficient."]
+        default: return ["An on-screen preview depends on your display profile and viewing environment. Colorgain does not currently measure or calibrate your display. Manage display calibration and the display profile in macOS or your calibration software.", "D50 and D65 describe standard daylight illuminants; A describes a different standard illuminant. Selecting one does not change the monitor calibration or prove how an unmeasured material will look under that light."]
+        }
+    }
+    private var headings: [String] {
+        index == 0 ? ["Viewing Profiles", "Output Proof"] : index == 1 ? ["Spectral Viewing", "Measurement Files"] : ["Display", "Viewing Conditions"]
+    }
+    var sectionAnchors: [(String, CGFloat)] { headings.enumerated().map { ($0.element, guide($0.offset) + 1) } }
+    private func advance(_ i: Int, width: CGFloat) -> CGFloat { max(6, SettingsSheet.settingAdvance(descriptions[i], width: max(140, width), paragraphOffset: 2) + 3) }
+    private func guide(_ i: Int) -> CGFloat { SettingsSheet.headerGuide + (i == 0 ? 0 : advance(0, width: bounds.width - x) * Design.App.unit) }
+    init(index: Int) {
+        self.index = index
+        super.init(frame: .zero)
+        action.target = self; action.action = #selector(openProfiles)
+        output.target = self; output.action = #selector(toggleOutput)
+        if index == 1 { action.title="Open Spectral Measurements…" }
+        action.isHidden = index > 1; output.isHidden = index != 0
+        addSubview(action); addSubview(output)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .prefsDidChange, object: nil)
+        reload()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    override var isFlipped: Bool { true }
+    func reload() { refresh() }
+    @objc private func refresh() {
+        output.title = "Output Proof: " + (Prefs.deltaWarningsEnabled ? "On" : "Off")
+        output.invalidateIntrinsicContentSize(); needsLayout = true; needsDisplay = true
+    }
+    func height(forWidth width: CGFloat) -> CGFloat {
+        let cx = SettingsSheet.contentColumn(width: width, window: window?.frame.width ?? Design.App.size.width)
+        return SettingsSheet.headerGuide + (advance(0, width: width - cx) + advance(1, width: width - cx)) * Design.App.unit
+    }
+    override func layout() {
+        super.layout()
+        for (i, button) in [action, output].enumerated() {
+            button.frame = NSRect(x: x, y: SettingsSheet.buttonTop(baseline: guide(i) + 2 * Design.App.unit), width: min(max(0, bounds.width - x), button.intrinsicContentSize.width), height: SwissButton.height)
+        }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        SettingsSheet.title(index == 0 ? "Proofing." : index == 1 ? "Spectral." : "Viewing.")
+        SettingsSheet.introduction("Colour Management", index == 0 ? "Profiles and output comparison." : index == 1 ? "Measured materials and lighting." : "Display and environment.", x: x, width: bounds.width)
+        for i in 0..<2 {
+            let g = guide(i)
+            SettingsSheet.section(i + 1, headings[i], guide: g, contentX: x, width: bounds.width)
+            SettingsSheet.paragraph(descriptions[i], x: x, firstBaseline: g + (index == 0 ? 4 : 3) * Design.App.unit, width: bounds.width - x, height: (advance(i, width: bounds.width - x) - 3) * Design.App.unit)
+        }
+        SettingsSheet.divider(above: height(forWidth: bounds.width) - Design.App.unit, width: bounds.width)
+    }
+    @objc private func openProfiles() {
+        if index == 1,let delegate=NSApp.delegate as? AppDelegate { delegate.showSettings();delegate.settings?.showSpectralViewing() }
+        else { onProfiles?() }
+    }
+    @objc private func toggleOutput() { Prefs.deltaWarningsEnabled.toggle() }
 }

@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#ECF0F1",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.82716330401920057,
+        "y" : 0.86462189508310827,
+        "z" : 0.72448408125434438
+      },
+      "pickedAt" : 1791482622757.8091,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.92549019607843142,
+          0.94117647058823528,
+          0.94509803921568625
+        ]
+      }
+    },
+    {
+      "hex" : "#2F425A",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.048004275508462729,
+        "y" : 0.051579233225916662,
+        "z" : 0.078703535674678859
+      },
+      "pickedAt" : 1791482621406.5171,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.18431372549019609,
+          0.25882352941176473,
+          0.35294117647058826
+        ]
+      }
+    },
+    {
+      "hex" : "#F8473B",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.43981465264965863,
+        "y" : 0.25666002193674581,
+        "z" : 0.050424116419306921
+      },
+      "pickedAt" : 1791482622014.606,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.97254901960784312,
+          0.27843137254901962,
+          0.23137254901960785
+        ]
+      }
+    },
+    {
+      "hex" : "#03C9FA",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.36211245027865535,
+        "y" : 0.47688188565985323,
+        "z" : 0.73945032297912772
+      },
+      "pickedAt" : 1791482623549.083,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.011764705882352941,
+          0.78823529411764703,
+          0.98039215686274506
+        ]
+      }
+    },
+    {
+      "hex" : "#737373",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.16530556566336063,
+        "y" : 0.17144110073282262,
+        "z" : 0.14147118780973766
+      },
+      "pickedAt" : 1791482624595.334,
+      "source" : {
+        "space" : "srgb",
+        "values" : [
+          0.45098039215686275,
+          0.45098039215686275,
+          0.45098039215686275
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 118",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.461Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "850E5DD3-666F-459A-9A5C-AB0765D33F40",
+    "documentID" : "9BA45923-277C-48A5-BB4B-27AF3C66A991",
+    "lastSavedAt" : "2026-10-19T23:43:09.503Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "850E5DD3-666F-459A-9A5C-AB0765D33F40",
+    "createdAt" : 1791482619161.8262,
+    "entries" : [
+      {
+        "addedAt" : 1791482621406.5171,
+        "hex" : "#2F425A"
+      },
+      {
+        "addedAt" : 1791482622014.606,
+        "hex" : "#F8473B"
+      },
+      {
+        "addedAt" : 1791482622757.8091,
+        "hex" : "#ECF0F1"
+      },
+      {
+        "addedAt" : 1791482623549.083,
+        "hex" : "#03C9FA"
+      },
+      {
+        "addedAt" : 1791482624595.334,
+        "hex" : "#737373"
+      }
+    ],
+    "id" : "9BA45923-277C-48A5-BB4B-27AF3C66A991",
+    "name" : "Palette 118",
+    "placedAt" : 1792453388446.5771,
+    "position" : 63,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791482619162.1331,
+    "purposes" : [
+      {
+        "changedAt" : 1791482619162.1331,
+        "id" : "8614C3E2-7493-4750-BE28-25D83C0D1CE2",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

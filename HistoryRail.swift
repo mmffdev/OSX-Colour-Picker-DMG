@@ -280,7 +280,7 @@ final class StepCell: NSTableCellView {
 }
 
 /// A table that hands the Delete key to the rail.
-final class HistoryTable: NSTableView {
+final class HistoryTable: ClickCursorTableView {
     var onDelete: (() -> Void)?
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 51 || event.keyCode == 117 { onDelete?(); return }

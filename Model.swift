@@ -15,13 +15,15 @@ struct Colour: Codable, Equatable {
     var source: ColourSource?
     var master: XYZ?
     var kind: ColourKind?
+    /// Portable descriptive and production metadata, embedded in the native asset document.
+    var metadata: AssetMetadata? = nil
 
-    enum CodingKeys: String, CodingKey { case hex, pickedAt, tags, tagsChangedAt, source, master, kind }
+    enum CodingKeys: String, CodingKey { case hex, pickedAt, tags, tagsChangedAt, source, master, kind, metadata }
 
     init(hex: String, pickedAt: Date, tags: [String]? = nil, tagsChangedAt: Date? = nil,
-         source: ColourSource? = nil, master: XYZ? = nil, kind: ColourKind? = nil) {
+         source: ColourSource? = nil, master: XYZ? = nil, kind: ColourKind? = nil, metadata: AssetMetadata? = nil) {
         self.hex = hex; self.pickedAt = pickedAt; self.tags = tags; self.tagsChangedAt = tagsChangedAt
-        self.source = source; self.master = master; self.kind = kind
+        self.source = source; self.master = master; self.kind = kind; self.metadata = metadata
         register()
     }
 
@@ -34,6 +36,7 @@ struct Colour: Codable, Equatable {
         source = try c.decodeIfPresent(ColourSource.self, forKey: .source)
         master = try c.decodeIfPresent(XYZ.self, forKey: .master)
         kind = try c.decodeIfPresent(ColourKind.self, forKey: .kind)
+        metadata = try c.decodeIfPresent(AssetMetadata.self, forKey: .metadata)
         register()
     }
 
@@ -105,10 +108,18 @@ struct TypeStyle: Codable, Equatable {
 /// A named collection of colours. Colours always live in the catalogue too.
 /// Portable provenance for an independent Library copy of a project assignment.
 /// Finder-style selection shared between both Library rails.
-struct PaletteSelection {
-    var ids: Set<UUID> = []
-    var anchor: UUID?
-    mutating func click(_ id: UUID, order: [UUID], extend: Bool, toggle: Bool) {
+typealias PaletteSelection = AssetSelection<UUID>
+
+/// Finder-style selection shared by rails and every asset grid. Identity survives sorting.
+struct AssetSelection<Key: Hashable> {
+    var ids: Set<Key> = []
+    var anchor: Key?
+    mutating func retain(_ order: [Key]) {
+        ids.formIntersection(order)
+        if let anchor, !order.contains(anchor) { self.anchor = nil }
+    }
+    mutating func click(_ id: Key, order: [Key], extend: Bool, toggle: Bool) {
+        guard order.contains(id) else { return }
         if extend, let start = anchor.flatMap({ order.firstIndex(of: $0) }), let end = order.firstIndex(of: id) {
             let range = Set(order[min(start, end)...max(start, end)])
             ids = toggle ? ids.union(range) : range
@@ -127,6 +138,12 @@ struct PaletteClaim: Codable, Equatable {
     var bucketName: String
     var assignedPalette: UUID
     var prefix: String { projectName + " / " + bucketName }
+}
+
+struct AssetNote: Codable, Equatable {
+    var name: String
+    var description: String
+    var hasContent: Bool { !description.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty }
 }
 
 struct Swatch: Codable, Equatable {
@@ -176,6 +193,10 @@ struct Swatch: Codable, Equatable {
 
     /// Portable palette-asset review state, saved in its .colpal file.
     var review:PaletteReview? = nil
+    /// Portable asset notes travel with the palette file, independently of a catalogue.
+    var assetNotes:AssetNote? = nil
+    /// Portable title, caption, copyright and print/design metadata; lives in .colpal/.coltyp.
+    var metadata: AssetMetadata? = nil
 
     var isTypography: Bool { styles != nil }
 
@@ -208,6 +229,10 @@ struct TagInfo: Codable, Equatable {
     /// The level-1 group of the schema the tag belongs to, a client, say: worn by anything in a member inside it. Used only
     /// while `projectID` is nil; absent from files written before groups could hold tags.
     var groupID: UUID? = nil
+    /// Lightroom-style controlled vocabulary support. Optional for compatibility with existing .colcat files.
+    var parentID: UUID? = nil
+    var synonyms: [String]? = nil
+    var keywordSet: String? = nil
 }
 
 struct Library: Codable, Equatable {
@@ -390,7 +415,7 @@ extension Library {
     /// Creates a swatch with a default name and makes it the target for new picks.
     @discardableResult
     mutating func createSwatch(at date: Date = Date()) -> UUID {
-        let s = Swatch(id: UUID(), name: nextDefaultSwatchName(), createdAt: date, entries: [])
+        let s = Swatch(id: UUID(), name: nextDefaultSwatchName(), createdAt: date, entries: [], metadata: MetadataConfiguration.forNewAsset())
         swatches.append(s)
         activeSwatchID = s.id
         return s.id
@@ -472,7 +497,7 @@ extension Library {
     mutating func createTypography(named raw: String = "", in project: UUID? = nil, at date: Date = Date()) -> UUID {
         let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = uniqueName(base.isEmpty ? nextTypographyName() : base, among: swatches.map { $0.name })
-        swatches.append(Swatch(id: UUID(), name: name, createdAt: date, entries: [], styles: [], stylesChangedAt: date))
+        swatches.append(Swatch(id: UUID(), name: name, createdAt: date, entries: [], styles: [], stylesChangedAt: date, metadata: MetadataConfiguration.forNewAsset()))
         let id = swatches[swatches.count - 1].id
         if let p = project { move(id, to: p, index: Int.max, at: date) }
         return id
@@ -618,6 +643,7 @@ extension Library {
             return e
         })
         copy.review = source.review
+        copy.assetNotes = withNotes ? source.assetNotes : nil
         copy.isCustom = source.isCustom
         if let styles = source.styles {
             copy.styles = styles.map { TypeStyle(id: UUID(), name: $0.name, ink: $0.ink, paper: $0.paper, heading: $0.heading,
@@ -1033,7 +1059,7 @@ extension Library {
     mutating func createSwatch(named raw: String, hexes: [String], custom: Bool = false, at date: Date = Date()) -> UUID {
         let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = uniqueName(base.isEmpty ? nextDefaultSwatchName() : base, among: swatches.map { $0.name })
-        let s = Swatch(id: UUID(), name: name, createdAt: date, entries: [], isCustom: custom ? true : nil)
+        let s = Swatch(id: UUID(), name: name, createdAt: date, entries: [], isCustom: custom ? true : nil, metadata: MetadataConfiguration.forNewAsset())
         swatches.append(s)
         add(hexes, toSwatch: s.id, at: date)
         activeSwatchID = s.id
@@ -1101,8 +1127,46 @@ enum StoreError: LocalizedError {
 }
 
 final class LibraryStore {
+    private static let tracePerformance = ProcessInfo.processInfo.environment["COLORGAIN_PERF_TRACE"] == "1"
+    private func perf(_ label: String, since start: Date) {
+        if Self.tracePerformance { print(String(format: "PERF stage %@ %.3f s", label, Date().timeIntervalSince(start))) }
+    }
+    let linkedPalettes = WorkspaceLinkedPalettes()
+    private var ownedAtLoad = Library()
+    private var linkedPickerTarget: UUID?
     let assetsHome: URL?
     private var globalAtLoad: Library?
+    private var lastWriteResult:Library?
+    private var cachedLibrary:Library?
+    private struct DiskSnapshot:Equatable {
+        var files:[String:FileVersion]
+        var folders:Set<String>
+    }
+    private var cachedFileVersions:DiskSnapshot?
+    private func fileVersions()->DiskSnapshot? {
+        let started=Date()
+        defer {perf("fileVersions", since:started)}
+        var versions:[String:FileVersion]=[:]
+        var folders=Set<String>()
+        let roots=[root]+(assetsHome.map{[GlobalAssets(home:$0).root]} ?? [])
+        for location in roots {
+            guard FileManager.default.fileExists(atPath:location.path) else{return nil}
+            let inventory=Handler_File_Manager.shared.inventory(root:location)
+            guard inventory.complete else{return nil}
+            folders.insert(location.standardizedFileURL.path)
+            for folder in inventory.folders {folders.insert(folder.standardizedFileURL.path)}
+            for url in inventory.files {
+                guard let version=FileVersion.read(url) else{return nil}
+                versions[url.standardizedFileURL.path]=version
+            }
+        }
+        if let home=assetsHome {
+            let manifest=AppDataStore(root:home).url
+            guard let version=FileVersion.read(manifest) else{return nil}
+            versions[manifest.standardizedFileURL.path]=version
+        }
+        return DiskSnapshot(files:versions,folders:folders)
+    }
     var pendingReconciliation: FileCatalogueReconciliationPlan?
     private var expectedIdentity: UUID?
     private var expectedCatalogue: Bool
@@ -1178,6 +1242,27 @@ final class LibraryStore {
     /// Reads the tree. A catalogue laid out by an earlier version is brought across first, with a backup beside it.
     /// First run seeds the library with a copy of the v2 library, or failing that the v1 colours.
     func load() throws -> Library {
+        let started=Date()
+        defer {perf("load", since:started)}
+        if let cachedLibrary,linkedPalettes.sources.isEmpty,pendingReconciliation == nil,
+           let cachedFileVersions {
+            if let home=assetsHome {try AssetTransaction.recover(home:home)}
+            else {try FileOperationTransaction.recover(home:root)}
+            if let current=fileVersions(),current == cachedFileVersions {return cachedLibrary}
+        }
+        let owned = try loadOwned()
+        ownedAtLoad = owned
+        linkedPalettes.refresh(store: self)
+        var result = linkedPalettes.adding(to: owned)
+        if let target = linkedPickerTarget, linkedPalettes.sources[target] != nil, linkedPalettes.canEdit(target) { result.activeSwatchID = target }
+        else if let target = result.activeSwatchID, !linkedPalettes.canEdit(target) { result.activeSwatchID = nil }
+        cachedLibrary=linkedPalettes.sources.isEmpty && pendingReconciliation == nil ? result:nil
+        cachedFileVersions=cachedLibrary == nil ? nil:fileVersions()
+        return result
+    }
+    private func loadOwned() throws -> Library {
+        let started=Date()
+        defer {perf("loadOwned", since:started)}
         if let home = assetsHome { try AssetTransaction.recover(home: home) }
         else { try FileOperationTransaction.recover(home: root) }
         if expectedCatalogue && CatalogueFiles.index(in: root) == nil && !Migration.needed(in: root) {
@@ -1186,10 +1271,14 @@ final class LibraryStore {
         if Migration.needed(in: root) { throw FileIssue(url: url, state: .unsupportedVersion, message: "This catalogue needs an explicit legacy migration. Open it through the workspace chooser to review and migrate it.") }
         if let index = CatalogueFiles.index(in: root) {
             try Handler_File_Manager.shared.requireCatalogueIdentity(index, expected: expectedIdentity)
+            let inspectionStarted=Date()
             let observed = Handler_File_Manager.shared.inspectCatalogue(index)
+            perf("inspectCatalogue", since:inspectionStarted)
             guard observed.complete else { throw FileRecoveryReport(root: root, issues: observed.issues) }
             do {
-                let loaded = try CatalogueTree.read(root: root)
+                let treeStarted=Date()
+                let loaded = try CatalogueTree.read(root: root,validated:true,observed:observed)
+                perf("CatalogueTree.read", since:treeStarted)
                 schema = loaded.schema
                 expectedCatalogue = true
                 notes = loaded.notes
@@ -1228,11 +1317,59 @@ final class LibraryStore {
     /// Writes the library as the tree, with the schema as it stands.
     func save(_ lib: Library) throws { try save(lib, schema: SchemaTrial.schema(for: root) ?? schema) }
 
-    func save(_ lib: Library, schema f: SchemaTrial.SchemaFile) throws {
+    func save(_ lib: Library, schema f: SchemaTrial.SchemaFile, previous: Library? = nil) throws {
+        let verifiedSnapshot=previous != nil && previous == cachedLibrary ? cachedFileVersions:nil
+        lastWriteResult=nil
+        cachedLibrary=nil;cachedFileVersions=nil
+        // First-run creation establishes its transaction root inside saveOwned.
+        // Only linked sources need an outer transaction spanning external writes.
+        if linkedPalettes.sources.isEmpty {
+            try saveOwned(lib, schema: f, previous: previous, verifiedSnapshot:verifiedSnapshot)
+            linkedPickerTarget = nil
+            return
+        }
+        try Handler_File_Manager.shared.withTransaction(home: assetsHome ?? root) {
+            let owned = try linkedPalettes.saveChanges(in: lib, owned: ownedAtLoad)
+            try saveOwned(owned, schema: f, previous: previous, verifiedSnapshot:nil)
+        }
+        // Linked files are independently coordinated; reread their final state.
+        lastWriteResult=nil
+        cachedLibrary=nil;cachedFileVersions=nil
+        linkedPickerTarget = lib.activeSwatchID.flatMap { linkedPalettes.sources[$0] != nil ? $0 : nil }
+    }
+    private static func dirtyPalettes(from previous:Library,to next:Library)->Set<UUID> {
+        let old=Dictionary(previous.swatches.map{($0.id,$0)},uniquingKeysWith:{first,_ in first})
+        var dirty=Set(next.swatches.filter{old[$0.id] != $0}.map(\.id))
+        let oldColours=Dictionary(previous.colours.map{($0.hex,$0)},uniquingKeysWith:{first,_ in first})
+        let newColours=Dictionary(next.colours.map{($0.hex,$0)},uniquingKeysWith:{first,_ in first})
+        let changed=Set(oldColours.keys).union(newColours.keys).filter{oldColours[$0] != newColours[$0]}
+        if !changed.isEmpty {
+            for palette in next.swatches where palette.entries.contains(where:{changed.contains($0.hex)}) {dirty.insert(palette.id)}
+        }
+        return dirty
+    }
+    private func saveOwned(_ lib: Library, schema f: SchemaTrial.SchemaFile, previous: Library? = nil, verifiedSnapshot:DiskSnapshot? = nil) throws {
+        let started=Date()
+        defer {perf("saveOwned", since:started)}
+        let cacheable=previous.map{old in
+            f == schema && old.projects == lib.projects && old.colours == lib.colours &&
+            old.swatches.map(\.id) == lib.swatches.map(\.id) &&
+            zip(old.swatches,lib.swatches).allSatisfy{pair in pair.0.projectID == pair.1.projectID && pair.0.bucketID == pair.1.bucketID}
+        } ?? false
+        let observed:FileInventory?
+        let diskUnchanged=verifiedSnapshot.map{fileVersions() == $0} == true
+        if verifiedSnapshot != nil && !diskUnchanged {
+            throw FileIssue(url:url,state:.unknown,message:"The catalogue changed while this edit was prepared. Reload it before saving so external changes are retained.")
+        }
         if expectedCatalogue {
             try Handler_File_Manager.shared.requireCatalogueIdentity(url, expected: expectedIdentity)
-            try Handler_File_Manager.shared.requireAvailableCatalogue(url)
-        }
+            if diskUnchanged {observed=nil}
+            else {
+                let availableStarted=Date()
+                observed=try Handler_File_Manager.shared.validatedCatalogue(url)
+                perf("requireAvailableCatalogue", since:availableStarted)
+            }
+        } else {observed=nil}
         do {
             if let home = assetsHome {
                 if expectedCatalogue && !FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path) {
@@ -1240,16 +1377,33 @@ final class LibraryStore {
                 }
                 if !expectedCatalogue && !FileManager.default.fileExists(atPath: AppDataStore(root: home).url.path) { try AppHomeSeed.ensure(at: home) }
                 let parts = GlobalAssets.split(lib)
-                let current = try GlobalAssets(home: home).load()
+                let current:Library
+                if diskUnchanged,let globalAtLoad {current=globalAtLoad}
+                else {current=try GlobalAssets(home: home).load()}
                 let next = globalAtLoad.map { LibraryDelta.between($0, parts.global).applied(to: current) } ?? GlobalAssets.joined(parts.global, current)
+                let localBefore=previous.map{GlobalAssets.split($0).local}
+                let localDirty=f == schema ? localBefore.map{Self.dirtyPalettes(from:$0,to:parts.local)}:nil
                 try AssetTransaction.perform(home: home, catalogue: root) {
-                    try GlobalAssets(home: home).save(next)
-                    try CatalogueTree.write(parts.local, schema: f, index: url, name: name, poolDirectory: "Support", createEmptyPools: false)
+                    if next != current {try GlobalAssets(home: home).save(next,dirtyPalettes:Self.dirtyPalettes(from:current,to:next),previous:current)}
+                    if localBefore != parts.local || f != schema {
+                        if let prior=localBefore,try CatalogueTree.writePortableEdit(from:prior,to:parts.local,index:url,validated:true) {}
+                        else if let prior=localBefore,try CatalogueTree.writePortableRename(from:prior,to:parts.local,index:url,validated:true) {}
+                        else {
+                            try CatalogueTree.write(parts.local, schema: f, index: url, name: name, poolDirectory: "Support", createEmptyPools: false,dirtyPalettes:localDirty,observed:observed)
+                        }
+                    }
                 }
                 globalAtLoad = next
+                lastWriteResult=GlobalAssets.joined(parts.local,next)
             } else {
                 try Handler_File_Manager.shared.createDirectory(root)
-                try Handler_File_Manager.shared.withTransaction(home: root) { try CatalogueTree.write(lib, schema: f, index: url, name: name) }
+                let dirty=f == schema ? previous.map{Self.dirtyPalettes(from:$0,to:lib)}:nil
+                try Handler_File_Manager.shared.withTransaction(home: root) {
+                    if let previous,f == schema,try CatalogueTree.writePortableEdit(from:previous,to:lib,index:url,validated:true) {return}
+                    if let previous,f == schema,try CatalogueTree.writePortableRename(from:previous,to:lib,index:url,validated:true) {return}
+                    try CatalogueTree.write(lib, schema: f, index: url, name: name,dirtyPalettes:dirty,observed:observed)
+                }
+                lastWriteResult=lib
             }
         } catch let error as StoreError {
             throw error
@@ -1261,16 +1415,27 @@ final class LibraryStore {
         expectedCatalogue = true
         expectedIdentity = CatalogueTree.catalogue(in: root)?.id
         SchemaTrial.adopt(f, for: root)
+        cachedLibrary=cacheable ? lastWriteResult:nil
+        cachedFileVersions=cachedLibrary == nil ? nil:fileVersions()
     }
 
     /// Re-reads from disk before changing anything, so picks made by the
     /// hotkey process while the window is open are never overwritten.
     @discardableResult
     func mutate(schema f: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) throws -> Void) throws -> Library {
+        let started=Date()
+        defer {perf("mutate", since:started)}
+        lastWriteResult=nil
         var lib = try load()
+        let before = lib
         try body(&lib)
+        // load() has already checked disk identity/recovery and incorporated external edits.
+        // Avoid rewriting the tree when an action made no effective change.
+        if lib == before && (f == nil || f == schema) { return lib }
         // A schema given is written with the library in the one save, so a member and its place land together.
-        if let f = f { try save(lib, schema: f) } else { try save(lib) }
-        return lib
+        if let f = f { try save(lib, schema: f, previous: before) }
+        else { try save(lib, schema: SchemaTrial.schema(for: root) ?? schema, previous: before) }
+        if let lastWriteResult{return lastWriteResult}
+        return try load()
     }
 }

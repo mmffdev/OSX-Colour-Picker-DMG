@@ -29,7 +29,7 @@ import AppKit
 // collections, their levels and the first member as one change. The splash is never a lock: it
 // opens again from the Schema page.
 
-final class StudioSplash: NSView {
+final class StudioSplash: ClickCursorView {
     typealias A = Design.App
     /// Called when the splash has done its work and the app may show.
     var onDone: (() -> Void)?
@@ -369,6 +369,7 @@ final class StudioSplash: NSView {
     }
 
     /// The band above the sections is where the window is dragged from, as the header's top strip is when the app shows.
+    override var dragCursorRects:[NSRect]{[NSRect(x:0,y:0,width:bounds.width,height:Self.bandTop)]}
     override func mouseDown(with event: NSEvent) {
         if convert(event.locationInWindow, from: nil).y < Self.bandTop { window?.performDrag(with: event) } else { super.mouseDown(with: event) }
     }
@@ -389,7 +390,9 @@ final class SplashBand: NSView {
 }
 
 /// One section of the splash: as tall as the band, its words on columns 7 to 12, on the beat counted from the band's top.
-class SplashSection: NSView {
+class SplashSection: ClickCursorView {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}}
+
     typealias A = Design.App
     let index: Int
     weak var splash: StudioSplash?
@@ -655,6 +658,9 @@ final class SplashName: SplashSection, NSTextFieldDelegate {
 /// well, takes a type of your own, which heads the list the moment it is taken. The names drag within their collection and go with
 /// their cross; a collection's cross takes it and every name in it.
 final class SplashWho: SplashPane, NSTextFieldDelegate {
+    override var handCursorRects:[NSRect]{super.handCursorRects}
+    override var dragCursorRects:[NSRect]{handles.map{$0.rect}}
+
     private let draft: SplashDraft
     private let typeField = SplashSection.field("A type of your own: Agencies, Partners")
     private var nameFields: [String: NSTextField] = [:]
@@ -965,6 +971,9 @@ class SplashPane: SplashSection {
 /// The blocks of a Choices section, drawn from their pane's top on the beat, so a row of the pane is a row of the band while
 /// it has not been scrolled; its columns are the section's own, from column 7.
 final class SplashBlocksPane: SplashPane, NSTextFieldDelegate {
+    override var handCursorRects:[NSRect]{super.handCursorRects}
+    override var dragCursorRects:[NSRect]{handles.map{$0.rect}}
+
     typealias Block = SplashBlocks.Block
     private let options: [String], word: String
     private let blocks: () -> [Block], ready: () -> Bool

@@ -1,4 +1,3 @@
-#if APPSTORE
 import AppKit
 
 /// A nonactivating naming bar: it takes text focus without reopening a minimized workspace.
@@ -10,8 +9,8 @@ final class MenubarPaletteNameBar: NSObject, NSTextFieldDelegate {
     private final class Bar: NSView { override var isFlipped: Bool { true } }
     private let panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 60), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     private let field = NSTextField(string: "")
-    private let picker = NSButton(title: "", target: nil, action: nil)
-    private let rectangle = NSButton(title: "", target: nil, action: nil)
+    private let picker = ClickCursorButton(title: "", target: nil, action: nil)
+    private let rectangle = ClickCursorButton(title: "", target: nil, action: nil)
     private weak var library: LibraryController?
     private let palette: UUID
     private var monitors: [Any] = []
@@ -81,4 +80,3 @@ final class MenubarPaletteNameBar: NSObject, NSTextFieldDelegate {
         DispatchQueue.main.async { library?.sampleAreaFromMenubar(sound: Prefs.appleMenubarSound, target: palette) }
     }
 }
-#endif

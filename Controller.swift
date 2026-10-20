@@ -36,6 +36,12 @@ final class LibraryController: NSObject {
     /// The open catalogue's files; its schema is read from the same folder.
     private(set) var store: LibraryStore { didSet { SchemaTrial.use(store: store); watchTree() } }
     private(set) var library = Library()
+    private var reviewWriteTimer: Timer?
+    private var reviewWriteIDs = Set<UUID>()
+    private var noteWriteIDs = Set<UUID>()
+    private var colourNoteWriteIDs = Set<UUID>()
+    private var favouriteWriteIDs = Set<UUID>()
+    private var reviewBefore: Library?
     private(set) var catalogue: String
     weak var window: NSWindow?
 
@@ -67,7 +73,11 @@ final class LibraryController: NSObject {
     private(set) var syncStatus = "Not synced yet."
     private var syncAsking = false
     private var syncPaused = false
+    private let syncCheckQueue=DispatchQueue(label:"Colorgain.Sync.Check",qos:.utility)
+    private var pendingSyncCheck:DispatchWorkItem?
+    private var syncCheckGeneration=0
     private var lastSyncComplaint: String?
+    private(set) var revision=0
     private var loadedStamp: Date?
     private var reportedQuarantine: URL?
 
@@ -110,6 +120,7 @@ final class LibraryController: NSObject {
     // MARK: Loading and saving
 
     func reload() {
+        flushPaletteReviews()
         do { library = try store.load(); FileIncidentCoordinator.shared.resolved(store.root) }
         catch { show(error); return }
         loadedStamp = store.modificationDate
@@ -173,6 +184,7 @@ final class LibraryController: NSObject {
     /// A change to anything in a locked project is refused before it is saved.
     @discardableResult
     func apply(_ title: String = "Change", schema: SchemaTrial.SchemaFile? = nil, _ body: (inout Library) -> Void) -> Bool {
+        flushPaletteReviews()
         if store.pendingReconciliation != nil { presentDiskReconciliation(); return false }
         let before = library
         do {
@@ -196,7 +208,19 @@ final class LibraryController: NSObject {
             show(error)
             return false
         }
-        if library != before { recordStep(title, before: before) }
+        if library != before {
+            let oldSwatches=Dictionary(uniqueKeysWithValues:before.swatches.map{($0.id,$0)})
+            let changedSwatches=library.swatches.filter{swatch in oldSwatches[swatch.id].map{$0.metadata != swatch.metadata || $0.tagList != swatch.tagList} ?? true}
+            let oldTags=Dictionary(uniqueKeysWithValues:before.tagInfo.map{($0.name.lowercased(),$0)})
+            let changedTags=library.tagInfo.filter{oldTags[$0.name.lowercased()] != $0}
+            let oldColours=Dictionary(uniqueKeysWithValues:before.colours.map{($0.hex,$0)})
+            let changedColours=library.colours.filter{colour in oldColours[colour.hex].map{$0.metadata != colour.metadata || ($0.tags ?? []) != (colour.tags ?? [])} ?? true}
+            if !changedSwatches.isEmpty || !changedColours.isEmpty || !changedTags.isEmpty {
+                AssetMetadataRegistry.merge(changedSwatches.compactMap(\.metadata)+changedColours.compactMap(\.metadata),keywords:changedSwatches.flatMap(\.tagList)+changedColours.flatMap{$0.tags ?? []},tags:changedTags)
+            }
+        }
+        guard library != before else {watch?.settle();assetsWatch?.settle();return true}
+        recordStep(title, before: before)
         changed()
         sync()
         watch?.settle(); assetsWatch?.settle()
@@ -234,6 +258,7 @@ final class LibraryController: NSObject {
 
     /// Flush the old catalogue before its app-data root changes; pending callbacks must not write into the new home.
     func finishWorkspaceSession() {
+        flushPaletteReviews()
         deferredFileScan?.cancel(); deferredFileScan = nil
         stopPicking(); historyTimer?.invalidate(); historyTimer=nil; saveHistory()
         watch?.stop(); assetsWatch?.stop()
@@ -281,8 +306,9 @@ final class LibraryController: NSObject {
         historyChanged()
     }
 
-    private func changed() {
-        NotificationCenter.default.post(name: .libraryDidChange, object: self)
+    private func changed(scope:String?=nil) {
+        revision &+= 1
+        NotificationCenter.default.post(name: .libraryDidChange, object: self,userInfo:scope.map{["scope":$0]})
     }
 
     // MARK: The tree on disk
@@ -291,6 +317,75 @@ final class LibraryController: NSObject {
     func memberFolderURL(_ id: UUID) -> URL? { CatalogueTree.folder(ofWorkGroup: id, in: store.root) }
     /// A palette's file, found by its id wherever the tree has it.
     func paletteFileURL(_ id: UUID) -> URL? { CatalogueTree.file(ofPalette: id, in: store.root) }
+
+    /// Review controls change one asset file. The catalogue tree and its schema are not rewritten.
+    func ratePalette(_ id: UUID, _ rating: Int) {
+        updatePaletteReview(id) { PaletteAssetHandler.setRating(rating, on: id, in: &$0) }
+    }
+    func flagPalette(_ id: UUID, _ flag: PaletteReview.Flag?) {
+        updatePaletteReview(id) { PaletteAssetHandler.setFlag(flag, on: id, in: &$0) }
+    }
+    func setPaletteNotes(_ id: UUID, _ record: AssetNotes.Record) {
+        guard library.swatch(id) != nil, !isLocked(palette:id) else { return }
+        if store.linkedPalettes.sources[id] != nil && !store.linkedPalettes.canEdit(id) { return }
+        if reviewBefore == nil { reviewBefore = library }
+        guard let index = library.swatches.firstIndex(where:{$0.id == id}) else { return }
+        library.swatches[index].assetNotes = record.hasContent ? record:nil
+        AssetNotes.cache(record.hasContent ? record:nil,for:"asset:"+id.uuidString)
+        noteWriteIDs.insert(id);scheduleAssetMetadataWrite()
+    }
+    func setColourNotes(_ hex: String, in palette: UUID, _ record: AssetNotes.Record) {
+        guard library.swatch(palette) != nil, !isLocked(palette:palette) else { return }
+        if store.linkedPalettes.sources[palette] != nil && !store.linkedPalettes.canEdit(palette) { return }
+        if reviewBefore == nil { reviewBefore = library }
+        library.setNote(record.description,of:hex,in:palette)
+        AssetNotes.cache(record.hasContent ? record:nil,for:"colour:"+palette.uuidString+":"+hex.uppercased())
+        colourNoteWriteIDs.insert(palette);scheduleAssetMetadataWrite()
+    }
+    private func updatePaletteReview(_ id: UUID, _ change: (inout Library) -> Void) {
+        guard store.pendingReconciliation == nil, library.swatch(id) != nil else { return }
+        if isLocked(palette: id) { flash("This palette is locked."); return }
+        if store.linkedPalettes.sources[id] != nil && !store.linkedPalettes.canEdit(id) { flash("Unlock this reference to edit it."); return }
+        if reviewBefore == nil { reviewBefore = library }
+        change(&library)
+        reviewWriteIDs.insert(id)
+        scheduleAssetMetadataWrite()
+    }
+    private func scheduleAssetMetadataWrite() {
+        changed(scope:favouriteWriteIDs.isEmpty ? (noteWriteIDs.isEmpty && colourNoteWriteIDs.isEmpty ? "review":"notes"):nil)
+        reviewWriteTimer?.invalidate()
+        reviewWriteTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: false) { [weak self] _ in self?.flushPaletteReviews() }
+    }
+    private func flushPaletteReviews() {
+        guard !reviewWriteIDs.isEmpty || !noteWriteIDs.isEmpty || !colourNoteWriteIDs.isEmpty || !favouriteWriteIDs.isEmpty else { return }
+        reviewWriteTimer?.invalidate(); reviewWriteTimer = nil
+        let reviews=reviewWriteIDs,notes=noteWriteIDs,colourNotes=colourNoteWriteIDs,favourites=favouriteWriteIDs,ids=reviews.union(notes).union(colourNotes).union(favourites),before=reviewBefore
+        reviewWriteIDs.removeAll();noteWriteIDs.removeAll();colourNoteWriteIDs.removeAll();favouriteWriteIDs.removeAll();reviewBefore = nil
+        do {
+            for id in ids {
+                let file: URL? = {
+                    if let source = store.linkedPalettes.sources[id] {
+                        return try? source.record.url(in: source.index.deletingLastPathComponent())
+                    }
+                    return paletteFileURL(id) ?? store.assetsHome.flatMap { CatalogueTree.file(ofPalette: id, in: $0) }
+                }()
+                guard let file, let palette = library.swatch(id) else { throw CocoaError(.fileNoSuchFile) }
+                var document = try PaletteAssetHandler.read(file)
+                if reviews.contains(id) { document.palette.review = palette.review }
+                if notes.contains(id) { document.palette.assetNotes = palette.assetNotes }
+                if colourNotes.contains(id) { document.palette.entries = palette.entries }
+                if favourites.contains(id) { document.palette.isFavourite=palette.isFavourite;document.palette.favouriteChangedAt=palette.favouriteChangedAt }
+                try PaletteAssetHandler.store(document, at: file)
+            }
+            loadedStamp = store.modificationDate
+            recordStep(notes.isEmpty && colourNotes.isEmpty ? (favourites.isEmpty ? "Review Palette":"Star Palette") : "Edit Asset Notes", before: before)
+            watch?.settle(); assetsWatch?.settle()
+            DispatchQueue.main.async { [weak self] in self?.sync() }
+        } catch {
+            flash("Could not save palette review: \(error.localizedDescription)")
+            reload()
+        }
+    }
 
     func setProjectLocked(_ id: UUID, _ on: Bool) {
         apply(on ? "Lock Project" : "Unlock Project") { $0.setProjectLocked(id, on) }
@@ -335,6 +430,8 @@ final class LibraryController: NSObject {
             return
         }
         deferredFileScan?.cancel(); deferredFileScan = nil
+        CatalogueTree.invalidateScanCache(in:store.root)
+        CatalogueTree.invalidateScanCache(in:GlobalAssets(home:Catalogues.standard.root).root)
         reload()
         flash("The catalogue changed in Finder and was read again")
     }
@@ -518,7 +615,13 @@ final class LibraryController: NSObject {
     // MARK: Projects
 
     /// Opens the project form; saving it creates the project.
-    @objc func newProject() { startProject(moving: nil) }
+    @objc func newProject() {
+        let schema=SchemaTrial.read(in:store.root)
+        guard schema.structure != nil else {startProject(moving:nil);return}
+        if let host=StudioWindowController.shared?.window?.contentView {
+            CatalogueJourneyView.present(library:self,over:host,client:schema.structure?.personalMode == true ? schema.structure?.personalCollectionID:nil,kind:schema.collections.isEmpty ? "client":"work")
+        }
+    }
 
     /// Asks for one line of text in the middle of the page; set by the window.
     var onPrompt: ((ModalPrompt) -> Void)?
@@ -532,12 +635,23 @@ final class LibraryController: NSObject {
                               check: { ProjectField.problem(name: $0, values: [:]) }) { [weak self] name in
             guard let self = self else { return }
             var id: UUID?
-            self.apply("New Project") { lib in
-                let made = lib.createProject(named: name)
-                // The Studio section starts as the organisation set in Settings; the form can change any of it.
-                let organisation = ProjectField.tidy(Prefs.organisation)
-                if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
-                id = made
+            var targetSchema=SchemaTrial.read(in:self.store.root)
+            if targetSchema.structure != nil,let collection {
+                let before=self.library
+                var next=before
+                let made=next.createProject(named:name)
+                targetSchema.places[made.uuidString] = SchemaPlace(collection:collection.id)
+                let organisation=ProjectField.tidy(Prefs.organisation)
+                if !organisation.isEmpty{next.setProjectDetails(made,organisation)}
+                do {try self.store.save(next,schema:targetSchema);self.reload();self.recordStep("New \(kind)",before:before);id=made}
+                catch {self.show(error);return}
+            } else {
+                self.apply("New Project") { lib in
+                    let made = lib.createProject(named: name)
+                    let organisation = ProjectField.tidy(Prefs.organisation)
+                    if !organisation.isEmpty { lib.setProjectDetails(made, organisation) }
+                    id = made
+                }
             }
             guard let made = id, let project = self.library.project(made) else { return }
             placed?(made)
@@ -584,6 +698,12 @@ final class LibraryController: NSObject {
     }
 
     private func refreshPrintCondition() {
+        // An explicitly chosen global viewing proof survives palette/swatch navigation.
+        // The palette condition remains the fallback before a global proof is configured.
+        if let settings=try? SavedPrintProfiles.load().current,settings.viewingCategory != nil {
+            PrintCondition.current=settings.channel
+            return
+        }
         var palette: UUID?
         if case .palette(let id)? = current { palette = id }
         let chosen: ColourProfile
@@ -658,6 +778,9 @@ final class LibraryController: NSObject {
     /// A project's details are on its Overview page.
     func editProject(_ id: UUID) {
         guard library.project(id) != nil else { return }
+        if SchemaTrial.structure != nil,let host=StudioWindowController.shared?.window?.contentView {
+            CatalogueJourneyView.present(library:self,over:host,client:SchemaTrial.collection(of:id).id,project:id,kind:"work");return
+        }
         onShow?(.overview(id), false)
     }
 
@@ -682,6 +805,7 @@ final class LibraryController: NSObject {
     }
 
     @objc func manageProjectTemplates() {
+        if SchemaTrial.read(in:store.root).structure != nil {(NSApp.delegate as? AppDelegate)?.showCatalogueStructure();return}
         if let window = window { ProjectTemplatesController.present(over: window) }
     }
 
@@ -914,16 +1038,24 @@ final class LibraryController: NSObject {
 
     func toggleFavourite(_ id: UUID) {
         guard let s = library.swatch(id) else { return }
-        apply(s.favourite ? "Unstar Palette" : "Star Palette") { $0.setFavourite(id, !s.favourite) }
+        guard !isLocked(palette:id),store.linkedPalettes.sources[id] == nil || store.linkedPalettes.canEdit(id) else { return }
+        if reviewBefore == nil { reviewBefore=library }
+        library.setFavourite(id,!s.favourite)
+        favouriteWriteIDs.insert(id);scheduleAssetMetadataWrite()
         flash(s.favourite ? "Removed \(s.name) from Favourites" : "Added \(s.name) to Favourites")
     }
 
     /// Stars every palette in a project, or unstars them all when every one is starred already.
     func toggleFavourites(inProject id: UUID) {
         let palettes = library.palettes(in: id)
-        guard let p = library.project(id), !palettes.isEmpty else { return }
+        guard let p = library.project(id), !p.isLocked, !palettes.isEmpty else { return }
         let on = !palettes.allSatisfy { $0.favourite }
-        apply(on ? "Star Palettes" : "Unstar Palettes") { lib in for s in palettes { lib.setFavourite(s.id, on) } }
+        if reviewBefore == nil { reviewBefore=library }
+        for s in palettes {
+            if store.linkedPalettes.sources[s.id] != nil && !store.linkedPalettes.canEdit(s.id) { continue }
+            library.setFavourite(s.id,on);favouriteWriteIDs.insert(s.id)
+        }
+        scheduleAssetMetadataWrite()
         flash(on ? "Added the palettes in \(p.name) to Favourites" : "Removed the palettes in \(p.name) from Favourites")
     }
 
@@ -941,7 +1073,7 @@ final class LibraryController: NSObject {
     }
 
     func setTarget(_ id: UUID?) {
-        apply("Send Picks To Palette") { $0.activeSwatchID = id }
+        guard apply("Send Picks To Palette", { $0.activeSwatchID = id }) else { return }
         flash(library.activeSwatch.map { "Picks now go to \($0.name)" } ?? "Picks now go to the library only")
     }
 
@@ -1173,7 +1305,7 @@ final class LibraryController: NSObject {
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Choose where to put \u{201C}\(pack.folderName)\u{201D} \u{2014} a git checkout, a shared drive, any folder"
-        let git = NSButton(checkboxWithTitle: "Commit and push with git when the folder is in a repository", target: nil, action: nil)
+        let git = ClickCursorButton(checkboxWithTitle: "Commit and push with git when the folder is in a repository", target: nil, action: nil)
         git.state = .off
         let row = NSStackView(views: [git])
         row.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
@@ -1209,7 +1341,7 @@ final class LibraryController: NSObject {
         panel.canCreateDirectories = true
         panel.message = palettes.count == 1 ? "Export \u{201C}\(first.name)\u{201D}" : "Export \(palettes.count) palettes"
 
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        let popup = ClickCursorPopupButton(frame: .zero, pullsDown: false)
         popup.addItems(withTitles: ExportFormat.allCases.map { $0.title })
         popup.selectItem(at: ExportFormat.allCases.firstIndex(of: Prefs.exportFormat) ?? 0)
         let chooser = FormatChooser(panel: panel, popup: popup, palettes: palettes)
@@ -1405,6 +1537,8 @@ final class LibraryController: NSObject {
 
     func open(catalogue requested: String) {
         guard requested != catalogue || store.root.standardizedFileURL != Catalogues.standard.directory(for: requested).standardizedFileURL else { return }
+        flushPaletteReviews()
+        StudioWindowController.shared?.frame.saveWorkspaceSession(flush:true)
         stopPicking()
         historyTimer?.invalidate(); saveHistory()
         var name = requested
@@ -1420,6 +1554,7 @@ final class LibraryController: NSObject {
         syncStatus = "Not synced yet."
         reload()
         onShow?(.all, false)
+        if let frame=StudioWindowController.shared?.frame { _ = frame.restoreWorkspaceSession();frame.enableSessionMemory() }
         flash("Opened \(name)")
         sync()
         stateChanged()
@@ -1466,19 +1601,8 @@ final class LibraryController: NSObject {
     }
 
     @objc func newCatalogue() {
-        let a = NSAlert()
-        a.messageText = "New Catalogue"
-        a.informativeText = "A catalogue is a separate library with its own swatches and palettes."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "Catalogue name"
-        a.accessoryView = field
-        a.addButton(withTitle: "Create")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = field
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        do { open(catalogue: try Catalogues.standard.create(name)) } catch { show(error) }
+        (NSApp.delegate as? AppDelegate)?.showSimpleSetup(home:Catalogues.standard.root)
+
     }
 
     @objc func openCatalogueFile() {
@@ -1520,14 +1644,41 @@ final class LibraryController: NSObject {
     func sync(loud: Bool = false) {
         if store.pendingReconciliation != nil { presentDiskReconciliation(); return }
         guard let engine = engine(), !syncAsking, !picking, !syncPaused || loud else { return }
+        syncCheckGeneration += 1
+        let generation=syncCheckGeneration,snapshot=library,name=catalogue
+        pendingSyncCheck?.cancel()
+        let work=DispatchWorkItem { [weak self] in
+            let outcome=Result { try engine.check(local:snapshot) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.syncCheckGeneration == generation,self.catalogue == name else{return}
+                self.pendingSyncCheck=nil
+                self.completeSyncCheck(outcome,engine:engine,snapshot:snapshot,loud:loud)
+            }
+        }
+        pendingSyncCheck=work
+        syncCheckQueue.asyncAfter(deadline:.now()+(loud ? 0:0.25),execute:work)
+    }
+    private func completeSyncCheck(_ outcome:Result<SyncState,Error>,engine:SyncEngine,snapshot:Library,loud:Bool) {
+        guard !syncAsking,!picking,!syncPaused || loud else{return}
         do {
-            let state = try engine.check()
+            let state=try outcome.get()
             if store.pendingReconciliation != nil { presentDiskReconciliation(); return }
+            // Only states that may write need the expensive local read. A changed file or
+            // in-process edit invalidates the plan and starts a fresh worker check.
+            switch state {
+            case .firstSync,.quiet,.incoming:
+                let current=try store.load()
+                if current != snapshot {
+                    library=current;loadedStamp=store.modificationDate;changed()
+                    sync(loud:loud);return
+                }
+            case .renamed,.inSync:break
+            }
             switch state {
             case .renamed(let new):
                 followRename(to: new)
             case .firstSync:
-                try engine.push(try store.load())
+                try engine.push(snapshot)
                 synced("Saved \(catalogue) to the sync folder", announce: true)
             case .inSync:
                 synced(nil, announce: loud)
@@ -1754,14 +1905,17 @@ extension LibraryController {
 
     /// Every palette of colours in `project` (nil: the stock list) as .colpalette files in a chosen folder.
     func exportPaletteFiles(in project: UUID?) {
-        let palettes = library.palettes(in: project).filter { !$0.isTypography && !$0.entries.isEmpty }
+        exportPaletteFiles(ids: library.palettes(in:project).filter{!$0.isTypography && !$0.entries.isEmpty}.map(\.id))
+    }
+    func exportPaletteFiles(ids:[UUID]) {
+        let palettes=ids.compactMap{library.swatch($0)}
         guard !palettes.isEmpty else { flash("Nothing to export yet"); return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
-        panel.message = "Each palette becomes a .colpalette file in the folder you choose"
+        panel.message = "Export \(palettes.count) selected palettes as individual Colorgain files into this folder"
         let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
             guard let self = self, r == .OK, let folder = panel.url else { return }
             do {

@@ -12,7 +12,7 @@ import CoreImage
 // header; the headers and the words stay.
 
 final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, PageSection, Overlay {
-    var sectionAnchors: [(String,CGFloat)] { [("Structure",SettingsSheet.headerGuide+1),("Schema",SettingsSheet.schemaContentStart + 4*Design.App.unit)] }
+    var sectionAnchors: [(String,CGFloat)] { [("Structure",SettingsSheet.headerGuide+1),("Schema",SettingsSheet.schemaContentStart + 4*Design.App.unit),("Workspace",24*Design.App.unit)] }
     /// The template menu open over a type row, if any.
     private var dropped: SwissDropdown.MenuPanel?
     var overlayWindows: [NSWindow] { dropped.map { [$0] } ?? [] }
@@ -47,7 +47,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
 
     private var safetyLocked = !Prefs.schemaSafetyLockDisabled
     private let safetyCover = SchemaSafetyCover()
-    private let padlock = NSButton()
+    private let padlock = ClickCursorButton()
     private var safetyCapturePending = false
     private var safetyCaptureSize = NSSize.zero
 
@@ -229,6 +229,8 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         rollover.keys = { [weak self] in self?.keys ?? [] }
         rollover.locked = { [weak self] k in self?.locked(k) ?? false }
         rollover.redraw = { [weak self] in self?.map.needsDisplay = true; self?.types.needsDisplay = true }
+        map.cursorRegions = { [weak self] in self?.rowRects ?? [] }
+        types.cursorRegions = { [weak self] in (self?.typeHits.map{$0.0} ?? [])+(self?.templateHits.map{$0.0} ?? []) }
         map.onDraw = { [weak self] in self?.drawMap() }
         map.onDown = { [weak self] p in self?.mapDown(at: p) }
         map.onDrag = { [weak self] p in self?.mapDragged(to: p) }
@@ -456,7 +458,7 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
     }
 
     /// The section fills the page; the map and the types scroll within it.
-    func height(forWidth width: CGFloat) -> CGFloat { 24 * Self.u }
+    func height(forWidth width: CGFloat) -> CGFloat { 33 * Self.u }
 
     override func layout() {
         super.layout()
@@ -473,13 +475,13 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         setUpButton.isHidden = !all.isEmpty
         setUpButton.frame = NSRect(x: leading, y: g.mapTop + u - setUpButton.intrinsicContentSize.height + 4, width: setUpButton.intrinsicContentSize.width, height: setUpButton.intrinsicContentSize.height)
         // The map's scroll starts at the page's edge, so a row's ground can reach the rail's divider, and ends in the middle of the gutter.
-        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter, height: max(0, bounds.height - g.mapTop))
+        mapScroll.frame = NSRect(x: 0, y: g.mapTop, width: leading + g.lw + Design.App.gutter, height: max(0, 24*Self.u - 16 - g.mapTop))
         let mapHeight = CGFloat(mapRows.count) * u + u
         map.frame = NSRect(x: 0, y: 0, width: leading + g.lw, height: max(mapScroll.frame.height, mapHeight))
         mapScroll.verticalScrollElasticity = mapHeight > mapScroll.frame.height ? .allowed : .none
         rowRects = mapRows.indices.map { NSRect(x: leading, y: CGFloat($0) * u, width: g.lw, height: u) }
         let lead: CGFloat = 0
-        typeScroll.frame = NSRect(x: g.rx - lead, y: g.typesTop, width: g.rw + lead, height: max(0, bounds.height - g.typesTop))
+        typeScroll.frame = NSRect(x: g.rx - lead, y: g.typesTop, width: g.rw + lead, height: max(0, 24*Self.u - 16 - g.typesTop))
         let typesHeight = CGFloat(typeRows.count) * u + u
         types.frame = NSRect(x: 0, y: 0, width: max(0, g.rw + lead - Design.App.gutter), height: max(typeScroll.frame.height, typesHeight))
         typeScroll.verticalScrollElasticity = typesHeight > typeScroll.frame.height ? .allowed : .none
@@ -533,6 +535,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
         SettingsSheet.paragraph(leftHelp, x: l, firstBaseline: offset + u + line, width: g.lw, height: Self.helpUnits * u, colour: Design.quiet)
         Design.attributed("Schema", .header).draw(x: l, baseline: offset + 4 * u + line)
         hairline(x: 0, y: g.mapTop - 1, width: l + g.lw, Design.rule)
+        SettingsSheet.divider(above:24*u,x:l,width:bounds.width-l)
+        Design.attributed("Workspace Structure",.header).draw(x:l,baseline:24*u+line)
+        SettingsSheet.paragraph(WorkspaceSidebarStructure.summary(catalogue:library?.catalogue ?? "Catalogue"),x:l,firstBaseline:25*u+line,width:bounds.width-l,height:7*u,colour:Design.quiet)
         guard selected != nil else { return }
         let rx = g.rx
         Design.attributed(g.form.title, .header).draw(x: rx, baseline: offset + line)
@@ -1054,7 +1059,9 @@ final class SchemaSettings: NSView, NSTextFieldDelegate, NSTextViewDelegate, Pag
 }
 
 /// A drawing surface inside a scroll view that hands everything to its owner: what to draw, and where the pointer went.
-final class Canvas: NSView {
+final class Canvas: ClickCursorView {
+    var cursorRegions:(()->[NSRect])?
+    override var handCursorRects:[NSRect]{cursorRegions?() ?? []}
     var onDraw: (() -> Void)?
     var onDown: ((NSPoint) -> Void)?
     var onDrag: ((NSPoint) -> Void)?
@@ -1122,7 +1129,7 @@ private final class SchemaSafetyCover: NSView {
     }
 }
 
-private final class SchemaSafetyCheckbox: NSButton {
+private final class SchemaSafetyCheckbox: ClickCursorButton {
     override func draw(_ dirtyRect: NSRect) {
         Design.ink.setStroke()
         let box = NSRect(x: 1, y: (bounds.height - 12) / 2, width: 12, height: 12)

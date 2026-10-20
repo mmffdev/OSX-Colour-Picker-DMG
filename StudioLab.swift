@@ -11,7 +11,9 @@ import AppKit
 // wheel holds as square tiles on the side's columns, each copying its value, with Base, Lock and Delete under the pointer.
 // Under both sides, the palette's name and the house buttons that keep them. The maths, the rules and the history are ColourScience.swift's; nothing is reinvented.
 
-final class LabPage: NSView, PageSection, Overlay, NSTextFieldDelegate {
+final class LabPage: ClickCursorView, PageSection, Overlay, NSTextFieldDelegate {
+    override var handCursorRects:[NSRect]{hits.map{$0.0}}
+
     var onResize: (() -> Void)?
     private let library: LibraryController
 

@@ -1,0 +1,169 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#010005",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.0003965244925780653,
+        "y" : 0.00017499684359729875,
+        "z" : 0.001194659170121607
+      },
+      "pickedAt" : 1791695922008.4419,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.0039405827409999998,
+          0,
+          0.019683834170000001
+        ]
+      }
+    },
+    {
+      "hex" : "#660000",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.057740150485781343,
+        "y" : 0.029536926189236624,
+        "z" : 0.001748444006401638
+      },
+      "pickedAt" : 1791696183006.793,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.3637695312,
+          0.05633544922,
+          0.02755736932
+        ]
+      }
+    },
+    {
+      "hex" : "#160202",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.003763626150681231,
+        "y" : 0.0022657657124505494,
+        "z" : 0.0005093473827866158
+      },
+      "pickedAt" : 1791696184565.147,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.075256340209999995,
+          0.0118103046,
+          0.0078735342249999993
+        ]
+      }
+    },
+    {
+      "hex" : "#B40001",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.19880650616791762,
+        "y" : 0.10144900599158505,
+        "z" : 0.006589869933259146
+      },
+      "pickedAt" : 1791696185767.4102,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.6459960938,
+          0.1291503906,
+          0.08679199219
+        ]
+      }
+    },
+    {
+      "hex" : "#EF2519",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.38524721547174801,
+        "y" : 0.20598393349347949,
+        "z" : 0.020860190196283004
+      },
+      "pickedAt" : 1791696187040.7031,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.8618164062,
+          0.2385253906,
+          0.1721191406
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 161",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.424Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "6FC7327C-47B4-4D11-85C2-027D99219482",
+    "documentID" : "A018DC58-FAD6-4A51-A879-EC6FBA17CCFD",
+    "lastSavedAt" : "2026-10-19T23:43:09.327Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "6FC7327C-47B4-4D11-85C2-027D99219482",
+    "createdAt" : 1791696180117.5488,
+    "entries" : [
+      {
+        "addedAt" : 1791696181875.0459,
+        "hex" : "#010005"
+      },
+      {
+        "addedAt" : 1791696183006.793,
+        "hex" : "#660000"
+      },
+      {
+        "addedAt" : 1791696184565.147,
+        "hex" : "#160202"
+      },
+      {
+        "addedAt" : 1791696185767.4102,
+        "hex" : "#B40001"
+      },
+      {
+        "addedAt" : 1791696187040.7031,
+        "hex" : "#EF2519"
+      }
+    ],
+    "id" : "A018DC58-FAD6-4A51-A879-EC6FBA17CCFD",
+    "name" : "Palette 161",
+    "placedAt" : 1792453388446.5771,
+    "position" : 19,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791696180117.8979,
+    "purposes" : [
+      {
+        "changedAt" : 1791696180117.8979,
+        "id" : "4F7426E6-C9FA-400D-84DB-2AF295314B8D",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

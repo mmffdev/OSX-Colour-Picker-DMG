@@ -168,7 +168,7 @@ enum Sharing {
         func folder(of p: UUID) -> UUID? { SchemaTrial.folder(of: p, among: schema.collections, places: schema.places) }
         var out = Library()
         out.version = lib.version
-        var cut = SchemaTrial.SchemaFile(collections: [], places: [:])
+        var cut = SchemaTrial.SchemaFile(collections: [], places: [:],structure:schema.structure)
         var members: [Project] = [], palettes: [Swatch] = []
         switch level {
         case .palette:
@@ -357,12 +357,19 @@ enum Sharing {
         var problems: [String]
         var ok: Bool { problems.isEmpty }
         var tree: ShareNode
+        var stagedRoot: URL? = nil
     }
 
     private static let paletteExtensions: Set<String> = [ColourFiles.palette, ColourFiles.typography, ColourFiles.legacyPalette]
 
     /// Opens the zip and checks it: the manifest, every file against its digest, nothing unlisted, and the shape its level calls for.
     static func inspect(_ url: URL) throws -> Inspection {
+        let probe=try FileHandle(forReadingFrom:url)
+        let prefix=try probe.read(upToCount:6) ?? Data()
+        try probe.close()
+        if prefix.count == 6 && prefix[0] == 0x50 && prefix[1] == 0x4b && prefix[2] == 3 && prefix[3] == 4 && prefix[4] == 45 {
+            return try inspectStreaming(url)
+        }
         let entries = try Zip.read(url)
         guard let m = entries.first(where: { $0.path == ShareManifest.fileName }) else { throw ShareFault.notAShare("there is no manifest in it") }
         guard let manifest = try? d.decode(ShareManifest.self, from: m.data), manifest.format == "colour-share" else { throw ShareFault.notAShare("its manifest could not be read") }
@@ -398,6 +405,45 @@ enum Sharing {
         return Inspection(manifest: manifest, entries: entries, problems: problems, tree: tree)
     }
 
+    private static func inspectStreaming(_ archive:URL) throws -> Inspection {
+        let root=stagingRoot.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at:root,withIntermediateDirectories:true)
+        var keep=false
+        defer {if !keep{discard(root)}}
+        let paths=try Zip.extractStreaming(archive,to:root)
+        guard paths.contains(ShareManifest.fileName) else {throw ShareFault.notAShare("there is no manifest in it")}
+        let bytes=try Data(contentsOf:root.appendingPathComponent(ShareManifest.fileName))
+        guard let manifest=try? d.decode(ShareManifest.self,from:bytes),manifest.format == "colour-share" else {throw ShareFault.notAShare("its manifest could not be read")}
+        var problems:[String]=[]
+        if manifest.version != 2 {problems.append("this share version is not supported")}
+        let listed=Set(manifest.files.map(\.path))
+        if listed.count != manifest.files.count {problems.append("its manifest repeats a file")}
+        for file in manifest.files {
+            guard paths.contains(file.path) else {problems.append(file.path + " is listed but missing");continue}
+            let source=try Handler_File_Manager.contained(file.path,under:root)
+            let size=try source.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? -1
+            if size != file.bytes {problems.append(file.path + " has a different size")}
+            else if try FileRevision.read(source).digest != file.sha256 {problems.append(file.path + " does not match its digest")}
+        }
+        for path in paths where path != ShareManifest.fileName && !listed.contains(path) {problems.append(path + " is not listed in its manifest")}
+        let top=paths.filter{!$0.contains("/") && $0 != ShareManifest.fileName}
+        switch manifest.level {
+        case .palette:
+            if paths.count != 2 || !top.contains(where:{paletteExtensions.contains(($0 as NSString).pathExtension.lowercased())}) {problems.append("a palette share must contain one palette")}
+        case .catalogue,.collection,.workGroup:
+            if top.filter({($0 as NSString).pathExtension.lowercased() == ColourFiles.catalogue}).count != 1 {problems.append("the share must contain one catalogue index")}
+        }
+        var tree=ShareNode(id:"",kind:.catalogue,name:manifest.subject.name,children:[])
+        if problems.isEmpty {
+            if let staged=try? read(staging:root,level:manifest.level) {
+                let subject=manifest.level == .palette ? staged.palette?.0.id:manifest.subject.id
+                tree=self.tree(level:manifest.level,subject:subject,in:staged.library,schema:staged.schema,catalogueName:manifest.catalogue.name)
+            } else {problems.append("its catalogue could not be read")}
+        }
+        keep=true
+        return Inspection(manifest:manifest,entries:[],problems:problems,tree:tree,stagedRoot:root)
+    }
+
     // MARK: Staging
 
     /// Where shares are unpacked while they are checked and chosen from: the app's own temporary folder, inside the container under the sandbox.
@@ -417,7 +463,7 @@ enum Sharing {
         }
         return dir
     }
-    static func stage(_ inspection: Inspection) throws -> URL { try stage(entries: inspection.entries) }
+    static func stage(_ inspection: Inspection) throws -> URL { if let root=inspection.stagedRoot{return root};return try stage(entries: inspection.entries) }
     static func discard(_ staging: URL) { try? fm.removeItem(at: staging) }
 
     /// What was staged, read as a library of its own: the share's catalogue, or a palette on its own.

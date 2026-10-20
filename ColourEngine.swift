@@ -455,7 +455,6 @@ enum RenderingIntent: String, Codable, CaseIterable {
     /// Keeps every colour in range exactly; brings one out of range to the nearest edge. The default for swatches.
     case relative
     /// As relative, and measured against the paper's own white, so the proof shows the colour on that stock.
-    /// The system's engine will not run this from a master, so the app applies the paper white itself.
     case absolute
     /// Compresses everything to fit, shifting even colours in range. For images, not single colours.
     case perceptual
@@ -477,8 +476,7 @@ enum RenderingIntent: String, Codable, CaseIterable {
         }
     }
 
-    /// What the system's engine is asked for. Absolute is relative with the paper white applied by the app.
-    var system: CGColorRenderingIntent { self == .perceptual ? .perceptual : .relativeColorimetric }
+
 }
 
 // MARK: Press profiles
@@ -502,9 +500,10 @@ enum PressProfiles {
 
     private static var cachedProfiles:[Profile] = []
     private static var cacheDate=Date.distantPast
-    static func refresh(){cacheDate = .distantPast;spaces=spaces.filter{$0.key.hasPrefix("Proof ICC ")};whites=whites.filter{$0.key.hasPrefix("Proof ICC ")};blacks=[:]}
+    static func refresh(){cacheDate = .distantPast;spaces=spaces.filter{$0.key.hasPrefix("Proof ICC ")};whites=whites.filter{$0.key.hasPrefix("Proof ICC ")};PCSConversion.resetCache()}
     static var installed:[Profile] {
         if Date().timeIntervalSince(cacheDate) < 10 {return cachedProfiles}
+        spaces = spaces.filter { $0.key.hasPrefix("Proof ICC ") }; fileStamps.removeAll()
         var found:[String:Profile]=[:]
         for path in installedProfilePaths() {
             guard let data=FileManager.default.contents(atPath:path),let space=CGColorSpace(iccData:data as CFData),
@@ -540,9 +539,15 @@ enum PressProfiles {
         }
         return key
     }
+    private struct FileStamp: Equatable {
+        let path: String
+        let size: UInt64
+        let modified: Date
+        let inode: UInt64
+    }
+    private static var fileStamps: [String: FileStamp] = [:]
     private static var spaces: [String: CGColorSpace] = [:]
     private static var whites: [String: XYZ] = [:]
-    private static var blacks: [String: Double] = [:]
 
     /// The paper white a profile was measured on, read from the profile's own file ("wtpt"). D50,
     /// a perfect white, when the profile gives none.
@@ -574,31 +579,143 @@ enum PressProfiles {
         return nil
     }
 
-    /// How bright the press's darkest black is, as a fraction of its white: what pure black comes back as.
-    static func blackLevel(of name: String) -> Double {
-        if let have = blacks[name] { return have }
-        var level = 0.0
-        if let space = space(named: name), let black = CGColor(colorSpace: CGColorSpace(name: CGColorSpace.genericXYZ)!, components: [0, 0, 0, 1]),
-           let ink = black.converted(to: space, intent: .relativeColorimetric, options: nil),
-           let back = ink.converted(to: CGColorSpace(name: CGColorSpace.genericXYZ)!, intent: .relativeColorimetric, options: nil)?.components, back.count >= 3 {
-            level = min(max(Double(back[1]), 0), 0.2)
-        }
-        blacks[name] = level
-        return level
-    }
-
     /// The colour space of a profile by name; nil when the profile is not on this Mac.
     static func space(named name: String) -> CGColorSpace? {
         if name.hasPrefix(ICCProfileLibrary.prefix) {return ICCProfileLibrary.shared.space(for:name)}
-        if let have = spaces[name] { return have }
-        guard let profile = installed.first(where: { $0.name == name }), let data = FileManager.default.contents(atPath: profile.path),
+        if name.hasPrefix("Proof ICC ") { return spaces[name] }
+        guard let profile = installed.first(where: { $0.name == name }),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: profile.path),
+              let size = attributes[.size] as? UInt64, size <= 16_000_000,
+              let modified = attributes[.modificationDate] as? Date,
+              let inode = attributes[.systemFileNumber] as? UInt64 else {
+            spaces[name] = nil; fileStamps[name] = nil
+            return nil
+        }
+        let stamp = FileStamp(path: profile.path, size: size, modified: modified, inode: inode)
+        if fileStamps[name] == stamp, let have = spaces[name] { return have }
+        spaces[name] = nil; whites[name] = nil; fileStamps[name] = nil
+        guard let data = FileManager.default.contents(atPath: profile.path), data.count <= 16_000_000,
               let space = CGColorSpace(iccData: data as CFData) else { return nil }
-        spaces[name] = space
+        spaces[name] = space; fileStamps[name] = stamp
         return space
     }
 }
 
-private let masterSpace = CGColorSpace(name: CGColorSpace.genericXYZ)!
+/// ICC boundary for the D50 XYZ master. Device values are normalised (CMYK 0...1,
+/// not percentages). ColorSync receives float buffers; stored masters remain Double.
+/// Built-in RGB/HDR encodings keep their separate, unbounded mathematical path.
+enum PCSConversion {
+    struct Provenance: Codable, Equatable {
+        var engine = "Apple ColorSync"
+        var pipelineVersion = 1
+        var operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
+        var connectionSpace = "CIE XYZ D50, Y = 1"
+        var profileSHA256: String
+    }
+    struct Prediction {
+        let values: [Double]
+        let shown: XYZ
+        let provenance: Provenance
+    }
+    private struct Profile {
+        // Retaining the space prevents ObjectIdentifier reuse while cached.
+        let space: CGColorSpace
+        let profile: ColorSyncProfile
+        let digest: String
+    }
+    private struct Key: Hashable {
+        let source: String
+        let destination: String
+        let intent: RenderingIntent
+        let blackPoint: Bool
+    }
+    private static let lock = NSRecursiveLock()
+    private static var profiles: [ObjectIdentifier: Profile] = [:]
+    private static var transforms: [Key: ColorSyncTransform] = [:]
+    private static let xyzSpace = CGColorSpace(name: CGColorSpace.genericXYZ)!
+    private static func key(_ value: Unmanaged<CFString>) -> String { value.takeUnretainedValue() as String }
+
+    static func resetCache() {
+        lock.lock(); defer { lock.unlock() }
+        profiles.removeAll(); transforms.removeAll()
+    }
+    private static func prepared(_ space: CGColorSpace) -> Profile? {
+        let id = ObjectIdentifier(space)
+        if let found = profiles[id] { return found }
+        guard let bytes = space.copyICCData(),
+              let profile = ColorSyncProfileCreate(bytes, nil)?.takeRetainedValue() else { return nil }
+        let value = Profile(space: space, profile: profile, digest: Sharing.sha256(bytes as Data))
+        if profiles.count >= 64 { profiles.removeAll() }
+        profiles[id] = value
+        return value
+    }
+    static func provenance(for space: CGColorSpace) -> Provenance? {
+        lock.lock(); defer { lock.unlock() }
+        return prepared(space).map { Provenance(profileSHA256: $0.digest) }
+    }
+    private static func convert(_ values: [Double], from source: CGColorSpace, to destination: CGColorSpace,
+                                intent: RenderingIntent, blackPoint: Bool = false) -> [Double]? {
+        guard values.count == source.numberOfComponents,
+              values.allSatisfy({ $0.isFinite && Float($0).isFinite }) else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        guard let input = prepared(source), let output = prepared(destination) else { return nil }
+        // BPC belongs to relative colorimetric conversion. It must never alter the
+        // colorimetric readback of a recipe or be applied a second time in a proof.
+        let bpc = blackPoint && intent == .relative
+        let cacheKey = Key(source: input.digest, destination: output.digest, intent: intent, blackPoint: bpc)
+        let transform: ColorSyncTransform
+        if let found = transforms[cacheKey] { transform = found }
+        else {
+            let rendering: CFString
+            switch intent {
+            case .relative: rendering = kColorSyncRenderingIntentRelative.takeUnretainedValue()
+            case .absolute: rendering = kColorSyncRenderingIntentAbsolute.takeUnretainedValue()
+            case .perceptual: rendering = kColorSyncRenderingIntentPerceptual.takeUnretainedValue()
+            }
+            let sequence: [[String: Any]] = [
+                [key(kColorSyncProfile): input.profile, key(kColorSyncRenderingIntent): rendering,
+                 key(kColorSyncTransformTag): kColorSyncTransformDeviceToPCS.takeUnretainedValue(),
+                 key(kColorSyncBlackPointCompensation): bpc],
+                [key(kColorSyncProfile): output.profile, key(kColorSyncRenderingIntent): rendering,
+                 key(kColorSyncTransformTag): kColorSyncTransformPCSToDevice.takeUnretainedValue(),
+                 key(kColorSyncBlackPointCompensation): bpc]
+            ]
+            guard let made = ColorSyncTransformCreate(sequence as CFArray,
+                [key(kColorSyncConvertQuality): kColorSyncBestQuality.takeUnretainedValue()] as CFDictionary)?.takeRetainedValue() else { return nil }
+            transform = made
+            if transforms.count >= 128 { transforms.removeAll() }
+            transforms[cacheKey] = made
+        }
+        let inputValues = values.map(Float.init)
+        var result = [Float](repeating: 0, count: destination.numberOfComponents)
+        let converted = result.withUnsafeMutableBytes { dst in inputValues.withUnsafeBytes { src in
+            ColorSyncTransformConvert(transform, 1, 1, dst.baseAddress!, kColorSync32BitFloat, 0, dst.count,
+                                      src.baseAddress!, kColorSync32BitFloat, 0, src.count,
+                                      [key(kColorSyncConvertUseExtendedRange): true] as CFDictionary)
+        }}
+        guard converted, result.allSatisfy(\.isFinite) else { return nil }
+        return result.map(Double.init)
+    }
+    static func encode(_ master: XYZ, to space: CGColorSpace, intent: RenderingIntent, blackPoint: Bool = false) -> [Double]? {
+        guard [.rgb, .cmyk, .monochrome].contains(space.model),
+              let values = convert([master.x, master.y, master.z], from: xyzSpace, to: space, intent: intent, blackPoint: blackPoint) else { return nil }
+        return values.map { min(1, max(0, $0)) }
+    }
+    static func decode(_ values: [Double], from space: CGColorSpace, intent: RenderingIntent = .relative) -> XYZ? {
+        guard [.rgb, .cmyk, .monochrome].contains(space.model),
+              values.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              let result = convert(values, from: space, to: xyzSpace, intent: intent), result.count == 3 else { return nil }
+        return XYZ(x: result[0], y: result[1], z: result[2])
+    }
+    static func predict(_ master: XYZ, in space: CGColorSpace, intent: RenderingIntent, blackPoint: Bool = false) -> Prediction? {
+        guard let values = encode(master, to: space, intent: intent, blackPoint: blackPoint),
+              let shown = decode(values, from: space, intent: intent == .absolute ? .absolute : .relative),
+              let provenance = provenance(for: space) else { return nil }
+        return Prediction(values: values, shown: shown, provenance: provenance)
+    }
+}
+
+
 
 /// A build of the four inks for a master, through a press profile, and what that build looks like.
 struct PrintBuild: Equatable {
@@ -614,35 +731,20 @@ struct PrintBuild: Equatable {
         return zip(names, inks).map { "\($0) \(Int(($1 * 100).rounded()))" }.joined(separator: "  ")
     }
 
-    /// Sends a master through the profile and back.
-    ///
-    /// Absolute colorimetric: the master is first expressed against the paper's white, and the
-    /// result is shown on that paper. Black point compensation: the master is scaled so that pure
-    /// black lands on the press's darkest black and white stays white, which keeps dark colours
-    /// apart at the cost of lifting them slightly. Both are worked out here; the system's engine
-    /// is asked only for the plain conversion, which is the part it does reliably.
+    var provenance: PCSConversion.Provenance? = nil
+
+    /// Render into the selected device, then read the actual recipe back through
+    /// its colorimetric table. ColorSync owns intent, paper white and BPC.
     static func of(_ master: XYZ, press: String, intent: RenderingIntent, blackPoint: Bool = false) -> PrintBuild? {
-        guard let space = PressProfiles.space(named: press) else { return nil }
-        let white = intent == .absolute ? PressProfiles.paperWhite(of: press) : XYZ.d50
-        var given = XYZ(x: master.x * XYZ.d50.x / white.x, y: master.y * XYZ.d50.y / white.y, z: master.z * XYZ.d50.z / white.z)
-        if blackPoint, intent != .perceptual {
-            let black = PressProfiles.blackLevel(of: press)
-            given = XYZ(x: given.x * (1 - black) + black * XYZ.d50.x, y: given.y * (1 - black) + black * XYZ.d50.y, z: given.z * (1 - black) + black * XYZ.d50.z)
-        }
-        guard let colour = CGColor(colorSpace: masterSpace, components: [CGFloat(given.x), CGFloat(given.y), CGFloat(given.z), 1]),
-              let ink = colour.converted(to: space, intent: intent.system, options: nil), let c = ink.components, c.count >= 4,
-              let back = ink.converted(to: masterSpace, intent: .relativeColorimetric, options: nil)?.components, back.count >= 3 else { return nil }
-        // What the build looks like: against a perfect white, or on its own paper for an absolute proof.
-        let printed = XYZ(x: Double(back[0]) * white.x / XYZ.d50.x, y: Double(back[1]) * white.y / XYZ.d50.y, z: Double(back[2]) * white.z / XYZ.d50.z)
-        return PrintBuild(inks: c.prefix(4).map { Double($0) }, printed: printed)
+        guard let space = PressProfiles.space(named: press), space.model == .cmyk,
+              let prediction = PCSConversion.predict(master, in: space, intent: intent, blackPoint: blackPoint) else { return nil }
+        return PrintBuild(inks: prediction.values, printed: prediction.shown, provenance: prediction.provenance)
     }
 
-    /// The master of a build typed in by hand: what those inks make on that press.
-    static func master(ofInks inks: [Double], press: String) -> XYZ? {
-        guard inks.count == 4, let space = PressProfiles.space(named: press),
-              let colour = CGColor(colorSpace: space, components: inks.map { CGFloat($0) } + [1]),
-              let back = colour.converted(to: masterSpace, intent: .relativeColorimetric, options: nil)?.components, back.count >= 3 else { return nil }
-        return XYZ(x: Double(back[0]), y: Double(back[1]), z: Double(back[2]))
+    /// Evaluate a fixed recipe without reseparating or changing its original inks.
+    static func master(ofInks inks: [Double], press: String, intent: RenderingIntent = .relative) -> XYZ? {
+        guard let space = PressProfiles.space(named: press), space.model == .cmyk else { return nil }
+        return PCSConversion.decode(inks, from: space, intent: intent)
     }
 }
 
@@ -714,15 +816,19 @@ struct Rendering: Equatable {
         let press = channel.press ?? PressProfiles.generic, intent = channel.intent ?? .relative, blackPoint = channel.blackPoint ?? false
         // A colour given as a build for this very press is delivered as given: the build is the truth, not a round trip through maths.
         if definition.source.space == "cmyk", definition.source.press == press, definition.source.values.count == 4 {
-            let build = PrintBuild(inks: definition.source.values, printed: master)
-            return Rendering(channel: channel, value: build.text, shown: master, difference: 0, inRange: true,
+            guard let shown = PrintBuild.master(ofInks: definition.source.values, press: press, intent: intent == .absolute ? .absolute : .relative) else {
+                return Rendering(channel: channel, value: nil, shown: nil, difference: nil, inRange: false, detail: "The source press profile is unavailable")
+            }
+            let build = PrintBuild(inks: definition.source.values, printed: shown)
+            let difference = deltaE2000(master.lab, shown.lab)
+            return Rendering(channel: channel, value: build.text, shown: shown, difference: difference, inRange: difference <= Rendering.visible,
                              detail: "As Given  \u{00B7}  Total Ink \(Int(build.totalInk.rounded()))%")
         }
         guard let build = PrintBuild.of(master, press: press, intent: intent, blackPoint: blackPoint) else {
             return Rendering(channel: channel, value: nil, shown: nil, difference: nil, inRange: false, detail: "The profile \u{201C}\(press)\u{201D} is not on this Mac")
         }
         let difference = deltaE2000(master.lab, build.printed.lab)
-        let extras = (blackPoint && intent != .perceptual ? "  \u{00B7}  Black Point Compensation" : "")
+        let extras = (blackPoint && intent == .relative ? "  \u{00B7}  Black Point Compensation" : "")
         return Rendering(channel: channel, value: build.text, shown: build.printed, difference: difference, inRange: difference <= Rendering.visible,
                          detail: "\(intent.name)\(extras)  \u{00B7}  Total Ink \(Int(build.totalInk.rounded()))%")
     }

@@ -78,13 +78,10 @@ enum HistogramType: Int, CaseIterable {
         }
     }
 
-    /// The safe range, where there is one. Outside it detail is lost: on a screen or in video,
-    /// values under 16 crush to black and over 235 blow out to white; on a press, a dot under 3%
-    /// does not hold and the paper shows through, and over 95% the dots fill in to solid. Hue,
-    /// saturation, lightness and Lab have no such limits: every value of theirs is a usable one.
+    /// Model-specific advisory ranges. Full-range RGB has no restricted signal bands.
     var safe: ClosedRange<Int>? {
         switch self {
-        case .rgb, .p3, .adobeRGB, .rec2020: return 16...235
+        case .rgb, .p3, .adobeRGB, .rec2020: return nil
         case .cmyk: return 3...95
         case .ycbcr: return 64...940
         case .hsl, .hsv, .lab: return nil
@@ -154,6 +151,12 @@ enum Histogram {
 
 /// The plot itself: merged into one, or a strip per channel.
 final class HistogramView: NSView {
+    var componentValue:((Int)->String)?
+    var componentNames:[String]?{didSet{changed()}}
+    var componentRanges:[ClosedRange<Int>]?{didSet{changed()}}
+    private var names:[String]{componentNames ?? type.channels}
+    private var ranges:[ClosedRange<Int>]{componentRanges ?? type.ranges}
+    private func place(_ value:Int,in channel:Int)->CGFloat{let r=ranges[channel];return CGFloat(min(max(value,r.lowerBound),r.upperBound)-r.lowerBound)/CGFloat(max(1,r.count-1))}
     static let mergedHeight: CGFloat = 72
     static let stripHeight: CGFloat = 72
     static let stripGap: CGFloat = 4
@@ -172,23 +175,23 @@ final class HistogramView: NSView {
 
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize {
-        let n = CGFloat(type.channels.count)
+        let n = CGFloat(names.count)
         return NSSize(width: NSView.noIntrinsicMetric, height: split ? n * HistogramView.stripHeight + (n - 1) * HistogramView.stripGap : HistogramView.mergedHeight)
     }
     private func changed() { invalidateIntrinsicContentSize(); needsDisplay = true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let n = type.channels.count
+        let n = names.count
         if split {
             for channel in 0..<n {
                 let height = fillsHeight ? max(20,(bounds.height-CGFloat(n-1)*Self.stripGap)/CGFloat(n)) : Self.stripHeight
                 let strip = NSRect(x: 0, y: CGFloat(channel) * (height + Self.stripGap), width: bounds.width, height: height)
                 plot([channel], in: strip, lit: false)
-                let value = own.flatMap { $0.indices.contains(channel) ? "\($0[channel])" : nil } ?? "\u{2014}"
-                let label = NSAttributedString(string: "\(type.channels[channel])  \(value)", attributes: [
+                let value = own.flatMap { $0.indices.contains(channel) ? (componentValue?($0[channel]) ?? "\($0[channel])") : nil } ?? "\u{2014}"
+                let label = NSAttributedString(string: "\(names[channel])  \(value)", attributes: [
                     .font: NSFont.systemFont(ofSize: TextSize.caption, weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(0.7)])
                 // The label keeps clear of the spike: on the right while the value is low, on the left once it is high.
-                let low = type.place(own?[safe: channel] ?? type.ranges[channel].lowerBound, in: channel) < 0.5
+                let low = place(own?[safe: channel] ?? ranges[channel].lowerBound, in: channel) < 0.5
                 label.draw(at: NSPoint(x: low ? strip.maxX - label.size().width - 8 : strip.minX + 8, y: strip.minY + 4))
             }
         } else {
@@ -208,14 +211,14 @@ final class HistogramView: NSView {
         frame.addClip()
         if lit { context.compositingOperation = .plusLighter }
         let inner = rect.insetBy(dx: 6, dy: 5)
-        func x(_ value: Int, _ channel: Int) -> CGFloat { inner.minX + type.place(value, in: channel) * inner.width }
+        func x(_ value: Int, _ channel: Int) -> CGFloat { inner.minX + place(value, in: channel) * inner.width }
         // The zones outside the safe range, shaded at each end with a line where safe begins and ends.
         context.saveGraphicsState()
         context.compositingOperation = .sourceOver
         // Only where the values have a safe range, which is the same for every channel that does.
         let first = channels.first ?? 0
         let guide = showsGuides ? (guideRanges?[safe:first] ?? type.safe) : nil
-        let safe = guide ?? type.ranges[first]
+        let safe = guide ?? ranges[first]
         let low = NSRect(x: rect.minX, y: rect.minY, width: x(safe.lowerBound, first) - rect.minX, height: rect.height)
         let high = NSRect(x: x(safe.upperBound, first), y: rect.minY, width: rect.maxX - x(safe.upperBound, first), height: rect.height)
         for zone in (guide == nil ? [] : [low, high]) {
@@ -238,13 +241,13 @@ final class HistogramView: NSView {
         context.restoreGraphicsState()
         let tallest = CGFloat(max(1, counts.flatMap { $0 }.max() ?? 1))
         for channel in channels {
-            let colour = type.colours[channel]
+            let colour = names.count == 1 ? NSColor(white:0.8,alpha:1):type.colours[min(channel,type.colours.count-1)]
             if counts.indices.contains(channel) {
                 colour.withAlphaComponent(0.38).setFill()
                 for (offset, count) in counts[channel].enumerated() where count > 0 {
                     let available = guide == nil ? inner.height : max(4, inner.maxY - (rect.minY + 44))
                     let h = max(3, min(inner.height * 0.6, available) * CGFloat(count) / tallest)
-                    NSRect(x: x(offset + type.ranges[channel].lowerBound, channel) - 1.5, y: inner.maxY - h, width: 3, height: h).fill()
+                    NSRect(x: x(offset + ranges[channel].lowerBound, channel) - 1.5, y: inner.maxY - h, width: 3, height: h).fill()
                 }
             }
             if let value = own?[safe: channel] {
@@ -260,11 +263,11 @@ final class HistogramView: NSView {
                 func outside(_ value: Int) -> Bool { isLow ? value < safe.lowerBound : value > safe.upperBound }
                 if let value = own?[safe: channel], outside(value) { return true }
                 guard counts.indices.contains(channel) else { return false }
-                return counts[channel].enumerated().contains { $0.element > 0 && outside($0.offset + type.ranges[channel].lowerBound) }
+                return counts[channel].enumerated().contains { $0.element > 0 && outside($0.offset + ranges[channel].lowerBound) }
             }
             let size = min(16, zone.width - 8, zone.height - 28)
             guard occupied, size >= 6 else { continue }
-            ResultGlyph.warning.draw(in: NSRect(x: zone.midX - size / 2, y: zone.minY + 20, width: size, height: size))
+            ResultGlyph.warning.draw(in:NSRect(x:zone.midX-size/2,y:zone.minY+20,width:size,height:size))
         }
         context.restoreGraphicsState()
     }
@@ -311,7 +314,7 @@ final class HistogramPanel: NSView {
         about.stringValue = plot.own == nil ? "Not Worked Out: The Press Profile Is Not On This Mac" : unsafe.isEmpty ? values : values + "   \u{00B7}   " + unsafe.joined(separator: ", ")
         plot.toolTip = "Bright: This Colour. Faint: Every Colour On The Page." + (type.safe == nil ? ""
             : type == .cmyk ? " The Shaded Ends Are Outside The Safe Range: Under 3% The Dot Does Not Hold, Over 95% It Fills In To Solid."
-            : " The Shaded Ends Are Outside The Safe Range: Under 16 Crushes To Black, Over 235 Blows Out To White.")
+            : " The Shaded Ends Are Outside The Selected Legal Signal Range.")
     }
 }
 

@@ -23,6 +23,7 @@ final class PrintBloomView: NSView {
             }.map { $0.element }
         }
     }
+    var differenceMetric="ΔE00",outputName="Print Prediction"
     var order: Order = .palette { didSet {
         orderMenu.displayValue(order.rawValue)
         if oldValue != order { motionDirty = true; needsDisplay = true }
@@ -226,10 +227,10 @@ final class PrintBloomView: NSView {
         let inspect = items.first { $0.id == (selected ?? hovered) }
         Design.attributed(inspect?.name ?? "\(items.count) Palette Colours", .bodyStrong).draw(x: 0, baseline: y, width: bounds.width)
         let detail = inspect.map { item in
-            item.delta.map { String(format: "ΔE00 %.2f · %@", $0, $0 <= tolerance ? "Holds" : "Outside") } ?? "No Profile Prediction"
-        } ?? String(format: "Dashed Ring: ΔE00 %.1f Tolerance", tolerance)
+            item.delta.map { String(format: "%@ %.2f", differenceMetric, $0) } ?? "No Profile Prediction"
+        } ?? String(format: "Dashed Ring: %@ %.1f Tolerance", differenceMetric, tolerance)
         Design.attributed(detail, .caption, colour: Design.quiet).draw(x: 0, baseline: y + (compact ? 20 : Design.App.unit), width: bounds.width)
-        if !compact { Design.attributed("Inside: RGB · Outside: Print Prediction · Rim: Pass / Fail", .caption, colour: Design.quiet).draw(x: 0, baseline: y + 2 * Design.App.unit, width: bounds.width) }
+        if !compact { Design.attributed("Inside: Master · Outside: Output Prediction · Rim: Tolerance Result", .caption, colour: Design.quiet).draw(x: 0, baseline: y + 2 * Design.App.unit, width: bounds.width) }
         }
         if items.isEmpty { Design.attributed("Choose A Palette", .body).draw(x: centre.x - 50, baseline: centre.y + 40) }
     }
@@ -250,7 +251,7 @@ final class PrintBloomView: NSView {
     }
 }
 
-final class PrintSortHeader: NSButton {
+final class PrintSortHeader: ClickCursorButton {
     var direction: Bool? { didSet { needsDisplay = true } }
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
@@ -268,7 +269,7 @@ final class PrintSortHeader: NSButton {
 
 final class PrintBloomDetail: NSView {
     let chart = PrintBloomView()
-    private let close = NSButton()
+    private let close = ClickCursorButton()
     var onClose: (() -> Void)?
     var order: PrintBloomView.Order = .palette { didSet { chart.order = order; if oldValue != order { updateFeedback() } } }
     @objc private func closePressed() { onClose?() }
@@ -351,7 +352,7 @@ final class PrintBloomFeedback: NSView {
     private var labels: [(NSTextField, Bool)] = []
     override var isFlipped: Bool { true }
 
-    func update(item: PrintBloomView.Item?, tolerance: Double, condition: String) {
+    func update(item: PrintBloomView.Item?, tolerance: Double, condition: String,isPrint:Bool=true,metric:String="ΔE00") {
         labels.forEach { $0.0.removeFromSuperview() }; labels.removeAll()
         func add(_ text: String, heading: Bool = false) {
             let label = Design.text(text, heading ? .bodyStrong : .body, colour: heading ? Design.ink : Design.quiet)
@@ -367,14 +368,15 @@ final class PrintBloomFeedback: NSView {
         let delta = item.delta.flatMap { $0.isFinite ? $0 : nil }
         if let delta {
             add(delta <= tolerance ? "Predicted Within Tolerance" : "Predicted Outside Tolerance", heading: true)
-            add(String(format: "ΔE00 %.1f · Tolerance %.1f", delta, tolerance))
-            add(delta <= tolerance
+            add(String(format: "%@ %.1f · Tolerance %.1f", metric, delta, tolerance))
+            add(!isPrint ? "Predicted against the selected output space; this is not a measured display calibration." : delta <= tolerance
                 ? "This printing condition predicts a match within your chosen tolerance. Confirm with a physical proof when colour accuracy is critical."
                 : "The predicted print differs from your master by more than your chosen tolerance. This alone does not prove the colour is impossible to print.")
         } else {
             add("Prediction Unavailable", heading: true)
             add("A usable print prediction is needed before this colour can be assessed. Check the selected printing condition.")
         }
+        if !isPrint{add("Output: \(condition)");add("Predicted Colour Difference · \(metric)");add("Compare the master with this output target. HDR previews on SDR displays do not represent HDR brightness.");return}
         add("Profile Prediction · No Measured Proof")
         add("Check The Printing Condition", heading: true)
         add(condition == "Generic CMYK"

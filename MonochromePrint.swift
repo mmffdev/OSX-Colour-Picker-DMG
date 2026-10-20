@@ -4,22 +4,19 @@ import AppKit
 enum MonochromePrint {
     static func render(_ definition:ColourDefinition,in channel:ProfileChannel)->Rendering {
         let name=channel.press ?? PressProfiles.generic,master=definition.master
-        let white=channel.intent == .absolute ? PressProfiles.paperWhite(of:name):XYZ.d50
-        func paper(_ value:XYZ)->XYZ {XYZ(x:value.x*white.x/XYZ.d50.x,y:value.y*white.y,z:value.z*white.z/XYZ.d50.z)}
+        let intent=channel.intent ?? .relative
         guard let space=PressProfiles.space(named:name) else {return unavailable(channel,"Install the selected ICC profile: "+name)}
         if channel.space == ProfileChannel.printGrey {
             guard space.model == .monochrome,
-                  let source=CGColor(colorSpace:CGColorSpace(name:CGColorSpace.genericXYZ)!,components:[CGFloat(master.x*XYZ.d50.x/white.x),CGFloat(master.y/white.y),CGFloat(master.z*XYZ.d50.z/white.z),1]),
-                  let grey=source.converted(to:space,intent:(channel.intent ?? .relative).system,options:nil),let value=grey.components?.first,
-                  let back=grey.converted(to:CGColorSpace(name:CGColorSpace.genericXYZ)!,intent:.relativeColorimetric,options:nil)?.components,back.count >= 3 else{return unavailable(channel,"The grey ICC transform is unavailable")}
-            let shown=paper(XYZ(x:Double(back[0]),y:Double(back[1]),z:Double(back[2]))),delta=deltaE2000(master.lab,shown.lab)
-            return Rendering(channel:channel,value:String(format:"Grey %.2f%%",Double(value)*100),shown:shown,difference:delta,inRange:delta <= Rendering.visible,detail:name+" · "+(channel.intent ?? .relative).name)
+                  let prediction=PCSConversion.predict(master,in:space,intent:intent,blackPoint:channel.blackPoint ?? false) else{return unavailable(channel,"The grey ICC transform is unavailable")}
+            let shown=prediction.shown,delta=deltaE2000(master.lab,shown.lab)
+            return Rendering(channel:channel,value:String(format:"Grey %.2f%%",prediction.values[0]*100),shown:shown,difference:delta,inRange:delta <= Rendering.visible,detail:name+" · "+intent.name)
         }
         guard space.model == .cmyk else{return unavailable(channel,"K-only requires a CMYK press profile")}
         var best:(k:Double,shown:XYZ,delta:Double)?
         func consider(_ k:Double){
-            guard let xyz=PrintBuild.master(ofInks:[0,0,0,k],press:name) else{return}
-            let shown=paper(xyz),delta=deltaE2000(master.lab,shown.lab)
+            guard let shown=PCSConversion.decode([0,0,0,k],from:space,intent:intent == .absolute ? .absolute : .relative) else{return}
+            let delta=deltaE2000(master.lab,shown.lab)
             if best == nil || delta < best!.delta {best=(k,shown,delta)}
         }
         for i in 0...32 {consider(Double(i)/32)}

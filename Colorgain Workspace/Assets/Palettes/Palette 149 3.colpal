@@ -1,0 +1,125 @@
+{
+  "catalogue" : "45D8F8C2-F834-4B41-AD83-E8A4DDDF0D24",
+  "colours" : [
+    {
+      "hex" : "#010005",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.0003965244925780653,
+        "y" : 0.00017499684359729875,
+        "z" : 0.001194659170121607
+      },
+      "pickedAt" : 1791695922008.4419,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.0039405827409999998,
+          0,
+          0.019683834170000001
+        ]
+      }
+    },
+    {
+      "hex" : "#22A0DC",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.24509277999210732,
+        "y" : 0.29931220574497602,
+        "z" : 0.54598211417561271
+      },
+      "pickedAt" : 1791695920322.376,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.3051757812,
+          0.6186523438,
+          0.8422851562
+        ]
+      }
+    },
+    {
+      "hex" : "#92918E",
+      "kind" : "surface",
+      "master" : {
+        "x" : 0.273014026783788,
+        "y" : 0.28275899827542822,
+        "z" : 0.22595032694850786
+      },
+      "pickedAt" : 1791695924489.6531,
+      "source" : {
+        "space" : "displayP3",
+        "values" : [
+          0.5717773438,
+          0.5678710938,
+          0.5595703125
+        ]
+      }
+    }
+  ],
+  "file" : "Palette 149 3",
+  "format" : "colour-palette",
+  "generator" : "Colorgain",
+  "header" : {
+    "createdAt" : "2026-10-19T19:59:58.433Z",
+    "createdBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "createdWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "derivedFrom" : "57C21FC0-7E47-4CFD-BE1C-0A59B44DF34F",
+    "documentID" : "6E8B4AF4-BE2D-454C-84A7-DFF214A2C315",
+    "lastSavedAt" : "2026-10-19T23:43:09.366Z",
+    "lastSavedBy" : {
+      "accountName" : "rick",
+      "actor" : "Person",
+      "displayName" : "Richard Cook"
+    },
+    "lastSavedWith" : {
+      "build" : "357",
+      "bundleIdentifier" : "com.mmffdev.mmffdevcolour3",
+      "commit" : "06e4b29+",
+      "name" : "Colorgain",
+      "version" : "3.0"
+    },
+    "metadataVersion" : 1
+  },
+  "palette" : {
+    "copiedFrom" : "57C21FC0-7E47-4CFD-BE1C-0A59B44DF34F",
+    "createdAt" : 1791695914797.2178,
+    "entries" : [
+      {
+        "addedAt" : 1791695920322.376,
+        "hex" : "#22A0DC"
+      },
+      {
+        "addedAt" : 1791695922008.4419,
+        "hex" : "#010005"
+      },
+      {
+        "addedAt" : 1791695924489.6531,
+        "hex" : "#92918E"
+      }
+    ],
+    "id" : "6E8B4AF4-BE2D-454C-84A7-DFF214A2C315",
+    "name" : "Palette 149 3",
+    "placedAt" : 1792453388446.5771,
+    "position" : 29,
+    "purpose" : "web",
+    "purposeChangedAt" : 1791695914797.637,
+    "purposes" : [
+      {
+        "changedAt" : 1791695914797.637,
+        "id" : "C857F4B8-2FAD-4326-91A1-58D272DCBBC2",
+        "purpose" : "web"
+      }
+    ]
+  },
+  "version" : 1
+}

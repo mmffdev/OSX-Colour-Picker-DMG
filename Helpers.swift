@@ -80,7 +80,7 @@ func symbol(_ name: String, _ description: String, size: CGFloat? = nil, weight:
 }
 
 func symbolButton(_ name: String, tooltip: String, target: AnyObject, action: Selector) -> NSButton {
-    let b = NSButton(image: symbol(name, tooltip), target: target, action: action)
+    let b = ClickCursorButton(image: symbol(name, tooltip), target: target, action: action)
     b.isBordered = false
     b.toolTip = tooltip
     b.setAccessibilityLabel(tooltip)
@@ -106,7 +106,7 @@ func caption(_ s: String, size: CGFloat = TextSize.caption) -> NSTextField {
 
 /// Looks like the other pop-up buttons in a bar, but a press runs its action instead of opening
 /// a menu — for a popover that has to stay open while several things are ticked.
-final class PopoverButton: NSPopUpButton {
+final class PopoverButton: ClickCursorPopupButton {
     init(title: String) {
         super.init(frame: .zero, pullsDown: true)
         addItem(withTitle: title)
@@ -270,14 +270,21 @@ enum Theme {
     static var knobStyle: NSScroller.KnobStyle { isDark ? .light : .dark }
 
     /// Applies the background and appearance to a window and every scroll view in it.
-    static func apply(to window: NSWindow) {
+    static func apply(to window: NSWindow, installScrollers: Bool = true) {
         window.backgroundColor = background
-        window.appearance = appearance
-        // The toolbar is the background too, whichever step is showing, with a hairline under it.
-        window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .line
+        let targetAppearance = appearance
+        if window.appearance?.name != targetAppearance?.name { window.appearance = targetAppearance }
+        // Keep each window's chosen titlebar geometry. Changing this after the Studio
+        // window is laid out shifts its content under the titlebar on macOS.
+        if window.titlebarSeparatorStyle != .line { window.titlebarSeparatorStyle = .line }
         func walk(_ v: NSView) {
-            if let s = v as? NSScrollView { s.scrollerKnobStyle = knobStyle; s.autohidesScrollers = true; QuietScroller.install(in: s) }
+            if let s = v as? NSScrollView {
+                if s.scrollerKnobStyle != knobStyle { s.scrollerKnobStyle = knobStyle }
+                if installScrollers {
+                    if !s.autohidesScrollers { s.autohidesScrollers = true }
+                    QuietScroller.install(in: s)
+                }
+            }
             v.subviews.forEach(walk)
         }
         if let content = window.contentView { walk(content); content.needsDisplay = true }
@@ -337,7 +344,7 @@ final class QuietScroller: NSScroller {
     override class var isCompatibleWithOverlayScrollers: Bool { false }
     override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { lane }
     static func install(in scroll: NSScrollView) {
-        scroll.scrollerStyle = .legacy
+        if scroll.scrollerStyle != .legacy { scroll.scrollerStyle = .legacy }
         if scroll.hasVerticalScroller, !(scroll.verticalScroller is QuietScroller) { scroll.verticalScroller = QuietScroller() }
         if scroll.hasHorizontalScroller, !(scroll.horizontalScroller is QuietScroller) { scroll.horizontalScroller = QuietScroller() }
     }
@@ -626,6 +633,8 @@ func gitCommitAndPush(repo: URL, path: URL, message: String) -> (ok: Bool, messa
 // ---------- Grid shared by the palette page and All Swatches ----------
 
 final class SwatchGridView: NSCollectionView {
+    override func resetCursorRects(){super.resetCursorRects();ClickCursor.register(collectionViewLayout?.layoutAttributesForElements(in:visibleRect).map{$0.frame} ?? [],in:self)}
+
     /// A plain click on a tile, including one that is already selected.
     var onClick: ((IndexPath) -> Void)?
     var onDelete: (() -> Void)?
@@ -647,13 +656,16 @@ final class SwatchGridView: NSCollectionView {
         }
         let held = event.modifierFlags.intersection([.command, .shift, .control, .option])
         if event.clickCount == 2, let ip = hit, onDoubleClick?(ip, event) == true { return }
-        // Shift-click takes every tile from the last one clicked to this one, in reading order.
-        if held == .shift, let to = hit, let from = anchor ?? selectionIndexPaths.min(by: { $0.item < $1.item }),
-           from.item < numberOfItems(inSection: 0) {
-            let run = Set((min(from.item, to.item)...max(from.item, to.item)).map { IndexPath(item: $0, section: 0) })
+        if held.contains(.shift) || held.contains(.command),let hit {
+            var state=AssetSelection<IndexPath>()
+            let order=(0..<numberOfItems(inSection:0)).map{IndexPath(item:$0,section:0)}
+            state.ids=selectionIndexPaths;state.anchor=anchor
+            state.click(hit,order:order,extend:held.contains(.shift),toggle:held.contains(.command))
+            let previous=selectionIndexPaths;selectionIndexPaths=state.ids;anchor=state.anchor
             window?.makeFirstResponder(self)
-            selectionIndexPaths = run
-            delegate?.collectionView?(self, didSelectItemsAt: run)
+            let removed=previous.subtracting(state.ids),added=state.ids.subtracting(previous)
+            if !removed.isEmpty {delegate?.collectionView?(self,didDeselectItemsAt:removed)}
+            if !added.isEmpty {delegate?.collectionView?(self,didSelectItemsAt:added)}
             return
         }
         if hit != nil { anchor = hit }

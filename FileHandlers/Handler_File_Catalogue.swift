@@ -2,15 +2,32 @@ import Foundation
 
 final class Handler_File_Catalogue: Handler_File_JSON {
     init() {
-        super.init(FileDescriptor(name: "Catalogue", extensions: ["colcat"], format: "colour-catalogue", versions: [3])) {
+        super.init(FileDescriptor(name: "Catalogue", extensions: ["colcat", "collib"], format: "colour-catalogue", versions: [3])) {
             try Handler_File_JSON.codec(CatalogueFile.self, $0)
         }
     }
     override func references(_ object: [String: Any], at url: URL) throws -> [FileReference] {
-        let root = url.deletingLastPathComponent()
+        try references(object,at:url,resolve:{try Handler_File_Manager.contained($0,under:url.deletingLastPathComponent())})
+    }
+    /// The inventory has already rejected links in this complete tree, so one
+    /// lexical containment check per reference replaces thousands of repeated
+    /// filesystem relationship queries. Other callers use the strict resolver.
+    func referencesInInspectedTree(_ object:[String:Any],at url:URL)throws->[FileReference] {
+        let root=url.deletingLastPathComponent().standardizedFileURL
+        let prefix=root.path+"/"
+        return try references(object,at:url,resolve:{relative in
+            guard !relative.isEmpty,!relative.hasPrefix("/"),!relative.split(separator:"/").contains("..") else {
+                throw failure("A file reference escapes its owning folder.")
+            }
+            let candidate=root.appendingPathComponent(relative).standardizedFileURL
+            guard candidate.path.hasPrefix(prefix) else {throw failure("A file reference escapes its owning folder.")}
+            return candidate
+        })
+    }
+    private func references(_ object:[String:Any],at url:URL,resolve:(String)throws->URL)throws->[FileReference] {
         var result: [FileReference] = []
         func add(_ path: String, id: String?, kind: String) throws {
-            result.append(FileReference(url: try Handler_File_Manager.contained(path, under: root), identity: id, kind: kind))
+            result.append(FileReference(url: try resolve(path), identity: id, kind: kind))
         }
         func assets(_ list: [[String: Any]]) throws {
             for item in list {
