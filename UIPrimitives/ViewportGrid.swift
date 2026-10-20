@@ -508,9 +508,10 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
                 let fillPath = notch.copy() as! NSBezierPath
                 fillPath.close(); Design.card.setFill(); fillPath.fill()
                 notch.lineWidth=1;Design.rule.setStroke();notch.stroke()
-                let notesRect=NSRect(x:tab.midX-42,y:tab.minY+5,width:16,height:16)
-                let tagsRect=NSRect(x:tab.midX-8,y:tab.minY+5,width:16,height:16)
-                let haloRect=NSRect(x:tab.midX+26,y:tab.minY+5,width:16,height:16)
+                let iconY=tab.minY+3
+                let notesRect=NSRect(x:tab.midX-42,y:iconY,width:16,height:16)
+                let tagsRect=NSRect(x:tab.midX-8,y:iconY,width:16,height:16)
+                let haloRect=NSRect(x:tab.midX+26,y:iconY,width:16,height:16)
                 if hasAssetActions {Design.haloMark(in:haloRect,colour:Design.ink);markHits.append((haloRect.insetBy(dx:-6,dy:-4),i))}
                 let hasNote=AssetNotes.key(for:it,palette:notePaletteID,scope:noteScope).map{key in
                     AssetNotes.hasNoteForDrawing(key){[weak self] in self?.setNeedsDisplay(self?.visibleRect ?? .zero)}
