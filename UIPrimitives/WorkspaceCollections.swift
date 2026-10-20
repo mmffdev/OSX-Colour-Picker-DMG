@@ -158,6 +158,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     var onFavourite:((UUID)->Void)?
     var onRename:((UUID,String)->Void)?
     var onTarget:((UUID)->Void)?
+    var onTags:((UUID)->Void)?
     var onRating:((UUID,Int)->Void)?
     var onFlag:((UUID,PaletteReview.Flag?)->Void)?
     private var rowsHeight:CGFloat {(0..<tree.numberOfRows).reduce(0){sum,index in sum+outlineView(tree,heightOfRowByItem:tree.item(atRow:index)!)}}
@@ -352,6 +353,8 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                 cell.target.active=value.isTarget;cell.target.symbol="scope"
                 cell.target.setAccessibilityLabel((value.isTarget ? "Stop Targeting ":"Target New Picks To ")+palette.name)
                 cell.target.run={[weak self] in self?.onTarget?(id);self?.refresh()}
+                cell.tagIcon.setAccessibilityLabel("Tags: "+palette.name)
+                cell.tagIcon.run={[weak self] in self?.onTags?(id)}
                 cell.star.isHidden=false;cell.star.favourite=palette.favourite
                 cell.star.setAccessibilityLabel((palette.favourite ? "Remove Favourite: ":"Add Favourite: ")+palette.name)
                 cell.star.run={[weak self] in self?.onFavourite?(id);self?.refresh()}
@@ -371,6 +374,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                 cell.review.isReadOnly=true
                 cell.star.isHidden=false;cell.star.isEnabled=false
                 cell.target.isHidden=false;cell.target.symbol="scope";cell.target.isEnabled=false
+                cell.tagIcon.isHidden=true
             }
         }
         if !cell.catalogueAction.isHidden {

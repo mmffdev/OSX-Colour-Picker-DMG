@@ -103,6 +103,19 @@ protocol WorkspacePinnedPanelContent:AnyObject {
     var controlsArePinned:Bool {get set}
 }
 
+/// The chevron before a full-rail panel's title, pointing left: pressed, it closes the rail the panel fills.
+final class WorkspaceBackChevron: ClickCursorButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: centre.x+3, y: centre.y+5))
+        path.line(to: NSPoint(x: centre.x+3, y: centre.y-5))
+        path.line(to: NSPoint(x: centre.x-4, y: centre.y))
+        path.close(); (isHighlighted ? Design.ink : Design.quiet).setFill(); path.fill()
+    }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
 final class WorkspacePanelHeader:NSView {
     override var isFlipped:Bool {true}
     override func draw(_ dirtyRect:NSRect){
@@ -125,6 +138,9 @@ final class WorkspacePanel: NSView {
     /// A sole panel fills the dock, then grows with its contents into the rail's outer scroll.
     var fillsRail=false {didSet{needsLayout=true;rail?.arrange()}}
     var pinsHeader=false {didSet{rail?.arrange()}}
+    /// A full-rail panel that closes its rail: the chevron before the title runs this.
+    var closeAction:(()->Void)? {didSet{back.isHidden=closeAction == nil;needsLayout=true}}
+    private let back=WorkspaceBackChevron()
     var headerIsPinned=false {didSet{needsLayout=true}}
     fileprivate let headerSurface:NSView=WorkspacePanelHeader()
     var collapsed = false { didSet { disclosure.state = collapsed ? .off : .on; needsLayout = true; rail?.arrange() } }
@@ -175,8 +191,10 @@ final class WorkspacePanel: NSView {
         headerActionButton.appearance=NSAppearance(named:.aqua)
         headerActionButton.contentTintColor=Design.quiet
         headerActionButton.target=self; headerActionButton.action=#selector(runHeaderAction)
+        back.isBordered=false;back.isHidden=true;back.target=self;back.action=#selector(runClose)
+        back.toolTip="Close";back.setAccessibilityLabel("Close \(title)")
         addSubview(headerSurface)
-        [disclosure,titleButton,filledTitle,headerActionButton,grip,help].forEach{headerSurface.addSubview($0)}
+        [disclosure,titleButton,filledTitle,headerActionButton,grip,help,back].forEach{headerSurface.addSubview($0)}
         addSubview(resizeGrip)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -189,6 +207,7 @@ final class WorkspacePanel: NSView {
         needsLayout=true
     }
     @objc private func runHeaderAction() { headerAction?() }
+    @objc private func runClose() { closeAction?() }
     @objc private func toggle() { collapsed.toggle() }
     override func layout() {
         super.layout()
@@ -201,9 +220,12 @@ final class WorkspacePanel: NSView {
         grip.frame = NSRect(x: bounds.width-64, y: Help_HexButton.opticalOffset, width: 28, height: Self.headerHeight)
         disclosure.isHidden=fillsRail;grip.isHidden=fillsRail || !draggable;titleButton.isHidden=fillsRail;filledTitle.isHidden = !fillsRail
         if fillsRail {
-            titleButton.frame=NSRect(x:16,y:0,width:max(20,bounds.width-64),height:Self.headerHeight)
+            // The chevron takes the disclosure's place, and the title follows it as it follows the disclosure.
+            back.frame=disclosure.frame
+            let titleX:CGFloat=closeAction == nil ? 16:30
+            titleButton.frame=NSRect(x:titleX,y:0,width:max(20,bounds.width-48-titleX),height:Self.headerHeight)
             let labelHeight=filledTitle.intrinsicContentSize.height
-            filledTitle.frame=NSRect(x:16,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-92),height:labelHeight)
+            filledTitle.frame=NSRect(x:titleX,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-76-titleX),height:labelHeight)
             filledTitle.textColor=Design.ink
             headerActionButton.frame=NSRect(x:bounds.width-64,y:5+Help_HexButton.opticalOffset,width:24,height:24)
         }

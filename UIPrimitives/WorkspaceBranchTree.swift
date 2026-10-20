@@ -111,10 +111,12 @@ final class WorkspaceBranchTree: NSOutlineView {
         var leadingDisclosure=false
         let catalogueAction=PaletteAssetIcon(frame:.zero)
         let target=PaletteAssetIcon(frame:.zero)
+        /// Tags, between the gear and the count on a palette row; opens the palette's tags in railInfo.
+        let tagIcon=PaletteAssetIcon(frame:.zero)
         let review=PaletteReviewControls(frame:.zero)
         var spectrumColours:[NSColor]=[] {didSet{needsDisplay=true}}
         var twoLines=false {didSet{needsLayout=true;needsDisplay=true}}
-        var isPalette=false {didSet{target.isHidden = !isPalette;review.isHidden = !isPalette;needsLayout=true}}
+        var isPalette=false {didSet{target.isHidden = !isPalette;tagIcon.isHidden = !isPalette;review.isHidden = !isPalette;needsLayout=true}}
         var renamePalette:((String)->Void)?
         private var editingName=false
         override var isFlipped:Bool{true}
@@ -126,7 +128,7 @@ final class WorkspaceBranchTree: NSOutlineView {
             let hit=super.hitTest(point)
             if !grip.isHidden,grip.frame.insetBy(dx:-4,dy:-7).contains(convert(point,from:superview)){return self}
             guard paletteDrag != nil,let hit else{return hit}
-            if hit === star || hit === colourButton || hit === target || hit === pin || hit.isDescendant(of:review) || hit is InlineName {return hit}
+            if hit === star || hit === colourButton || hit === target || hit === tagIcon || hit === pin || hit.isDescendant(of:review) || hit is InlineName {return hit}
             return self
         }
         override func mouseDown(with event:NSEvent){
@@ -148,7 +150,7 @@ final class WorkspaceBranchTree: NSOutlineView {
             if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {selectPalette?()}
         }
         func activate(at point:NSPoint)->Bool {
-            for button in [star,colourButton,target,catalogueAction,pin] as [NSButton] where !button.isHidden && button.frame.contains(point){button.performClick(nil);return true}
+            for button in [star,colourButton,target,tagIcon,catalogueAction,pin] as [NSButton] where !button.isHidden && button.frame.contains(point){button.performClick(nil);return true}
             if isPalette,review.frame.contains(point){return review.activate(at:convert(point,to:review))}
             return false
         }
@@ -191,6 +193,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         override init(frame:NSRect){
             super.init(frame:frame);addSubview(grip);grip.isHidden=true;addSubview(pin);pin.isHidden=true;addSubview(star);addSubview(colourButton);colourButton.isHidden=true
             addSubview(target);addSubview(review);target.isHidden=true;review.isHidden=true
+            addSubview(tagIcon);tagIcon.isHidden=true;tagIcon.symbol="tag";tagIcon.toolTip="Tags";tagIcon.setAccessibilityLabel("Tags")
             addSubview(catalogueAction);catalogueAction.isHidden=true
             countLabel.font=Design.Text.body.font();countLabel.alignment = .right;countLabel.isHidden=true;addSubview(countLabel)
         }
@@ -205,9 +208,10 @@ final class WorkspaceBranchTree: NSOutlineView {
             let reviewWidth=PaletteReviewControls.width
             let pinWidth:CGFloat=pin.isHidden ? 0:28
             if trailingGearAndCount {
-                let countSlot:CGFloat=40,gearSlot:CGFloat=26
-                let gearX=bounds.width-countSlot-gearSlot
+                let countSlot:CGFloat=40,gearSlot:CGFloat=26,tagSlot:CGFloat=tagIcon.isHidden ? 0:26
+                let gearX=bounds.width-countSlot-tagSlot-gearSlot
                 catalogueAction.frame=NSRect(x:gearX,y:0,width:gearSlot,height:twoLines ? 28:bounds.height)
+                tagIcon.frame=NSRect(x:gearX+gearSlot,y:0,width:tagSlot,height:twoLines ? 28:bounds.height)
                 countLabel.frame=NSRect(x:bounds.width-countSlot,y:((twoLines ? CGFloat(28):bounds.height)-height)/2,width:countSlot-5,height:height)
                 if twoLines {
                     review.frame=NSRect(x:bounds.width-reviewWidth,y:28,width:reviewWidth,height:28)
@@ -380,6 +384,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         cell.colourButton.colour=background(index,item:item)
         cell.star.contentTintColor=cell.textField?.textColor;cell.star.needsDisplay=true
         cell.target.ink=cell.textField?.textColor ?? Design.ink;cell.review.ink=cell.textField?.textColor ?? Design.ink
+        cell.tagIcon.ink=cell.textField?.textColor ?? Design.ink
         cell.catalogueAction.ink=cell.textField?.textColor ?? Design.ink
         cell.pin.ink=cell.textField?.textColor ?? Design.ink
         cell.grip.ink=cell.textField?.textColor ?? Design.ink

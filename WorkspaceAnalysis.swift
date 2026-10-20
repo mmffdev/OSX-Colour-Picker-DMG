@@ -814,8 +814,8 @@ final class WorkspaceExpandButton:ClickCursorButton {
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
 }
 
-/// Palette spectra use the same master colours and strip geometry in both analysis panes.
-private enum PaletteSpectrum {
+/// Palette spectra use the same master colours and strip geometry in both analysis panes and in railInfo.
+enum PaletteSpectrum {
     static func draw(_ colours:[NSColor],in rect:NSRect){
         guard !colours.isEmpty else{return}
         let width=rect.width/CGFloat(colours.count)

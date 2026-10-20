@@ -139,12 +139,27 @@ extension LibraryController {
     }
 }
 
+/// A window that can show the tags in railInfo instead of the modal: the Studio frame.
+protocol TagRailHost: AnyObject {
+    /// True when the host took the request and opened the rail.
+    func openTagRail(_ request: TagRequest) -> Bool
+}
+
 /// The panel the halo's Tags opens: the tags as words separated by commas, and the scope a new one takes, from a house dropdown.
+/// On the Studio window the same request opens railInfo beside rail1 instead; the modal stays for the classic window.
 enum TagPanel {
+    /// The frames that can open railInfo; the first that takes a request wins, and the modal opens when none does.
+    static let hosts = NSHashTable<AnyObject>.weakObjects()
+    private static func rail(_ subject: TagRequest.Subject, over window: NSWindow?) -> Bool {
+        let request = TagRequest(subject: subject, window: window)
+        for host in hosts.allObjects { if (host as? TagRailHost)?.openTagRail(request) == true { return true } }
+        return false
+    }
     static func palettes(_ ids:[UUID],library:LibraryController,over window:NSWindow?) {
         if ids.count == 1,let id=ids.first {palette(id,library:library,over:window);return}
         let records=ids.compactMap{library.library.swatch($0)}
         guard !records.isEmpty else {return}
+        if rail(.palettes(ids), over: window) { return }
         let common=records.dropFirst().reduce(Set(records[0].tagList)){$0.intersection($1.tagList)}
         let within=Set(records.compactMap(\.projectID))
         ask(title:"Tags for \(records.count) Selected Palettes",note:"Replace the tags on all \(records.count) selected palettes. Initially showing their shared tags. New tags use the chosen scope.",value:common.sorted().joined(separator:", "),within:within,start:.global,library:library,over:window) {tags,scope in
@@ -156,6 +171,7 @@ enum TagPanel {
         let lib = library.library
         guard let s = lib.swatch(id) else { Diagnostics.log("tags", "no palette for \(id)"); return }
         Diagnostics.log("tags", "panel for \(s.name)")
+        if rail(.palette(id), over: window) { return }
         // The scopes this palette can wear: Global, its member and the group its member is in. It starts on its own member.
         let within = Set([s.projectID].compactMap { $0 })
         let start: TagScope = s.projectID.map { .member($0) } ?? .global
@@ -167,6 +183,7 @@ enum TagPanel {
     static func colours(_ hexes: [String], library: LibraryController, over window: NSWindow?) {
         let lib = library.library
         guard let first = hexes.first else { return }
+        if rail(.colours(hexes), over: window) { return }
         let now = lib.colours.first { $0.hex == first }?.tags ?? []
         let within = lib.projects(holdingAll: hexes)
         let start: TagScope = within.count == 1 ? .member(within.first!) : .global

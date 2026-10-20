@@ -158,6 +158,8 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     var onDrop:((UUID,LibraryRail.DropDestination)->Void)?
     var onRename:((UUID,String)->Void)?
     var onTarget:((UUID)->Void)?
+    /// The tag icon on a palette row: the palette's tags, in railInfo.
+    var onTags:((UUID)->Void)?
     var onRating:((UUID,Int)->Void)?
     var onFlag:((UUID,PaletteReview.Flag?)->Void)?
     private var assets=Library()
@@ -629,6 +631,9 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                 cell.target.setAccessibilityLabel((isTarget ? "Stop Targeting ":"Target New Picks To ")+palette.name)
                 cell.target.toolTip=isTarget ? "New Picks Go Here":"Target For New Picks"
                 cell.target.run={ [weak self] in self?.onTarget?(id) }
+                cell.tagIcon.setAccessibilityLabel("Tags: "+palette.name)
+                cell.tagIcon.toolTip="Tags"
+                cell.tagIcon.run={ [weak self] in self?.onTags?(id) }
                 cell.review.onRating={ [weak self] rating in self?.onRating?(id,rating) }
                 cell.review.onFlag={ [weak self] flag in self?.onFlag?(id,flag) }
             }

@@ -108,6 +108,10 @@ final class StudioWindowController: NSWindowController {
         c.showWindow(nil)
         c.window?.makeKeyAndOrderFront(nil)
         library.window = c.window   // errors and prompts come up on this window
+        // --tag-rail "<palette>" opens railInfo on that palette's tags, for looking at the rail straight away.
+        if let i = args.firstIndex(of: "--tag-rail"), args.indices.contains(i + 1), let s = library.library.swatches.first(where: { $0.name == args[i + 1] }) {
+            DispatchQueue.main.async { [weak c, weak library] in guard let c, let library else { return }; TagPanel.palette(s.id, library: library, over: c.window) }
+        }
         c.frame.enableSessionMemory();c.startSessionMemory()
         // The splash that sets up the work (TH-299): over the whole window when the catalogue has no structure yet, or when --splash asks; --no-splash keeps it away.
         // While the splash is being designed, the loop keeps the app in it: every launch opens on it, and Set starts it again instead of
@@ -127,6 +131,7 @@ final class StudioWindowController: NSWindowController {
         if gridKey == nil {
             gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c, weak library] e in
                 guard let c = c, e.window === c.window else { return e }
+                if e.keyCode == 53, !Overlays.any, c.window?.attachedSheet == nil, c.frame.escapeInfoRail() { return nil }
                 if e.keyCode == 53, !Overlays.any, c.window?.attachedSheet == nil, c.frame.closeExpandedPanel() { return nil }
                 if e.keyCode == 53, !Overlays.any, (c.window?.firstResponder as? ShortcutsSettings)?.isRecordingShortcut != true, c.frame.leaveSettings() { return nil }
                 guard !(c.window?.firstResponder is NSText), !Overlays.any else { return e }
@@ -542,6 +547,10 @@ final class StudioFrame: NSView {
     private var wideLibraryRailVisible = true
     private var wideAnalysisRailVisible = true
     private let railProfile=WorkspaceRail(scrollbarOnLeft:false)
+    /// railInfo: the rail right of rail1 that is nothing until a pane opens it and pushes the viewport across (StudioInfoRail.swift).
+    private let infoRail=WorkspaceRail(scrollbarOnLeft:false)
+    private var infoOpen:CGFloat=0,infoGoal:CGFloat=0
+    private var infoPane:(NSView & InfoRailContent)?
     private let profileEditor=ProfileRailPane(frame:.zero)
     private let profileHeader=WorkspacePanelHeader(frame:.zero)
     private let profileHeaderContent=NSView(frame:.zero)
@@ -924,7 +933,7 @@ final class StudioFrame: NSView {
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
-        for view in [leftPanelRail, rightPanelRail, railProfile, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
+        for view in [leftPanelRail, infoRail, rightPanelRail, railProfile, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
         let cataloguesPanel=WorkspacePanel(id: "catalogues", title: WorkspaceSidebarStructure.title, content: cataloguePane,resizable:false)
         cataloguePane.setCatalogueAction { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
@@ -968,6 +977,9 @@ final class StudioFrame: NSView {
         let proofPanel=WorkspacePanel(id:"railProfile",title:"Viewing Proof Profiles",content:profileEditor,resizable:false,draggable:false)
         proofPanel.fillsRail=true;proofPanel.setHeaderAction(symbol:"xmark",title:"Close Viewing Proof Profiles"){[weak self] in self?.profileGoal=0;if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion{self?.profileOpen=0;self?.needsLayout=true}else{self?.slide()}};railProfile.add(proofPanel)
         NotificationCenter.default.addObserver(self,selector:#selector(openProfileRail(_:)),name:.openProfileRail,object:nil)
+        TagPanel.hosts.add(self)
+        cataloguePane.onTags = { [weak self] id in guard let self else{return};TagPanel.palette(id,library:self.library,over:self.window) }
+        collectionsPane.onTags = { [weak self] id in guard let self else{return};TagPanel.palette(id,library:self.library,over:self.window) }
         let bloomPanel=WorkspacePanel(id:"bloom",title:"Delta Bloom · Output Difference",content:bloomPane,resizable:false)
 
         bloomPanel.setHeaderAction(symbol:"slider.horizontal.3",title:"Configure Viewing Proof"){[weak self] in self?.showProfileRail()};rightPanelRail.add(bloomPanel)
@@ -1555,7 +1567,7 @@ final class StudioFrame: NSView {
     private func slide() {
         if embeddedPage {open=goal;needsLayout=true;return}
         header.historyOpen = goal.history > 0
-        guard open != goal || profileOpen != profileGoal else { needsLayout = true; return }
+        guard open != goal || profileOpen != profileGoal || infoOpen != infoGoal else { needsLayout = true; return }
         guard slideClock == nil else { return }
         page.layoutFrozen = true
         lastSlide = Date()
@@ -1565,11 +1577,12 @@ final class StudioFrame: NSView {
             self.lastSlide = now
             func toward(_ v: CGFloat, _ g: CGFloat) -> CGFloat { v < g ? min(g, v + step) : max(g, v - step) }
             self.profileOpen=toward(self.profileOpen,self.profileGoal)
+            self.infoOpen=toward(self.infoOpen,self.infoGoal)
             self.open = (toward(self.open.rail1, self.goal.rail1), toward(self.open.rail2, self.goal.rail2), toward(self.open.history, self.goal.history))
             self.needsLayout = true
             self.layoutSubtreeIfNeeded()
             self.needsDisplay = true
-            if self.open == self.goal && self.profileOpen == self.profileGoal {
+            if self.open == self.goal && self.profileOpen == self.profileGoal && self.infoOpen == self.infoGoal {
                 t.invalidate(); self.slideClock = nil
                 let transition = CATransition(); transition.type = .fade; transition.duration = 0.12
                 if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { self.page.layer?.add(transition, forKey: "RailContentReflow") }
@@ -1608,7 +1621,7 @@ final class StudioFrame: NSView {
         super.layout()
         let w = bounds.width, h = bounds.height
         if embeddedPage {
-            for view in [header,rail1,rail2,history,footer,strip,profileHeader,printPaletteRail,leftPanelRail,rightPanelRail,railProfile,intakeSourceRail,intakeTargetRail,filmstrip,designerWorkspace,bloomWorkspace,overlay,settingsCurtainClip] as [NSView] {view.isHidden=true}
+            for view in [header,rail1,rail2,history,footer,strip,profileHeader,printPaletteRail,leftPanelRail,infoRail,rightPanelRail,railProfile,intakeSourceRail,intakeTargetRail,filmstrip,designerWorkspace,bloomWorkspace,overlay,settingsCurtainClip] as [NSView] {view.isHidden=true}
             arrangePageStack(in:bounds);return
         }
         pageLayout.isHidden = !libraryLayoutAvailable
@@ -1639,11 +1652,15 @@ final class StudioFrame: NSView {
         if canvasWorkspace {
             let adaptive = !imageIntakeWorkspace && place != .designer
             let rails = WorkspaceResponsiveGeometry.rails(width:w, selection:compactRailSelection, library:wideLibraryRailVisible, analysis:wideAnalysisRailVisible)
-            let left = adaptive ? rails.0:A.railWidth, right = adaptive ? rails.1:A.railWidth
-            leftPanelRail.isHidden = leftPanelRail.isHidden || left == 0
+            let dock = adaptive ? rails.0:A.railWidth, right = adaptive ? rails.1:A.railWidth
+            leftPanelRail.isHidden = leftPanelRail.isHidden || dock == 0
             rightPanelRail.isHidden = rightPanelRail.isHidden || right == 0
             railProfile.isHidden = rightPanelRail.isHidden || profileOpen == 0
-            viewportFooter.setRailControls(library:left > 0, analysis:right > 0, visible:adaptive)
+            // railInfo opens right of rail1 and pushes everything from the actionbar across; `left` is where that starts.
+            infoRail.isHidden = !adaptive || infoOpen == 0
+            let infoWidth:CGFloat = infoRail.isHidden ? 0:(A.railWidth*infoOpen).rounded()
+            let left = dock+infoWidth
+            viewportFooter.setRailControls(library:dock > 0, analysis:right > 0, visible:adaptive)
             let proofWidth = right > 0 ? min(A.railWidth,max(0,w-left-right-280))*profileOpen:0
             let profileHeight:CGFloat=profileHeader.isHidden ? 0:viewportHeader.channels.headerHeight(forWidth:max(0,w-left-right-proofWidth-34))
             let intakeBarHeight:CGFloat=imageIntakeWorkspace ? page.actionbarHeight(for:max(0,w-left-right-proofWidth-2)):0
@@ -1652,12 +1669,13 @@ final class StudioFrame: NSView {
             footer.frame=NSRect(x:0,y:h-A.footer,width:w,height:A.footer)
             footer.grid=(A.column(1,in:w),A.columnWidth(in:w),A.column(5,in:w))
             header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
-            header.grid = (16, A.columnWidth(in: w)); header.railEdge = imageIntakeWorkspace ? A.railWidth:left
+            header.grid = (16, A.columnWidth(in: w)); header.railEdge = imageIntakeWorkspace ? A.railWidth:dock
             let railTop=A.header+1
             profileHeader.frame=NSRect(x:left+1,y:railTop,width:w-left-right-proofWidth-2,height:profileHeight)
             profileHeaderContent.frame=NSRect(x:16,y:0,width:max(0,profileHeader.bounds.width-32),height:profileHeight)
             viewportHeader.channels.frame=profileHeaderContent.bounds
-            leftPanelRail.frame = NSRect(x: 0, y: railTop, width: left, height: h-railTop-bottom)
+            leftPanelRail.frame = NSRect(x: 0, y: railTop, width: dock, height: h-railTop-bottom)
+            infoRail.frame = NSRect(x: dock, y: railTop, width: infoWidth, height: h-railTop-bottom)
             rightPanelRail.frame = NSRect(x: w-right, y: railTop, width: right, height: h-railTop-bottom)
             railProfile.frame=NSRect(x:w-right-proofWidth,y:railTop,width:proofWidth,height:h-railTop-bottom)
             intakeSourceRail.frame=leftPanelRail.frame
@@ -1688,6 +1706,7 @@ final class StudioFrame: NSView {
             return
         }
         page.compactWorkspace=false
+        infoRail.isHidden=true
         header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
         let top = A.header + 1, bodyH = h - A.header - A.footer - 2
@@ -1769,6 +1788,7 @@ final class StudioFrame: NSView {
         if canvasWorkspace {
             hairline(x:0,y:A.header,width:w)
             fill(NSRect(x:leftPanelRail.frame.maxX,y:A.header,width:1,height:leftPanelRail.frame.height),Design.rule)
+            if !infoRail.isHidden {fill(NSRect(x:infoRail.frame.maxX,y:A.header,width:1,height:infoRail.frame.height),Design.rule)}
             fill(NSRect(x:rightPanelRail.frame.minX-1,y:A.header,width:1,height:rightPanelRail.frame.height),Design.rule)
             return
         }
@@ -1991,7 +2011,7 @@ final class StudioFrame: NSView {
                 panel.collapsed=saved.closed;panel.preferredHeight=max(0,CGFloat(saved.height));rails[saved.rail].add(panel,at:saved.order)
             }
             histogramPane.layoutSelection=state.histogram;expandedHistogram.copyConfiguration(from:histogramPane)
-            profileGoal=0;profileOpen=0
+            profileGoal=0;profileOpen=0;infoGoal=0;infoOpen=0
             expanded=state.expanded;page.expanded=state.pageExpanded
             if state.rails.count == 3 {slideClock?.invalidate();slideClock=nil;goal=(CGFloat(state.rails[0]),CGFloat(state.rails[1]),CGFloat(state.rails[2]));open=goal}
             if let rect=state.window?.rect,rect.width.isFinite,rect.height.isFinite,rect.minX.isFinite,rect.minY.isFinite,let window,let screen=NSScreen.screens.first(where:{$0.visibleFrame.intersects(rect)}) ?? window.screen {
@@ -3249,6 +3269,31 @@ final class StudioFrame: NSView {
         bloomWorkspace.present(kind == .bloom ? expandedBloom:expandedHistogram)
         refreshAnalysis();needsLayout=true
     }
+    // ---------- railInfo ----------
+
+    /// Opens railInfo beside rail1 on `pane`, in place of whatever it held; the rail slides open and pushes the viewport across.
+    func showInfoRail(_ pane:NSView & InfoRailContent,title:String="Options") {
+        for old in infoRail.panels {infoRail.remove(old)}
+        let panel=WorkspacePanel(id:"railInfo",title:title,content:pane,resizable:false,draggable:false)
+        panel.fillsRail=true
+        panel.closeAction={[weak self] in self?.closeInfoRail()}
+        infoRail.add(panel);infoPane=pane
+        infoGoal=1
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {infoOpen=1;needsLayout=true} else {slide()}
+    }
+    func closeInfoRail() {
+        guard infoGoal > 0 else{return}
+        infoGoal=0
+        if window?.firstResponder is NSText {window?.makeFirstResponder(nil)}
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {infoOpen=0;needsLayout=true} else {slide()}
+    }
+    /// Escape while railInfo is open: the pane takes it first (an edit goes back to its list), then the rail closes.
+    @discardableResult func escapeInfoRail()->Bool {
+        guard infoGoal > 0,!embeddedPage else{return false}
+        if infoPane?.escapeInfoRail() == true {return true}
+        closeInfoRail();return true
+    }
+
     @discardableResult func closeExpandedPanel()->Bool {
         guard expandedAnalysis != nil else{return false}
         expandedAnalysis=nil;page.expandedPanelTitle=nil;window?.makeFirstResponder(page.grid);needsLayout=true;return true
@@ -5148,4 +5193,16 @@ private final class SettingsRailCurtain: NSView {
     override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
     override func scrollWheel(with event: NSEvent) { }
+}
+
+// ---------- railInfo hosts the tags ----------
+
+extension StudioFrame: TagRailHost {
+    /// The halo's Tags on this window open railInfo on the Tags pane, the pane turning to the new asset when it is already open.
+    func openTagRail(_ request:TagRequest)->Bool {
+        guard !embeddedPage,canvasWorkspace,!imageIntakeWorkspace,place != .designer,let window,request.window === window else{return false}
+        if let pane=infoPane as? TagsInfoPane,infoGoal > 0 {pane.show(request)}
+        else {showInfoRail(TagsInfoPane(request:request,library:library))}
+        return true
+    }
 }
