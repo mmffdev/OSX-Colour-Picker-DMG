@@ -6,6 +6,7 @@ This is the start point for every native UI task. [styles.md](../styles.md) owns
 |---|---|
 | App header, global Actionbar, rails, viewport stack, tabs, barberpole or footers | [Shell and viewport](c_c_ui_shell.md) |
 | Docked panels, subsection headers, panel content, resize/scroll or trees | [Panels and trees](c_c_ui_panels.md) |
+| Palette or other asset lowestnode inside a tree | [Lowestnode](c_c_ui_lowestnode.md) |
 | Grids, cards, palettes, swatches, previews or selection | [Assets and grids](c_c_ui_assets.md) |
 | Buttons, dropdowns, filters, menus, overlays or interaction states | [Controls](c_c_ui_controls.md) |
 | Colour, type, rhythm or motion | [styles.md](../styles.md), then its focused style contract |

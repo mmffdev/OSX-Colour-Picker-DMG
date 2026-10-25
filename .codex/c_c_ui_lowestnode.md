@@ -1,0 +1,9 @@
+# Lowestnode — shared Codex and Claude layout contract
+
+Parent: [UI framework](c_ui_framework.md). This is the canonical rule for the lowest asset nodes rendered by `WorkspaceBranchTree.Cell` in Library, Favourites and Collections. Apply it to every projection of a palette, including imported palette previews; do not fork a separate row layout for one tree.
+
+A palette lowestnode is 64 pt high: 4 pt above its 28 pt upper row, a 28 pt lower row, then 4 pt below. Its row surface is inset 3 pt; with 2 pt between row frames, rounded cards have an 8 pt visible gap. The text and glyphs centre in their lines, leaving balanced visual padding above and below. The upper row holds the palette icon and the longest name that fits, followed by the gear, tag and right-aligned colour count as one tight trailing group. The count slot grows only when its text requires it. The gear and tag keep separate hit targets. Leaf icons start 8 pt inside the card, and counts end 8 pt inside its right edge.
+
+The lower row holds favourite, optional focus pin, target, spectrum, then the five rating stars and flag. Place the spectrum between the target's hit area and the first visible rating star, with spacing at both ends; centre it vertically on the lower 28 pt row. Derive its available width from those controls and omit it when no width remains. Do not reserve upper-row name space for the spectrum. Keep the row's connector, left Collection colour border, palette actions, accessibility and drag behaviour intact.
+
+A font lowestnode reuses this 64 pt cell and the same favourite, tag, gear, five stars and flag. Its title is typeset in the font family. The target and spectrum region stays empty; font drag carries a stable font ID to product Fonts buckets. Installed fonts remain system-owned. Collection colour markers follow the same `Font/<family>` membership key as the collection model.

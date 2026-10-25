@@ -51,6 +51,18 @@ class SwissBlockTextField:NSTextField {
     }
 }
 
+/// The bordered metadata-edit field, shared by rail editors and preset names.
+func styleMetadataInput(_ field:NSTextField) {
+    field.font=Design.Text.body.font();field.textColor=Design.ink
+    field.backgroundColor=Design.card;field.drawsBackground=true
+    field.isBordered=false;field.focusRingType = .none
+    field.wantsLayer=true;field.layer?.borderColor=Design.rule.cgColor
+    field.layer?.borderWidth=1;field.layer?.cornerRadius=4
+    if let placeholder=field.placeholderString {
+        field.placeholderAttributedString=NSAttributedString(string:placeholder,attributes:[.foregroundColor:Design.quiet,.font:Design.Text.body.font()])
+    }
+}
+
 /// Multiline counterpart for editable descriptions.
 final class SwissBlockTextView:NSTextView {
     private var pulse:Timer?, visibleCaret=true
@@ -311,6 +323,12 @@ final class SwissDropdown: ClickCursorView, Overlay {
         func setLeadingSymbols(_ symbols:[Int:(String,NSColor)]) {
             for (index,row) in menuRows.enumerated(){row.leadingSymbol=symbols[index];row.needsDisplay=true}
         }
+        func setFontPreviews(_ fonts:[Int:NSFont]) {
+            for (index,row) in menuRows.enumerated(){row.fontPreview=fonts[index];row.needsDisplay=true}
+        }
+        func setPillBorders(_ colours:[Int:NSColor]) {
+            for (index,row) in menuRows.enumerated(){row.pillBorderColor=colours[index];row.needsDisplay=true}
+        }
         /// Compact tool menus keep their spoken names and hover hints while showing only icons.
         func setIconsOnly(){for row in menuRows{row.iconsOnly=true;row.toolTip=row.accessibleTitle;row.needsDisplay=true}}
         func highlight(_ index: Int) { for (i, row) in menuRows.enumerated() { row.setHover(i == index) }; if menuRows.indices.contains(index) { menuRows[index].scrollToVisible(menuRows[index].bounds) } }
@@ -424,6 +442,8 @@ final class SwissDropdown: ClickCursorView, Overlay {
             var leadingSymbol:(String,NSColor)?
             var iconsOnly=false
             var warning=false
+            var fontPreview:NSFont?
+            var pillBorderColor:NSColor?
             var literalTitle = false
             var forcedDivider = false
             var hasSubmenu = false
@@ -458,7 +478,7 @@ final class SwissDropdown: ClickCursorView, Overlay {
                     image.draw(in:NSRect(x:(bounds.width-size.width)/2,y:(bounds.height-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
                     return
                 }
-                let t = Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
+                let t=Design.attributed(title, .body, colour: enabled ? Design.ink : Design.soft)
                 if !spectrum.isEmpty { SwissDropdown.drawSpectrum(spectrum, in: NSRect(x: 14, y: 8, width: max(0, bounds.width - 44), height: 7)) }
                 if warning {
                     NSGraphicsContext.saveGraphicsState()
@@ -469,8 +489,23 @@ final class SwissDropdown: ClickCursorView, Overlay {
                     let image=RowMark.image(name,colour:colour),size=image.size
                     image.draw(in:NSRect(x:14,y:(bounds.height-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
                 }
-                let textX:CGFloat=leadingSymbol == nil && !warning ? 14:36
-                t.draw(x:textX,baseline:(bounds.height-t.size().height)/2+t.baselineFont.ascender+(spectrum.isEmpty ? 0:6),width:bounds.width-textX-14-(chosen || hasSubmenu ? 16:0)-CGFloat(actionButtons.count)*28)
+                var textX:CGFloat=leadingSymbol == nil && !warning ? 14:36
+                let sampleStart:CGFloat=fontPreview == nil ? bounds.width:bounds.width*0.55
+                var textWidth=max(0,sampleStart-textX-8)
+                if let pillBorderColor {
+                    let pillWidth=min(ceil(t.size().width)+18,max(0,sampleStart-48))
+                    let pill=NSRect(x:(sampleStart-pillWidth)/2,y:(bounds.height-22)/2,width:pillWidth,height:22)
+                    pillBorderColor.setStroke()
+                    let outline=NSBezierPath(roundedRect:pill.insetBy(dx:0.75,dy:0.75),xRadius:11,yRadius:11);outline.lineWidth=1.5;outline.stroke()
+                    textX=pill.minX+max(8,(pill.width-t.size().width)/2)
+                    textWidth=max(0,pill.maxX-textX-8)
+                }
+                t.draw(x:textX,baseline:(bounds.height-t.size().height)/2+t.baselineFont.ascender+(spectrum.isEmpty ? 0:6),width:textWidth)
+                if let fontPreview {
+                    let sampleFont=NSFont(descriptor:fontPreview.fontDescriptor,size:18) ?? fontPreview
+                    let sample=NSAttributedString(string:"Sample",attributes:[.font:sampleFont,.foregroundColor:enabled ? Design.ink:Design.soft])
+                    sample.draw(x:sampleStart,baseline:(bounds.height-sample.size().height)/2+sample.baselineFont.ascender,width:max(0,bounds.width-sampleStart-12-CGFloat(actionButtons.count)*28))
+                }
                 if hasSubmenu {
                     let arrow = Design.attributed("›", .bodyStrong, colour: enabled ? Design.ink : Design.soft)
                     arrow.draw(at: NSPoint(x: bounds.width - 24, y: (bounds.height - arrow.size().height) / 2))
@@ -933,7 +968,7 @@ final class InlineName: NSTextField, NSTextFieldDelegate {
     private var finished = false
 
     /// `baseline` is the line the host draws the name on, in the host's flipped coordinates; `at` is the click, so the cursor lands in the word under it.
-    static func edit(_ name: String, style: Design.Text, in host: NSView, x: CGFloat, baseline: CGFloat, width: CGFloat, at p: NSPoint, colour:NSColor=Design.ink, then: @escaping (String?) -> Void) {
+    static func edit(_ name: String, style: Design.Text, in host: NSView, x: CGFloat, baseline: CGFloat, width: CGFloat, at p: NSPoint, colour:NSColor=Design.ink, selectAll:Bool=false, then: @escaping (String?) -> Void) {
         let f = InlineName(string: name)
         f.done = then
         f.isBordered = false
@@ -953,8 +988,11 @@ final class InlineName: NSTextField, NSTextFieldDelegate {
             tv.insertionPointColor = colour
             // Selected words are paper on ink, not the system's blue.
             tv.selectedTextAttributes = [.backgroundColor: Design.ink, .foregroundColor: Design.paper]
-            let i = tv.characterIndexForInsertion(at: tv.convert(p, from: host))
-            tv.setSelectedRange(NSRange(location: min(i, (name as NSString).length), length: 0))
+            if selectAll {tv.setSelectedRange(NSRange(location:0,length:(name as NSString).length))}
+            else {
+                let i = tv.characterIndexForInsertion(at: tv.convert(p, from: host))
+                tv.setSelectedRange(NSRange(location: min(i, (name as NSString).length), length: 0))
+            }
         }
     }
     func controlTextDidEndEditing(_ obj: Notification) { finish(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }

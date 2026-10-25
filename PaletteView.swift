@@ -1053,6 +1053,8 @@ final class PaletteViewController: NSViewController, NSCollectionViewDataSource,
         haloHex = hex
         halo.caption = Prefs.showNames ? library.library.name(of: hex, in: paletteID) : ColourFormat.hex.text(hex, lowercase: Prefs.lowercaseHex)
         halo.actions = SwatchMenu.ring(for: hex, in: paletteID, library: library, editTags: onEditTags)
+        let insertAt=halo.actions.firstIndex(where:{$0.id == "add-to"}).map{$0+1} ?? halo.actions.count
+        halo.actions.insert(HaloAction(id:"custom-colours",label:"Add To Custom Colours",symbol:"eyedropper",onSelect:{_ = WorkspaceCustomColours.add([hex])}),at:insertAt)
         halo.open(over: trigger)
     }
 
@@ -1234,6 +1236,7 @@ enum SwatchMenu {
         if !addTo.items.isEmpty { addTo.addItem(.separator()) }
         add(addTo, "New Palette", #selector(Handler.addToNew))
         menu.addItem(withTitle: "Add to Palette", action: nil, keyEquivalent: "").submenu = addTo
+        add(menu,"Add To Custom Colours",#selector(Handler.addToCustomColours))
 
         if hexes.count == 1 {
             let make = NSMenu()
@@ -1342,6 +1345,7 @@ enum SwatchMenu {
         }
         @objc func addTo(_ s: NSMenuItem) { if let id = s.representedObject as? UUID { library.add(hexes, to: id) } }
         @objc func addToNew() { library.createPalette(named: "", hexes: hexes, rename: true) }
+        @objc func addToCustomColours() { _ = WorkspaceCustomColours.add(hexes) }
         @objc func make(_ s: NSMenuItem) {
             if let raw = s.representedObject as? String, let h = Harmony(rawValue: raw) { library.makePalette(h, from: hexes[0]) }
         }

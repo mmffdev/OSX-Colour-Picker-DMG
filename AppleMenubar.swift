@@ -33,26 +33,32 @@ final class AppleMenubar: NSObject {
     private func refresh() {
         guard let button=item.button else{return}
         let history=Array(ColourCopies.recent.suffix(Prefs.appleMenubarCount))
-        let key=([String(Prefs.appleMenubarSwatches),String(Prefs.appleMenubarCount),Prefs.copyFormat.rawValue]+history.map{$0.key+($0.sourceCMYK ?? "")}).joined(separator:"|")
+        let dark=button.effectiveAppearance.bestMatch(from:[.aqua,.darkAqua]) == .darkAqua
+        let key=([String(dark),String(Prefs.appleMenubarSwatches),String(Prefs.appleMenubarCount),Prefs.copyFormat.rawValue]+history.map{$0.key+($0.sourceCMYK ?? "")}).joined(separator:"|")
         guard key != renderKey else{return};renderKey=key
-        swatches=[];var x:CGFloat=4
+        swatches=[];var x:CGFloat=8
         if Prefs.appleMenubarSwatches {
             for slot in 0..<Prefs.appleMenubarCount {
                 swatches.append((NSRect(x:x,y:3,width:18,height:18),slot<history.count ? history[slot]:nil));x+=21
             }
             x+=6
         }
-        let label=NSAttributedString(string:Prefs.copyFormat.label+" ▾",attributes:[.font:Design.Text.body.font(),.foregroundColor:NSColor.labelColor])
+        let foreground=dark ? NSColor.white:NSColor.black
+        let label=NSAttributedString(string:Prefs.copyFormat.label+" ▾",attributes:[.font:Design.Text.body.font(),.foregroundColor:foreground])
         let width=max(48,label.size().width+12)
         formatRect=NSRect(x:x,y:0,width:width,height:24);x+=width+6
         let iconRect=NSRect(x:x,y:1,width:22,height:22);x+=28
         let image=NSImage(size:NSSize(width:x,height:24))
         button.effectiveAppearance.performAsCurrentDrawingAppearance {
             image.lockFocus()
+            let pill=NSBezierPath(roundedRect:NSRect(x:0.5,y:0.5,width:x-1,height:23),xRadius:11.5,yRadius:11.5)
+            (dark ? NSColor(calibratedWhite:0.16,alpha:1):NSColor(calibratedWhite:0.98,alpha:1)).setFill();pill.fill()
+            (dark ? NSColor.white.withAlphaComponent(0.55):NSColor.black.withAlphaComponent(0.25)).setStroke()
+            pill.lineWidth=1;pill.stroke()
             for slot in swatches {
                 let box=slot.rect.insetBy(dx:1,dy:1)
                 (slot.entry.flatMap{colorFromHex($0.key)} ?? NSColor.quaternaryLabelColor).setFill();box.fill()
-                NSColor.labelColor.withAlphaComponent(0.3).setStroke();let border=NSBezierPath(rect:box);border.lineWidth=0.5;border.stroke()
+                foreground.withAlphaComponent(0.3).setStroke();let border=NSBezierPath(rect:box);border.lineWidth=0.5;border.stroke()
             }
             label.draw(at:NSPoint(x:formatRect.minX+4,y:6))
             NSImage(named:NSImage.applicationIconName)?.draw(in:iconRect)

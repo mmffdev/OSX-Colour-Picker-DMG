@@ -31,6 +31,14 @@ private func linear(_ v: OKLCH) -> (r: Double, g: Double, b: Double) {
     return oklabToLinear(v.l, v.c * cos(t), v.c * sin(t))
 }
 
+extension XYZ {
+    /// Unclipped OKLCH back to the D50 master. The display conversion alone chooses a gamut.
+    init(oklch value: OKLCH) {
+        let rgb = linear(value)
+        self = RGBSpace.linearSRGB.master(of: [rgb.r, rgb.g, rgb.b])
+    }
+}
+
 private func fromLinear(_ v: Double) -> Double { v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055 }
 
 private func turned(_ h: Double) -> Double { (h.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360) }

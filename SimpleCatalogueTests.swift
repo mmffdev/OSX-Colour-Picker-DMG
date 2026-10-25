@@ -2,8 +2,11 @@ import Foundation
 
 func runSimpleCatalogueTests(check:(Bool,String)->Void){
     print("Simplified ownership, setup, migration and catalogue exchange")
-    check(SimpleAssetType.setupImportTypes.map(\.id) == ["documents","palettes","fonts","typography","ase","luts","icc","css"] && SimpleAssetType.setupImportTypes.map(\.setupTitle) == WorkspaceImport.types,"Setup and Import offer the eight focused colour-work types in the same order")
-    check(SimpleAssetType.find("photography")?.selectable == false && SimpleAssetType.find("audio")?.selectable == false && SimpleAssetType.find("css")?.selectable == true,"Historical broad asset types remain readable but are absent from new setup")
+    check(SimpleAssetType.setupImportTypes.map(\.id) == ["palettes","fonts","typography","images","photography","documents","ase","luts","icc","css"] && SimpleAssetType.setupImportTypes.map(\.setupTitle) == WorkspaceImport.types,"Setup and Import offer the ten focused asset types in the same order")
+    check(SimpleCatalogueStructure().assetTypes == SimpleAssetType.defaultAssetIDs && SimpleAssetType.defaultLibraryIDs == ["information","palettes","fonts","typography","images","photography"],"New clients and My Library seed the six requested sections in order")
+    let defaultStack=SimpleCatalogue.stack(SimpleCatalogueStructure())
+    check(defaultStack.children.first?.name == "Information" && defaultStack.children.first(where:{$0.kind == "Simple Assets"})?.children.map(\.name) == ["Palettes","Fonts","Typography","Images","Photographs"],"New client stacks contain Information then the five default asset buckets in order")
+    check(SimpleAssetType.find("photography")?.selectable == true && SimpleAssetType.find("images")?.selectable == true && SimpleAssetType.find("audio")?.selectable == false,"Images and Photographs are setup choices; historical broad types stay readable")
     let fm=FileManager.default
     do {
         let root=fm.temporaryDirectory.appendingPathComponent("Colorgain-Simple-"+UUID().uuidString,isDirectory:true)
@@ -24,7 +27,7 @@ func runSimpleCatalogueTests(check:(Bool,String)->Void){
         let loopLibrary=try loopStore.load(),loopSchema=loopStore.schema
         check(loopSchema.collections.map(\.name) == ["Acme","Beta"] && loopLibrary.projects.map(\.name) == ["Launch","Website"] && loopSchema.places.count == 2,"Repeated setup branches create real clients and work items")
         check(loopSchema.collections.map{$0.stack.name} == ["Project","Campaign"] && loopSchema.collections.map{$0.workItemPlural ?? ""} == ["Projects","Campaigns"] && loopSchema.places[loopLibrary.projects[0].id.uuidString]?.collection == loopSchema.collections[0].id && loopSchema.places[loopLibrary.projects[1].id.uuidString]?.collection == loopSchema.collections[1].id,"Each setup work item keeps its client and terminology")
-        check(Set(GlobalAssets(home:loopRoot).assetTypes) == Set(["palettes","icc"]),"My Library receives the selected categories from all setup branches")
+        check(Set(GlobalAssets(home:loopRoot).assetTypes) == Set(["information","palettes","icc"]),"My Library receives Information and selected categories from all setup branches")
         var customConfig=SimpleCatalogueStructure();customConfig.assetTypes=[]
         customConfig.customAssetFamilies=["Press Archives"]
         customConfig.customAssetTypes=[SimpleCustomAssetType(id:"custom-finish",title:"Finish Samples",family:"Print Production"),SimpleCustomAssetType(id:"custom-plates",title:"Plate Records",family:"Press Archives")]
@@ -48,7 +51,7 @@ func runSimpleCatalogueTests(check:(Bool,String)->Void){
         legacyObject.removeValue(forKey:"clientLabel")
         let legacy=try ColourFiles.decoder().decode(SimpleCatalogueStructure.self,from:JSONSerialization.data(withJSONObject:legacyObject))
         check(legacy.clientName == "Client","Earlier catalogue structures retain Client wording when the new optional label is absent")
-        check(GlobalAssets(home:root).assetTypes == config.assetTypes && fm.fileExists(atPath:GlobalAssets(home:root).index.path),"Setup initialises My Library and catalogue from the same selection")
+        check(GlobalAssets(home:root).assetTypes == ["information"]+config.assetTypes && fm.fileExists(atPath:GlobalAssets(home:root).index.path),"Setup initialises My Library with Information and the catalogue selection")
         let before=try FileHandlerFixture.snapshot(root)
         check((try? SimpleCatalogue.create(home:root,parent:cats.folder,name:"First",config:config)) == nil,"Repeated setup cannot overwrite an existing catalogue")
         check(try before == FileHandlerFixture.snapshot(root),"Rejected repeated setup leaves existing workspace bytes unchanged")
@@ -140,7 +143,7 @@ func runSimpleCatalogueTests(check:(Bool,String)->Void){
         check((try? SimpleCatalogueImport.inspect(libraryExport.appendingPathComponent("my_library.collib"))) == nil,"Library indexes cannot be imported as client catalogues")
         let migratedAssets=GlobalAssets(home:libraryTarget),identity=twice.id
         try fm.moveItem(at:migratedAssets.libraryIndex,to:migratedAssets.legacyIndex)
-        try AppDataStore(root:libraryTarget).update{$0["assets"]="Assets/Assets.colcat";$0["libraryAssetTypes"]=["palettes","audio"]}
+        try AppDataStore(root:libraryTarget).update{$0["assets"]="My Library/Assets.colcat";$0["libraryAssetTypes"]=["palettes","audio"]}
         var old=twice;old.libraryAssetTypes=nil
         try ColourFiles.encoder().encode(old).write(to:migratedAssets.legacyIndex)
         _ = try migratedAssets.load()

@@ -22,21 +22,22 @@ private final class PaletteHaloButton: ClickCursorButton {
 }
 
 /// One square drawing box and centre for every header utility glyph.
-private enum HeaderUtilityIcon {
+enum HeaderUtilityIcon {
     static let size: CGFloat = 18
     private static var images: [String: NSImage] = [:]
     static func rect(in bounds: NSRect) -> NSRect {
         NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
     }
-    static func draw(_ name: String, in bounds: NSRect) {
-        let key = name + (hexOf(Design.ink) ?? "")
+    static func draw(_ name: String, in bounds: NSRect, colour: NSColor = Design.ink) {
+        let opaque=colour.withAlphaComponent(1)
+        let key = name + (hexOf(opaque) ?? "")
         if let image = images[key] {
-            image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: colour.alphaComponent, respectFlipped: true, hints: nil)
             return
         }
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: name)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [Design.ink]))),
+                .applying(NSImage.SymbolConfiguration(paletteColors: [opaque]))),
               let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 72, pixelsHigh: 72,
                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
@@ -55,7 +56,7 @@ private enum HeaderUtilityIcon {
               let pixels = bitmap.cgImage?.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)) else { return }
         let image = NSImage(cgImage: pixels, size: NSSize(width: size, height: size))
         images[key] = image
-        image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        image.draw(in: rect(in: bounds), from: .zero, operation: .sourceOver, fraction: colour.alphaComponent, respectFlipped: true, hints: nil)
     }
 }
 
@@ -178,15 +179,15 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
     func clearFilter() { hideSearch() }
-    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import"]
+    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import", "Designer", "Fonts"]
     static let secondaryNavigation:[(index:Int,title:String)]=[(2,"Lab"),(4,"Contrast"),(5,"Projects"),(3,"PrePress"),(6,"Appbridge")]
-    private let primaryButtons=[HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero)]
-    private let primaryIndices=[0,1,8,7]
+    private let primaryButtons=[HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero)]
+    private let primaryIndices=[0,1,9,8,7]
     private let toolsButton=HeaderToolsButton(frame:.zero)
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
     private var compactHeader:Bool { bounds.width < 1720 }
-    private var headerCentre:CGFloat { compactHeader ? 28:bounds.midY }
+    private var headerCentre:CGFloat { compactHeader ? 28:bounds.height - 18 }
     private var headerBaseline:CGFloat { let font=Design.Text.body.font();return headerCentre+(font.ascender+font.descender)/2 }
 
     init() {
@@ -206,7 +207,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
         field.isHidden = true
         addSubview(field)
         for (i,button) in primaryButtons.enumerated(){
-            button.title=i == 2 ? "Designer":tabs[primaryIndices[i]];button.symbol=["books.vertical","square.stack","pencil.and.outline","square.and.arrow.down"][i]
+            button.title=tabs[primaryIndices[i]];button.symbol=["books.vertical","square.stack","textformat","pencil.and.outline","square.and.arrow.down"][i]
             button.setAccessibilityLabel(button.title);button.toolTip=button.title
             button.run={ [weak self] in self?.onTab?(self?.primaryIndices[i] ?? i) };addSubview(button)
         }
@@ -233,7 +234,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
             button.frame=NSRect(x:x,y:headerCentre-18,width:button.contentWidth,height:36)
             x=button.frame.maxX+28
         }
-        toolsButton.active=live.map{$0 > 1 && $0 != 7 && $0 != 8} ?? false
+        toolsButton.active=live.map{$0 > 1 && $0 != 7 && $0 != 8 && $0 != 9} ?? false
         let font=Design.Text.body.font(),textCentre=headerBaseline-(font.ascender+font.descender)/2
         paletteHalo.frame=NSRect(x:x-6,y:textCentre-14,width:28,height:28)
         toolsButton.frame=NSRect(x:bounds.width-Design.App.margin-97,y:textCentre-18,width:36,height:36)
@@ -257,11 +258,11 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        hairline(x:0, y:Design.App.header - 1, width:bounds.width, Design.rule)
+        hairline(x:0, y:bounds.height - 1, width:bounds.width, Design.rule)
         let g = Design.App.gutter, b = headerBaseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        Logo.drawHeader(centredOver:Design.App.railWidth,centreY:bounds.midY)
+        Logo.drawHeader(centredOver:Design.App.railWidth,centreY:bounds.midY,height:compactHeader ? 46:44)
         let font = Design.Text.body.font()
         let centreY = b - (font.ascender + font.descender) / 2
         // Centre the picker pair in the full header, using the utility icon renderer.
@@ -421,7 +422,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
             list = history
         }
         let height = list.frame.height
-        let pageHeight = (win.contentView?.bounds.height ?? 600) - Design.App.header - Design.App.footer
+        let pageHeight = (win.contentView?.bounds.height ?? 600) - Design.App.headerHeight(for:bounds.width) - Design.App.footer
         let scroll = FittedScrollView(frame: NSRect(x: 0, y: 0, width: width, height: min(height, pageHeight * 0.5)))
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = true; scroll.backgroundColor = Design.card; scroll.documentView = list
         let panel = NSPanel(contentRect: scroll.bounds, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

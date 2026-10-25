@@ -92,6 +92,22 @@ func runWorkspaceImportTests(check: (Bool, String) -> Void) {
         check(AssetCollections.list(in:store).filter{$0.items.contains(collected)}.count == 2,"one asset can belong to multiple Collections saved in .colcat")
         try AssetCollections.remove(collected,from:collectionA,in:store)
         check(AssetCollections.list(in:store).first{$0.id == collectionB}?.items.contains(collected) == true,"removing one membership leaves the other Collection intact")
+        var doomedID=UUID()
+        _ = try store.mutate { lib in
+            doomedID=lib.createSwatch(named:"Delete Me",hexes:["#173B5D"])
+            lib.setFavourite(doomedID,true)
+        }
+        let doomed=AssetCollectionItem.palette(doomedID,name:"Delete Me")
+        try AssetCollections.add([doomed],to:collectionA,in:store)
+        try AssetCollections.add([doomed],to:collectionB,in:store)
+        _ = try store.mutate{$0.deleteAssignedPalettes([doomedID],removeClaimed:false,catalogue:nil)}
+        let afterDeletion=try store.load()
+        check(AssetCollections.list(in:store).allSatisfy{!$0.items.contains(doomed)} && !afterDeletion.orderedFavourites.contains(where:{$0.id == doomedID}),
+              "deleting a favourite palette removes its membership from every Collection and Favourites")
+        let staleCollectionItem=AssetCollectionItem.palette(UUID(),name:"Already Deleted")
+        try AssetCollections.add([staleCollectionItem],to:collectionA,in:store)
+        try AssetCollections.removeMissingPalettes(in:store,library:try store.load())
+        check(AssetCollections.list(in:store).allSatisfy{!$0.items.contains(staleCollectionItem)},"opening Collections repairs older missing-palette memberships")
         var changed = try store.load(); changed.renameProject(a, to: "Renamed")
         try store.save(changed)
         let renamed = WorkspaceImport.records(store: store).first { !$0.0.external }!.0
@@ -274,6 +290,13 @@ func runWorkspaceImportBatchTests(check: (Bool, String) -> Void) {
         check(AssetCollections.list(in:store).first{$0.id == importCollection}?.items.contains(where:{item in imageRecords.contains{$0.id.uuidString == item.identity}}) == true,"Image Import adds its new record to the chosen Collection")
         check(try Data(contentsOf:copiedImage) == imageBytes && !FileManager.default.fileExists(atPath:movedImage.path) && Data(contentsOf:linkedImage) == imageBytes,"Copy and reference retain originals; move removes only its selected source")
         check(try imageRecords.filter{!$0.external}.allSatisfy{try Data(contentsOf:$0.url(in:store.root)) == imageBytes},"Copied and moved images retain exact bytes in their chosen folders")
+        let linkedRecord=imageRecords.first{$0.external && $0.path == linkedImage.path}!
+        try AssetCollections.add([AssetCollectionItem.imported(linkedRecord)],to:importCollection,in:store)
+        try WorkspaceImport.changeReference(linkedRecord,index:store.url,replacement:nil,store:store)
+        check(!WorkspaceImport.records(store:store).contains(where:{$0.0.id == linkedRecord.id}) &&
+              AssetCollections.list(in:store).allSatisfy{$0.items.allSatisfy{$0.identity != linkedRecord.id.uuidString}} &&
+              FileManager.default.fileExists(atPath:linkedImage.path),
+              "removing an imported reference clears its Collection membership and preserves the source file")
         let outside=root.appendingPathComponent("External Images",isDirectory:true)
         try FileManager.default.createDirectory(at:outside,withIntermediateDirectories:true)
         let customSource=root.appendingPathComponent("Custom.png")

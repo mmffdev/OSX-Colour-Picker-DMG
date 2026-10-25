@@ -18,9 +18,9 @@ Shared contract agreed with Rick, 2026-10-17. Read through [styles.md](../styles
 
 ## Alignment and page profile header
 
-- Header labels and value text share one optical centre line. Each 34 pt page profile-header row uses 28 pt controls with equal three-point top/bottom padding; label baseline is the same as the controls' text baseline.
-- The profile header occupies the page between the rails, level with the first 34 pt panel headers. Rails retain their original top. Reuse the frame's top/side rules; do not add a second border. Keep the single bottom separator.
-- Preset starts at the same page inset as the palette tab icon below. Workflow, Target and Tolerance follow as a compact group; Rendering Intent is also visible for print and RGB ICC targets. Narrow pages wrap complete label/dropdown pairs onto additional 34 pt rows, like Viewport-Actionbar. The header grows and the page begins below it; the rails keep their original top. Preserve full selected names without horizontal scrolling.
+- Header labels and value text share one optical centre line. Each 40 pt page profile-header row uses 28 pt controls with equal six-point top/bottom padding; label baseline is the same as the controls' text baseline.
+- The profile header occupies the page between the rails, level with the first 40 pt panel headers. Rails retain their original top. Reuse the frame's top/side rules; do not add a second border. Keep the single bottom separator.
+- Preset starts at the same page inset as the palette tab icon below. Workflow, Target and Tolerance follow as a compact group; Rendering Intent is also visible for print and RGB ICC targets. Narrow pages wrap complete label/dropdown pairs onto additional 40 pt rows, like Viewport-Actionbar. The header grows and the page begins below it; the rails keep their original top. Preserve full selected names without horizontal scrolling.
 - Preset lists custom saved setups first, with inline edit/export/remove actions, then grouped built-in targets. Save Profile and inline Edit actions replace the lower preset list with an adaptive draft form inside the same trigger-anchored dropdown. Keep My Profiles above it. Save selects the resulting profile and restores the list; Cancel or Escape discards the draft and restores the list. Nested selectors keep their editor underneath. The separate header editor icon is retired. Saved presets include the full viewing-proof state.
 
 ## Verification

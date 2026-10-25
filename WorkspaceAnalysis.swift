@@ -3,6 +3,7 @@ import AppKit
 /// Compact native controls shared by the analysis dock and expanded workspace.
 final class AnalysisMenu: ClickCursorPopupButton, Overlay {
     var borderless=false {didSet{needsDisplay=true}}
+    var pillBorders:[String:NSColor]=[:] {didSet{needsDisplay=true}}
     var dismissOnOutsideClick:Bool{true}
     private var houseMenu:SwissDropdown.MenuPanel?
     var menuHeadings = false
@@ -16,10 +17,12 @@ final class AnalysisMenu: ClickCursorPopupButton, Overlay {
         guard isEnabled,let owner=window else{return}
         if houseMenu?.isVisible == true{dismissOverlay();return};dismissOverlay()
         let titles=itemTitles
-        let width=min(440,max(bounds.width,min(440,(titles.map{Design.attributed($0,.body).size().width}.max() ?? 0)+52)))
+        let inset:CGFloat=pillBorders.isEmpty ? 52:70
+        let width=min(440,max(bounds.width,(titles.map{Design.attributed($0,.body).size().width}.max() ?? 0)+inset))
         let panel=SwissDropdown.MenuPanel(items:titles,chosen:"",width:width,literalItems:!menuHeadings,chosenIndex:indexOfSelectedItem){[weak self] index in
             guard let self else{return};self.dismissOverlay();self.selectItem(at:index);self.picked()
         }
+        panel.setPillBorders(Dictionary(uniqueKeysWithValues:titles.enumerated().compactMap{index,title in pillBorders[title].map{(index,$0)}}))
         let anchor=owner.convertToScreen(convert(bounds,to:nil));panel.place(anchoredTo:anchor,within:owner)
         owner.addChildWindow(panel,ordered:.above);houseMenu=panel;panel.makeKeyAndOrderFront(nil);Overlays.opened(self)
     }
@@ -35,7 +38,16 @@ final class AnalysisMenu: ClickCursorPopupButton, Overlay {
     override func draw(_ dirtyRect:NSRect){
         // Own the same surface as the house menu, including inside native dark Settings.
         if borderless{InlineDropdownSkin.draw(in:bounds)}else{Design.card.setFill();NSBezierPath(roundedRect:bounds,xRadius:4,yRadius:4).fill();DropdownSkin.draw(in:bounds,hover:isHighlighted)}
-        Design.attributed(titleOfSelectedItem ?? title,.body,colour:isEnabled ? Design.ink:Design.quiet).draw(x:borderless ? 0:8,baseline:bounds.midY+(borderless ? 5:4),width:max(0,bounds.width-(borderless ? 20:44)))
+        let selected=titleOfSelectedItem ?? title
+        let label=Design.attributed(selected,.body,colour:isEnabled ? Design.ink:Design.quiet)
+        if let colour=pillBorders[selected] {
+            let pillWidth=min(ceil(label.size().width)+18,max(0,bounds.width-28))
+            let pill=NSRect(x:max(0,(bounds.width-20-pillWidth)/2),y:(bounds.height-22)/2,width:pillWidth,height:22)
+            colour.setStroke();let outline=NSBezierPath(roundedRect:pill.insetBy(dx:0.75,dy:0.75),xRadius:11,yRadius:11);outline.lineWidth=1.5;outline.stroke()
+            label.draw(x:pill.minX+max(8,(pill.width-label.size().width)/2),baseline:bounds.midY+(borderless ? 5:4),width:max(0,pill.width-16))
+        } else {
+            label.draw(x:borderless ? 0:8,baseline:bounds.midY+(borderless ? 5:4),width:max(0,bounds.width-(borderless ? 20:44)))
+        }
     }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
     @objc private func picked() { needsDisplay=true;changed?(indexOfSelectedItem) }
@@ -109,18 +121,18 @@ private final class AnalysisTargetFilter:NSView {
     }
     var inlineLeadingWidth: CGFloat = 0
     private func inlinePositions(width: CGFloat, leading: CGFloat) -> [(AnalysisMenu, NSRect)] {
-        var x = leading, y: CGFloat = 3
+        var x = leading, y: CGFloat = 6
         return inlineFields.map { label, menu in
             let labelWidth = Design.attributed(label, .controlLabel).size().width + 12
             let fieldWidth = labelWidth + menu.fittedWidth
-            if x > 0 && x + fieldWidth > width { x = 0; y += 34 }
+            if x > 0 && x + fieldWidth > width { x = 0; y += WorkspacePanel.headerHeight }
             let frame = NSRect(x:x + labelWidth,y:y,width:menu.fittedWidth,height:28)
             x += fieldWidth + 24
             return (menu, frame)
         }
     }
     func inlineHeight(forWidth width: CGFloat, leading: CGFloat) -> CGFloat {
-        (inlinePositions(width: width, leading: leading).last?.1.maxY ?? 31) + 3
+        (inlinePositions(width: width, leading: leading).last?.1.maxY ?? 34) + 6
     }
     var inline=false {didSet{[workflow,target,tolerance,intent,blackMenu].forEach{$0.borderless=inline}}}
     var changed:(()->Void)?
@@ -764,7 +776,7 @@ final class WorkspaceChannelControls:NSView,Overlay {
     }
     override func layout(){
         super.layout();let left=Design.attributed("Preset",.controlLabel).size().width+12
-        button.frame=NSRect(x:left,y:headerMode ? 3:(bounds.height-28)/2,width:headerMode ? presetWidth:max(0,bounds.width-left),height:28)
+        button.frame=NSRect(x:left,y:headerMode ? 6:(bounds.height-28)/2,width:headerMode ? presetWidth:max(0,bounds.width-left),height:28)
         inlineForm.inlineLeadingWidth = presetFieldWidth + 24
         inlineForm.frame = bounds
         inlineForm.needsLayout = true
@@ -773,7 +785,7 @@ final class WorkspaceChannelControls:NSView,Overlay {
     }
     override func draw(_ dirtyRect:NSRect){
         let width=Design.attributed("Preset",.controlLabel).size().width
-        Design.attributed("Preset",.controlLabel).draw(x:0,baseline:headerMode ? 21:bounds.midY+4,width:width)
+        Design.attributed("Preset",.controlLabel).draw(x:0,baseline:headerMode ? 24:bounds.midY+4,width:width)
     }
 }
 
@@ -806,11 +818,16 @@ private final class AnalysisPaletteCell:NSView {
 final class WorkspaceExpandButton:ClickCursorButton {
     var run:(()->Void)?
     private let closes:Bool
-    init(closes:Bool=false){self.closes=closes;super.init(frame:.zero);isBordered=false;title=closes ? "Close":"Expand";setAccessibilityLabel(title);toolTip=closes ? "Close Expanded Panel · Esc":"Expand Panel";target=self;action=#selector(invoke)}
+    init(closes:Bool=false){self.closes=closes;super.init(frame:.zero);isBordered=false;title=closes ? "Contract":"Expand";setAccessibilityLabel(title);toolTip=closes ? "Contract Panel · Esc":"Expand Panel";target=self;action=#selector(invoke)}
     required init?(coder:NSCoder){fatalError()}
     @objc private func invoke(){run?()}
     override var isFlipped:Bool{true}
-    override func draw(_ dirtyRect:NSRect){Design.attributed((closes ? "×  ":"⤢  ")+title,.body,colour:isHighlighted ? Design.quiet:Design.ink).draw(x:4,baseline:19,width:bounds.width-8)}
+    override func draw(_ dirtyRect:NSRect){
+        let colour=isHighlighted ? Design.quiet:Design.ink
+        let icon=RowMark.image(closes ? PanelExpansionSymbol.contract:PanelExpansionSymbol.expand,colour:colour)
+        icon.draw(in:NSRect(x:4,y:(bounds.height-16)/2,width:16,height:16),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        Design.attributed(title,.body,colour:colour).draw(x:24,baseline:19,width:bounds.width-28)
+    }
     override func resetCursorRects(){addCursorRect(bounds,cursor:.pointingHand)}
 }
 

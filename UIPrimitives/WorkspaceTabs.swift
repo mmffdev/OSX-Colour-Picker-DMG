@@ -5,7 +5,75 @@ import ImageIO
 /// Shared title contour for split library tabs and single-subject pages.
 enum WorkspaceTabContour {
     static let curve:CGFloat=28
-    static let height:CGFloat=32
+    // The page tab extends below the rail header without changing the rail's height.
+    static let height:CGFloat=WorkspacePanel.headerHeight+4
+    /// Extend one point under the actionbar rule; the visible lower edge stays put.
+    static let topOverlap:CGFloat=1
+    /// The same concave action tab used below Library cards and canvas nodes.
+    static func drawCardActionTab(_ tab:NSRect) {
+        let notch=NSBezierPath(),halfCurve=curve/2
+        notch.move(to:NSPoint(x:tab.minX-curve,y:tab.minY))
+        notch.curve(to:NSPoint(x:tab.minX,y:tab.maxY-1),controlPoint1:NSPoint(x:tab.minX-halfCurve,y:tab.minY),controlPoint2:NSPoint(x:tab.minX-halfCurve,y:tab.maxY-1))
+        notch.line(to:NSPoint(x:tab.maxX,y:tab.maxY-1))
+        notch.curve(to:NSPoint(x:tab.maxX+curve,y:tab.minY),controlPoint1:NSPoint(x:tab.maxX+halfCurve,y:tab.maxY-1),controlPoint2:NSPoint(x:tab.maxX+halfCurve,y:tab.minY))
+        let ground=notch.copy() as! NSBezierPath
+        ground.close();Design.card.setFill();ground.fill()
+        notch.lineWidth=1;Design.rule.setStroke();notch.stroke()
+    }
+    /// One selection band follows both the card and its concave control tab.
+    static func drawSelectedCardContour(card:NSRect,tab:NSRect) {
+        func outline(_ inset:CGFloat)->NSBezierPath {
+            let body=card.insetBy(dx:-inset,dy:-inset)
+            let radius:CGFloat=max(0,8+inset),bend=curve
+            let leftFoot=tab.minX-bend-inset,rightFoot=tab.maxX+bend+inset
+            let leftTab=tab.minX-inset,rightTab=tab.maxX+inset
+            let tabBottom=tab.maxY-1+inset
+            let path=NSBezierPath()
+            path.move(to:NSPoint(x:body.minX+radius,y:body.minY))
+            path.line(to:NSPoint(x:body.maxX-radius,y:body.minY))
+            path.curve(to:NSPoint(x:body.maxX,y:body.minY+radius),
+                       controlPoint1:NSPoint(x:body.maxX-radius/2,y:body.minY),
+                       controlPoint2:NSPoint(x:body.maxX,y:body.minY+radius/2))
+            path.line(to:NSPoint(x:body.maxX,y:body.maxY-radius))
+            path.curve(to:NSPoint(x:body.maxX-radius,y:body.maxY),
+                       controlPoint1:NSPoint(x:body.maxX,y:body.maxY-radius/2),
+                       controlPoint2:NSPoint(x:body.maxX-radius/2,y:body.maxY))
+            path.line(to:NSPoint(x:rightFoot,y:body.maxY))
+            path.curve(to:NSPoint(x:rightTab,y:tabBottom),
+                       controlPoint1:NSPoint(x:rightFoot-bend/2,y:body.maxY),
+                       controlPoint2:NSPoint(x:rightTab+bend/2,y:tabBottom))
+            path.line(to:NSPoint(x:leftTab,y:tabBottom))
+            path.curve(to:NSPoint(x:leftFoot,y:body.maxY),
+                       controlPoint1:NSPoint(x:leftTab-bend/2,y:tabBottom),
+                       controlPoint2:NSPoint(x:leftFoot+bend/2,y:body.maxY))
+            path.line(to:NSPoint(x:body.minX+radius,y:body.maxY))
+            path.curve(to:NSPoint(x:body.minX,y:body.maxY-radius),
+                       controlPoint1:NSPoint(x:body.minX+radius/2,y:body.maxY),
+                       controlPoint2:NSPoint(x:body.minX,y:body.maxY-radius/2))
+            path.line(to:NSPoint(x:body.minX,y:body.minY+radius))
+            path.curve(to:NSPoint(x:body.minX+radius,y:body.minY),
+                       controlPoint1:NSPoint(x:body.minX,y:body.minY+radius/2),
+                       controlPoint2:NSPoint(x:body.minX+radius/2,y:body.minY))
+            path.close()
+            return path
+        }
+        let outer=outline(4),inner=outline(0)
+        let band=NSBezierPath();band.windingRule = .evenOdd;band.append(outer);band.append(inner)
+        let bounds=outer.bounds
+        NSGraphicsContext.saveGraphicsState();band.addClip()
+        NSColor.white.setFill();bounds.fill()
+        NSColor.black.setFill()
+        let stripe:CGFloat=6,period:CGFloat=12
+        var x=bounds.minX-bounds.height-period
+        while x<bounds.maxX+bounds.height+period {
+            let mark=NSBezierPath()
+            mark.move(to:NSPoint(x:x,y:bounds.minY));mark.line(to:NSPoint(x:x+stripe,y:bounds.minY))
+            mark.line(to:NSPoint(x:x+stripe-bounds.height,y:bounds.maxY))
+            mark.line(to:NSPoint(x:x-bounds.height,y:bounds.maxY))
+            mark.close();mark.fill();x+=period
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
     static func edge(width:CGFloat,height:CGFloat)->NSBezierPath{
         let path=NSBezierPath(),h=height-0.5,w=max(curve,width-0.5)
         path.move(to:NSPoint(x:0,y:0.5));path.line(to:NSPoint(x:w-curve,y:0.5))
@@ -14,7 +82,7 @@ enum WorkspaceTabContour {
     static func drawBarberPole(in bounds:NSRect,colour:NSColor){
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect:bounds).addClip()
-        colour.setFill()
+        Design.mix(colour,.white,0.20).setFill()
         let stripe=20*sqrt(2.0),step=30*sqrt(2.0),height=bounds.height
         var x = -height-step
         while x < bounds.width+height {
@@ -28,9 +96,15 @@ enum WorkspaceTabContour {
         let ground=edge.copy() as! NSBezierPath
         ground.line(to:NSPoint(x:0,y:h));ground.close()
         (selected ? Design.card:Design.mist).setFill();ground.fill()
-        edge.lineWidth=1;Design.rule.setStroke();edge.stroke()
-        RowMark.image(symbol,colour:Design.quiet).draw(in:NSRect(x:16,y:9,width:14,height:14),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
-        Design.attributed(title,selected ? .bodyStrong:.body).draw(x:36,baseline:21,width:max(0,bounds.width-36-curve-8))
+        // The Actionbar owns the straight top rule. Only the descending tab
+        // contour is stroked, so the two rows meet on a single clean line.
+        let w=max(curve,bounds.width-0.5)
+        let outline=NSBezierPath()
+        outline.move(to:NSPoint(x:w-curve,y:0.5))
+        outline.curve(to:NSPoint(x:w,y:h),controlPoint1:NSPoint(x:w-curve/2,y:0.5),controlPoint2:NSPoint(x:w-curve/2,y:h))
+        outline.lineWidth=1;Design.rule.setStroke();outline.stroke()
+        RowMark.image(symbol,colour:Design.quiet).draw(in:NSRect(x:16,y:(bounds.height-14)/2+topOverlap,width:14,height:14),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        Design.attributed(title,selected ? .bodyStrong:.body).draw(x:36,baseline:bounds.midY+5+topOverlap,width:max(0,bounds.width-36-curve-8))
     }
     /// The mirrored S-curve over the action cap. A page may omit the cap entirely.
     static func drawActionCap(in bounds:NSRect,triggerX:CGFloat,tabEnd:CGFloat){
@@ -42,7 +116,8 @@ enum WorkspaceTabContour {
         let ground=controls.copy() as! NSBezierPath
         ground.line(to:NSPoint(x:bounds.width,y:bottom));ground.close();Design.card.setFill();ground.fill()
         let border=NSBezierPath();border.move(to:NSPoint(x:min(tabEnd,foot),y:bottom))
-        border.line(to:NSPoint(x:foot,y:bottom));border.append(controls)
+        border.line(to:NSPoint(x:foot,y:bottom))
+        border.curve(to:NSPoint(x:crest,y:top),controlPoint1:NSPoint(x:foot+12,y:bottom),controlPoint2:NSPoint(x:crest-12,y:top))
         border.lineWidth=1;Design.rule.setStroke();border.stroke()
     }
     static func canSplit(paneCount:Int,maxPanes:Int,isRoot:Bool,parentIsRoot:Bool,rootVertical:Bool?,vertical:Bool)->Bool{
@@ -56,6 +131,7 @@ final class WorkspacePageTabHeader:NSView{
     var title=""{didSet{needsDisplay=true;setAccessibilityLabel(title)}}
     var symbol="photo.on.rectangle"{didSet{needsDisplay=true}}
     var stripeColour=Design.houseYellow{didSet{needsDisplay=true}}
+    var showsLeadingBorder=false{didSet{needsDisplay=true}}
     struct Actions {
         var paneCount=1,maxPanes=1
         var newTab:(()->Void)?
@@ -89,7 +165,7 @@ final class WorkspacePageTabHeader:NSView{
             (closeButton,actions.paneCount>1 && actions.close != nil)]
         let shown=available.filter{$0.1}.map(\.0)
         for (button,visible) in available{button.isHidden = !visible}
-        for (index,button) in shown.enumerated(){button.frame=NSRect(x:bounds.width-12-CGFloat(shown.count-index)*36,y:0,width:32,height:32)}
+        for (index,button) in shown.enumerated(){button.frame=NSRect(x:bounds.width-12-CGFloat(shown.count-index)*36,y:(bounds.height-32)/2+WorkspaceTabContour.topOverlap,width:32,height:32)}
     }
     override func draw(_ dirtyRect:NSRect){
         fill(bounds,Design.card)
@@ -102,6 +178,7 @@ final class WorkspacePageTabHeader:NSView{
         else{hairline(x:tabWidth,y:bounds.height-1,width:max(0,bounds.width-tabWidth))}
         // The tab row owns this final pixel; the barber pole cannot leak below it.
         hairline(x:0,y:bounds.height-1,width:bounds.width)
+        if showsLeadingBorder {fill(NSRect(x:0,y:0,width:1,height:bounds.height),Design.rule)}
     }
 }
 
@@ -138,7 +215,7 @@ final class LibraryPageLayout:NSView {
     }
     fileprivate final class TabScroll:FittedScrollView {
         var tabWidth:CGFloat=0
-        override func tile(){super.tile();documentView?.setFrameSize(NSSize(width:max(tabWidth,contentView.bounds.width),height:32))}
+        override func tile(){super.tile();documentView?.setFrameSize(NSSize(width:max(tabWidth,contentView.bounds.width),height:WorkspaceTabContour.height))}
         override func scrollWheel(with event:NSEvent){
             let delta=event.scrollingDeltaX == 0 ? event.scrollingDeltaY:event.scrollingDeltaX
             let x=max(0,min(max(0,tabWidth-contentSize.width),contentView.bounds.minX-delta))
@@ -152,9 +229,14 @@ final class LibraryPageLayout:NSView {
         override func hitTest(_ point:NSPoint)->NSView?{nil}
         override func draw(_ dirtyRect:NSRect){
             guard let pane else{return}
+            if pane.owner?.hidePageControls?() == true{return}
             let trigger=pane.moreButton.isHidden ? pane.newButton:pane.moreButton
             let end=min(pane.strip.frame.maxX,max(0,pane.strip.tabWidth-pane.strip.contentView.bounds.minX))
-            WorkspaceTabContour.drawActionCap(in:bounds,triggerX:trigger.frame.minX,tabEnd:end)
+            let tabHeight=WorkspaceTabContour.height
+            // Carry the control face across the content's top rule, as the title tab does.
+            let foot=max(0,trigger.frame.minX-WorkspaceTabContour.curve)
+            fill(NSRect(x:foot,y:tabHeight-1,width:max(0,bounds.width-foot),height:2),Design.card)
+            WorkspaceTabContour.drawActionCap(in:NSRect(x:0,y:0,width:bounds.width,height:tabHeight),triggerX:trigger.frame.minX,tabEnd:end)
         }
     }
     fileprivate final class TargetBand:NSView {
@@ -266,7 +348,7 @@ final class LibraryPageLayout:NSView {
             revealSelection=true;needsLayout=true
         }
         override func layout(){
-            super.layout();selectedTab?.content.frame=bounds
+            super.layout();selectedTab?.content.frame=NSRect(x:0,y:WorkspaceTabContour.topOverlap,width:bounds.width,height:max(0,bounds.height-WorkspaceTabContour.topOverlap))
             let compact=bounds.width < Self.compactControlsWidth
             if moreButton.isHidden == compact{dismissOverlay()}
             moreButton.isHidden = !compact
@@ -278,22 +360,22 @@ final class LibraryPageLayout:NSView {
             if hideControls {[moreButton,newButton,splitButton,belowButton,closeButton].forEach{$0.isHidden=true}}
             let buttons=hideControls ? []:compact ? [moreButton]:[newButton,splitButton,belowButton,closeButton].filter{!$0.isHidden}
             let controlsWidth=CGFloat(buttons.count)*36
-            strip.frame=NSRect(x:0,y:0,width:max(0,bounds.width-20-controlsWidth-28),height:32)
-            contour.frame=NSRect(x:0,y:strip.frame.minY,width:bounds.width,height:32)
+            strip.frame=NSRect(x:0,y:0,width:max(0,bounds.width-20-controlsWidth-28),height:WorkspaceTabContour.height)
+            contour.frame=NSRect(x:0,y:strip.frame.minY,width:bounds.width,height:WorkspaceTabContour.height+1)
             var x:CGFloat=0
-            for label in labels {label.updateTitle();let width=min(480,max(72,Design.attributed(label.name,.bodyStrong).size().width+36+8+TabButton.curve));label.frame=NSRect(x:x,y:0,width:width,height:32);x+=width;label.needsDisplay=true}
-            strip.tabWidth=x;document.frame=NSRect(x:0,y:0,width:max(x,strip.contentSize.width),height:32)
+            for label in labels {label.updateTitle();let width=min(480,max(72,Design.attributed(label.name,.bodyStrong).size().width+36+8+TabButton.curve));label.frame=NSRect(x:x,y:0,width:width,height:WorkspaceTabContour.height);x+=width;label.needsDisplay=true}
+            strip.tabWidth=x;document.frame=NSRect(x:0,y:0,width:max(x,strip.contentSize.width),height:WorkspaceTabContour.height)
             if lastStripWidth != strip.frame.width{lastStripWidth=strip.frame.width;revealSelection=true}
             if revealSelection,let label=labels.first(where:{$0.tab.id == selected}){label.scrollToVisible(label.bounds);revealSelection=false}
-            for (i,b) in buttons.enumerated(){b.ink=Design.ink;b.frame=NSRect(x:bounds.width-12-controlsWidth+CGFloat(i)*36,y:0,width:32,height:32)}
-            targetBand.frame=NSRect(x:0,y:0,width:bounds.width,height:strip.frame.maxY)
+            for (i,b) in buttons.enumerated(){b.ink=Design.ink;b.frame=NSRect(x:bounds.width-12-controlsWidth+CGFloat(i)*36,y:(WorkspaceTabContour.height-32)/2+WorkspaceTabContour.topOverlap,width:32,height:32)}
+            targetBand.frame=NSRect(x:0,y:strip.frame.minY,width:bounds.width,height:WorkspaceTabContour.height)
             targetBand.isHidden=owner?.targetPaneID != id && referenceID == nil
             targetBand.needsDisplay=true
             targetPill.isHidden=owner?.root is Pane
             targetPill.title=owner?.targetPaneID == id ? "Target":"Set Target"
             targetPill.setAccessibilityLabel(targetPill.title+" Pane")
             targetPill.toolTip="Make This Pane The Target For Future Actions"
-            targetPill.frame=NSRect(x:max(0,(bounds.width-88)/2),y:strip.frame.minY+4,width:88,height:24)
+            targetPill.frame=NSRect(x:max(0,(bounds.width-88)/2),y:strip.frame.minY+4+WorkspaceTabContour.topOverlap,width:88,height:24)
             referencePill.isHidden = referenceID == nil
             if let id = referenceID {
                 let unlocked = controller?.canEditLinkedPalette(id) ?? owner?.canEditLinkedPalette?(id) ?? false
@@ -302,7 +384,7 @@ final class LibraryPageLayout:NSView {
                 referencePill.setAccessibilityLabel(referencePill.title + " Linked Palette")
                 referencePill.toolTip = unlocked ? "Edits Save To The Original Linked File":"Unlock To Edit The Original Linked File"
                 let right = targetPill.isHidden ? bounds.midX+76 : bounds.midX+124
-                referencePill.frame=NSRect(x:max(8,right-152),y:strip.frame.minY+4,width:152,height:24)
+                referencePill.frame=NSRect(x:max(8,right-152),y:strip.frame.minY+4+WorkspaceTabContour.topOverlap,width:152,height:24)
                 if !targetPill.isHidden { targetPill.frame.origin.x=max(8,referencePill.frame.minX-96) }
                 addSubview(referencePill,positioned:.above,relativeTo:nil)
                 referencePill.needsDisplay=true
@@ -398,6 +480,7 @@ final class LibraryPageLayout:NSView {
     var toggleLinkedPaletteEditing:((UUID)->Void)?
     var currentPlace:(()->StudioFrame.Place)?
     var hidePageControls:(()->Bool)?
+    var pickerTitleOverride:String? {didSet{refreshTabTitles()}}
     var titleForPlace:((StudioFrame.Place)->String)?
     var navigatePrimary:((StudioFrame.Place)->Void)?
     var renamePrimary:((String)->Void)?
@@ -456,7 +539,7 @@ final class LibraryPageLayout:NSView {
     }
     func refreshTabTitles(){for pane in panes(){pane.needsLayout=true;for label in pane.labels{label.updateTitle();label.needsDisplay=true}}}
     func updatePrimary(_ place:StudioFrame.Place){initialTab.route=place;refreshTabTitles()}
-    fileprivate func name(of tab:Tab)->String{guard let place=tab.controller?.place ?? tab.route else{return "New Panel"};return titleForPlace?(place) ?? "Library"}
+    fileprivate func name(of tab:Tab)->String{if tab === initialTab,let pickerTitleOverride{return pickerTitleOverride};guard let place=tab.controller?.place ?? tab.route else{return "New Panel"};return titleForPlace?(place) ?? "Library"}
     private func activateAncestor(of hit:NSView?){var view=hit;while let candidate=view{if let pane=candidate as? Pane{activate(pane);return};view=candidate.superview}}
     private func activate(_ pane:Pane){active.layer?.borderWidth=0;active=pane;pane.wantsLayer=true;pane.layer?.borderWidth=0;onActivate?(pane.controller)}
     fileprivate func select(_ tab:Tab,in pane:Pane){pane.selected=tab.id;pane.render();activate(pane);needsLayout=true}
@@ -547,6 +630,7 @@ final class LibraryPageLayout:NSView {
         switch place{case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:return true;default:return false}
     }
     func navigate(_ place:StudioFrame.Place)->Bool{guard active.selectedTab !== initialTab else{return false};load(active,place:place);return true}
+    func selectPrimary(){select(initialTab,in:primary)}
     private func load(_ pane:Pane,place:StudioFrame.Place){
         guard let tab=pane.selectedTab else{return};tab.route=place
         if let controller=tab.controller{controller.go(place);pane.needsLayout=true;return}

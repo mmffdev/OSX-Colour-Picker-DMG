@@ -150,6 +150,21 @@ protocol TagRailHost: AnyObject {
 enum TagPanel {
     /// The frames that can open railInfo; the first that takes a request wins, and the modal opens when none does.
     static let hosts = NSHashTable<AnyObject>.weakObjects()
+    static func fonts(_ entries:[FontLibraryEntry],library:LibraryController,over window:NSWindow?,onSave:@escaping ()->Void) {
+        guard let first=entries.first else{return}
+        let common=entries.dropFirst().reduce(Set(first.info.tags)){$0.intersection($1.info.tags)}
+        let within=Set(entries.compactMap{$0.imported?.0.member})
+        ask(title:entries.count == 1 ? "Tags For \(first.info.family)":"Tags For \(entries.count) Selected Fonts",
+            note:"Replace the tags on the selected fonts. New tags use the chosen scope.",
+            value:common.sorted().joined(separator:", "),within:within,start:.global,library:library,over:window) {tags,scope in
+            for tag in tags where !library.library.allTags.contains(where:{$0.caseInsensitiveCompare(tag) == .orderedSame}) {library.makeTag(tag,scope:scope)}
+            for entry in entries {
+                var info=entry.info;info.tags=tags
+                do {try FontLibraryIndex.save(info,entry:entry)} catch {library.flash(error.localizedDescription)}
+            }
+            onSave()
+        }
+    }
     private static func rail(_ subject: TagRequest.Subject, over window: NSWindow?) -> Bool {
         let request = TagRequest(subject: subject, window: window)
         for host in hosts.allObjects { if (host as? TagRailHost)?.openTagRail(request) == true { return true } }

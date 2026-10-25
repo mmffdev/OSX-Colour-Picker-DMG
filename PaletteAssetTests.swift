@@ -19,6 +19,17 @@ func runPaletteAssetTests(check:(Bool,String)->Void){
         var metadataAsset=asset;metadataAsset.palette.metadata=metadata;metadataAsset.palette.tags=["Brand","Primary"]
         let metadataRoundTrip=try PaletteAssetHandler.read(PaletteAssetHandler.data(metadataAsset))
         check(metadataRoundTrip.palette.metadata == metadata && metadataRoundTrip.palette.tagList == ["Brand","Primary"],"asset metadata and Lightroom-style keywords travel inside the native palette file")
+        var customMetadata=metadata
+        customMetadata.customFieldLabels=["brand_code":"Brand Code"]
+        customMetadata.customFieldSections=["brand_code":"Client Handover"]
+        customMetadata.customSections=["Client Handover"]
+        customMetadata.tidy()
+        var customAsset=asset;customAsset.palette.metadata=customMetadata
+        let customRead=try PaletteAssetHandler.read(PaletteAssetHandler.data(customAsset)).palette.metadata
+        check(customRead?.customFieldLabels?["brand_code"] == "Brand Code" && customRead?.customFieldSections?["brand_code"] == "Client Handover" && customRead?.customSections == ["Client Handover"],"empty custom metadata fields retain their label and section inside a native palette")
+        var sectionRemoval=customMetadata
+        AssetMetadataSchema.apply(AssetMetadata(),to:&sectionRemoval,including:[],removingSections:["Client Handover"])
+        check(sectionRemoval.customSections == nil && sectionRemoval.customFieldSections?["brand_code"] == "Custom Fields","removing a custom section preserves its fields in Custom Fields")
         let url=folder.appendingPathComponent("Portable Review.colpal")
         try PaletteAssetHandler.store(asset,at:url)
         let loaded=try PaletteAssetHandler.read(url)

@@ -44,6 +44,7 @@ final class StudioPage: ClickCursorView, Overlay {
     var compactWorkspace = false
     private let subjectTabHeader=WorkspacePageTabHeader(frame:.zero)
     var paneHeaderControls=false
+    var colourPickerHeader:(instruction:String,selection:String)? {didSet{needsDisplay=true}}
     weak var workspaceToolbar: WorkspaceViewportBar?
     weak var workspaceActionbar: WorkspaceViewportBar?
     let paletteActions=PalettePageControls(frame:.zero)
@@ -55,6 +56,7 @@ final class StudioPage: ClickCursorView, Overlay {
         needsLayout=true
     }}
     var showsPaletteFilters=false {didSet{if oldValue != showsPaletteFilters{window?.contentView?.needsLayout=true}}}
+    var fontLibraryMode=false
     var paletteSwatchCount:Int? {didSet{needsLayout=true;needsDisplay=true}}
     var imageIntakeMode=false {didSet{subjectTabHeader.isHidden = !imageIntakeMode;grid.imageIntake=imageIntakeMode;if imageIntakeMode{grid.listView=false};needsLayout=true;needsDisplay=true}}
     private var intakeGridColumns=6
@@ -62,11 +64,24 @@ final class StudioPage: ClickCursorView, Overlay {
     private let metadataFilterPanel=MetadataFilterPanel(frame:.zero)
     private var basePageItems:[TileGrid.Item]=[]
     private var filteredPageItems:[TileGrid.Item]=[]
+    private var sourceGridSections:[TileGrid.Section]=[]
     var assetOrder=GridAssetOrder.name { didSet { applyAssetOrder() } }
     @discardableResult private func applyAssetOrder(reuseGridIfSame:Bool=false)->Bool {
-        let ordered=assetProps.renderer == .image ? filteredPageItems:assetOrder.sorted(filteredPageItems)
+        var ordered:[TileGrid.Item]=[]
+        var visibleSections:[TileGrid.Section]=[]
+        if sourceGridSections.isEmpty {
+            ordered=assetProps.renderer == .image ? filteredPageItems:assetOrder.sorted(filteredPageItems)
+        } else {
+            for (sectionIndex,section) in sourceGridSections.enumerated() {
+                let members=filteredPageItems.filter{$0.sectionIndex == sectionIndex}
+                guard !members.isEmpty else{continue}
+                visibleSections.append(TileGrid.Section(title:section.title,start:ordered.count))
+                ordered += assetOrder.sorted(members)
+            }
+        }
         let reused=reuseGridIfSame && grid.hasSameIdentities(as:ordered)
         if !reused{grid.items=ordered}
+        grid.sections=visibleSections
         workspaceActionbar?.setAssetOrder(assetOrder)
         needsLayout=true
         return reused
@@ -89,10 +104,11 @@ final class StudioPage: ClickCursorView, Overlay {
     var inset: CGFloat = 8 { didSet { if inset != oldValue { needsLayout = true } } }
     var insetRight: CGFloat = 8 { didSet { if insetRight != oldValue { needsLayout = true } } }
     private func viewingNeedsRow(for width:CGFloat)->Bool{showsDeltaTools && !imageIntakeMode && width < (showsPaletteFilters ? 620:max(460,paletteActions.controlWidth+viewingControls.controlWidth+64))}
+    private func needsFilterRow(for width:CGFloat)->Bool{section == .tiles && !imageIntakeMode && paletteSwatchCount == nil && assetProps.filters.contains(.metadata) && width < 1140}
     func actionbarHeight(for width:CGFloat)->CGFloat{
         if imageIntakeMode{return WorkspacePanel.headerHeight}
         let base=showsPaletteFilters ? PaletteFilterControls.actionbarHeight(for:width):WorkspaceViewportBar.actionbarHeight
-        return base+(viewingNeedsRow(for:width) ? 40:0)+(width < 1140 ? 40:0)
+        return base+(viewingNeedsRow(for:width) ? 40:0)+(needsFilterRow(for:width) ? 40:0)
     }
     let importPanel=WorkspaceImportPanel(frame:.zero)
     private var importDestination:String?
@@ -174,7 +190,7 @@ final class StudioPage: ClickCursorView, Overlay {
         guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
         return onPaletteDrop?(id) ?? false
     }
-    enum Section: Hashable { case tiles, welcome, catalogues, schema, shortcuts, halo, sounds, general, colourManagement(Int), appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
+    enum Section: Hashable { case tiles, fontSpecimen, welcome, catalogues, schema, shortcuts, halo, sounds, general, colourManagement(Int), appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
     var settingsDestination: StudioFrame.Place? { didSet { needsLayout = true; needsDisplay = true } }
     var onSettingsTab: ((StudioFrame.Place) -> Void)?
     private var navigationTabs: [(String, StudioFrame.Place)] { settingsDestination.flatMap { SettingsNavigation.group(for: $0)?.tabs } ?? [] }
@@ -405,12 +421,13 @@ final class StudioPage: ClickCursorView, Overlay {
     override var isFlipped: Bool { true }
 
     private func canShowDelta(_ item:TileGrid.Item)->Bool { grid.canHover?(item) ?? (item.hex != nil || item.id != nil) }
-    func set(title: String, meta: (String, String), items: [TileGrid.Item],reuseGridIfSame:Bool=false) {
+    func set(title: String, meta: (String, String), items: [TileGrid.Item],reuseGridIfSame:Bool=false,sections:[TileGrid.Section]=[]) {
         self.title = title; self.meta = meta;subjectTabHeader.title=title
-        showsDeltaTools = showsPaletteFilters || paletteSwatchCount != nil || items.contains{canShowDelta($0)}
+        showsDeltaTools = !fontLibraryMode && (showsPaletteFilters || paletteSwatchCount != nil || items.contains{canShowDelta($0)})
         applyDeltaState(Prefs.deltaWarningsEnabled)
         basePageItems=items
         filteredPageItems=items
+        sourceGridSections=sections
         let reused=applyAssetOrder(reuseGridIfSame:reuseGridIfSame)
         if !reused{metadataFilterPanel.update(records:items)}
         needsDisplay = true
@@ -426,7 +443,7 @@ final class StudioPage: ClickCursorView, Overlay {
         super.layout()
         if subjectTabHeader.superview == nil{addSubview(subjectTabHeader)}
         subjectTabHeader.isHidden = !imageIntakeMode
-        subjectTabHeader.frame=NSRect(x:0,y:imageIntakeMode ? 0:AreaHeader.headingBaseline-21,width:bounds.width,height:WorkspaceTabContour.height)
+        subjectTabHeader.frame=NSRect(x:0,y:(imageIntakeMode ? 0:AreaHeader.headingBaseline-21)-WorkspaceTabContour.topOverlap,width:bounds.width,height:WorkspaceTabContour.height)
         var top = Self.headerHeight
         let u = Design.App.unit
         // The slider: one column wide, its track through the arrow's centre, ending a step before the arrow.
@@ -492,7 +509,7 @@ final class StudioPage: ClickCursorView, Overlay {
         let viewingParent: NSView = compactWorkspace ? (workspaceActionbar ?? self):self
         if viewingControls.superview !== viewingParent{viewingParent.addSubview(viewingControls)}
         if compactWorkspace,let actionbar=workspaceActionbar{
-            actionbar.filtersNewRow = !imageIntakeMode && actionbar.bounds.width < 1140
+            actionbar.filtersNewRow = needsFilterRow(for:actionbar.bounds.width)
             actionbar.trailingControlsNewRow=viewingNeedsRow(for:actionbar.bounds.width)
             actionbar.rightControls=showsDeltaTools && !imageIntakeMode ? [(viewingControls,viewingControls.controlWidth,28,0)]:[]
         }
@@ -531,10 +548,14 @@ final class StudioPage: ClickCursorView, Overlay {
 
     override func draw(_ dirtyRect: NSRect) {
         if section == .welcome || imageIntakeMode {return}
+        if let picker=colourPickerHeader {
+            AreaHeader.draw(heading:"",left:"CHOOSE NODE COLOURS · "+picker.instruction,right:picker.selection,in:bounds,inset:inset,insetRight:insetRight,arrow:.none,centreTabRowLabels:paneHeaderControls)
+            return
+        }
         // The same header as the rails: the name as the Heading, its two facts as the Labels, the Rule under.
         let paneCount=paletteSwatchCount.map{"Swatch Count \($0)"} ?? meta.0
         let paneContext=paletteSwatchCount == nil ? meta.1:meta.0
-        AreaHeader.draw(heading: aseName == nil && !renamingTitle && !paneHeaderControls && !imageIntakeMode ? (expandedPanelTitle ?? title) : "", left:paneHeaderControls ? paneContext:(anchors.isEmpty && navigationTabs.isEmpty && !showsDeltaTools ? meta.0:""), right:paneHeaderControls ? paneCount:(anchors.isEmpty && navigationTabs.isEmpty && !showsDeltaTools ? meta.1:""), in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open),headingRight:paneHeaderControls ? "":(paletteSwatchCount.map{"Swatch Count \($0)"} ?? ""),headingTrailingInset:paneHeaderControls ? 144:0)
+        AreaHeader.draw(heading: aseName == nil && !renamingTitle && !paneHeaderControls && !imageIntakeMode ? (expandedPanelTitle ?? title) : "", left:paneHeaderControls ? paneContext:(anchors.isEmpty && navigationTabs.isEmpty && !showsDeltaTools ? meta.0:""), right:paneHeaderControls ? paneCount:(anchors.isEmpty && navigationTabs.isEmpty && !showsDeltaTools ? meta.1:""), in: bounds, inset: inset, insetRight: insetRight, arrow: compactWorkspace ? .none : (expanded ? .close : .open),headingRight:paneHeaderControls ? "":(paletteSwatchCount.map{"Swatch Count \($0)"} ?? ""),headingTrailingInset:paneHeaderControls ? 144:0,centreTabRowLabels:paneHeaderControls)
         if showsDeltaTools && !paneHeaderControls {Design.attributed(meta.0,.label,colour:Design.quiet).draw(x:inset,baseline:AreaHeader.labelBaseline,width:compactWorkspace ? bounds.width-inset-insetRight : max(0,viewingControls.frame.minX-inset-16))}
         if let paletteCount, !compactWorkspace {
             Design.attributed(paletteCount, .bodyStrong).draw(x: inset, baseline: Self.headerHeight + Design.App.textBaseline, width: bounds.width - inset - insetRight)

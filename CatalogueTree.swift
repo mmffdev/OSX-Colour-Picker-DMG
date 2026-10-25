@@ -30,7 +30,7 @@ enum TreeFiles {
     static let palettesPool = "Palettes", typographyPool = "Typography", swatchesPool = "Swatches", profilesPool = "Profiles"
     static let pools = [palettesPool, typographyPool, swatchesPool, profilesPool]
     /// Folder names at the root that a collection may not take.
-    static let reserved: Set<String> = [library, "Assets", "Support", "AppBridge", "Keys", templates, backups, "Catalogues"]
+    static let reserved: Set<String> = [library, "Assets", GlobalAssets.folderName, "Support", "AppBridge", "Keys", templates, backups, "Catalogues"]
     /// The self-test removes what it takes out; the app puts it in the Bin.
     static var removedGoesToBin = true
 }
@@ -136,6 +136,8 @@ struct CatalogueFile: Codable, Equatable {
     var assetCollections: [AssetCollectionEntry]? = nil
     /// Colour of the top Collections navigation node, stored with this catalogue.
     var assetCollectionsRootColour: String? = nil
+    /// Palette derivations stay in their canvas until a result is explicitly saved to Library.
+    var paletteTransformGraphs: [PaletteTransformGraph]? = nil
     var structure: SimpleCatalogueStructure? = nil
     var sharedAssetReferences: [String:String]? = nil
     var libraryAssetTypes: [String]? = nil
@@ -393,7 +395,7 @@ enum CatalogueTree {
             for name in names(in: dir) {
                 let url = dir.appendingPathComponent(name)
                 if isFolder(url) {
-                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues" || (name == "Assets" && (fm.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || fm.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)))) { continue }
+                    if depth == 0 && (name == TreeFiles.backups || name == "Catalogues" || (["Assets",GlobalAssets.folderName].contains(name) && (fm.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || fm.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)))) { continue }
                     walk(url, depth: depth + 1)
                     continue
                 }
@@ -681,6 +683,8 @@ enum CatalogueTree {
         // The assets: each where Finder has it, belonging to the member whose folder holds it, or to the Library.
         var swatches: [Swatch] = [], colours: [Colour] = [], seenColours = Set<String>(), seenPalettes = Set<UUID>()
         func takeColours(_ list: [Colour]) { for c in list where seenColours.insert(c.hex).inserted { colours.append(c) } }
+        // A catalogue's own loose palettes still live in its Assets pool. The app-wide
+        // My Library directory is separate and is excluded from catalogue scans above.
         let library = root.appendingPathComponent("Assets")
         let memberFolders = memberURL.map { ($0.key, $0.value.path + "/") }.sorted { $0.1.count > $1.1.count }
         func owner(of url: URL) -> (found: Bool, member: UUID?) {
@@ -1064,7 +1068,7 @@ enum CatalogueTree {
                                  activePalette: lib.activeSwatchID, colours: lib.colours.map { $0.hex }, tags: lib.tagInfo, deleted: lib.deleted,
                                  templates: schema.templates ?? [], collections: collections, libraryAssets: libraryLinks,
                                  swatches: createEmptyPools || !looseColours.isEmpty ? relative(swatchesURL, to: root) : nil, profiles: createEmptyPools || !lib.colourProfiles.isEmpty ? relative(profilesURL, to: root) : nil,
-                                 metadataFilters: old?.metadataFilters,workspaceLayouts:old?.workspaceLayouts,importedAssets:importedAssets,assetCollections:old?.assetCollections ?? (old == nil && indexURL.lastPathComponent != "Assets.colcat" ? [AssetCollections.defaultEntry()] : nil),assetCollectionsRootColour:old?.assetCollectionsRootColour,structure:schema.structure,sharedAssetReferences:old?.sharedAssetReferences,libraryAssetTypes:old?.libraryAssetTypes)
+                                 metadataFilters: old?.metadataFilters,workspaceLayouts:old?.workspaceLayouts,importedAssets:importedAssets,assetCollections:old?.assetCollections ?? (old == nil && indexURL.lastPathComponent != "Assets.colcat" ? [AssetCollections.defaultEntry()] : nil),assetCollectionsRootColour:old?.assetCollectionsRootColour,paletteTransformGraphs:old?.paletteTransformGraphs,structure:schema.structure,sharedAssetReferences:old?.sharedAssetReferences,libraryAssetTypes:old?.libraryAssetTypes)
         if !importMoves.isEmpty, FileManager.default.fileExists(atPath: ASERegistry.url(in: root).path) {
             var sources = try ASERegistry.resolved(root)
             let previous = sources.map(\.path)

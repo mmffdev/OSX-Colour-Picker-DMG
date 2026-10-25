@@ -1,20 +1,36 @@
 import AppKit
 
+/// One centred, open stroke for panel and subsection navigation.
+enum WorkspaceHeaderChevron {
+    enum Direction { case down, right, left }
+    static func draw(_ direction:Direction, at centre:NSPoint, colour:NSColor) {
+        let path=NSBezierPath()
+        switch direction {
+        case .down:
+            path.move(to:NSPoint(x:centre.x-4.5,y:centre.y-2.25))
+            path.line(to:NSPoint(x:centre.x,y:centre.y+2.25))
+            path.line(to:NSPoint(x:centre.x+4.5,y:centre.y-2.25))
+        case .right:
+            path.move(to:NSPoint(x:centre.x-2.25,y:centre.y-4.5))
+            path.line(to:NSPoint(x:centre.x+2.25,y:centre.y))
+            path.line(to:NSPoint(x:centre.x-2.25,y:centre.y+4.5))
+        case .left:
+            path.move(to:NSPoint(x:centre.x+2.25,y:centre.y-4.5))
+            path.line(to:NSPoint(x:centre.x-2.25,y:centre.y))
+            path.line(to:NSPoint(x:centre.x+2.25,y:centre.y+4.5))
+        }
+        path.lineWidth=1.8;path.lineCapStyle = .round;path.lineJoinStyle = .round
+        colour.setStroke();path.stroke()
+    }
+}
+
 /// Shared disclosure glyph for outline rows and dockable panel headers.
 final class WorkspaceDisclosure: ClickCursorButton {
+    override var isFlipped:Bool {true}
     override func draw(_ dirtyRect: NSRect) {
-        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
-        let path = NSBezierPath()
-        if state == .on {
-            path.move(to: NSPoint(x: centre.x-5, y: centre.y-3))
-            path.line(to: NSPoint(x: centre.x+5, y: centre.y-3))
-            path.line(to: NSPoint(x: centre.x, y: centre.y+4))
-        } else {
-            path.move(to: NSPoint(x: centre.x-3, y: centre.y+5))
-            path.line(to: NSPoint(x: centre.x-3, y: centre.y-5))
-            path.line(to: NSPoint(x: centre.x+4, y: centre.y))
-        }
-        path.close(); (isHighlighted ? Design.ink : Design.quiet).setFill(); path.fill()
+        WorkspaceHeaderChevron.draw(state == .on ? .down:.right,
+                                    at:NSPoint(x:bounds.midX,y:bounds.midY),
+                                    colour:isHighlighted ? Design.ink:Design.quiet)
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
@@ -105,28 +121,35 @@ protocol WorkspacePinnedPanelContent:AnyObject {
 
 /// The chevron before a full-rail panel's title, pointing left: pressed, it closes the rail the panel fills.
 final class WorkspaceBackChevron: ClickCursorButton {
+    override var isFlipped:Bool {true}
     override func draw(_ dirtyRect: NSRect) {
-        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: centre.x+3, y: centre.y+5))
-        path.line(to: NSPoint(x: centre.x+3, y: centre.y-5))
-        path.line(to: NSPoint(x: centre.x-4, y: centre.y))
-        path.close(); (isHighlighted ? Design.ink : Design.quiet).setFill(); path.fill()
+        WorkspaceHeaderChevron.draw(.left,at:NSPoint(x:bounds.midX,y:bounds.midY),
+                                    colour:isHighlighted ? Design.ink:Design.quiet)
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
+private final class WorkspacePanelTitleButton:ClickCursorButton {
+    override var isFlipped:Bool {true}
+    override func draw(_ dirtyRect:NSRect) {
+        Design.attributed(title,.bodyStrong).draw(x:0,baseline:bounds.midY+5,width:bounds.width)
+    }
+}
+
 final class WorkspacePanelHeader:NSView {
+    var showsTopDivider=false {didSet{if oldValue != showsTopDivider {needsDisplay=true}}}
+    var showsBottomDivider=true {didSet{if oldValue != showsBottomDivider {needsDisplay=true}}}
     override var isFlipped:Bool {true}
     override func draw(_ dirtyRect:NSRect){
         fill(bounds,Design.card)
         WorkspacePanelSurface.draw(in:bounds,selected:false)
-        hairline(x:0,y:bounds.height-1,width:bounds.width)
+        if showsTopDivider {hairline(x:0,y:0,width:bounds.width)}
+        if showsBottomDivider {hairline(x:0,y:bounds.height-1,width:bounds.width)}
     }
 }
 
 final class WorkspacePanel: NSView {
-    static let headerHeight: CGFloat = 34
+    static let headerHeight: CGFloat = 40
     static let footerHeight: CGFloat = 18
     static let contentPadding: CGFloat = 16
     let panelID: String
@@ -143,6 +166,11 @@ final class WorkspacePanel: NSView {
     private let back=WorkspaceBackChevron()
     var headerIsPinned=false {didSet{needsLayout=true}}
     fileprivate let headerSurface:NSView=WorkspacePanelHeader()
+    var showsTopDivider:Bool {
+        get {(headerSurface as? WorkspacePanelHeader)?.showsTopDivider ?? false}
+        set {(headerSurface as? WorkspacePanelHeader)?.showsTopDivider=newValue}
+    }
+    fileprivate var showsBottomDivider=true {didSet{if oldValue != showsBottomDivider {needsDisplay=true}}}
     var collapsed = false { didSet { disclosure.state = collapsed ? .off : .on; needsLayout = true; rail?.arrange() } }
     weak var rail: WorkspaceRail? {didSet{needsLayout=true}}
     private let contentScroll: WorkspacePanelScroll?
@@ -166,7 +194,7 @@ final class WorkspacePanel: NSView {
         help=Help_HexButton(page:id,title:title)
         self.resizable=resizable;self.draggable=draggable
         contentScroll = content is WorkspaceInspector || content is WorkspaceScrollableContent ? WorkspacePanelScroll() : nil
-        titleButton = ClickCursorButton(title: title, target: nil, action: nil)
+        titleButton = WorkspacePanelTitleButton(title: title, target: nil, action: nil)
         filledTitle = NSTextField(labelWithString:title)
         super.init(frame: .zero)
         wantsLayer = true; layer?.backgroundColor = Design.card.cgColor
@@ -212,11 +240,11 @@ final class WorkspacePanel: NSView {
     override func layout() {
         super.layout()
         if !headerIsPinned {headerSurface.frame=NSRect(x:0,y:0,width:bounds.width,height:Self.headerHeight)}
-        disclosure.frame = NSRect(x: 8, y: 9, width: 16, height: 16)
+        disclosure.frame = NSRect(x: 8, y: (Self.headerHeight-16)/2, width: 16, height: 16)
         let dragSpace:CGFloat=draggable ? 28:0
         help.frame=Help_HexButton.frame(width:bounds.width,height:Self.headerHeight)
         titleButton.frame = NSRect(x: 30, y: 0, width: max(20,bounds.width-70-dragSpace-(headerAction == nil ? 0:28)), height: Self.headerHeight)
-        headerActionButton.frame=NSRect(x:bounds.width-64-dragSpace,y:5+Help_HexButton.opticalOffset,width:24,height:24)
+        headerActionButton.frame=NSRect(x:bounds.width-64-dragSpace,y:(Self.headerHeight-24)/2+Help_HexButton.opticalOffset,width:24,height:24)
         grip.frame = NSRect(x: bounds.width-64, y: Help_HexButton.opticalOffset, width: 28, height: Self.headerHeight)
         disclosure.isHidden=fillsRail;grip.isHidden=fillsRail || !draggable;titleButton.isHidden=fillsRail;filledTitle.isHidden = !fillsRail
         if fillsRail {
@@ -227,14 +255,14 @@ final class WorkspacePanel: NSView {
             let labelHeight=filledTitle.intrinsicContentSize.height
             filledTitle.frame=NSRect(x:titleX,y:(Self.headerHeight-labelHeight)/2,width:max(20,bounds.width-76-titleX),height:labelHeight)
             filledTitle.textColor=Design.ink
-            headerActionButton.frame=NSRect(x:bounds.width-64,y:5+Help_HexButton.opticalOffset,width:24,height:24)
+            headerActionButton.frame=NSRect(x:bounds.width-64,y:(Self.headerHeight-24)/2+Help_HexButton.opticalOffset,width:24,height:24)
         }
         let closed=collapsed && !fillsRail
         content.isHidden = closed; contentScroll?.isHidden=closed; resizeGrip.isHidden = closed || resizeFooterHeight == 0
         let top:CGFloat=(headerIsPinned ? 0:Self.headerHeight)+topPadding
         let viewport=NSRect(x:0,y:top,width:bounds.width,height:max(0,bounds.height-top-resizeFooterHeight-bottomPadding))
         if let contentScroll {
-            let height=fillsRail ? viewport.height:contentHeight
+            let height=fillsRail ? max(viewport.height,contentHeight):contentHeight
             contentScroll.onLeft=false
             contentScroll.reservesScrollerLane=resizable && !fillsRail && !(content is WorkspaceRailAwareContent)
             contentScroll.hasVerticalScroller=resizable && !fillsRail && height > viewport.height+0.5
@@ -247,7 +275,7 @@ final class WorkspacePanel: NSView {
     override func draw(_ dirtyRect: NSRect) {
         if !collapsed && !fillsRail {
             if resizeFooterHeight > 0 {hairline(x:0,y:bounds.height-resizeFooterHeight,width:bounds.width)}
-            hairline(x:0,y:bounds.height-1,width:bounds.width)
+            if showsBottomDivider {hairline(x:0,y:bounds.height-1,width:bounds.width)}
         }
     }
 }
@@ -396,6 +424,15 @@ final class WorkspaceRail: NSView {
     override func layout(){super.layout();arrange()}
     func arrange() {
         let pinned=panels.count == 1 && panels[0].fillsRail && panels[0].pinsHeader ? panels[0]:nil
+        let visiblePanels=panels.filter{!$0.isHidden}
+        for (index,panel) in visiblePanels.enumerated() {
+            let hasNext=index < visiblePanels.count-1
+            panel.showsBottomDivider = !hasNext
+            if let header=panel.headerSurface as? WorkspacePanelHeader {
+                header.showsTopDivider = index > 0
+                header.showsBottomDivider = !panel.collapsed || !hasNext
+            }
+        }
         let controls=pinned?.content as? WorkspacePinnedPanelContent
         let fixedHeight:CGFloat=pinned == nil ? 0:WorkspacePanel.headerHeight+(controls?.pinnedControlsHeight ?? 0)
         scroll.frame=NSRect(x:scroll.onLeft ? 0:1,y:fixedHeight,width:max(0,bounds.width-1),height:max(0,bounds.height-fixedHeight))

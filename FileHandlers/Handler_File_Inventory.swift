@@ -83,7 +83,7 @@ extension Handler_File_Manager {
                     let key = url.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased()
                     if !names.insert(key).inserted { result.issues.append(FileIssue(url: url, state: .ambiguous, message: "Several folder entries differ only by case or Unicode spelling. Resolve them before moving or saving files.")) }
                     if depth == 0, ["Backups", "Catalogues"].contains(url.lastPathComponent) { continue }
-                    if depth == 0, url.lastPathComponent == "Assets", (FileManager.default.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || FileManager.default.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)) { continue }
+                    if depth == 0, ["Assets",GlobalAssets.folderName].contains(url.lastPathComponent), (FileManager.default.fileExists(atPath: url.appendingPathComponent("Assets.colcat").path) || FileManager.default.fileExists(atPath:url.appendingPathComponent("my_library.collib").path)) { continue }
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                     if values.isSymbolicLink == true { result.issues.append(FileIssue(url: url, state: .ambiguous, message: "Symbolic links need explicit review before file operations.")); continue }
                     if values.isDirectory == true { result.folders.append(url); walk(url, depth: depth + 1) }

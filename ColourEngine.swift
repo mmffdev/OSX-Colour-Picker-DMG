@@ -45,7 +45,7 @@ struct ColourSource: Codable, Equatable {
 }
 
 /// A colour's full definition: what was given, the master worked out from it, and its kind.
-struct ColourDefinition: Equatable {
+struct ColourDefinition: Codable, Equatable {
     var source: ColourSource
     var master: XYZ
     var kind: ColourKind

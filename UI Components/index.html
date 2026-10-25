@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Colorgain · UI Components</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="components.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Colorgain</span><span class="brand-slash">/</span><span class="brand-page">UI Components</span></div>
+      <span class="topbar-status"><span class="status-dot"></span> Design review · Native app unchanged</span>
+    </header>
+    <div class="workspace">
+      <aside class="nav" aria-label="Component sections">
+        <div class="nav-heading">CONTROLS</div>
+        <a href="#overview" class="nav-link active">Overview <span>01</span></a>
+        <a href="#buttons" class="nav-link">Current buttons <span>02</span></a>
+        <a href="#raised-buttons" class="nav-link">Raised button study <span>03</span></a>
+        <a href="#checks" class="nav-link">Checkboxes <span>04</span></a>
+        <a href="#selectors" class="nav-link">Dropdown / Dropup <span>05</span></a>
+        <a href="#fields" class="nav-link">Text fields <span>06</span></a>
+        <a href="#dates" class="nav-link">Date boxes <span>07</span></a>
+        <a href="#textboxes" class="nav-link">Text boxes <span>08</span></a>
+        <div class="nav-foot">A working specimen sheet for choosing the shared controls before native implementation.</div>
+      </aside>
+      <main id="main">
+        <section class="intro" id="overview">
+          <h1>Shape the control language.</h1>
+          <p>Review the interaction, spacing and states here first. The page includes the current text actions and a separate raised-button proposal, alongside selectors and form fields. The circular checkbox is also a proposed replacement for the current square check.</p>
+          <div class="intro-metrics"><span><b>8</b> component studies</span><span><b>32</b> px standard control height</span><span><b>2</b> button directions to compare</span></div>
+        </section>
+
+        <section class="component-section" id="buttons">
+          <div class="section-heading"><div><h2>Current buttons</h2></div><p>Text actions use the app’s leading arrow and underline on hover. Icon actions stay compact and descriptive.</p></div>
+          <div class="specimen"><div class="specimen-label">TEXT ACTIONS <span>LIVE</span></div><div class="demo-row" id="buttons-demo"></div></div>
+          <div class="specimen"><div class="specimen-label">ICON ACTIONS &amp; STATES</div><div class="demo-row" id="icons-demo"></div></div>
+          <div class="specimen"><div class="specimen-label">MODE &amp; IMPORT CHOICES</div><div class="demo-row" id="choices-demo"></div></div>
+          <div class="component-note">Primary, secondary and quiet are semantic roles in the Swift API. The current app draws them with one shared text-action treatment.</div>
+        </section>
+
+        <section class="component-section" id="raised-buttons">
+          <div class="section-heading"><div><h2>Raised button study</h2></div><p>A close study of the supplied reference: softly domed capsule, cool grey face, bright top rim, deeper lower lip and a broad cast shadow. Press a button to see the surface settle.</p></div>
+          <div class="raised-stage" data-depth="reference">
+            <div class="raised-stage-head"><span>LIGHT STUDY / 12 VARIATIONS</span><div class="depth-switch" role="group" aria-label="Shadow depth"><span>SHADOW</span><button type="button" data-depth="soft" aria-pressed="false">Soft</button><button type="button" data-depth="reference" aria-pressed="true">Reference</button><button type="button" data-depth="deep" aria-pressed="false">Deep</button></div></div>
+            <div class="raised-grid" id="raised-demo"></div>
+          </div>
+          <div class="raised-caption"><span>Surface</span><p>Light falls from the upper left. The lower-right shadow creates lift; a narrow bright rim and dark underside give the button its thickness. The small disc and amber halo are separate treatments from the same reference.</p></div>
+        </section>
+
+        <section class="component-section" id="checks">
+          <div class="section-heading"><div><h2>Checkboxes</h2></div><p>The new circular check follows your reference. Each item toggles independently; the mixed state shows partial selection.</p></div>
+          <div class="specimen check-specimen"><div class="specimen-label">PROPOSED CIRCULAR CHECK <span>CLICK OR PRESS SPACE</span></div><div class="check-grid" id="checks-demo"></div></div>
+          <div class="component-note">The circle and tick are vector paths. Native checkbox semantics, keyboard access and labels remain required when this is brought into Swift.</div>
+        </section>
+
+        <section class="component-section" id="selectors">
+          <div class="section-heading"><div><h2>Dropdown / Dropup</h2></div><p>Bordered selectors sit inside forms. Compact inline selectors belong in headers and toolbars. The dropup opens above its trigger.</p></div>
+          <div class="specimen"><div class="specimen-label">SELECTORS <span>CLICK TO OPEN</span></div><div class="selector-grid"><div class="form-unit"><div class="field-label">Metadata preset</div><div id="dropdown-demo"></div><div class="field-help">Form selector · opens below</div></div><div class="form-unit"><div class="field-label">Output profile</div><div id="dropup-demo"></div><div class="field-help">Form selector · prefers above</div></div><div class="form-unit"><div class="field-label">Toolbar view</div><div id="inline-demo"></div><div class="field-help">Inline selector · no outer border</div></div></div></div>
+        </section>
+
+        <section class="component-section" id="fields">
+          <div class="section-heading"><div><h2>Text fields</h2></div><p>Every editable value has a visible boundary, a label and a clear focus state. Help and error text follow the field.</p></div>
+          <div class="specimen"><div class="specimen-label">SINGLE-LINE INPUT</div><div class="field-grid" id="fields-demo"></div></div>
+        </section>
+
+        <section class="component-section" id="dates">
+          <div class="section-heading"><div><h2>Date boxes</h2></div><p>Dates use the same field frame and a native date input, with the calendar affordance retained.</p></div>
+          <div class="specimen"><div class="specimen-label">DATE INPUT</div><div class="field-grid" id="dates-demo"></div></div>
+        </section>
+
+        <section class="component-section" id="textboxes">
+          <div class="section-heading"><div><h2>Text boxes</h2></div><p>Multiline input shares the field border, label and validation pattern, with enough room to read and edit notes.</p></div>
+          <div class="specimen"><div class="specimen-label">MULTILINE INPUT</div><div class="field-grid" id="textboxes-demo"></div></div>
+        </section>
+        <footer class="page-footer">Colorgain UI Components <span>Review specimen · 21 October 2026</span></footer>
+      </main>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

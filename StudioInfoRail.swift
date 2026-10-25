@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 // ---------- railInfo and its first pane, Tags ----------
 //
@@ -18,6 +19,163 @@ import AppKit
 protocol InfoRailContent: AnyObject {
     /// Escape while the rail is open: true when the pane took it (an inner state closed); false lets the rail close.
     func escapeInfoRail() -> Bool
+}
+
+/// Contextual asset intake stays beside the Workspace tree; it never changes the viewport route.
+final class BucketIntakeInfoPane: NSView, WorkspaceScrollableContent, InfoRailContent, Overlay {
+    struct DestinationChoice { let key:String;let section:String;let path:String }
+    typealias ImportAction = ([URL], WorkspaceImport.ImageTransfer, String, @escaping (Result<Int, Error>) -> Void) -> Void
+    private let kind: String
+    private let destinations:[DestinationChoice]
+    private var selectedDestination:String
+    private let importAction: ImportAction
+    private var files: [URL] = []
+    private var transfer: WorkspaceImport.ImageTransfer = .copy
+    private var busy = false
+    private let kindLabel = Design.text("", .bodyStrong)
+    private let destinationButton = DropdownButton()
+    private var destinationMenu:SwissDropdown.MenuPanel?
+    private let sourceLabel = Design.text("Choose files to add", .body, colour: Design.quiet)
+    private let fileList = NSScrollView(frame: .zero)
+    private let fileNames = NSTextView(frame: .zero)
+    private let noteLabel = Design.text("A copy is added to the selected bucket. The originals stay in place.", .body, colour: Design.quiet)
+    private let statusLabel = Design.text("", .body, colour: Design.quiet)
+    private let sourceButton = WorkspaceImportActionButton(frame: .zero)
+    private let commitButton = WorkspaceImportActionButton(frame: .zero)
+    private let methods: [WorkspaceImportMethodButton] = zip(["Copy", "Move", "Reference"], ["doc.on.doc", "arrow.right", "link"]).map { title, symbol in
+        let button = WorkspaceImportMethodButton(frame: .zero)
+        button.title = title; button.symbol = symbol
+        return button
+    }
+    override var isFlipped: Bool { true }
+    private var fileListHeight: CGFloat { files.isEmpty ? 0 : min(192, CGFloat(files.count) * 24 + 16) }
+    var minimumContentHeight: CGFloat { 550 + fileListHeight }
+    var panelContentPadding: CGFloat { 16 }
+
+    var overlayWindows:[NSWindow] { destinationMenu.map{[$0]} ?? [] }
+    var dismissOnOutsideClick:Bool { true }
+    func dismissOverlay() { if let menu=destinationMenu {menu.parent?.removeChildWindow(menu);menu.orderOut(nil)};destinationMenu=nil;Overlays.closed(self) }
+    override func viewWillMove(toWindow newWindow:NSWindow?) { if newWindow == nil {dismissOverlay()};super.viewWillMove(toWindow:newWindow) }
+    init(kind: String, destinations:[DestinationChoice], selectedKey:String, importAction: @escaping ImportAction) {
+        self.kind = kind; self.destinations=destinations; self.selectedDestination=selectedKey; self.importAction = importAction
+        super.init(frame: .zero)
+        kindLabel.stringValue = kind
+        destinationButton.target=self;destinationButton.action=#selector(chooseDestination)
+        sourceLabel.maximumNumberOfLines = 3; sourceLabel.lineBreakMode = .byWordWrapping
+        fileNames.isEditable = false; fileNames.isSelectable = true
+        fileNames.drawsBackground = false; fileNames.font = Design.Text.body.font(); fileNames.textColor = Design.ink
+        fileNames.textContainerInset = NSSize(width: 8, height: 8)
+        fileList.documentView = fileNames; fileList.hasVerticalScroller = true
+        fileList.drawsBackground = false; fileList.borderType = .lineBorder
+        noteLabel.maximumNumberOfLines = 3; noteLabel.lineBreakMode = .byWordWrapping
+        statusLabel.maximumNumberOfLines = 3; statusLabel.lineBreakMode = .byWordWrapping
+        for view in [kindLabel, destinationButton, sourceLabel, fileList, noteLabel, statusLabel, sourceButton, commitButton] as [NSView] { addSubview(view) }
+        sourceButton.title = "Choose Files…"; sourceButton.symbol = "doc.badge.plus"
+        sourceButton.target = self; sourceButton.action = #selector(chooseFiles)
+        commitButton.title = "Add \(kind)"; commitButton.symbol = "square.and.arrow.down"
+        commitButton.target = self; commitButton.action = #selector(addFiles)
+        for (index, button) in methods.enumerated() {
+            button.tag = index; button.target = self; button.action = #selector(selectMethod(_:)); addSubview(button)
+        }
+        refresh()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func escapeInfoRail() -> Bool { if destinationMenu != nil {dismissOverlay();return true};return false }
+
+    override func layout() {
+        super.layout()
+        let x: CGFloat = 16, width = max(40, bounds.width - 32)
+        kindLabel.frame = NSRect(x: x, y: 32, width: width, height: 32)
+        destinationButton.frame = NSRect(x: x, y: 102, width: width, height: 36)
+        sourceButton.frame = NSRect(x: x, y: 206, width: width, height: 40)
+        sourceLabel.frame = NSRect(x: x, y: 257, width: width, height: 28)
+        fileList.frame = NSRect(x: x, y: 287, width: width, height: fileListHeight)
+        fileNames.frame = NSRect(origin: .zero, size: NSSize(width: max(40, width - 18), height: max(fileListHeight, CGFloat(files.count) * 24 + 16)))
+        let offset = fileListHeight
+        let gap: CGFloat = 4, methodWidth = (width - 2 * gap) / 3
+        for (index, button) in methods.enumerated() {
+            button.frame = NSRect(x: x + CGFloat(index) * (methodWidth + gap), y: 338 + offset, width: methodWidth, height: 36)
+        }
+        noteLabel.frame = NSRect(x: x, y: 388 + offset, width: width, height: 48)
+        commitButton.frame = NSRect(x: x, y: 448 + offset, width: width, height: 40)
+        statusLabel.frame = NSRect(x: x, y: 499 + offset, width: width, height: 50)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        for (caption, y) in [("Asset Type", CGFloat(18)), ("Destination", 87), ("Source", 182), ("File Handling", 321 + fileListHeight)] {
+            Design.attributed(caption, .caption).draw(x: 16, baseline: y, width: bounds.width - 32)
+        }
+    }
+    private func refresh() {
+        destinationButton.title=destinations.first(where:{$0.key == selectedDestination})?.path ?? "Choose Destination"
+        destinationButton.toolTip=destinationButton.title
+        sourceLabel.stringValue = files.isEmpty ? "Choose files to add" : "\(files.count) \(files.count == 1 ? "file" : "files") selected"
+        fileNames.string = files.enumerated().map { "\($0.offset + 1). \($0.element.lastPathComponent)" }.joined(separator: "\n")
+        fileList.isHidden = files.isEmpty
+        noteLabel.stringValue = transfer == .copy ? "A copy is added to the selected bucket. The originals stay in place." : transfer == .move ? "The originals are removed after the new files are saved." : "Link the originals in place. Keep them available to Colorgain."
+        for (index, button) in methods.enumerated() { button.chosen = (index == 0 && transfer == .copy) || (index == 1 && transfer == .move) || (index == 2 && transfer == .reference); button.isEnabled = !busy }
+        sourceButton.isEnabled = !busy
+        destinationButton.isEnabled = !busy
+        commitButton.isEnabled = !busy && !files.isEmpty && destinations.contains(where:{$0.key == selectedDestination})
+        needsLayout = true; needsDisplay = true
+        var ancestor = superview
+        while let view = ancestor { if let panel = view as? WorkspacePanel { panel.rail?.arrange(); break }; ancestor = view.superview }
+    }
+    @objc private func chooseDestination() {
+        guard let window,!destinations.isEmpty else{return}
+        dismissOverlay()
+        let M=SwissDropdown.MenuPanel.self
+        var rows:[String]=[],keys:[String?]=[],previous:String?
+        for choice in destinations {
+            if choice.section != previous {
+                if previous != nil {rows.append(M.divider);keys.append(nil)}
+                rows.append(M.heading(choice.section));keys.append(nil);previous=choice.section
+            }
+            rows.append(choice.path);keys.append(choice.key)
+        }
+        let selected=destinations.first(where:{$0.key == selectedDestination})?.path ?? ""
+        let menu=SwissDropdown.MenuPanel(items:rows,chosen:selected,width:max(bounds.width - 32,420)){[weak self] index in
+            guard let self,keys.indices.contains(index),let key=keys[index] else{return}
+            self.selectedDestination=key;self.dismissOverlay();self.refresh()
+        }
+        menu.place(anchoredTo:window.convertToScreen(destinationButton.convert(destinationButton.bounds,to:nil)),within:window)
+        window.addChildWindow(menu,ordered:.above);destinationMenu=menu;menu.orderFront(nil);Overlays.opened(self)
+    }
+    @objc private func selectMethod(_ sender: WorkspaceImportMethodButton) {
+        transfer = sender.tag == 1 ? .move : sender.tag == 2 ? .reference : .copy
+        refresh()
+    }
+    @objc private func chooseFiles() {
+        guard let window else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose \(kind)"
+        panel.message = "Select one or more \(kind.lowercased()) files."
+        panel.prompt = "Use Files"
+        panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
+        panel.allowedContentTypes = kind == "Images" || kind == "Photographs" ? [.image] : WorkspaceImport.importExtensions(for: kind).compactMap { UTType(filenameExtension: $0) }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK else { return }
+            self.files = panel.urls; self.statusLabel.stringValue = ""; self.refresh()
+        }
+    }
+    @objc private func addFiles() {
+        guard !files.isEmpty, !busy else { return }
+        busy = true; statusLabel.stringValue = "Adding \(files.count) file(s)…"; refresh()
+        let chosen=selectedDestination
+        importAction(files, transfer, chosen) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.busy = false
+                switch result {
+                case .success(let count):
+                    let path=self.destinations.first(where:{$0.key == chosen})?.path ?? "the selected destination"
+                    self.statusLabel.stringValue = "Added \(count) file(s) to \(path)."
+                    self.files = []
+                case .failure(let error): self.statusLabel.stringValue = error.localizedDescription
+                }
+                self.refresh()
+            }
+        }
+    }
 }
 
 /// What is being tagged.
@@ -65,8 +223,8 @@ final class TagsInfoPane: NSView, WorkspaceScrollableContent, InfoRailContent, N
 
     override var isFlipped: Bool { true }
     var panelContentPadding: CGFloat { Self.inset }
-    private var rowsHeight: CGFloat { CGFloat(tree.numberOfRows) * tree.rowHeight }
-    var minimumContentHeight: CGFloat { editing == nil ? Self.treeTop + rowsHeight : Self.editBottom }
+    private var rowsHeight: CGFloat { WorkspaceBranchTree.rowsHeight(tree.numberOfRows,rowHeight:tree.rowHeight) }
+    var minimumContentHeight: CGFloat { editing == nil ? Self.treeTop + rowsHeight + 2*WorkspaceBranchTree.edgePadding : Self.editBottom }
 
     init(request: TagRequest, library: LibraryController) {
         self.library = library; self.request = request
@@ -213,7 +371,7 @@ final class TagsInfoPane: NSView, WorkspaceScrollableContent, InfoRailContent, N
     private func buildTree() {
         let column = NSTableColumn(identifier: .init("Tags"))
         tree.addTableColumn(column); tree.outlineTableColumn = column; tree.headerView = nil
-        tree.rowHeight = 34; tree.intercellSpacing = .zero; tree.indentationPerLevel = 0
+        tree.rowHeight = 34; tree.intercellSpacing = NSSize(width:0,height:WorkspaceBranchTree.rowSpacing); tree.indentationPerLevel = 0
         tree.backgroundColor = Design.card; tree.style = .plain; tree.focusRingType = .none
         tree.leadingDisclosure = true; tree.expandsOnSelection = false; tree.allowsEmptySelection = true
         tree.swatchFamily = .charcoal; tree.outlinedRows = true
@@ -307,7 +465,7 @@ final class TagsInfoPane: NSView, WorkspaceScrollableContent, InfoRailContent, N
             well.frame = NSRect(x: x, y: Self.block3 + 24, width: 28, height: 28)
             let sw = save.intrinsicContentSize.width
             save.frame = NSRect(x: x + w - sw, y: Self.saveTop, width: sw, height: SwissButton.height)
-            tree.frame = NSRect(x: 0, y: Self.treeTop, width: bounds.width, height: max(34, rowsHeight))
+            tree.frame = NSRect(x: 0, y: Self.treeTop+WorkspaceBranchTree.edgePadding, width: bounds.width, height: max(34, rowsHeight))
             tree.tableColumns.first?.width = bounds.width
         } else {
             editField.frame = NSRect(x: x, y: Self.block1 + 24, width: w, height: 24)

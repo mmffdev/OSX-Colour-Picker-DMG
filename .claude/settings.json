@@ -98,7 +98,13 @@
       "Bash(./deploy.sh)",
       "Bash(grep -vE '^\\\\s*$')",
       "Bash(grep -vE '^\\\\s*$' /private/tmp/claude-501/-Users-rick-Documents-MMFFDev---Apple-Projects-MMFFDev---Colour-Picker/7491d517-5a87-4544-bde5-606e67a7f5c4/scratchpad/deploy.log)",
-      "Bash(git commit -q -m 'Run compose from /var/site beside its env file *)"
+      "Bash(git commit -q -m 'Run compose from /var/site beside its env file *)",
+      "Bash(scutil --proxy)",
+      "Bash(grep -v \" 0$\")",
+      "Bash(awk '/^utun|^ipsec|^ppp|^tun/{i=$1} /inet /{if\\(i\\){print i,$2; i=\"\"}}')",
+      "Bash(awk '{print $1,$9,$10}')",
+      "Bash(sqlite3 '/Users/rick/Library/Application Support/com.apple.TCC/TCC.db' 'select service, client, auth_value, datetime\\(last_modified,'\\\\''unixepoch'\\\\''\\) from access where service like '\\\\''%LocalNetwork%'\\\\'' or client like '\\\\''%vivaldi%'\\\\'';')",
+      "Bash(ps -axo pid,etime,command)"
     ]
   }
 }

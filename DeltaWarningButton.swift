@@ -54,6 +54,7 @@ enum PaletteViewing {
 final class PaletteViewingControls:NSView,Overlay {
     static let width:CGFloat=288
     var showsIlluminant=true {didSet{if oldValue != showsIlluminant{dismissOverlay();light.isHidden = !showsIlluminant;needsLayout=true}}}
+    var opensUpward=false {didSet{output.opensUpward=opensUpward;light.opensUpward=opensUpward;output.needsDisplay=true;light.needsDisplay=true}}
     var controlWidth:CGFloat{output.fittedWidth+(showsIlluminant ? 16+light.fittedWidth:0)}
     private let output=DropdownButton(),light=DropdownButton()
     private var dropped:SwissDropdown.MenuPanel?
@@ -98,7 +99,7 @@ final class PaletteViewingControls:NSView,Overlay {
             }
         }
         if sender.tag == 1 && !spectralEnabled{panel.configure(disabled:Set(1..<labels.count));panel.setWarnings(Set(1..<labels.count))}
-        let anchor=owner.convertToScreen(sender.convert(sender.bounds,to:nil));panel.place(anchoredTo:anchor,within:owner)
+        let anchor=owner.convertToScreen(sender.convert(sender.bounds,to:nil));panel.place(anchoredTo:anchor,preferAbove:opensUpward,within:owner)
         owner.addChildWindow(panel,ordered:.above);dropped=panel;panel.makeKeyAndOrderFront(nil);Overlays.opened(self)
     }
 }

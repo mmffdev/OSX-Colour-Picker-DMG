@@ -91,7 +91,7 @@ struct WorkspaceInventory {
             }
             if let id = entry.id, detachedIDs.contains(id) { return }
             let canonical=folder.resolvingSymlinksInPath().path
-            if canonical == root.appendingPathComponent("Assets").resolvingSymlinksInPath().path || canonical.hasPrefix(root.appendingPathComponent("Backups").resolvingSymlinksInPath().path+"/") {
+            if ["Assets",GlobalAssets.folderName].contains(where:{canonical == root.appendingPathComponent($0).resolvingSymlinksInPath().path}) || canonical.hasPrefix(root.appendingPathComponent("Backups").resolvingSymlinksInPath().path+"/") {
                 entry.state = .invalid;entry.issue="This is an internal assets or backup location. Locate the user catalogue itself."
             }
             if let id = entry.id, !identities.insert(id).inserted { return }
@@ -302,8 +302,8 @@ final class WorkspaceStartupView: NSView,WKNavigationDelegate {
     }
     @objc private func cancelPressed() { onCancel?() }
     @objc private func chooseData() {
-        let panel=NSOpenPanel();panel.canChooseFiles=true;panel.canChooseDirectories=true;panel.allowsMultipleSelection=false
-        panel.title="Open Existing App Data";panel.prompt="Open Workspace";panel.message="Choose colorgain.coldata, or the app-data folder containing it.";panel.directoryURL=root
+        let panel=NSOpenPanel();panel.canChooseFiles=false;panel.canChooseDirectories=true;panel.allowsMultipleSelection=false
+        panel.title="Open Existing App Data";panel.prompt="Open Workspace";panel.message="Choose the workspace folder containing colorgain.coldata.";panel.directoryURL=root
         guard let window else { return }
         panel.beginSheetModal(for:window) { [weak self] result in
             guard let self,result == .OK,let selection=panel.url else { return }
@@ -367,7 +367,7 @@ final class WorkspaceStartupView: NSView,WKNavigationDelegate {
     }
     private func validateAndOpen(_ entry: WorkspaceCatalogue) throws {
         let folder=entry.folder.resolvingSymlinksInPath().path
-        guard folder != root.appendingPathComponent("Assets").resolvingSymlinksInPath().path,
+        guard !["Assets",GlobalAssets.folderName].contains(where:{folder == root.appendingPathComponent($0).resolvingSymlinksInPath().path}),
               !folder.hasPrefix(root.appendingPathComponent("Backups").resolvingSymlinksInPath().path+"/") else { throw failure("App-wide assets and backups are not user catalogues. Choose the original catalogue folder.") }
         guard entry.canOpen else { throw failure(entry.issue ?? entry.state.label) }
         if entry.state == .migration {

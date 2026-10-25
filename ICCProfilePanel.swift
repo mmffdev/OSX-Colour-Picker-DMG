@@ -25,7 +25,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
     var onTarget:((ICCProfileLibrary.Profile)->Void)?
     var onCollectionActions:((ICCProfileLibrary.Profile)->HaloAction)?
     override var isFlipped:Bool {true}
-    private var treeHeight:CGFloat {CGFloat(tree.numberOfRows)*34}
+    private var treeHeight:CGFloat {WorkspaceBranchTree.rowsHeight(tree.numberOfRows)+2*WorkspaceBranchTree.edgePadding}
     var minimumContentHeight:CGFloat {treeHeight+108+(selected == nil ? 0:212)}
     override init(frame:NSRect){
         super.init(frame:frame)
@@ -40,7 +40,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
         let column=NSTableColumn(identifier:.init("ICCProfiles"));tree.addTableColumn(column);tree.outlineTableColumn=column;tree.headerView=nil
         tree.swatchFamily = .yellow
         tree.leadingDisclosure=true;tree.depthOffset=2;tree.connectsFromParent=true
-        tree.rowHeight=34;tree.intercellSpacing = .zero;tree.indentationPerLevel=0;tree.backgroundColor=Design.card;tree.style = .plain;tree.focusRingType = .none
+        tree.rowHeight=34;tree.intercellSpacing = NSSize(width:0,height:WorkspaceBranchTree.rowSpacing);tree.indentationPerLevel=0;tree.backgroundColor=Design.card;tree.style = .plain;tree.focusRingType = .none
         tree.delegate=self;tree.dataSource=self;tree.setAccessibilityLabel("ICC Profile Library")
         addSubview(tree);tree.installConnectors(in:self)
         tree.target=self;tree.doubleAction=#selector(openSelected)
@@ -106,7 +106,7 @@ final class ICCProfilePanel:NSView,NSOutlineViewDataSource,NSOutlineViewDelegate
     }
     override func layout(){
         super.layout();let w=max(0,bounds.width-32)
-        tree.frame=NSRect(x:0,y:0,width:bounds.width,height:treeHeight);tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()
+        tree.frame=NSRect(x:0,y:WorkspaceBranchTree.edgePadding,width:bounds.width,height:max(0,treeHeight-2*WorkspaceBranchTree.edgePadding));tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()
         let bottom=treeHeight
         search.frame=NSRect(x:16,y:bottom+12,width:max(0,w-36),height:28)
         refreshButton.ink=Design.ink;refreshButton.frame=NSRect(x:bounds.width-40,y:bottom+12,width:24,height:28)

@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var main: MainWindowController?
     private let classicMenuSentinel=NSObject()
     private var classicMenuActions:[ObjectIdentifier:Selector]=[:]
-    private let lazyCatalogueMenu=NSMenu(title:"Catalogue")
+    private var lazyCatalogueMenu=NSMenu(title:"Catalogue")
     var settings: SettingsWindowController?
     private var splash: SplashWindowController?
     private var setupWindow: NSWindowController?
@@ -502,6 +502,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             add(m, "New Palette from Clipboard", #selector(LibraryController.paletteFromClipboard), "v", library, [.command, .shift])
             m.addItem(.separator())
             let catalogue = NSMenuItem(title: "Catalogue", action: nil, keyEquivalent: "")
+            // AppKit forbids attaching a submenu that still belongs to an installed menu bar.
+            // A workspace switch rebuilds the whole bar, so give each build its own menu.
+            lazyCatalogueMenu = NSMenu(title: "Catalogue")
             lazyCatalogueMenu.delegate=self
             catalogue.submenu = lazyCatalogueMenu
             m.addItem(catalogue)

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Colorgain · Viewport colour picker studies</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="light">
+  <div class="review-bar">
+    <div class="review-heading"><strong>Viewport colour picker</strong><span>Five grid studies · illustrative sRGB</span></div>
+    <nav id="studies" aria-label="Choose a design study"></nav>
+    <div class="theme-switch" aria-label="Preview theme"><button type="button" data-set-theme="light">Light</button><button type="button" data-set-theme="dark">Dark</button></div>
+  </div>
+
+  <div class="app-shell">
+    <header class="app-header"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>colorgain</div><nav aria-label="App navigation"><b>Library</b><span>Palettes</span><span>Designer</span><span>Import</span></nav><span class="header-utility" aria-hidden="true">⌕　◷　⚙</span></header>
+    <div class="global-bar"><span><b>Preset</b> sRGB <i class="chevron"></i></span><span><b>Workflow</b> Design And Photography <i class="chevron"></i></span><span><b>Target</b> sRGB <i class="chevron"></i></span><span><b>Tolerance</b> ΔE00 2.0 <i class="chevron"></i></span></div>
+    <div class="workspace">
+      <aside class="rail rail-left" aria-label="Library rail">
+        <div class="rail-tabs"><span>MMFFDev 001</span><div class="barberpole" aria-hidden="true"></div></div>
+        <section class="rail-panel"><h2><i class="chevron down"></i> My Favourites</h2><div class="rail-body favs"><div><span class="star">★</span> Palette 129 <span class="tiny-band one"></span></div><div><span class="star">★</span> Palette 143 2 <span class="tiny-band two"></span></div></div></section>
+        <section class="rail-panel"><h2><i class="chevron down"></i> MMFFDev 001</h2><div class="rail-body"><div class="tree-node root"><i class="chevron down"></i><span>▣</span> MMFFDev <small>128</small></div><div class="tree-node child"><i class="chevron down"></i><span>▣</span> Colorgain <small>127</small></div><div class="tree-node leaf">Information <small>(0)</small></div><div class="tree-node leaf">Assets <small>127</small></div></div></section>
+        <section class="rail-panel"><h2><i class="chevron down"></i> My Library</h2><div class="rail-body"><div class="tree-node root"><i class="chevron down"></i><span>▣</span> Library <small>155</small></div><div class="tree-node child">ICC Profiles <small>(0)</small></div><div class="tree-node child">Palettes <small>155</small></div></div></section>
+      </aside>
+
+      <main class="viewport" aria-label="Colour picker in page viewport">
+        <div class="viewport-tab"><span>◈　Colour Picker</span><div class="barberpole" aria-hidden="true"></div><span class="tab-actions" aria-hidden="true">＋　▣　▤</span></div>
+        <div class="viewport-actionbar"><span>Tree Node　›　Palettes</span><span>Saved colour　#414141</span></div>
+        <div class="page-head"><div><h1>Choose node colour</h1><p>The rails stay in place while you compare and select a new background.</p></div><span class="target-pill">Rail 1 · Palettes</span></div>
+        <div class="picker-content">
+          <div class="palette-column"><div class="palette-heading"><div><h2 id="study-title"></h2><p id="study-desc"></p></div><span id="swatch-count"></span></div><div id="palette" class="palette-grid" aria-label="Grouped hue swatches"></div><section class="greys"><h2>Greys</h2><div id="grey-groups"></div></section></div>
+          <aside class="choice-panel" aria-label="Colour selection"><h2>Selected colour</h2><div class="colour-preview" id="colour-preview"></div><div class="comparison"><div><span>Current</span><i id="current-colour"></i></div><div><span>Proposed</span><i id="proposed-colour"></i></div></div><label for="hex-field">Hex value</label><input id="hex-field" spellcheck="false" maxlength="7" value="#414141"><p id="hex-error" role="status"></p><div class="choice-note">Select a thumbnail to compare it with the current node. These studies do not change app data.</div></aside>
+        </div>
+        <footer class="viewport-footer"><span id="status" role="status">Preview only · no app data changed</span><div><button id="cancel" type="button">Reset preview</button><button id="use-colour" type="button">Use colour</button></div></footer>
+      </main>
+
+      <aside class="rail rail-right" aria-label="Inspector rail"><section class="rail-panel"><h2><i class="chevron down"></i> Metadata</h2><div class="rail-body metadata"><strong>Palette 99 2</strong><div class="tiny-band three"></div><p>All Fields</p><dl><dt>Type</dt><dd>Palette</dd><dt>Creator</dt><dd>—</dd><dt>Created</dt><dd>8 Oct 2026</dd></dl></div></section><section class="rail-panel"><h2><i class="chevron down"></i> Histograms · Channel Levels</h2><div class="rail-body histogram"><div></div><div></div><div></div></div></section></aside>
+    </div>
+    <div class="app-footer"><span>Grid　 List</span><span>Release v3.0　·　Viewport study</span></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

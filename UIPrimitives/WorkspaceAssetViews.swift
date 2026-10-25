@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -33,6 +34,17 @@ final class WorkspaceInspector:NSView,WorkspaceScrollableContent {
 }
 
 final class WorkspaceFilmstrip:NSView {
+    enum Kind:Equatable {case palettes,fonts,images}
+    struct Entry {
+        enum Content {case palette(UUID,[String]),font(UUID,String),image(String,Date?)}
+        let title:String,content:Content
+        var identity:String {
+            switch content {
+            case .palette(let id,_),.font(let id,_):return id.uuidString
+            case .image(let path,_):return path
+            }
+        }
+    }
     private final class CarouselScroll:NSScrollView {
         override func scrollWheel(with event:NSEvent) {
             guard let documentView else{return}
@@ -45,44 +57,94 @@ final class WorkspaceFilmstrip:NSView {
         }
     }
     final class Strip:ClickCursorView,NSDraggingSource {
-    override var handCursorRects:[NSRect]{[NSRect(x:0,y:0,width:min(bounds.width,CGFloat(palettes.count)*112),height:bounds.height)]}
-
-        private var pressedPalette:Swatch?
+        override var handCursorRects:[NSRect]{[NSRect(x:0,y:0,width:min(bounds.width,CGFloat(entries.count)*112),height:bounds.height)]}
+        private var pressedEntry:Entry?
         private var press:(NSPoint,TimeInterval)=(.zero,0)
-        var palettes:[Swatch]=[] {didSet{needsDisplay=true}}
-        var selected:UUID? {didSet{needsDisplay=true}}
+        var entries:[Entry]=[] {didSet{needsDisplay=true}}
+        var selected:String? {didSet{needsDisplay=true}}
         var displayColours: [String:NSColor] = [:]
-        var onPick:((UUID)->Void)?
+        var imagePreview:((String,Date?)->NSImage?)?
+        var onPick:((Entry)->Void)?
         override var isFlipped:Bool{true}
-        override func draw(_ dirtyRect:NSRect){for (i,palette) in palettes.enumerated(){let box=NSRect(x:CGFloat(i)*112+8,y:8,width:96,height:48);guard box.insetBy(dx:-8,dy:-8).intersects(dirtyRect) else{continue};let colours=palette.entries;for (j,c) in colours.enumerated(){fill(NSRect(x:box.minX+CGFloat(j)*box.width/CGFloat(max(1,colours.count)),y:box.minY,width:box.width/CGFloat(max(1,colours.count))+0.5,height:box.height),displayColours[c.hex] ?? Design.hex(c.hex))};if selected==palette.id{Design.ink.setStroke();let path=NSBezierPath(rect:box.insetBy(dx:-3,dy:-3));path.lineWidth=2;path.stroke()};Design.attributed(palette.name,.body).draw(x:box.minX,baseline:76,width:96)}}
-        private func palette(at point:NSPoint)->Swatch? {
+        override func draw(_ dirtyRect:NSRect){
+            for (i,entry) in entries.enumerated(){
+                let box=NSRect(x:CGFloat(i)*112+8,y:8,width:96,height:48)
+                guard box.insetBy(dx:-8,dy:-8).intersects(dirtyRect) else{continue}
+                switch entry.content {
+                case .palette(_,let colours):
+                    if colours.isEmpty{fill(box,Design.mist)}
+                    for (j,hex) in colours.enumerated(){fill(NSRect(x:box.minX+CGFloat(j)*box.width/CGFloat(max(1,colours.count)),y:box.minY,width:box.width/CGFloat(max(1,colours.count))+0.5,height:box.height),displayColours[hex] ?? Design.hex(hex))}
+                case .font(_,let family):
+                    fill(box,Design.mist)
+                    let font=NSFont(name:family,size:32) ?? NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:32) ?? NSFont.systemFont(ofSize:32)
+                    let face=CTFontCreateWithName(font.fontName as CFString,32,nil)
+                    let sample=NSAttributedString(string:"Aa",attributes:[kCTFontAttributeName as NSAttributedString.Key:face,.foregroundColor:Design.ink])
+                    let line=CTLineCreateWithAttributedString(sample)
+                    let ink=CTLineGetImageBounds(line,nil)
+                    if let context=NSGraphicsContext.current?.cgContext,ink.width > 0,ink.height > 0 {
+                        context.saveGState()
+                        context.textMatrix=CGAffineTransform(scaleX:1,y:-1)
+                        context.textPosition=CGPoint(x:box.midX-ink.midX,y:box.midY+ink.midY)
+                        CTLineDraw(line,context)
+                        context.restoreGState()
+                    }
+                case .image(let path,let modified):
+                    fill(box,Design.mist)
+                    if let image=imagePreview?(path,modified) {
+                        let ratio=min(box.width/max(1,image.size.width),box.height/max(1,image.size.height))
+                        let size=NSSize(width:image.size.width*ratio,height:image.size.height*ratio)
+                        image.draw(in:NSRect(x:box.midX-size.width/2,y:box.midY-size.height/2,width:size.width,height:size.height))
+                    }
+                }
+                if selected == entry.identity {Design.ink.setStroke();let path=NSBezierPath(rect:box.insetBy(dx:-3,dy:-3));path.lineWidth=2;path.stroke()}
+                Design.attributed(entry.title,.body).draw(x:box.minX,baseline:76,width:96)
+            }
+        }
+        private func entry(at point:NSPoint)->Entry? {
             guard bounds.contains(point) else{return nil}
             let index=Int(point.x/112)
-            return palettes.indices.contains(index) ? palettes[index]:nil
+            return entries.indices.contains(index) ? entries[index]:nil
         }
         override func mouseDown(with event:NSEvent){
-            pressedPalette=palette(at:convert(event.locationInWindow,from:nil))
+            pressedEntry=entry(at:convert(event.locationInWindow,from:nil))
             press=(event.locationInWindow,event.timestamp)
         }
         override func mouseDragged(with event:NSEvent){
-            guard let palette=pressedPalette,PaletteDrag.counts(event,from:press) else{return}
-            pressedPalette=nil
-            PaletteDrag.begin(palette.id,name:palette.name,colours:palette.entries.map{displayColours[$0.hex] ?? Design.hex($0.hex)},event:event,in:self)
+            guard let entry=pressedEntry,PaletteDrag.counts(event,from:press) else{return}
+            pressedEntry=nil
+            if case .palette(let id,let colours)=entry.content {
+                PaletteDrag.begin(id,name:entry.title,colours:colours.map{displayColours[$0] ?? Design.hex($0)},event:event,in:self)
+            }
         }
         override func mouseUp(with event:NSEvent){
-            defer{pressedPalette=nil}
-            guard let pressedPalette,!PaletteDrag.counts(event,from:press),
-                  palette(at:convert(event.locationInWindow,from:nil))?.id == pressedPalette.id else{return}
-            onPick?(pressedPalette.id)
+            defer{pressedEntry=nil}
+            guard let pressedEntry,!PaletteDrag.counts(event,from:press),
+                  entry(at:convert(event.locationInWindow,from:nil))?.identity == pressedEntry.identity else{return}
+            onPick?(pressedEntry)
         }
         func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation {.copy}
     }
     private let scroll=CarouselScroll(),strip=Strip()
-    var onPick:((UUID)->Void)?
+    private var kind:Kind = .palettes
+    var onPick:((Entry)->Void)?
+    var imagePreview:((String,Date?)->NSImage?)? {didSet{strip.imagePreview=imagePreview}}
     override var isFlipped:Bool{true}
-    override init(frame:NSRect){super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=Design.card.cgColor;scroll.drawsBackground=false;scroll.hasHorizontalScroller=true;scroll.horizontalScrollElasticity = .none;scroll.verticalScrollElasticity = .none;scroll.autohidesScrollers=true;scroll.documentView=strip;addSubview(scroll);strip.onPick={[weak self] in self?.onPick?($0)};setAccessibilityLabel("Footer palette carousel")}
+    override init(frame:NSRect){super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=Design.card.cgColor;scroll.drawsBackground=false;scroll.hasHorizontalScroller=true;scroll.horizontalScrollElasticity = .none;scroll.verticalScrollElasticity = .none;scroll.autohidesScrollers=false;QuietScroller.install(in:scroll);scroll.documentView=strip;addSubview(scroll);strip.onPick={[weak self] in self?.onPick?($0)};setAccessibilityLabel("Asset Carousel")}
     required init?(coder:NSCoder){fatalError()}
-    func update(_ palettes:[Swatch],selected:UUID?, colours:[String:NSColor] = [:]){strip.displayColours=colours;strip.palettes=palettes;strip.selected=selected;needsLayout=true}
-    override func layout(){super.layout();scroll.frame=NSRect(x:8,y:24,width:bounds.width-16,height:bounds.height-24);strip.frame=NSRect(x:0,y:0,width:max(scroll.contentSize.width,CGFloat(strip.palettes.count)*112+8),height:84)}
-    override func draw(_ dirtyRect:NSRect){hairline(x:0,y:0,width:bounds.width);Design.attributed("All Palettes · \(strip.palettes.count)",.body,colour:Design.quiet).draw(x:16,baseline:19)}
+    func update(kind:Kind,entries:[Entry],selected:String?,colours:[String:NSColor] = [:]){
+        self.kind=kind;strip.displayColours=colours;strip.entries=entries;strip.selected=selected
+        setAccessibilityLabel(kind == .palettes ? "Palette Carousel":kind == .fonts ? "Font Carousel":"Image Carousel")
+        needsLayout=true;needsDisplay=true
+    }
+    func update(_ palettes:[Swatch],selected:UUID?,colours:[String:NSColor] = [:]){
+        update(kind:.palettes,entries:palettes.map{Entry(title:$0.name,content:.palette($0.id,$0.entries.map(\.hex)))},selected:selected?.uuidString,colours:colours)
+    }
+    func select(_ identity:String?){strip.selected=identity}
+    func imagePreviewReady(){strip.needsDisplay=true}
+    override func layout(){super.layout();scroll.frame=NSRect(x:8,y:24,width:bounds.width-16,height:bounds.height-24);strip.frame=NSRect(x:0,y:0,width:max(scroll.contentSize.width,CGFloat(strip.entries.count)*112+8),height:84)}
+    override func draw(_ dirtyRect:NSRect){
+        hairline(x:0,y:0,width:bounds.width)
+        let noun=kind == .palettes ? "Palettes":kind == .fonts ? "Fonts":"Images"
+        Design.attributed("\(noun) · \(strip.entries.count)",.body,colour:Design.quiet).draw(x:16,baseline:19)
+    }
 }

@@ -6,12 +6,27 @@ import ImageIO
 /// Native outline semantics retain independent expansion and keyboard/multiple selection.
 final class WorkspaceBranchTree: NSOutlineView {
     enum SwatchFamily { case drives, charcoal, yellow }
+    /// Rounded cards need a small, consistent outside separation: 3 + 2 + 3 = 8 pt.
+    static let rowSpacing:CGFloat=2
+    static let surfaceInset:CGFloat=3
+    static let edgePadding:CGFloat=3
+    static let paletteRowHeight:CGFloat=64
+    static let paletteContentInset:CGFloat=4
+    static func rowsHeight(_ count:Int,rowHeight:CGFloat=34)->CGFloat {
+        guard count > 0 else{return 0}
+        return CGFloat(count)*rowHeight+CGFloat(count-1)*rowSpacing
+    }
     private static let driveSwatches = ["#1F2933", "#323F4B", "#3E4C59", "#52606D", "#616E7C", "#7B8794", "#9AA5B1", "#CBD2D9", "#E4E7EB", "#F5F7FA"]
     private static let charcoalSwatches = ["#242424", "#414141", "#585858", "#707070", "#888888", "#A0A0A0", "#B8B8B8", "#CFCFCF", "#E3E3E3", "#F5F5F5"]
     private static let yellowSwatches = ["#F4BE00", "#F5C526", "#F6CC4B", "#F7D371", "#F8DA96", "#F9E2B4", "#FAE9CD", "#FCF0DF", "#FDF6ED", "#FEFBF6"]
     var swatchFamily:SwatchFamily = .charcoal
     /// Source browsers use the same tree geometry with clear, outlined rows.
     var outlinedRows = false
+    /// Source selectors can mark their single current row with the shared
+    /// black-and-white selection band without enabling node-colour editing.
+    var selectedBarberPole = false
+    /// A projected section can start a new root tree without a sibling trunk.
+    var rootConnectorBreak:((Any)->Bool)?
     var swatchFamilyForItem:((Any)->SwatchFamily)?
     static func tint(_ depth:Int,family:SwatchFamily = .charcoal)->NSColor {
         let colours=family == .drives ? driveSwatches:family == .yellow ? yellowSwatches:charcoalSwatches
@@ -24,6 +39,17 @@ final class WorkspaceBranchTree: NSOutlineView {
         if rowClear?(item) == true || outlinedRows && rowFill?(item) != true { return Design.ink }
         return Theme.takesLightText(on:hexOf(background(row,item:item)) ?? "#FFFFFF") ? .white:.black
     }
+    /// Read the same live row sources used by drawing; older nodes need no appearance migration.
+    func renderedColour(for item:Any,channel:WorkspaceColourMode.Channel)->NSColor? {
+        let row=row(forItem:item)
+        guard row >= 0 else{return nil}
+        let clear=rowClear?(item) == true || (outlinedRows && rowFill?(item) != true)
+        switch channel {
+        case .background:return clear ? Design.card:background(row,item:item)
+        case .text:return ink(row,item:item)
+        case .border:return rowBorder?(item) ?? (clear || rowLeadingAccent?(item) != nil ? Design.rule:nil)
+        }
+    }
     /// Destination pickers select owners without collapsing their descendants.
     var expandsOnSelection = true
     var leadingDisclosure=false
@@ -35,8 +61,27 @@ final class WorkspaceBranchTree: NSOutlineView {
     var paletteDragActive=false {didSet{enumerateAvailableRowViews{row,_ in row.needsDisplay=true}}}
     var reorderLineY:CGFloat? {didSet{connectorOverlay.needsDisplay=true}}
     var onContext:((Any,NSPoint,NSView)->Void)?
+    /// When set, every row click selects a colour target instead of activating row controls or navigating.
+    var onColourModeClick:((Int,NSEvent)->Void)?
+    var colourModeActive:Bool {onColourModeClick != nil}
+    func colourTargetRowHeight(for item:Any,base:CGFloat)->CGFloat {
+        let index=row(forItem:item)
+        return colourModeActive && index >= 0 && selectedRowIndexes.contains(index) ? base+4:base
+    }
+    func refreshColourTargetGeometry(_ rows:IndexSet) {
+        guard !rows.isEmpty else{return}
+        noteHeightOfRows(withIndexesChanged:rows)
+        needsLayout=true
+        var ancestor=superview
+        while let view=ancestor {
+            view.needsLayout=true
+            if let panel=view as? WorkspacePanel {panel.rail?.arrange();break}
+            ancestor=view.superview
+        }
+    }
     var rowColour:((Any)->NSColor?)?
     var rowInk:((Any)->NSColor?)?
+    var rowBorder:((Any)->NSColor?)?
     /// Filled feature rows can coexist with outlined rows in the same tree.
     var rowFill:((Any)->Bool)?
     /// Clear asset rows use the same light rule as the surrounding app rails.
@@ -50,12 +95,13 @@ final class WorkspaceBranchTree: NSOutlineView {
     private var previousSiblings:[Int:Int]=[:]
     private lazy var connectorOverlay=Connectors(tree:self)
     private static let laneStep:CGFloat=14 // Nine-point nodes, five-point horizontal gap.
-    private static func lane(_ depth:Int)->CGFloat {13 + CGFloat(depth)*laneStep}
+    // The outer connector ring begins at the same 16 pt panel inset as other content.
+    private static func lane(_ depth:Int)->CGFloat {18 + CGFloat(depth)*laneStep}
     static var accent:NSColor {
         Theme.takesLightText(on:hexOf(Design.card) ?? "#FFFFFF") ? Design.hex("#C7C7C7"):Design.hex("#6D6D6D")
     }
     private static let trailingActionCentreInset:CGFloat=18
-    private static var paletteCellTrailingInset:CGFloat {trailingActionCentreInset-10}
+    private static var paletteCellTrailingInset:CGFloat {13}
     override func frameOfOutlineCell(atRow row:Int)->NSRect {
         let box=rect(ofRow:row)
         if leadingDisclosure {return NSRect(x:showsConnectors ? Self.lane(visualDepth(row))+21:16,y:box.minY+(min(34,box.height)-20)/2,width:20,height:20)}
@@ -64,19 +110,30 @@ final class WorkspaceBranchTree: NSOutlineView {
     override func frameOfCell(atColumn column:Int,row:Int)->NSRect {
         let box=rect(ofRow:row)
         if (item(atRow:row) as? WorkspaceCatalogues.Node)?.key == "icc-content"{return box}
-        let start:CGFloat=(showsConnectors ? Self.lane(visualDepth(row))+21:16)+(leadingDisclosure ? 22:0)
-        let isPalette:Bool={if let node=item(atRow:row) as? WorkspaceCatalogues.Node,case .palette=node.place{return true};return false}()
+        let disclosure=leadingDisclosure && isExpandable(item(atRow:row))
+        let start:CGFloat=(showsConnectors ? Self.lane(visualDepth(row))+21:16)+(disclosure ? 22:0)
+        let isPalette:Bool={
+            if let node=item(atRow:row) as? WorkspaceCatalogues.Node {if case .palette=node.place{return true};return node.fontID != nil}
+            if let node=item(atRow:row) as? WorkspaceCollectionsPane.Node,case .asset(let asset,_)=node.value {
+                return ["Palette","Palettes","Font","Fonts"].contains(asset.kind)
+            }
+            return false
+        }()
         let isCatalogue=(item(atRow:row) as? WorkspaceCatalogues.Node)?.catalogue != nil
-        let trailing=leadingDisclosure ? Self.paletteCellTrailingInset:(isCatalogue ? 6:(isPalette ? Self.paletteCellTrailingInset:34))
+        let trailing=leadingDisclosure || isCatalogue || isPalette ? Self.paletteCellTrailingInset:34
         return NSRect(x:start,y:box.minY,width:max(0,bounds.width-start-trailing),height:box.height)
     }
     private final class Disclosure:ClickCursorButton {
         weak var tree:WorkspaceBranchTree?
+        var rowInk:NSColor? {didSet{needsDisplay=true}}
         override func draw(_ dirtyRect:NSRect) {
             guard let tree else{return}
-            let row=tree.row(for:self)
+            let attachedRow=tree.row(for:self)
+            let point=tree.convert(NSPoint(x:bounds.midX,y:bounds.midY),from:self)
+            let row=attachedRow >= 0 ? attachedRow:tree.row(at:point)
             let colour:NSColor
             if row >= 0,let item=tree.item(atRow:row) {colour=tree.ink(row,item:item)}
+            else if let rowInk {colour=rowInk}
             else {colour=WorkspaceBranchTree.accent}
             let path=NSBezierPath();path.lineWidth=1.3
             if tree.leadingDisclosure {
@@ -121,13 +178,16 @@ final class WorkspaceBranchTree: NSOutlineView {
         private var editingName=false
         override var isFlipped:Bool{true}
         var paletteDrag:(UUID,String,[NSColor])?
+        var fontDrag:(UUID,String)?
+        var fontFamily:String?
         var selectPalette:(()->Void)?
+        var selectFont:(()->Void)?
         var dragChanged:((Bool)->Void)?
         private var press:(NSPoint,TimeInterval)?
         override func hitTest(_ point:NSPoint)->NSView? {
             let hit=super.hitTest(point)
             if !grip.isHidden,grip.frame.insetBy(dx:-4,dy:-7).contains(convert(point,from:superview)){return self}
-            guard paletteDrag != nil,let hit else{return hit}
+            guard paletteDrag != nil || fontDrag != nil,let hit else{return hit}
             if hit === star || hit === colourButton || hit === target || hit === tagIcon || hit === pin || hit.isDescendant(of:review) || hit is InlineName {return hit}
             return self
         }
@@ -136,18 +196,19 @@ final class WorkspaceBranchTree: NSOutlineView {
                 reorderDrag?(event);return
             }
             if activate(at:convert(event.locationInWindow,from:nil)){press=nil;return}
-            guard paletteDrag != nil else{super.mouseDown(with:event);return}
+            guard paletteDrag != nil || fontDrag != nil else{super.mouseDown(with:event);return}
             if event.clickCount == 2,beginRenaming(with:event){return}
             press=(event.locationInWindow,event.timestamp)
         }
         override func mouseDragged(with event:NSEvent){
-            guard let press,let (id,name,colours)=paletteDrag,PaletteDrag.counts(event,from:press) else{return}
+            guard let press,PaletteDrag.counts(event,from:press) else{return}
             self.press=nil;dragChanged?(true)
-            PaletteDrag.begin(id,name:name,colours:colours,event:event,in:self)
+            if let (id,name,colours)=paletteDrag {PaletteDrag.begin(id,name:name,colours:colours,event:event,in:self)}
+            else if let (id,name)=fontDrag {FontDrag.begin(id,name:name,event:event,in:self)}
         }
         override func mouseUp(with event:NSEvent){
             defer{press=nil}
-            if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {selectPalette?()}
+            if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {if fontDrag != nil {selectFont?()}else{selectPalette?()}}
         }
         func activate(at point:NSPoint)->Bool {
             for button in [star,colourButton,target,tagIcon,catalogueAction,pin] as [NSButton] where !button.isHidden && button.frame.contains(point){button.performClick(nil);return true}
@@ -158,7 +219,7 @@ final class WorkspaceBranchTree: NSOutlineView {
             let point=convert(event.locationInWindow,from:nil)
             guard isPalette,let field=textField,field.frame.contains(point),!editingName else{return false}
             editingName=true;field.isHidden=true;press=nil
-            InlineName.edit(field.stringValue,style:.body,in:self,x:field.frame.minX,baseline:twoLines ? 19:bounds.midY+5,width:field.frame.width,at:point,colour:field.textColor ?? Design.ink){ [weak self,weak field] value in
+            InlineName.edit(field.stringValue,style:.body,in:self,x:field.frame.minX,baseline:twoLines ? 19+WorkspaceBranchTree.paletteContentInset:bounds.midY+5,width:field.frame.width,at:point,colour:field.textColor ?? Design.ink){ [weak self,weak field] value in
                 self?.editingName=false;field?.isHidden=false
                 if let value {self?.renamePalette?(value)}
             };return true
@@ -201,6 +262,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         override func layout() {
             super.layout()
             let height=textField?.intrinsicContentSize.height ?? 18
+            let paletteTop=twoLines ? WorkspaceBranchTree.paletteContentInset:0
             let offset:CGFloat=grip.isHidden ? 0:18
             grip.frame=NSRect(x:0,y:(bounds.height-16)/2,width:10,height:16)
             let inset:CGFloat=(symbol == nil ? 0:24)+offset
@@ -208,17 +270,17 @@ final class WorkspaceBranchTree: NSOutlineView {
             let reviewWidth=PaletteReviewControls.width
             let pinWidth:CGFloat=pin.isHidden ? 0:28
             if trailingGearAndCount {
-                let countSlot:CGFloat=40,gearSlot:CGFloat=26,tagSlot:CGFloat=tagIcon.isHidden ? 0:26
+                let countSlot:CGFloat=twoLines && isPalette ? max(28,ceil(countLabel.intrinsicContentSize.width)+8):40
+                let gearSlot:CGFloat=26,tagSlot:CGFloat=tagIcon.isHidden ? 0:26
                 let gearX=bounds.width-countSlot-tagSlot-gearSlot
-                catalogueAction.frame=NSRect(x:gearX,y:0,width:gearSlot,height:twoLines ? 28:bounds.height)
-                tagIcon.frame=NSRect(x:gearX+gearSlot,y:0,width:tagSlot,height:twoLines ? 28:bounds.height)
-                countLabel.frame=NSRect(x:bounds.width-countSlot,y:((twoLines ? CGFloat(28):bounds.height)-height)/2,width:countSlot-5,height:height)
+                catalogueAction.frame=NSRect(x:gearX,y:paletteTop,width:gearSlot,height:twoLines ? 28:bounds.height)
+                tagIcon.frame=NSRect(x:gearX+gearSlot,y:paletteTop,width:tagSlot,height:twoLines ? 28:bounds.height)
+                countLabel.frame=NSRect(x:bounds.width-countSlot,y:paletteTop+((twoLines ? CGFloat(28):bounds.height)-height)/2,width:countSlot-5,height:height)
                 if twoLines {
-                    review.frame=NSRect(x:bounds.width-reviewWidth,y:28,width:reviewWidth,height:28)
-                    let spectrumStart=max(inset+48,gearX-112)
-                    textField?.frame=NSRect(x:inset,y:(28-height)/2,width:max(0,spectrumStart-inset-8),height:height)
-                    star.frame=NSRect(x:-5,y:28,width:24,height:28)
-                    target.frame=NSRect(x:star.frame.maxX,y:28,width:24,height:28)
+                    review.frame=NSRect(x:bounds.width-reviewWidth,y:paletteTop+28,width:reviewWidth,height:28)
+                    textField?.frame=NSRect(x:inset,y:paletteTop+(28-height)/2,width:max(0,gearX-inset-8),height:height)
+                    star.frame=NSRect(x:-5,y:paletteTop+28,width:24,height:28)
+                    target.frame=NSRect(x:star.frame.maxX,y:paletteTop+28,width:24,height:28)
                 } else {
                     textField?.frame=NSRect(x:inset,y:(bounds.height-height)/2,width:max(0,gearX-inset-8),height:height)
                 }
@@ -244,7 +306,7 @@ final class WorkspaceBranchTree: NSOutlineView {
                 textField?.frame=NSRect(x:inset,y:(bounds.height-height)/2,width:max(0,labelEnd-inset-8),height:height)
                 return
             }
-            pin.frame=NSRect(x:bounds.width-countWidth-pinWidth,y:0,width:pin.isHidden ? 0:28,height:twoLines ? 28:bounds.height)
+            pin.frame=NSRect(x:bounds.width-countWidth-pinWidth,y:paletteTop,width:pin.isHidden ? 0:28,height:twoLines ? 28:bounds.height)
             if !catalogueAction.isHidden {
                 catalogueAction.frame=NSRect(x:max(0,bounds.width-(creationAction ? 60:28)),y:0,width:28,height:bounds.height)
                 // Creation stays on the header action column; focus gets its own slot.
@@ -261,14 +323,14 @@ final class WorkspaceBranchTree: NSOutlineView {
                 return
             }
             if twoLines {
-                review.frame=NSRect(x:bounds.width-reviewWidth,y:28,width:reviewWidth,height:28)
-                let nameEnd=isPalette && !spectrumColours.isEmpty ? review.frame.minX+review.ratingGlyphSpan.lowerBound-8:bounds.width-countWidth-8
-                textField?.frame=NSRect(x:inset,y:(28-height)/2,width:max(0,nameEnd-inset),height:height)
-                countLabel.frame=NSRect(x:bounds.width-countWidth,y:(28-height)/2,width:max(0,countWidth-4),height:height)
+                review.frame=NSRect(x:bounds.width-reviewWidth,y:paletteTop+28,width:reviewWidth,height:28)
+                let nameEnd=bounds.width-countWidth-8
+                textField?.frame=NSRect(x:inset,y:paletteTop+(28-height)/2,width:max(0,nameEnd-inset),height:height)
+                countLabel.frame=NSRect(x:bounds.width-countWidth,y:paletteTop+(28-height)/2,width:max(0,countWidth-4),height:height)
                 // The palette glyph is centred at x=7 in its shared 14 pt icon lane.
-                star.frame=NSRect(x:-5,y:28,width:24,height:28)
-                if !pin.isHidden{pin.frame=NSRect(x:star.frame.maxX,y:28,width:24,height:28)}
-                target.frame=NSRect(x:star.frame.maxX+(pin.isHidden ? 0:24),y:28,width:24,height:28)
+                star.frame=NSRect(x:-5,y:paletteTop+28,width:24,height:28)
+                if !pin.isHidden{pin.frame=NSRect(x:star.frame.maxX,y:paletteTop+28,width:24,height:28)}
+                target.frame=NSRect(x:star.frame.maxX+(pin.isHidden ? 0:24),y:paletteTop+28,width:24,height:28)
                 return
             }
             // Parent cells reserve their disclosure lane; counts share the palette count column.
@@ -290,23 +352,20 @@ final class WorkspaceBranchTree: NSOutlineView {
         override func draw(_ dirtyRect:NSRect){
             super.draw(dirtyRect)
             if isPalette,twoLines,!spectrumColours.isEmpty {
-                let spectrum:NSRect
-                if trailingGearAndCount {
-                    let start=max((symbol == nil ? 0:24)+(grip.isHidden ? 0:18)+48,catalogueAction.frame.minX-112)
-                    spectrum=NSRect(x:start,y:8,width:max(0,catalogueAction.frame.minX-start-4),height:12)
-                } else {
-                    let span=review.ratingGlyphSpan
-                    spectrum=NSRect(x:review.frame.minX+span.lowerBound,y:8,width:span.upperBound-span.lowerBound,height:12)
+                let start=target.frame.maxX+8
+                let end=review.frame.minX+review.ratingGlyphSpan.lowerBound-8
+                if end > start {
+                    let spectrum=NSRect(x:start,y:WorkspaceBranchTree.paletteContentInset+36,width:end-start,height:12)
+                    let width=spectrum.width/CGFloat(spectrumColours.count)
+                    NSGraphicsContext.saveGraphicsState();NSBezierPath(rect:spectrum).addClip()
+                    for (index,colour) in spectrumColours.enumerated(){colour.setFill();NSRect(x:spectrum.minX+CGFloat(index)*width,y:spectrum.minY,width:width+0.5,height:spectrum.height).fill()}
+                    NSGraphicsContext.restoreGraphicsState()
                 }
-                let width=spectrum.width/CGFloat(spectrumColours.count)
-                NSGraphicsContext.saveGraphicsState();NSBezierPath(rect:spectrum).addClip()
-                for (index,colour) in spectrumColours.enumerated(){colour.setFill();NSRect(x:spectrum.minX+CGFloat(index)*width,y:spectrum.minY,width:width+0.5,height:spectrum.height).fill()}
-                NSGraphicsContext.restoreGraphicsState()
             }
             guard let symbol,let label=textField else{return}
-            if warning {ResultGlyph.warning.draw(in:NSRect(x:0,y:((twoLines ? 28:bounds.height)-16)/2,width:16,height:16));return}
+            if warning {ResultGlyph.warning.draw(in:NSRect(x:0,y:(twoLines ? WorkspaceBranchTree.paletteContentInset:0)+((twoLines ? 28:bounds.height)-16)/2,width:16,height:16));return}
             let image=RowMark.image(symbol,colour:label.textColor ?? Design.ink),size=image.size
-            image.draw(in:NSRect(x:(14-size.width)/2+(grip.isHidden ? 0:18),y:((twoLines ? 28:bounds.height)-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+            image.draw(in:NSRect(x:(14-size.width)/2+(grip.isHidden ? 0:18),y:(twoLines ? WorkspaceBranchTree.paletteContentInset:0)+((twoLines ? 28:bounds.height)-size.height)/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
         }
     }
     override func makeView(withIdentifier identifier:NSUserInterfaceItemIdentifier,owner:Any?)->NSView? {
@@ -324,6 +383,7 @@ final class WorkspaceBranchTree: NSOutlineView {
         sender.state=isItemExpanded(item) ? .on:.off;refreshSurfaces()
     }
     override func keyDown(with event:NSEvent){
+        if colourModeActive {return}
         if (event.keyCode == 125 || event.keyCode == 126),event.modifierFlags.intersection([.command,.control,.option,.shift]).isEmpty,numberOfRows > 0 {
             let step = event.keyCode == 125 ? 1 : -1
             var next = selectedRow < 0 ? (step > 0 ? 0 : numberOfRows - 1) : selectedRow + step
@@ -340,6 +400,10 @@ final class WorkspaceBranchTree: NSOutlineView {
     }
     override func mouseDown(with event:NSEvent) {
         let point=convert(event.locationInWindow,from:nil),index=row(at:point)
+        if let onColourModeClick {
+            if index >= 0 {window?.makeFirstResponder(self);onColourModeClick(index,event)}
+            return
+        }
         if index >= 0,let cell=view(atColumn:0,row:index,makeIfNecessary:false) as? Cell {
             let local=cell.convert(event.locationInWindow,from:nil)
             if cell.activate(at:local){return}
@@ -356,10 +420,19 @@ final class WorkspaceBranchTree: NSOutlineView {
         refreshSurfaces()
     }
     override func rightMouseDown(with event:NSEvent){
+        if colourModeActive {return}
         let point=convert(event.locationInWindow,from:nil),index=row(at:point)
         guard index >= 0,let node=item(atRow:index) else{return}
         onContext?(node,point,self)
     }
+    override func hitTest(_ point:NSPoint)->NSView? {
+        if colourModeActive,let parent=superview {
+            let local=convert(point,from:parent)
+            if row(at:local) >= 0 {return self}
+        }
+        return super.hitTest(point)
+    }
+    override func mouseDragged(with event:NSEvent){if !colourModeActive {super.mouseDragged(with:event)}}
     override func draggingExited(_ sender:NSDraggingInfo?){super.draggingExited(sender);paletteDragActive=false}
     override func draggingEnded(_ sender:NSDraggingInfo){super.draggingEnded(sender);paletteDragActive=false}
     override func updateTrackingAreas() {
@@ -379,8 +452,20 @@ final class WorkspaceBranchTree: NSOutlineView {
     override func resetCursorRects(){super.resetCursorRects();let range=rows(in:visibleRect);guard range.location != NSNotFound else{return};for row in range.location..<NSMaxRange(range){ClickCursor.register([rect(ofRow:row)],in:self)}}
     func refreshCell(_ index:Int) {
         guard index >= 0,let item=item(atRow:index),let cell=view(atColumn:0,row:index,makeIfNecessary:false) as? Cell else{return}
-        cell.textField?.font=(isItemExpanded(item) ? Design.Text.bodyStrong:Design.Text.body).font()
-        cell.textField?.textColor=ink(index,item:item)
+        let currentInk=ink(index,item:item)
+        if let family=cell.fontFamily {
+            cell.textField?.font=NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:TextSize.body) ?? Design.Text.body.font()
+        } else {
+            cell.textField?.font=(isItemExpanded(item) ? Design.Text.bodyStrong:Design.Text.body).font()
+        }
+        cell.textField?.textColor=currentInk
+        if let row=rowView(atRow:index,makeIfNecessary:false) {
+            func refreshDisclosure(in view:NSView) {
+                if let disclosure=view as? Disclosure {disclosure.rowInk=currentInk}
+                else {view.subviews.forEach{refreshDisclosure(in:$0)}}
+            }
+            refreshDisclosure(in:row)
+        }
         cell.colourButton.colour=background(index,item:item)
         cell.star.contentTintColor=cell.textField?.textColor;cell.star.needsDisplay=true
         cell.target.ink=cell.textField?.textColor ?? Design.ink;cell.review.ink=cell.textField?.textColor ?? Design.ink
@@ -402,7 +487,11 @@ final class WorkspaceBranchTree: NSOutlineView {
             ancestors.append(stack)
             let parent=stack.last ?? -1 // The root folders share their own trunk.
             if (item(atRow:index) as? WorkspaceCatalogues.Node)?.key == "workspace-focus-back"{continue}
-            previousSiblings[index]=branchEnds[parent]
+            if parent < 0,let item=item(atRow:index),rootConnectorBreak?(item) == true {
+                previousSiblings[index]=nil
+            } else {
+                previousSiblings[index]=branchEnds[parent]
+            }
             branchEnds[parent]=index
             stack.append(index)
         }
@@ -464,11 +553,17 @@ final class WorkspaceBranchTree: NSOutlineView {
                     let px=WorkspaceBranchTree.lane(tree.visualDepth(parent))
                     let start=tree.rect(ofRow:parent).midY+tree.nodeRadius(parent)
                     guard NSRect(x:px-1,y:start,width:x-px+2,height:max(1,y-start)).intersects(dirtyRect) else{continue}
-                    let reach=(y-start)*0.65
+                    // The bend sits halfway between the two node centres, not between the node edges:
+                    // a big ring above and a small dot below would otherwise push it down the lane.
+                    let mid=(tree.rect(ofRow:parent).midY+tree.rect(ofRow:index).midY)/2
+                    let half=max(0,min(mid-start,y-mid))
+                    let a=mid-half,b=mid+half,reach=half*1.3
                     lines.move(to:NSPoint(x:px,y:start))
-                    lines.curve(to:NSPoint(x:x,y:y),
-                        controlPoint1:NSPoint(x:px,y:start+reach),
-                        controlPoint2:NSPoint(x:x,y:y-reach))
+                    if a > start {lines.line(to:NSPoint(x:px,y:a))}
+                    lines.curve(to:NSPoint(x:x,y:b),
+                        controlPoint1:NSPoint(x:px,y:a+reach),
+                        controlPoint2:NSPoint(x:x,y:b-reach))
+                    if y > b {lines.line(to:NSPoint(x:x,y:y))}
                 }
             }
             ink.withAlphaComponent(0.65).setStroke();lines.stroke()
@@ -508,27 +603,44 @@ final class WorkspaceBranchTree: NSOutlineView {
                 fill(bounds,Design.mix(Design.card,tree.tint(index,item:item),0.045))
             }
             let inset:CGFloat=tree.showsConnectors ? lane+13:8
-            let box=NSRect(x:inset,y:3,width:max(0,bounds.width-inset-4),height:bounds.height-6)
+            // The node's outer right edge uses the panel's 16 pt content margin.
+            // Plain tree cards already begin at that same margin; connector rings
+            // provide the left edge for branching trees.
+            let trailingInset:CGFloat=10
+            let targeting=tree.colourModeActive && isSelected
+            let surfaceInset=WorkspaceBranchTree.surfaceInset+(targeting ? 2:0)
+            let box=NSRect(x:inset,y:surfaceInset,width:max(0,bounds.width-inset-trailingInset),height:bounds.height-2*surfaceInset)
             let colour=tree.background(index,item:item)
+            let customBorder=tree.rowBorder?(item)
             let path=NSBezierPath(roundedRect:box,xRadius:7,yRadius:7)
             if let accent=tree.rowLeadingAccent?(item) {
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(rect:NSRect(x:box.minX,y:box.minY,width:5,height:box.height)).addClip()
                 accent.setFill();path.fill()
                 NSGraphicsContext.restoreGraphicsState()
-                Design.rule.setStroke()
-                path.lineWidth=1;path.stroke()
+                (customBorder ?? Design.rule).setStroke()
+                path.lineWidth=customBorder == nil ? 1:1.5;path.stroke()
             } else if tree.rowClear?(item) == true {
-                Design.rule.setStroke();path.lineWidth=1;path.stroke()
+                (customBorder ?? Design.rule).setStroke();path.lineWidth=customBorder == nil ? 1:1.5;path.stroke()
             } else if tree.outlinedRows && tree.rowFill?(item) != true {
-                let border=tree.rowColour?(item) ?? (isSelected ? Design.ink:Design.rule)
-                border.setStroke();path.lineWidth=isSelected ? 1.5:1;path.stroke()
+                let navigationSelected=isSelected && !tree.colourModeActive
+                let border=customBorder ?? tree.rowColour?(item) ?? (navigationSelected ? Design.ink:Design.rule)
+                border.setStroke();path.lineWidth=navigationSelected || customBorder != nil ? 1.5:1;path.stroke()
             } else {
                 colour.setFill();path.fill()
-                if isSelected || tree.hoverRow == index {
-                    tree.ink(index,item:item).withAlphaComponent(isSelected ? 0.65:0.35).setStroke()
-                    path.lineWidth=isSelected ? 1.5:1;path.stroke()
+                if let customBorder {customBorder.setStroke();path.lineWidth=1.5;path.stroke()}
+                else if (isSelected && !tree.colourModeActive) || tree.hoverRow == index {
+                    tree.ink(index,item:item).withAlphaComponent(isSelected && !tree.colourModeActive ? 0.65:0.35).setStroke()
+                    path.lineWidth=isSelected && !tree.colourModeActive ? 1.5:1;path.stroke()
                 }
+            }
+            if targeting {
+                // The selected row grows by four points, keeping its card size and
+                // editable border while leaving two more points before the target band.
+                let marker=box.insetBy(dx:-4.5,dy:-4.5)
+                ColourTargetBarberPole.draw(in:marker,radius:11.5,thickness:2)
+            } else if tree.selectedBarberPole && isSelected {
+                ColourTargetBarberPole.draw(in:box.insetBy(dx:-2,dy:-2),radius:9,thickness:3)
             }
             if tree.paletteDragActive,tree.isDropTarget?(item) == true {
                 Design.houseYellow.setStroke()

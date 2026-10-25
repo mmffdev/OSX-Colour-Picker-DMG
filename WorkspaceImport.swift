@@ -2,6 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 import CryptoKit
 import ImageIO
+import CoreImage
 
 /// References are index entries, never editable copies masquerading as native palettes.
 struct WorkspaceImportedAsset: Codable, Equatable, Identifiable {
@@ -12,6 +13,7 @@ struct WorkspaceImportedAsset: Codable, Equatable, Identifiable {
     var external: Bool
     var member: UUID?
     var bucket: UUID?
+    var font: FontAssetInfo? = nil
     func url(in root: URL) throws -> URL {
         if external {
             guard path.hasPrefix("/") else { throw failure("The linked file has an invalid location.") }
@@ -50,7 +52,7 @@ enum WorkspaceImport {
         /// Files live in this user-selected folder; the active catalogue tracks the references.
         case custom(URL)
     }
-    static let supportedTypes: Set<String> = ["Palettes", "ASE"]
+    static let supportedTypes: Set<String> = ["Palettes", "ASE", "Fonts"]
     static let types = SimpleAssetType.setupImportTypes.map(\.setupTitle)
     private static func seenSourcesKey(_ catalogue:URL)->String {
         let digest=SHA256.hash(data:Data(catalogue.standardizedFileURL.path.utf8))
@@ -66,7 +68,7 @@ enum WorkspaceImport {
         AppPreferences.shared.set(paths.sorted(),forKey:key)
     }
     static func importExtensions(for kind:String)->[String] {
-        kind == "ASE" ? ["ase"] : kind == "Palettes" ? ["colpal","colpalette","colplt","css","scss","json"] : []
+        kind == "ASE" ? ["ase"] : kind == "Fonts" ? ["otf","ttf","ttc","otc"] : kind == "Palettes" ? ["colpal","colpalette","colplt","css","scss","json"] : []
     }
     struct Destination: Equatable {
         var title: String
@@ -89,7 +91,7 @@ enum WorkspaceImport {
         }
     }
     static func matches(_ node: SchemaNode, type: String) -> Bool {
-        type == "ASE" ? SchemaTrial.type(of: node).caseInsensitiveCompare("ASE") == .orderedSame : SchemaTrial.role(of: node) == .palettes
+        type == "ASE" ? SchemaTrial.type(of: node).caseInsensitiveCompare("ASE") == .orderedSame : type == "Fonts" ? SchemaTrial.type(of: node).caseInsensitiveCompare("Fonts") == .orderedSame : SchemaTrial.role(of: node) == .palettes
     }
     /// Project the actual hierarchy into destination rows. Asset buckets are implicit.
     /// Typed leaf pages are hidden; containers with a matching bucket remain addressable.
@@ -239,7 +241,7 @@ enum WorkspaceImport {
             let assets=GlobalAssets(home:workspace)
             try assets.migrateLibraryIndex()
             index=assets.libraryIndex;ownerRoot=assets.root;member=nil;bucket=nil
-            destination=assets.root.appendingPathComponent("Library/Photographs");externallyStored=false
+            destination=assets.root.appendingPathComponent(kind);externallyStored=false
         case .custom(let folder):
             let values=try folder.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey])
             guard values.isDirectory == true,values.isSymbolicLink != true else {throw failure("Choose an existing folder for the images.")}
@@ -249,8 +251,10 @@ enum WorkspaceImport {
         let sourceFiles = try urls.map { url -> URL in
             let file = url.standardizedFileURL
             let values = try file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+            let imageSource=CGImageSourceCreateWithURL(file as CFURL,nil)
+            let readable=imageSource.map{CGImageSourceGetCount($0)>0} ?? (CIImage(contentsOf:file) != nil)
             guard values.isDirectory != true, values.isSymbolicLink != true,
-                  let source=CGImageSourceCreateWithURL(file as CFURL, nil),CGImageSourceGetCount(source) > 0 else { throw failure("A selected file is not a readable image: " + file.lastPathComponent) }
+                  readable else { throw failure("A selected file is not a readable image: " + file.lastPathComponent) }
             return file
         }
         return try manager.withTransaction(home: store.assetsHome ?? store.root) {
@@ -302,6 +306,9 @@ enum WorkspaceImport {
                 if let replacement { rows[i].path = replacement.path; rows[i].external = true }
                 else { rows.remove(at: i) }
             }
+            if replacement == nil {
+                try AssetCollections.removeDeletedInTransaction([AssetCollectionItem.imported(record).key,"Palette/"+record.id.uuidString],in:store)
+            }
             if record.type == "ASE" {
                 var sources = try ASERegistry.resolved(store.root)
                 if let replacement {
@@ -312,6 +319,10 @@ enum WorkspaceImport {
                 }
                 try ASERegistry.write(sources, root: store.root)
             }
+        }
+        if record.type == "Fonts" {
+            if let replacement {_ = FontBookBridge.register(replacement)}
+            FontBookBridge.syncCollections(in:store)
         }
     }
     static func perform(urls: [URL], type: String, reference: Bool, target: Destination, allowBucket: Bool, store: LibraryStore, fault: ((String) throws -> Void)? = nil) throws {
@@ -335,6 +346,7 @@ enum WorkspaceImport {
             let data = try Data(contentsOf: url)
             guard data.count <= 16 * 1024 * 1024 else { throw failure("\(url.lastPathComponent) exceeds the 16 MB import limit.") }
             if type == "ASE" { _ = try AdobeASE.read(data); return (url, data, []) }
+            if type == "Fonts" { _ = try FontBookBridge.describe(url); return (url, data, []) }
             let palettes = PaletteImport.read(data, fallback: url.deletingPathExtension().lastPathComponent)
             guard !palettes.isEmpty, palettes.allSatisfy({ $0.asset?.palette.isTypography != true }) else { throw failure("No supported colour palettes found in \(url.lastPathComponent).") }
             return (url, data, palettes)
@@ -350,6 +362,7 @@ enum WorkspaceImport {
         }
         let manager = Handler_File_Manager.shared
         var copiedASE: [URL] = []
+        var fontDestinations: [URL] = []
         var skippedSources=Set<String>()
         var importedSources=Set<String>()
         var collectedItems:[AssetCollectionItem]=[]
@@ -405,7 +418,7 @@ enum WorkspaceImport {
                     if type == "Palettes" && !reference && target.customPath == nil { continue }
                     let index = target.customPath != nil ? store.url : target.member == nil ? store.assetsHome.map { GlobalAssets(home: $0).index } ?? store.url : store.url
                     let root = index.deletingLastPathComponent()
-                    var directory = target.customPath.map{URL(fileURLWithPath:$0,isDirectory:true)} ?? root.appendingPathComponent(ASERegistry.directory)
+                    var directory = target.customPath.map{URL(fileURLWithPath:$0,isDirectory:true)} ?? root.appendingPathComponent(type == "Fonts" ? "Fonts" : ASERegistry.directory)
                     if let member = target.member, let bucket {
                         guard let cat = CatalogueTree.catalogue(in: store.root),
                               let entry = cat.collections.flatMap({ $0.allMembers.map(\.member) }).first(where: { $0.id == member }),
@@ -444,7 +457,9 @@ enum WorkspaceImport {
                         _ = try FileEditAccess.ensure(for: destination)
                         let external = reference || target.customPath != nil
                         let path = external ? destination.path : String(destination.path.dropFirst(root.path.count + 1))
-                        let record=WorkspaceImportedAsset(name: destination.deletingPathExtension().lastPathComponent, type: type, path: path, external: external, member: target.member, bucket: bucket)
+                        var record=WorkspaceImportedAsset(name: destination.deletingPathExtension().lastPathComponent, type: type, path: path, external: external, member: target.member, bucket: bucket)
+                        if type == "Fonts" {record.font=try FontBookBridge.describe(destination)}
+                        if type == "Fonts" {fontDestinations.append(destination)}
                         records.append(record);collectedItems.append(.imported(record))
                         importedSources.insert(source.standardizedFileURL.path)
                         if type == "ASE", !aseSources.contains(where: { $0.url.standardizedFileURL == destination.standardizedFileURL }) { aseSources.append(.init(path: destination.path, folder: false)) }
@@ -466,6 +481,10 @@ enum WorkspaceImport {
                 }
             }
             copiedASE.forEach { ASEIcon.apply(to: $0) }
+            if type == "Fonts" {
+                for url in fontDestinations {_ = FontBookBridge.register(url)}
+                FontBookBridge.syncCollections(in:store)
+            }
         } catch {
             // A failed transaction may have rolled back a just-created schema override.
             _ = try? store.load()
@@ -629,7 +648,8 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
     var typeInActionbar = false { didSet { typeLabel.isHidden=typeInActionbar;type.isHidden=typeInActionbar;refreshExtent() } }
     var onOpenASE: ((URL) -> Void)?
     var onOpenPalette: ((UUID) -> Void)?
-    private var treeHeight: CGFloat { ready ? CGFloat(destination.numberOfRows) * 34 : 0 }
+    var onOpenFont: ((UUID) -> Void)?
+    private var treeHeight: CGFloat { ready ? WorkspaceBranchTree.rowsHeight(destination.numberOfRows)+2*WorkspaceBranchTree.edgePadding : 0 }
     private var methodTop:CGFloat{typeInActionbar ? 12:80}
     private var noteTop:CGFloat{methodTop+56}
     private var destinationTop:CGFloat{methodTop+136}
@@ -647,7 +667,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         type.changed = { [weak self] _ in self?.refresh(reset: true) }
         let column = NSTableColumn(identifier: .init("ImportDestinations"))
         destination.addTableColumn(column); destination.outlineTableColumn = column
-        destination.headerView = nil; destination.rowHeight = 34; destination.intercellSpacing = .zero
+        destination.headerView = nil; destination.rowHeight = 34; destination.intercellSpacing = NSSize(width:0,height:WorkspaceBranchTree.rowSpacing)
         destination.indentationPerLevel = 0; destination.backgroundColor = Design.card
         destination.style = .plain; destination.focusRingType = .none
         destination.leadingDisclosure = true; destination.expandsOnSelection = false
@@ -659,6 +679,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
             return target.member == nil && target.groupID == nil ? .yellow:.charcoal
         }
         destination.rowColour={item in guard let node=item as? WorkspaceImport.DestinationNode else{return nil};return WorkspaceNodeAppearance.colour(node.destination.appearanceKey)}
+        destination.rowBorder={item in guard let node=item as? WorkspaceImport.DestinationNode else{return nil};return WorkspaceNodeAppearance.borderColour(node.destination.appearanceKey)}
         destination.rowInk={item in guard let node=item as? WorkspaceImport.DestinationNode else{return nil};return WorkspaceNodeAppearance.ink(node.destination.appearanceKey)}
         destination.allowsMultipleSelection = true; destination.allowsEmptySelection = true
         destination.delegate = self; destination.dataSource = self
@@ -673,6 +694,23 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
     func selectType(_ kind: String) {
         guard let index = WorkspaceImport.types.firstIndex(of: kind) else { return }
         type.selectItem(at: index + 1); refresh(reset: true)
+    }
+    func selectDestination(member:UUID?,bucket:UUID?) {
+        func path(in nodes:[WorkspaceImport.DestinationNode])->[WorkspaceImport.DestinationNode]? {
+            for node in nodes {
+                let target=node.destination
+                if !target.heading && !target.locked && target.member == member && target.bucket == bucket && target.customPath == nil{return [node]}
+                if let children=path(in:node.children){return [node]+children}
+            }
+            return nil
+        }
+        guard let nodes=path(in:roots),let target=nodes.last else{return}
+        for ancestor in nodes.dropLast(){destination.expandItem(ancestor)}
+        let row=destination.row(forItem:target)
+        guard row >= 0 else{return}
+        destination.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)
+        destination.scrollRowToVisible(row)
+        updateNote()
     }
     func refresh(reset: Bool = false) {
         guard let controller else { return }
@@ -722,11 +760,16 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         importButton.symbol=transfer == .reference ? "link":"square.and.arrow.down"
         destinationLabel.stringValue = targets.isEmpty ? "Destinations" : "Destinations · \(targets.count) Selected"
         if selectedType == "Choose Artefact Type" { note.stringValue = "Choose an artefact type to see its available destinations." }
-        else if !ready { note.stringValue = "\(selectedType) import is not connected yet. Choose Palettes or ASE." }
+        else if !ready { note.stringValue = "\(selectedType) import is not connected yet. Choose Palettes, ASE or Fonts." }
         else {
             let missing = targets.filter { $0.member != nil && $0.bucket == nil }.count
             let action=transfer == .copy ? "Copy keeps the originals." : transfer == .move ? "Move removes the originals after every destination succeeds." : "Reference links to the originals in place."
-            let target=targets.isEmpty ? "Choose a destination below." : "\(targets.count) destination(s) selected."
+            let target:String
+            if targets.count == 1,let chosen=targets.first {
+                let typedBucket=chosen.bucket != nil || (chosen.member == nil && chosen.customPath == nil)
+                let path=chosen.path+(typedBucket && !chosen.path.hasSuffix("/ \(selectedType)") ? " / \(selectedType)" : "")
+                target="Destination: \(path)."
+            } else {target=targets.isEmpty ? "Choose a destination below." : "\(targets.count) destinations selected."}
             let missingNote=missing > 0 ? " \(missing) location(s) need a \(selectedType) bucket; you will be asked first." : ""
             note.stringValue=incompatibleReference ? "Choose Copy or Move to place files in a Custom Folder. Reference links to catalogue or My Library destinations." : incompatibleRename ? "Turn off File Renaming to add a Reference; the original file name stays in place." : "\(selectedType) → \(controller?.catalogue ?? "Catalogue"). \(action) \(target)\(missingNote)"
         }
@@ -749,7 +792,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         for (index,button) in methodButtons.enumerated(){button.frame=NSRect(x:16+CGFloat(index)*(buttonWidth+gap),y:methodTop,width:buttonWidth,height:40)}
         note.frame = NSRect(x: 16, y: noteTop, width: width, height: 72)
         destinationLabel.frame = NSRect(x: 16, y: destinationTop, width: width, height: 20)
-        destination.frame = NSRect(x: 0, y: treeTop, width: bounds.width, height: treeHeight)
+        destination.frame = NSRect(x: 0, y: treeTop+WorkspaceBranchTree.edgePadding, width: bounds.width, height: max(0,treeHeight-2*WorkspaceBranchTree.edgePadding))
         destination.tableColumns.first?.width = bounds.width
         destination.layoutConnectors()
         importButton.frame = NSRect(x: 16, y: actionsTop, width: width, height: 42)
@@ -914,6 +957,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         guard records.indices.contains(assets.indexOfSelectedItem) else { return }
         let (record, index) = records[assets.indexOfSelectedItem]
         if record.type == "Palettes" { onOpenPalette?(record.id); return }
+        if record.type == "Fonts" { onOpenFont?(record.id); return }
         do {
             let url = try record.url(in: index.deletingLastPathComponent())
             guard FileManager.default.isReadableFile(atPath: url.path) else { throw failure("The file is offline or unavailable. Use Manage to locate it again.") }
@@ -947,6 +991,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
                     do {
                         let data = try Data(contentsOf: url)
                         if record.type == "ASE" { _ = try AdobeASE.read(data) }
+                        else if record.type == "Fonts" { _ = try FontBookBridge.describe(url) }
                         else if PaletteImport.read(data, fallback: record.name).isEmpty { throw failure("This file contains no supported palettes.") }
                         try FolderAccess.authorize(url)
                         guard let controller = self.controller else { return }

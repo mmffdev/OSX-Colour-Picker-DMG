@@ -107,26 +107,19 @@ extension ColourDefinition {
 }
 
 extension Library {
-    /// The key of a colour with this definition, adding it if the library does not have it. A
-    /// colour that is a plain sRGB value is kept under its hex; any other gets a key of its own.
+    /// The key of a colour with this definition, adding it if the library does not have it. Only
+    /// an exact 8-bit sRGB source can use a hex as its identity; higher precision gets its own key.
     /// The same definition twice is the same colour.
     @discardableResult
     mutating func addColour(_ definition: ColourDefinition, at date: Date = Date()) -> String? {
-        if definition.source.space == RGBSpace.srgb.rawValue, definition.source.values.count == 3, definition.source.values.allSatisfy({ $0 >= 0 && $0 <= 1 }) {
-            return addToCatalogue(RGBSpace.srgb.text(definition.source.values), at: date)
+        let values = definition.source.values
+        if definition.source.space == RGBSpace.srgb.rawValue, values.count == 3,
+           definition.kind == .surface, values.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 && $0 * 255 == ($0 * 255).rounded() }),
+           let hex = normaliseHex(RGBSpace.srgb.text(values)),
+           ColourDefinition.of(hex: hex) == definition {
+            return addToCatalogue(hex, at: date)
         }
-        // A screen pick sRGB can show keeps its hex as its key, as every library so far expects, and its exact source
-        // and master on the record beside it, so what was captured is never only the eight-bit hex. A build typed for a
-        // press or given as Lab is a colour in its own right whatever sRGB makes of it, and keeps a key of its own.
-        if definition.source.space == RGBSpace.displayP3.rawValue, definition.fitsSRGB {
-            let hex = RGBSpace.srgb.text(RGBSpace.srgb.values(of: definition.master))
-            guard let key = addToCatalogue(hex, at: date) else { return nil }
-            if let i = colours.firstIndex(where: { $0.hex == key }), colours[i].source == nil {
-                colours[i].source = definition.source; colours[i].master = definition.master; colours[i].kind = definition.kind
-            }
-            return key
-        }
-        if let have = colours.first(where: { $0.source == definition.source }) { return have.hex }
+        if let have = colours.first(where: { $0.source == definition.source && $0.master == definition.master && ($0.kind ?? .surface) == definition.kind }) { return have.hex }
         let key = ColourKeys.make()
         colours.append(Colour(hex: key, pickedAt: date, source: definition.source, master: definition.master, kind: definition.kind))
         return key

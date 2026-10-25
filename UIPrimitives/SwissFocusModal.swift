@@ -148,7 +148,8 @@ final class SwissFocusModal: NSView, Overlay {
     override func layout() {
         super.layout(); background.frame = bounds
         if fillsWorkspace, let content = customContent {
-            card.frame = NSRect(x: 0, y: Design.App.header, width: bounds.width, height: max(0, bounds.height - Design.App.header - Design.App.footer))
+            let headerHeight = Design.App.headerHeight(for:bounds.width)
+            card.frame = NSRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight - Design.App.footer))
             content.frame = card.bounds.insetBy(dx: Design.App.margin, dy: Design.App.margin)
             return
         }

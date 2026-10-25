@@ -60,7 +60,7 @@ final class GridOverlay: NSView {
         // The header's baseline, the area header's heading and label lines and its rule.
         let strong = c.withAlphaComponent(0.6), faint = c.withAlphaComponent(0.25)
         fill(NSRect(x: 0, y: StudioHeader.baseline, width: w, height: 1), strong)
-        let top = A.header + 1
+        let top = A.headerHeight(for:w) + 1
         for y in [AreaHeader.headingBaseline, AreaHeader.labelBaseline, AreaHeader.rule] { fill(NSRect(x: 0, y: top + y, width: w, height: 1), strong) }
         // The beat: a unit line and, within each unit, the line text sits on.
         var y = top + AreaHeader.height

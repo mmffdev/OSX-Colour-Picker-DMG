@@ -404,7 +404,7 @@ private final class AnalysisPanel: NSView {
         about.textColor = .secondaryLabelColor
         about.lineBreakMode = .byTruncatingTail
         about.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let open = symbolButton(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+        let open = symbolButton(expanded ? PanelExpansionSymbol.contract : PanelExpansionSymbol.expand,
                                 tooltip: expanded ? "Back To Every Panel" : "Open \(kind.title) To The Full Page", target: self, action: #selector(expandTapped))
         for v in [title, about, open, plot] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         var before: NSView = open

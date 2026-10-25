@@ -1,10 +1,41 @@
 import AppKit
 
+/// The paired diagonal arrows for reversible panel expansion.
+enum PanelExpansionSymbol {
+    static let expand = "arrow.up.left.and.arrow.down.right"
+    static let contract = "arrow.down.right.and.arrow.up.left"
+}
+
+/// Native rendering of assets/glyphs/transform-bypass.svg at any action-tab scale.
+enum TransformBypassGlyph {
+    static func draw(in rect:NSRect,ink:NSColor=Design.ink,enabled:Bool=true) {
+        NSGraphicsContext.saveGraphicsState()
+        let t=NSAffineTransform();t.translateX(by:rect.minX,yBy:rect.minY)
+        t.scaleX(by:rect.width/32,yBy:rect.height/32);t.concat()
+        let wire=NSBezierPath()
+        wire.move(to:NSPoint(x:2,y:16));wire.line(to:NSPoint(x:10,y:16))
+        wire.curve(to:NSPoint(x:17,y:8),controlPoint1:NSPoint(x:13,y:16),controlPoint2:NSPoint(x:13,y:8))
+        wire.line(to:NSPoint(x:27,y:8))
+        wire.move(to:NSPoint(x:10,y:16));wire.curve(to:NSPoint(x:17,y:24),controlPoint1:NSPoint(x:13,y:16),controlPoint2:NSPoint(x:13,y:24))
+        (enabled ? ink:Design.quiet).setStroke();wire.lineWidth=2;wire.lineCapStyle = .round;wire.lineJoinStyle = .round;wire.stroke()
+        let arrow=NSBezierPath();arrow.move(to:NSPoint(x:23,y:4));arrow.line(to:NSPoint(x:28,y:8));arrow.line(to:NSPoint(x:23,y:12))
+        arrow.lineWidth=2;arrow.lineCapStyle = .round;arrow.stroke()
+        let cross=NSBezierPath();cross.move(to:NSPoint(x:19,y:20));cross.line(to:NSPoint(x:27,y:28))
+        cross.move(to:NSPoint(x:27,y:20));cross.line(to:NSPoint(x:19,y:28))
+        (enabled ? NSColor.systemRed:Design.quiet).setStroke();cross.lineWidth=2.5;cross.lineCapStyle = .round;cross.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 /// Small palette actions keep their hit areas independent of row selection and dragging.
 final class PaletteAssetIcon:ClickCursorButton {
     var symbol="" {didSet{if symbol != oldValue{needsDisplay=true}}}
     var ink=Design.ink {didSet{if !ink.isEqual(oldValue){needsDisplay=true}}}
     var active=true {didSet{if active != oldValue{needsDisplay=true}}}
+    var matchesHeaderGlyph=false {didSet{if matchesHeaderGlyph != oldValue{needsDisplay=true}}}
+    var badgePlus=false {didSet{if badgePlus != oldValue{needsDisplay=true}}}
+    var outlinedSquare=false {didSet{needsDisplay=true}}
+    var selectedSquare=false {didSet{needsDisplay=true}}
     var run:(()->Void)?
     private var hovered=false
     private var themeInk=Design.ink
@@ -16,8 +47,22 @@ final class PaletteAssetIcon:ClickCursorButton {
     override func draw(_ dirtyRect:NSRect){
         let rollover=hovered || isHighlighted
         let colour=ink.withAlphaComponent(rollover ? (active ? 0.60:1):(active ? 1:0.45))
-        let image=RowMark.image(symbol,colour:colour),size=image.size
-        image.draw(in:NSRect(x:bounds.midX-size.width/2,y:bounds.midY-size.height/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        if outlinedSquare {
+            (selectedSquare ? ink:Design.rule).setStroke()
+            let square=NSBezierPath(rect:bounds.insetBy(dx:0.5,dy:0.5))
+            square.lineWidth=1;square.stroke()
+        }
+        if matchesHeaderGlyph {HeaderUtilityIcon.draw(symbol,in:bounds,colour:colour)}
+        else {
+            let image=RowMark.image(symbol,colour:colour),size=image.size
+            image.draw(in:NSRect(x:bounds.midX-size.width/2,y:bounds.midY-size.height/2,width:size.width,height:size.height),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        }
+        if badgePlus {
+            let badge=NSRect(x:bounds.maxX-11,y:isFlipped ? bounds.maxY-11:bounds.minY+1,width:10,height:10)
+            Design.card.setFill();NSBezierPath(ovalIn:badge.insetBy(dx:-1,dy:-1)).fill()
+            colour.setStroke();let ring=NSBezierPath(ovalIn:badge);ring.lineWidth=1.2;ring.stroke()
+            let plus=NSBezierPath();plus.move(to:NSPoint(x:badge.midX-2.5,y:badge.midY));plus.line(to:NSPoint(x:badge.midX+2.5,y:badge.midY));plus.move(to:NSPoint(x:badge.midX,y:badge.midY-2.5));plus.line(to:NSPoint(x:badge.midX,y:badge.midY+2.5));plus.lineWidth=1.2;plus.stroke()
+        }
     }
     override func updateTrackingAreas(){super.updateTrackingAreas();trackingAreas.forEach(removeTrackingArea);addTrackingArea(NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))}
     override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
@@ -136,7 +181,7 @@ final class PalettePageControls:NSView {
 /// A single filter surface for library buckets and palette listing actionbars.
 final class PaletteFilterControls:NSView,Overlay {
     static func height(for width:CGFloat)->CGFloat{32}
-    static func actionbarHeight(for width:CGFloat)->CGFloat{52}
+    static func actionbarHeight(for width:CGFloat)->CGFloat{WorkspaceViewportBar.actionbarHeight}
     var value=PaletteAssetHandler.Filter(){didSet{refresh()}}
     var onChange:((PaletteAssetHandler.Filter)->Void)?
     private let stars=(1...5).map{_ in PaletteAssetIcon(frame:.zero)}

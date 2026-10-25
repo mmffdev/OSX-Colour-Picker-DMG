@@ -16,8 +16,12 @@ struct AssetMetadata: Codable, Equatable {
     var keywords: [String]? = nil
     /// Designer-defined and asset-specific fields; unknown keys round-trip with the asset.
     var extra: [String:String]? = nil
+    /// Keeps custom field names and empty fields visible when this asset is reopened.
+    var customFieldLabels: [String:String]? = nil
+    var customFieldSections: [String:String]? = nil
+    var customSections: [String]? = nil
     var changedAt: Date? = nil
-    var isEmpty: Bool { [title,description,creator,rights,source,identifier,subjectCode,printProcess,colourStandard].allSatisfy { ($0 ?? "").isEmpty } && (keywords ?? []).isEmpty && (spotColourNames ?? []).isEmpty && (extra ?? [:]).values.allSatisfy(\.isEmpty) }
+    var isEmpty: Bool { [title,description,creator,rights,source,identifier,subjectCode,printProcess,colourStandard].allSatisfy { ($0 ?? "").isEmpty } && (keywords ?? []).isEmpty && (spotColourNames ?? []).isEmpty && (extra ?? [:]).values.allSatisfy(\.isEmpty) && (customFieldLabels ?? [:]).isEmpty && (customSections ?? []).isEmpty }
     mutating func tidy() {
         title=title?.trimmedMetadata; description=description?.trimmedMetadata; creator=creator?.trimmedMetadata
         rights=rights?.trimmedMetadata; source=source?.trimmedMetadata; identifier=identifier?.trimmedMetadata
@@ -25,6 +29,9 @@ struct AssetMetadata: Codable, Equatable {
         keywords=Library.cleanTags(keywords ?? []); spotColourNames=Library.cleanTags(spotColourNames ?? [])
         extra=extra?.compactMapValues { $0.trimmedMetadata }
         if extra?.isEmpty == true { extra=nil }
+        if customFieldLabels?.isEmpty == true { customFieldLabels=nil }
+        if customFieldSections?.isEmpty == true { customFieldSections=nil }
+        if customSections?.isEmpty == true { customSections=nil }
         if isEmpty { self = AssetMetadata() } else {
             // Native asset JSON stores dates in milliseconds. Use the same precision here so
             // an in-memory edit and its immediate readback represent the identical instant.
@@ -191,19 +198,46 @@ enum AssetMetadataSchema {
         if item.id == 10 { metadata.keywords=Library.cleanTags(text.split(separator:",").map(String.init));return }
         var extra=metadata.extra ?? [:];extra[item.key]=text;metadata.extra=extra
     }
-    static func apply(_ source:AssetMetadata,to destination:inout AssetMetadata,including ids:Set<Int>) {
+    static func apply(_ source:AssetMetadata,to destination:inout AssetMetadata,including ids:Set<Int>,removing removedKeys:Set<String>=[],removingSections removedSections:Set<String>=[]) {
         for item in items where ids.contains(item.id) { assign(value(item,in:source),for:item,to:&destination) }
-        let customKeys=(source.extra ?? [:]).keys.sorted().filter { key in !items.contains(where:{$0.key==key}) }
+        var sectionNames=destination.customSections ?? []
+        for name in source.customSections ?? [] where !sectionNames.contains(name) {sectionNames.append(name)}
+        sectionNames.removeAll{removedSections.contains($0)}
+        destination.customSections=sectionNames.isEmpty ? nil:sectionNames
+        let customKeys=Set((source.extra ?? [:]).keys).union((source.customFieldLabels ?? [:]).keys).sorted().filter { key in !items.contains(where:{$0.key==key}) }
         for key in customKeys where ids.contains(customID(key)) {
             var extra=destination.extra ?? [:];extra[key]=source.extra?[key];destination.extra=extra
+            var labels=destination.customFieldLabels ?? [:]
+            labels[key]=source.customFieldLabels?[key] ?? key.replacingOccurrences(of:"_",with:" ")
+            destination.customFieldLabels=labels
+            var sections=destination.customFieldSections ?? [:]
+            sections[key]=source.customFieldSections?[key] ?? "Custom Fields"
+            destination.customFieldSections=sections
+        }
+        if !removedKeys.isEmpty {
+            var extra=destination.extra ?? [:],labels=destination.customFieldLabels ?? [:],sections=destination.customFieldSections ?? [:]
+            for key in removedKeys {extra.removeValue(forKey:key);labels.removeValue(forKey:key);sections.removeValue(forKey:key)}
+            destination.extra=extra.isEmpty ? nil:extra
+            destination.customFieldLabels=labels.isEmpty ? nil:labels
+            destination.customFieldSections=sections.isEmpty ? nil:sections
+        }
+        if !removedSections.isEmpty {
+            var sections=destination.customFieldSections ?? [:]
+            for (key,name) in sections where removedSections.contains(name) {sections[key]="Custom Fields"}
+            destination.customFieldSections=sections.isEmpty ? nil:sections
         }
     }
 }
 
 /// Compact read-only loadout for the selected asset in Rail 2.
 final class AssetMetadataPanel: NSView, WorkspacePanelContentMetrics {
-    var minimumContentHeight: CGFloat { palette == nil ? 116:360 }
-    var palette: Swatch? { didSet { updateFields() } }
+    var minimumContentHeight: CGFloat { palette == nil ? 148:360 }
+    var palette: Swatch? { didSet {
+        updateFields()
+        if (oldValue == nil) != (palette == nil) {
+            (superview as? WorkspacePanel)?.rail?.arrange()
+        }
+    } }
     var onEdit: ((UUID)->Void)?
     var onSettings: (()->Void)?
     private let title=Design.text("Select An Asset",.bodyStrong)
@@ -238,13 +272,14 @@ final class AssetMetadataPanel: NSView, WorkspacePanelContentMetrics {
         preset.options(["All Fields"]+names,selected:names.firstIndex(of:config.inspectorPreset ?? "").map{$0+1} ?? 0)
         guard let p=palette else {
             title.stringValue="Select An Asset"
-            edit.isEnabled=false;spectrum.isHidden=true;preset.isHidden=true;settings.isHidden=true
+            edit.isEnabled=false;edit.isHidden=true;spectrum.isHidden=true
+            preset.isHidden=false;settings.isHidden=false
             for label in labels{label.isHidden=true}
             for value in values{value.isHidden=true}
             needsLayout=true;return
         }
         title.stringValue=p.metadata?.title ?? p.name;title.toolTip=title.stringValue
-        edit.isEnabled=true;spectrum.isHidden=false;preset.isHidden=false;settings.isHidden=false
+        edit.isEnabled=true;edit.isHidden=false;spectrum.isHidden=false;preset.isHidden=false;settings.isHidden=false
         spectrum.subviews.forEach{$0.removeFromSuperview()}
         for entry in p.entries.prefix(12) {
             let strip=NSView();strip.wantsLayer=true;strip.layer?.backgroundColor=Design.hex(entry.hex).cgColor;spectrum.addSubview(strip)
@@ -275,6 +310,11 @@ final class AssetMetadataPanel: NSView, WorkspacePanelContentMetrics {
         super.layout()
         let width=bounds.width-32
         title.frame=NSRect(x:16,y:bounds.height-28,width:width,height:20)
+        if palette == nil {
+            preset.frame=NSRect(x:16,y:bounds.height-72,width:width,height:30)
+            settings.frame=NSRect(x:16,y:16,width:width,height:30)
+            return
+        }
         spectrum.frame=NSRect(x:16,y:bounds.height-58,width:width,height:14)
         let count=spectrum.subviews.count
         for (i,strip) in spectrum.subviews.enumerated(){let step=width/CGFloat(max(1,count));strip.frame=NSRect(x:CGFloat(i)*step,y:0,width:step+0.5,height:14)}
@@ -315,7 +355,7 @@ private final class MetadataFlippedView: NSView { override var isFlipped:Bool { 
 private final class MetadataAssetView: NSView {
     override var isFlipped:Bool { true }
     private let subject:MetadataAssetSubject
-    private let heading=Design.text("Selected Asset",.caption,colour:Design.quiet)
+    private let heading=Design.text("Selected Asset",.header)
     private let name=Design.text("",.bodyStrong)
     private let details=Design.text("",.caption,colour:Design.quiet)
     private let created=Design.text("",.caption,colour:Design.quiet)
@@ -343,19 +383,19 @@ private final class MetadataAssetView: NSView {
     override func layout() {
         super.layout()
         let inner=bounds.insetBy(dx:16,dy:0),width=inner.width
-        heading.frame=NSRect(x:inner.minX,y:18,width:width,height:18)
+        heading.frame=NSRect(x:inner.minX,y:18,width:width,height:27)
         let previewHeight=min(220,max(100,width*0.77))
-        spectrum.frame=NSRect(x:inner.minX,y:50,width:width,height:previewHeight)
+        spectrum.frame=NSRect(x:inner.minX,y:82,width:width,height:previewHeight)
         imageView.frame=spectrum.frame
         let count=spectrum.subviews.count
         for (index,strip) in spectrum.subviews.enumerated() {
             let step=width/CGFloat(max(1,count))
             strip.frame=NSRect(x:CGFloat(index)*step,y:0,width:step+0.5,height:previewHeight)
         }
-        name.frame=NSRect(x:inner.minX,y:previewHeight+66,width:width,height:28)
-        details.frame=NSRect(x:inner.minX,y:previewHeight+96,width:width,height:20)
-        created.frame=NSRect(x:inner.minX,y:previewHeight+150,width:width,height:20)
-        modified.frame=NSRect(x:inner.minX,y:previewHeight+174,width:width,height:20)
+        name.frame=NSRect(x:inner.minX,y:previewHeight+98,width:width,height:28)
+        details.frame=NSRect(x:inner.minX,y:previewHeight+128,width:width,height:20)
+        created.frame=NSRect(x:inner.minX,y:previewHeight+182,width:width,height:20)
+        modified.frame=NSRect(x:inner.minX,y:previewHeight+206,width:width,height:20)
     }
 }
 
@@ -366,19 +406,25 @@ final class AssetMetadataForm: NSView {
         let label:NSTextField
         let field:NSTextField
         let check:SwissCheckbox
-        var height:CGFloat { item.multiline ? 70:42 }
+        let rename:SwissButton?
+        let remove:SwissButton?
+        var height:CGFloat { item.id>=1000 ? 66:(item.multiline ? 70:42) }
     }
     private final class Group {
-        let title:String
+        var title:String
+        let isCustom:Bool
         let header=MetadataFlippedView()
         let toggle=ClickCursorButton(frame:.zero)
         let check=SwissCheckbox("")
         let label:NSTextField
+        let rule=MetadataFlippedView()
+        let rename=SwissButton("Rename Section",.quiet)
+        let remove=SwissButton("Remove Section",.quiet)
         var rows:[Row]=[]
         var facts:[(NSTextField,NSTextField)]=[]
         var collapsed=false
         var y:CGFloat=0
-        init(_ title:String) {self.title=title;label=Design.text(title,.bodyStrong)}
+        init(_ title:String,isCustom:Bool=false) {self.title=title;self.isCustom=isCustom;label=Design.text(isCustom ? title+" · Custom":title,.bodyStrong)}
     }
     private let palette:Swatch
     private let subject:MetadataAssetSubject
@@ -386,20 +432,35 @@ final class AssetMetadataForm: NSView {
     private let selectedCount:Int
     private let preview:MetadataAssetView
     private let navigation=MetadataFlippedView()
+    private let navScroll=FittedScrollView()
     private let formPane=MetadataFlippedView()
+    private let editorFooter=MetadataFlippedView()
+    private let editorFooterRule=MetadataFlippedView()
     private let scroll=FittedScrollView()
     private let document=MetadataFlippedView()
     private let footer=MetadataFlippedView()
     private let firstRule=MetadataFlippedView()
     private let secondRule=MetadataFlippedView()
     private let footerRule=MetadataFlippedView()
+    private let headerRule=MetadataFlippedView()
     private let keywordHelp=Design.text("Keywords are search terms. Collections group assets separately.",.caption,colour:Design.quiet)
     private let title=Design.text("Metadata",.header)
     private let intro=Design.text("",.caption,colour:Design.quiet)
-    private let navHeading=Design.text("Sections",.caption,colour:Design.quiet)
+    private let navHeading=Design.text("Sections",.header)
+    private let navSelection=MetadataFlippedView()
     private let preset:AnalysisMenu
     private let keywordSet:AnalysisMenu
     private let addField=SwissButton("Add Field",.quiet)
+    private let customHelp=Design.text("Custom fields are saved with this asset. Choose a section or create one.",.caption,colour:Design.quiet)
+    private let customLabel=Design.text("Field Name",.caption)
+    private let customName=NSTextField(string:"")
+    private let sectionLabel=Design.text("Section",.caption)
+    private let sectionChoice=AnalysisMenu("Section",[])
+    private let newSectionLabel=Design.text("New Section",.caption)
+    private let newSectionName=NSTextField(string:"")
+    private let customCreate=SwissButton("Create Field",.quiet)
+    private let customCancel=SwissButton("Cancel",.quiet)
+    private let customError=Design.text("",.caption,colour:Design.ink)
     private let savePreset=SwissButton("Save Preset",.quiet)
     private let checkAll=SwissButton("Check All",.quiet)
     private let checkNone=SwissButton("Check None",.quiet)
@@ -412,7 +473,13 @@ final class AssetMetadataForm: NSView {
     private var fieldByID:[Int:NSTextField]=[:]
     private var include:[Int:SwissCheckbox]=[:]
     private var selectedGroup=0
-    var onSave:((AssetMetadata,Set<Int>)->Void)?
+    private var removedCustomKeys:Set<String>=[]
+    private var removedCustomSections:Set<String>=[]
+    private var composerOpen=false
+    private var editingFieldKey:String?
+    private var editingSectionName:String?
+    private var savingPreset=false
+    var onSave:((AssetMetadata,Set<Int>,Set<String>,Set<String>)->Void)?
     var onCancel:(()->Void)?
     override var isFlipped:Bool { true }
     init(palette:Swatch,selectedCount:Int=1) {
@@ -427,34 +494,40 @@ final class AssetMetadataForm: NSView {
     required init?(coder:NSCoder){fatalError()}
     private func build() {
         wantsLayer=true;layer?.backgroundColor=Design.card.cgColor
-        addSubview(preview);addSubview(navigation);addSubview(formPane);addSubview(footer)
-        for rule in [firstRule,secondRule,footerRule] {rule.wantsLayer=true;rule.layer?.backgroundColor=Design.rule.cgColor;addSubview(rule)}
+        addSubview(preview);addSubview(navScroll);addSubview(formPane);addSubview(footer)
+        for rule in [firstRule,secondRule,footerRule,headerRule] {rule.wantsLayer=true;rule.layer?.backgroundColor=Design.rule.cgColor;addSubview(rule)}
         document.addSubview(keywordHelp)
+        navScroll.drawsBackground=false;navScroll.hasVerticalScroller=true;navScroll.autohidesScrollers=true
+        navScroll.documentView=navigation
         navigation.addSubview(navHeading)
+        navSelection.wantsLayer=true;navSelection.layer?.backgroundColor=Design.houseYellow.cgColor
+        navSelection.layer?.cornerRadius=4;navigation.addSubview(navSelection)
         formPane.addSubview(title);formPane.addSubview(intro);formPane.addSubview(preset)
-        formPane.addSubview(keywordSet);formPane.addSubview(addField);formPane.addSubview(savePreset)
+        formPane.addSubview(keywordSet);formPane.addSubview(editorFooter)
+        editorFooterRule.wantsLayer=true;editorFooterRule.layer?.backgroundColor=Design.rule.cgColor
+        editorFooter.addSubview(editorFooterRule)
+        for view in [addField,savePreset,customHelp,customLabel,customName,sectionLabel,sectionChoice,newSectionLabel,newSectionName,customCreate,customCancel,customError] {editorFooter.addSubview(view)}
         scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true
         scroll.documentView=document;formPane.addSubview(scroll)
         intro.stringValue=selectedCount>1 ? "Editing \(selectedCount) assets · Check fields to apply" : "Edit details for this asset. File facts are read-only."
-        for (index,name) in AssetMetadataSchema.groups.enumerated() {
-            let group=Group(name);groups.append(group)
-            let button=ClickCursorButton(frame:.zero);button.title=name;button.tag=index
-            button.isBordered=false;button.font=Design.Text.body.font()
-            button.alignment = .left;button.target=self;button.action=#selector(navigate(_:))
-            button.setAccessibilityLabel("Show \(name)")
-            button.wantsLayer=true;navigation.addSubview(button);navButtons.append(button)
-            group.toggle.image=NSImage(systemSymbolName:"chevron.down",accessibilityDescription:"Collapse \(name)")
-            group.toggle.isBordered=false;group.toggle.tag=index
-            group.toggle.target=self;group.toggle.action=#selector(toggleGroup(_:))
-            group.check.state = .on;group.check.tag=index
-            group.check.target=self;group.check.action=#selector(checkGroup(_:))
-            group.header.addSubview(group.toggle);group.header.addSubview(group.check);group.header.addSubview(group.label)
-            document.addSubview(group.header)
-        }
+        for name in AssetMetadataSchema.groups {addGroup(name)}
+        for name in initial.customSections ?? [] where !AssetMetadataSchema.groups.contains(name) {addGroup(name,isCustom:true)}
         for item in AssetMetadataSchema.items { append(item) }
-        for key in (initial.extra ?? [:]).keys.sorted().filter({ key in !AssetMetadataSchema.items.contains(where:{$0.key==key}) }) {
-            append(.init(AssetMetadataSchema.customID(key),key,key,"Custom Fields"))
+        for key in Set((initial.extra ?? [:]).keys).union((initial.customFieldLabels ?? [:]).keys).sorted().filter({ key in !AssetMetadataSchema.items.contains(where:{$0.key==key}) }) {
+            let section=initial.customFieldSections?[key] ?? "Custom Fields"
+            if !groups.contains(where:{$0.title==section}) {addGroup(section,isCustom:true)}
+            append(.init(AssetMetadataSchema.customID(key),key,initial.customFieldLabels?[key] ?? key.replacingOccurrences(of:"_",with:" "),section))
         }
+        customName.placeholderString="Field name, such as Brand Code"
+        styleMetadataField(customName)
+        customName.setAccessibilityLabel("New custom field name")
+        newSectionName.placeholderString="Section name, such as Client Handover"
+        styleMetadataField(newSectionName)
+        newSectionName.setAccessibilityLabel("New custom section name")
+        refreshSectionChoices(selected:"Custom Fields")
+        sectionChoice.changed={ [weak self] _ in self?.needsLayout=true }
+        customCreate.actionSymbol="plus";customCreate.target=self;customCreate.action=#selector(createCustomField)
+        customCancel.actionSymbol="xmark";customCancel.target=self;customCancel.action=#selector(closeComposer)
         populateFacts()
         preset.changed = { [weak self] index in self?.applyPreset(index) }
         keywordSet.changed = { [weak self] index in self?.applyKeywordSet(index) }
@@ -462,7 +535,7 @@ final class AssetMetadataForm: NSView {
                                        (savePreset,"bookmark",#selector(savePresetPressed)),
                                        (checkAll,"checkmark.square",#selector(checkAllPressed)),
                                        (checkNone,"square",#selector(checkNonePressed)),
-                                       (checkFilled,"checkmark.square.fill",#selector(checkFilledPressed)),
+                                       (checkFilled,"checkmark.square",#selector(checkFilledPressed)),
                                        (cancel,"xmark",#selector(cancelPressed)),
                                        (done,"checkmark",#selector(donePressed))] {
             button.actionSymbol=symbol;button.target=self;button.action=action
@@ -470,13 +543,41 @@ final class AssetMetadataForm: NSView {
         for button in [checkAll,checkNone,checkFilled,cancel,done] { footer.addSubview(button) }
         refreshGroupChecks()
     }
+    private func addGroup(_ name:String,isCustom:Bool=false) {
+        let index=groups.count,group=Group(name,isCustom:isCustom);groups.append(group)
+        let button=ClickCursorButton(frame:.zero);button.title=isCustom ? name+" · Custom":name;button.tag=index
+        button.isBordered=false;button.font=Design.Text.body.font()
+        button.alignment = .left;button.target=self;button.action=#selector(navigate(_:))
+        button.setAccessibilityLabel("Show \(name)");button.focusRingType = .none
+        navigation.addSubview(button);navButtons.append(button)
+        group.toggle.image=NSImage(systemSymbolName:"chevron.down",accessibilityDescription:"Collapse \(name)")
+        group.toggle.isBordered=false;group.toggle.tag=index
+        group.toggle.target=self;group.toggle.action=#selector(toggleGroup(_:))
+        group.check.state = .on;group.check.tag=index
+        group.check.target=self;group.check.action=#selector(checkGroup(_:))
+        group.rule.wantsLayer=true;group.rule.layer?.backgroundColor=Design.rule.cgColor
+        group.header.addSubview(group.toggle);group.header.addSubview(group.label)
+        group.header.addSubview(group.check);group.header.addSubview(group.rule)
+        if isCustom {
+            group.rename.actionSymbol="pencil";group.rename.target=self;group.rename.action=#selector(renameSection(_:));group.rename.tag=index
+            group.remove.actionSymbol="trash";group.remove.target=self;group.remove.action=#selector(removeSection(_:));group.remove.tag=index
+            group.header.addSubview(group.rename);group.header.addSubview(group.remove)
+        }
+        document.addSubview(group.header)
+    }
+    private func refreshSectionChoices(selected name:String) {
+        let names=groups.map(\.title)
+        sectionChoice.options(names+["New Section…"],selected:names.firstIndex(of:name) ?? names.count)
+    }
+    private func styleMetadataField(_ field:NSTextField) {
+        styleMetadataInput(field)
+    }
     private func append(_ item:AssetMetadataSchema.Item) {
         guard let group=groups.first(where:{$0.title==item.group}) else{return}
         if item.id>=1000 { customItems.append(item) }
         let label=Design.text(item.label,.caption)
         let field=NSTextField(string:item.id>=1000 ? initial.extra?[item.key] ?? "" : AssetMetadataSchema.value(item,in:initial))
-        field.font=Design.Text.body.font();field.textColor=Design.ink
-        field.backgroundColor=Design.card;field.isBordered=true;field.focusRingType = .none
+        styleMetadataField(field)
         field.usesSingleLineMode = !item.multiline
         if item.multiline { field.lineBreakMode = .byWordWrapping }
         field.setAccessibilityLabel(item.label)
@@ -484,7 +585,18 @@ final class AssetMetadataForm: NSView {
         check.setAccessibilityLabel("Include \(item.label)")
         check.target=self;check.action=#selector(checkField(_:))
         document.addSubview(label);document.addSubview(field);document.addSubview(check)
-        group.rows.append(Row(item:item,label:label,field:field,check:check))
+        var rename:SwissButton?,remove:SwissButton?
+        if item.id>=1000 {
+            let edit=SwissButton("Rename Field",.quiet)
+            edit.actionSymbol="pencil";edit.identifier=NSUserInterfaceItemIdentifier(item.key)
+            edit.target=self;edit.action=#selector(renameCustomField(_:))
+            document.addSubview(edit);rename=edit
+            let button=SwissButton("Remove Field",.quiet)
+            button.actionSymbol="trash";button.identifier=NSUserInterfaceItemIdentifier(item.key)
+            button.target=self;button.action=#selector(removeCustomField(_:))
+            document.addSubview(button);remove=button
+        }
+        group.rows.append(Row(item:item,label:label,field:field,check:check,rename:rename,remove:remove))
         fieldByID[item.id]=field;include[item.id]=check
     }
     private func populateFacts() {
@@ -509,27 +621,56 @@ final class AssetMetadataForm: NSView {
         let previewWidth=min(260,max(180,bounds.width*0.205))
         let navWidth=min(218,max(154,bounds.width*0.16))
         preview.frame=NSRect(x:0,y:0,width:previewWidth,height:bodyHeight)
-        navigation.frame=NSRect(x:previewWidth,y:0,width:navWidth,height:bodyHeight)
+        navScroll.frame=NSRect(x:previewWidth,y:0,width:navWidth,height:bodyHeight)
+        navigation.frame=NSRect(x:0,y:0,width:navWidth,height:max(bodyHeight,78+CGFloat(groups.count)*40+24))
         formPane.frame=NSRect(x:previewWidth+navWidth,y:0,width:max(0,bounds.width-previewWidth-navWidth),height:bodyHeight)
         footer.frame=NSRect(x:0,y:bodyHeight,width:bounds.width,height:footHeight)
         firstRule.frame=NSRect(x:previewWidth,y:0,width:1,height:bodyHeight)
         secondRule.frame=NSRect(x:previewWidth+navWidth,y:0,width:1,height:bodyHeight)
+        headerRule.frame=NSRect(x:0,y:60,width:bounds.width,height:1)
         footerRule.frame=NSRect(x:0,y:bodyHeight,width:bounds.width,height:1)
-        navHeading.frame=NSRect(x:16,y:20,width:navWidth-32,height:18)
+        navHeading.frame=NSRect(x:16,y:18,width:navWidth-32,height:27)
+        navSelection.frame=NSRect(x:16,y:78+CGFloat(selectedGroup)*40,width:navWidth-32,height:34)
         for (i,button) in navButtons.enumerated() {
-            button.frame=NSRect(x:8,y:52+CGFloat(i)*38,width:navWidth-16,height:34)
-            button.layer?.cornerRadius=4
-            button.layer?.backgroundColor=i==selectedGroup ? Design.houseYellow.cgColor:NSColor.clear.cgColor
+            button.frame=NSRect(x:28,y:78+CGFloat(i)*40,width:navWidth-56,height:34)
+            button.font=i==selectedGroup ? Design.Text.bodyStrong.font():Design.Text.body.font()
             button.contentTintColor=i==selectedGroup ? .black:Design.ink
         }
         let formWidth=formPane.bounds.width
-        title.frame=NSRect(x:24,y:14,width:max(0,formWidth-48),height:27)
-        intro.frame=NSRect(x:24,y:42,width:max(0,formWidth-48),height:20)
-        preset.frame=NSRect(x:24,y:72,width:190,height:30)
-        keywordSet.frame=NSRect(x:224,y:72,width:170,height:30)
-        addField.frame=NSRect(x:max(404,formWidth-202),y:72,width:90,height:32)
-        savePreset.frame=NSRect(x:max(496,formWidth-110),y:72,width:100,height:32)
-        scroll.frame=NSRect(x:0,y:116,width:formWidth,height:max(0,bodyHeight-116))
+        title.frame=NSRect(x:24,y:18,width:max(0,formWidth-48),height:27)
+        intro.frame=NSRect(x:24,y:76,width:max(0,formWidth-48),height:20)
+        preset.frame=NSRect(x:24,y:106,width:190,height:30)
+        keywordSet.frame=NSRect(x:224,y:106,width:170,height:30)
+        let shortComposer=savingPreset || editingSectionName != nil
+        let newSection=sectionChoice.titleOfSelectedItem == "New Section…" && !shortComposer
+        let formFooterHeight:CGFloat=composerOpen ? (shortComposer ? 160:(newSection ? 252:214)):54
+        scroll.frame=NSRect(x:0,y:150,width:formWidth,height:max(0,bodyHeight-150-formFooterHeight))
+        editorFooter.frame=NSRect(x:0,y:bodyHeight-formFooterHeight,width:formWidth,height:formFooterHeight)
+        editorFooterRule.frame=NSRect(x:0,y:0,width:formWidth,height:1)
+        addField.isHidden=composerOpen;savePreset.isHidden=composerOpen
+        for view in [customHelp,customLabel,customName,sectionLabel,sectionChoice,newSectionLabel,newSectionName,customCreate,customCancel,customError] {view.isHidden = !composerOpen}
+        if composerOpen {
+            customHelp.frame=NSRect(x:24,y:14,width:formWidth-48,height:22)
+            customLabel.frame=NSRect(x:24,y:44,width:formWidth-48,height:18)
+            customName.frame=NSRect(x:24,y:64,width:formWidth-48,height:30)
+            sectionLabel.isHidden=shortComposer
+            sectionChoice.isHidden=shortComposer
+            sectionLabel.frame=NSRect(x:24,y:102,width:formWidth-48,height:18)
+            sectionChoice.frame=NSRect(x:24,y:122,width:min(320,formWidth-48),height:30)
+            newSectionLabel.isHidden = !newSection
+            newSectionName.isHidden = !newSection
+            if newSection {
+                newSectionLabel.frame=NSRect(x:24,y:158,width:formWidth-48,height:18)
+                newSectionName.frame=NSRect(x:24,y:178,width:formWidth-48,height:30)
+            }
+            customError.isHidden=customError.stringValue.isEmpty
+            customError.frame=NSRect(x:24,y:formFooterHeight-43,width:max(0,formWidth-280),height:22)
+            customCancel.frame=NSRect(x:formWidth-252,y:formFooterHeight-45,width:92,height:30)
+            customCreate.frame=NSRect(x:formWidth-152,y:formFooterHeight-45,width:128,height:30)
+        } else {
+            addField.frame=NSRect(x:24,y:11,width:106,height:32)
+            savePreset.frame=NSRect(x:formWidth-148,y:11,width:124,height:32)
+        }
         layoutDocument(width:max(420,formWidth-20))
         let buttonY:CGFloat=12
         checkAll.frame=NSRect(x:18,y:buttonY,width:94,height:32)
@@ -544,18 +685,27 @@ final class AssetMetadataForm: NSView {
         var y:CGFloat=8
         for (index,group) in groups.enumerated() {
             group.y=y
-            group.header.frame=NSRect(x:left,y:y,width:width-left-24,height:38)
+            group.header.frame=NSRect(x:left,y:y,width:width-left-24,height:40)
             group.toggle.frame=NSRect(x:0,y:7,width:24,height:24)
-            group.check.frame=NSRect(x:28,y:7,width:26,height:24)
-            group.label.frame=NSRect(x:62,y:8,width:width-left-100,height:22)
-            y += 46
+            let checkX=fieldX+fieldWidth+8-left
+            group.label.frame=NSRect(x:30,y:7,width:max(120,checkX-(group.isCustom ? 220:40)),height:24)
+            group.check.frame=NSRect(x:checkX,y:7,width:26,height:24)
+            if group.isCustom {
+                group.rename.frame=NSRect(x:checkX-220,y:6,width:106,height:26)
+                group.remove.frame=NSRect(x:checkX-108,y:6,width:102,height:26)
+            }
+            group.rule.frame=NSRect(x:0,y:39,width:group.header.bounds.width,height:1)
+            y += 50
             let hidden=group.collapsed
+            if group.title == "Custom Fields" && group.rows.isEmpty && !hidden { y += 12 }
             for row in group.rows {
-                row.label.isHidden=hidden;row.field.isHidden=hidden;row.check.isHidden=hidden
+                row.label.isHidden=hidden;row.field.isHidden=hidden;row.check.isHidden=hidden;row.rename?.isHidden=hidden;row.remove?.isHidden=hidden
                 if hidden {continue}
                 row.label.frame=NSRect(x:left+12,y:y+8,width:labelWidth-12,height:20)
-                row.field.frame=NSRect(x:fieldX,y:y,width:fieldWidth,height:row.height-10)
+                row.field.frame=NSRect(x:fieldX,y:y,width:fieldWidth,height:row.item.id>=1000 ? 30:row.height-10)
                 row.check.frame=NSRect(x:fieldX+fieldWidth+8,y:y+7,width:26,height:26)
+                row.rename?.frame=NSRect(x:fieldX+fieldWidth-232,y:y+34,width:112,height:24)
+                row.remove?.frame=NSRect(x:fieldX+fieldWidth-112,y:y+34,width:112,height:24)
                 y += row.height
             }
             for (label,value) in group.facts {
@@ -575,17 +725,25 @@ final class AssetMetadataForm: NSView {
     }
     private func refreshGroupChecks() {
         for group in groups {
+            group.check.isHidden=group.rows.isEmpty
+            group.check.allowsMixedState=true
             let on=group.rows.filter{$0.check.state == .on}.count
             group.check.state=on==0 ? .off:(on==group.rows.count ? .on:.mixed)
-            group.check.allowsMixedState=true
         }
     }
     @objc private func navigate(_ sender:NSButton) {
         selectedGroup=sender.tag
-        needsLayout=true;layoutSubtreeIfNeeded()
         guard groups.indices.contains(selectedGroup) else{return}
+        let group=groups[selectedGroup]
+        if group.collapsed {
+            group.collapsed=false
+            group.toggle.image=NSImage(systemSymbolName:"chevron.down",accessibilityDescription:"Collapse \(group.title)")
+        }
+        needsLayout=true;layoutSubtreeIfNeeded()
         let top=groups[selectedGroup].y
         scroll.contentView.scroll(to:NSPoint(x:0,y:top));scroll.reflectScrolledClipView(scroll.contentView)
+        let navTop=max(0,navButtons[selectedGroup].frame.minY-80)
+        navScroll.contentView.scroll(to:NSPoint(x:0,y:navTop));navScroll.reflectScrolledClipView(navScroll.contentView)
     }
     @objc private func toggleGroup(_ sender:NSButton) {
         guard groups.indices.contains(sender.tag) else{return}
@@ -610,11 +768,31 @@ final class AssetMetadataForm: NSView {
     private func currentValue()->AssetMetadata {
         var value=initial
         for group in groups {for row in group.rows {AssetMetadataSchema.assign(row.field.stringValue,for:row.item,to:&value)}}
+        var extra=value.extra ?? [:],labels=value.customFieldLabels ?? [:],sections=value.customFieldSections ?? [:]
+        for key in removedCustomKeys {extra.removeValue(forKey:key);labels.removeValue(forKey:key);sections.removeValue(forKey:key)}
+        for group in groups {for row in group.rows where row.item.id>=1000 {
+            labels[row.item.key]=row.label.stringValue
+            sections[row.item.key]=group.title
+        }}
+        value.extra=extra.isEmpty ? nil:extra
+        value.customFieldLabels=labels.isEmpty ? nil:labels
+        value.customFieldSections=sections.isEmpty ? nil:sections
+        let customSections=groups.filter(\.isCustom).map(\.title)
+        value.customSections=customSections.isEmpty ? nil:customSections
         value.tidy();return value
     }
     private func applyPreset(_ index:Int){
         guard index>0,let name=preset.titleOfSelectedItem,let value=MetadataPresetStore.all()[name] else{return}
+        for name in value.customSections ?? [] where !groups.contains(where:{$0.title==name}) {addGroup(name,isCustom:true)}
+        for key in Set((value.extra ?? [:]).keys).union((value.customFieldLabels ?? [:]).keys).sorted() where !customItems.contains(where:{$0.key==key}) {
+            let section=value.customFieldSections?[key] ?? "Custom Fields"
+            if !groups.contains(where:{$0.title==section}) {addGroup(section,isCustom:true)}
+            append(.init(AssetMetadataSchema.customID(key),key,value.customFieldLabels?[key] ?? key.replacingOccurrences(of:"_",with:" "),section))
+        }
         for group in groups {for row in group.rows {row.field.stringValue=AssetMetadataSchema.value(row.item,in:value)}}
+        refreshSectionChoices(selected:"Custom Fields")
+        refreshGroupChecks()
+        needsLayout=true
     }
     private func applyKeywordSet(_ index:Int){
         let sets=AssetMetadataRegistry.keywordSets().sorted{$0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending}
@@ -622,36 +800,145 @@ final class AssetMetadataForm: NSView {
         fieldByID[10]?.stringValue=sets[index-1].terms.joined(separator:", ")
     }
     @objc private func addFieldPressed(){
-        let alert=NSAlert();alert.messageText="Add Metadata Field"
-        alert.informativeText="Give this asset a field for details that the standard list does not cover."
-        let field=NSTextField(string:"");field.placeholderString="Field name";field.frame=NSRect(x:0,y:0,width:300,height:28)
-        alert.accessoryView=field;alert.addButton(withTitle:"Add Field");alert.addButton(withTitle:"Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else{return}
-        let name=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !name.isEmpty else{return}
-        let key=name.lowercased().replacingOccurrences(of:" ",with:"_")
-        guard !groups.flatMap(\.rows).contains(where:{$0.item.key==key}) else{return}
-        let item=AssetMetadataSchema.Item(AssetMetadataSchema.customID(key),key,name,"Custom Fields")
-        append(item);selectedGroup=groups.count-1;needsLayout=true
-        navigate(navButtons[selectedGroup])
+        editingFieldKey=nil;editingSectionName=nil;savingPreset=false
+        customName.stringValue="";newSectionName.stringValue="";customError.stringValue=""
+        customLabel.stringValue="Field Name"
+        customHelp.stringValue="Custom fields are saved with this asset. Choose a section or create one."
+        customCreate.title="Create Field"
+        refreshSectionChoices(selected:groups.indices.contains(selectedGroup) ? groups[selectedGroup].title:"Custom Fields")
+        composerOpen=true;needsLayout=true;layoutSubtreeIfNeeded()
+        window?.makeFirstResponder(customName)
+    }
+    @objc private func closeComposer(){composerOpen=false;editingFieldKey=nil;editingSectionName=nil;savingPreset=false;customError.stringValue="";needsLayout=true}
+    private func chosenSection()->Group? {
+        guard let name=sectionChoice.titleOfSelectedItem else{return nil}
+        if name == "New Section…" {
+            let proposed=newSectionName.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+            guard !proposed.isEmpty else {customError.stringValue="Enter a section name.";needsLayout=true;return nil}
+            guard !groups.contains(where:{$0.title.caseInsensitiveCompare(proposed) == .orderedSame}) else {
+                customError.stringValue="That section already exists. Choose it from the list.";needsLayout=true;return nil
+            }
+            addGroup(proposed,isCustom:true)
+            removedCustomSections.remove(proposed)
+            refreshSectionChoices(selected:proposed)
+            return groups.last
+        }
+        return groups.first(where:{$0.title==name})
+    }
+    @objc private func createCustomField(){
+        let name=customName.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !name.isEmpty else {customError.stringValue="Enter a name first.";needsLayout=true;return}
+        if savingPreset {
+            MetadataPresetStore.save(currentValue(),named:name)
+            preset.options(["Custom"]+MetadataPresetStore.all().keys.sorted())
+            closeComposer();return
+        }
+        if let old=editingSectionName {
+            guard !groups.contains(where:{$0.title.caseInsensitiveCompare(name) == .orderedSame && $0.title != old}) else {
+                customError.stringValue="That section already exists.";needsLayout=true;return
+            }
+            guard let group=groups.first(where:{$0.title==old}) else{return}
+            group.title=name;group.label.stringValue=name+" · Custom"
+            let index=groups.firstIndex(where:{$0 === group}) ?? 0
+            navButtons[index].title=name+" · Custom";navButtons[index].setAccessibilityLabel("Show \(name)")
+            removedCustomSections.insert(old);removedCustomSections.remove(name)
+            customItems=customItems.map{$0.group==old ? .init($0.id,$0.key,$0.label,name,$0.multiline):$0}
+            refreshSectionChoices(selected:name);closeComposer();needsLayout=true;return
+        }
+        if let key=editingFieldKey {
+            guard let oldGroup=groups.first(where:{$0.rows.contains(where:{$0.item.key==key})}),
+                  let index=oldGroup.rows.firstIndex(where:{$0.item.key==key}) else{return}
+            guard !groups.flatMap(\.rows).contains(where:{$0.item.key != key && $0.label.stringValue.caseInsensitiveCompare(name) == .orderedSame}) else {
+                customError.stringValue="That field name already exists.";needsLayout=true;return
+            }
+            guard let group=chosenSection() else{return}
+            let old=oldGroup.rows.remove(at:index)
+            let item=AssetMetadataSchema.Item(old.item.id,key,name,group.title)
+            old.label.stringValue=name
+            group.rows.append(Row(item:item,label:old.label,field:old.field,check:old.check,rename:old.rename,remove:old.remove))
+            customItems=customItems.map{$0.key==key ? item:$0}
+            selectedGroup=groups.firstIndex(where:{$0 === group}) ?? selectedGroup
+            refreshGroupChecks();closeComposer();navigate(navButtons[selectedGroup]);return
+        }
+        let key=name.lowercased().unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? String($0):"_" }.joined()
+            .split(separator:"_").joined(separator:"_")
+        guard !key.isEmpty else {customError.stringValue="Use letters or numbers in the field name.";needsLayout=true;return}
+        guard !groups.flatMap(\.rows).contains(where:{$0.item.key==key || $0.label.stringValue.caseInsensitiveCompare(name) == .orderedSame}) else {
+            customError.stringValue="That field already exists. Edit its value below.";needsLayout=true;return
+        }
+        guard let group=chosenSection() else{return}
+        let item=AssetMetadataSchema.Item(AssetMetadataSchema.customID(key),key,name,group.title)
+        removedCustomKeys.remove(key)
+        append(item)
+        refreshGroupChecks()
+        selectedGroup=groups.firstIndex(where:{$0 === group}) ?? selectedGroup
+        closeComposer();navigate(navButtons[selectedGroup])
+        if let field=fieldByID[item.id] {window?.makeFirstResponder(field)}
+    }
+    @objc private func renameCustomField(_ sender:NSButton){
+        guard let key=sender.identifier?.rawValue,
+              let group=groups.first(where:{$0.rows.contains(where:{$0.item.key==key})}),
+              let row=group.rows.first(where:{$0.item.key==key}) else{return}
+        editingFieldKey=key;editingSectionName=nil;savingPreset=false
+        customName.stringValue=row.label.stringValue;customLabel.stringValue="Field Name"
+        customHelp.stringValue="Rename this custom field or move it to another section."
+        customCreate.title="Save Field";customError.stringValue=""
+        refreshSectionChoices(selected:group.title)
+        composerOpen=true;needsLayout=true;layoutSubtreeIfNeeded();window?.makeFirstResponder(customName)
+    }
+    @objc private func removeCustomField(_ sender:NSButton){
+        guard let key=sender.identifier?.rawValue,
+              let group=groups.first(where:{$0.rows.contains(where:{$0.item.key==key})}),
+              let index=group.rows.firstIndex(where:{$0.item.key==key}) else{return}
+        let row=group.rows.remove(at:index)
+        for view in [row.label,row.field,row.check] {view.removeFromSuperview()}
+        row.rename?.removeFromSuperview();row.remove?.removeFromSuperview()
+        customItems.removeAll{$0.key==key}
+        fieldByID.removeValue(forKey:row.item.id);include.removeValue(forKey:row.item.id)
+        removedCustomKeys.insert(key)
+        refreshGroupChecks();needsLayout=true
+    }
+    @objc private func renameSection(_ sender:NSButton){
+        guard groups.indices.contains(sender.tag),groups[sender.tag].isCustom else{return}
+        editingSectionName=groups[sender.tag].title;editingFieldKey=nil;savingPreset=false
+        customName.stringValue=groups[sender.tag].title;customLabel.stringValue="Section Name"
+        customHelp.stringValue="Rename this custom section. Its fields stay in place."
+        customCreate.title="Save Section";customError.stringValue=""
+        composerOpen=true;needsLayout=true;layoutSubtreeIfNeeded();window?.makeFirstResponder(customName)
+    }
+    @objc private func removeSection(_ sender:NSButton){
+        guard groups.indices.contains(sender.tag),groups[sender.tag].isCustom,
+              let fallback=groups.first(where:{$0.title=="Custom Fields"}) else{return}
+        let group=groups.remove(at:sender.tag)
+        for row in group.rows {
+            let item=AssetMetadataSchema.Item(row.item.id,row.item.key,row.label.stringValue,fallback.title)
+            fallback.rows.append(Row(item:item,label:row.label,field:row.field,check:row.check,rename:row.rename,remove:row.remove))
+        }
+        customItems=customItems.map{$0.group==group.title ? .init($0.id,$0.key,$0.label,fallback.title,$0.multiline):$0}
+        group.header.removeFromSuperview();navButtons.remove(at:sender.tag).removeFromSuperview()
+        removedCustomSections.insert(group.title)
+        for (index,entry) in groups.enumerated() {
+            entry.toggle.tag=index;entry.check.tag=index;entry.rename.tag=index;entry.remove.tag=index;navButtons[index].tag=index
+        }
+        selectedGroup=min(selectedGroup,groups.count-1)
+        refreshSectionChoices(selected:fallback.title);refreshGroupChecks();needsLayout=true
     }
     @objc private func savePresetPressed(){
-        let alert=NSAlert();alert.messageText="Save Metadata Preset"
-        let field=NSTextField(string:"New Preset");field.frame=NSRect(x:0,y:0,width:280,height:28)
-        alert.accessoryView=field;alert.addButton(withTitle:"Save");alert.addButton(withTitle:"Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else{return}
-        MetadataPresetStore.save(currentValue(),named:field.stringValue)
-        preset.options(["Custom"]+MetadataPresetStore.all().keys.sorted())
+        savingPreset=true;editingFieldKey=nil;editingSectionName=nil
+        customName.stringValue="";customLabel.stringValue="Preset Name"
+        customHelp.stringValue="Save these values as a reusable metadata preset."
+        customCreate.title="Save Preset";customError.stringValue=""
+        composerOpen=true;needsLayout=true;layoutSubtreeIfNeeded();window?.makeFirstResponder(customName)
     }
     @objc private func donePressed(){
-        onSave?(currentValue(),Set(include.compactMap{$0.value.state == .on ? $0.key:nil}))
+        onSave?(currentValue(),Set(include.compactMap{$0.value.state == .on ? $0.key:nil}),removedCustomKeys,removedCustomSections)
     }
     @objc private func cancelPressed(){onCancel?()}
 }
 
 enum AssetMetadataEditor {
-    static func present(_ palette:Swatch, selectedCount:Int=1, over root:NSView, save:@escaping(AssetMetadata,Set<Int>)->Void){
+    static func present(_ palette:Swatch, selectedCount:Int=1, over root:NSView, save:@escaping(AssetMetadata,Set<Int>,Set<String>,Set<String>)->Void){
         let form=AssetMetadataForm(palette:palette,selectedCount:selectedCount);let modal=SwissFocusModal(content:form,size:NSSize(width:1440,height:820))
-        form.onSave={ value,fields in save(value,fields);modal.dismissOverlay() };form.onCancel={modal.dismissOverlay()};modal.present(over:root)
+        form.onSave={ value,fields,removed,sections in save(value,fields,removed,sections);modal.dismissOverlay() };form.onCancel={modal.dismissOverlay()};modal.present(over:root)
     }
 }

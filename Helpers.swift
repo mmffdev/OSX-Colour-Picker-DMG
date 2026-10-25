@@ -354,7 +354,9 @@ final class QuietScroller: NSScroller {
     }
     override func drawKnob() {
         Design.houseYellow.setFill()
-        NSBezierPath(roundedRect: rect(for: .knob).insetBy(dx: 3, dy: 1), xRadius: 3, yRadius: 3).fill()
+        let horizontal=bounds.width > bounds.height
+        let knob=rect(for:.knob).insetBy(dx:horizontal ? 1:3,dy:horizontal ? 3:1)
+        NSBezierPath(roundedRect:knob,xRadius:3,yRadius:3).fill()
     }
 }
 

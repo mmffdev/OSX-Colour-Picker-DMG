@@ -687,7 +687,7 @@ final class ThemePanel: SettingsPanel {
 // MARK: Halo
 
 /// A slider that goes back to its starting value on a double click.
-final class ResettingSlider: ClickCursorSlider {
+class ResettingSlider: ClickCursorSlider {
     var resting = 1.0
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == 2 else { super.mouseDown(with: event); return }
@@ -1119,13 +1119,13 @@ final class MetadataSettingsPanel: SettingsPanel {
     @objc private func openMaster() {
         let config=MetadataConfiguration.load()
         let sample=Swatch(id:UUID(),name:"New Asset Defaults",createdAt:Date(),entries:[],metadata:config.master)
-        AssetMetadataEditor.present(sample,over:view) { metadata,_ in
+        AssetMetadataEditor.present(sample,over:view) { metadata,_,_,_ in
             var updated=MetadataConfiguration.load();updated.master=metadata;updated.save()
         }
     }
     @objc private func openPreset() {
         let sample=Swatch(id:UUID(),name:"New Metadata Preset",createdAt:Date(),entries:[],metadata:MetadataConfiguration.load().master)
-        AssetMetadataEditor.present(sample,over:view) { [weak self] metadata,_ in
+        AssetMetadataEditor.present(sample,over:view) { [weak self] metadata,_,_,_ in
             let alert=NSAlert();alert.messageText="Name Metadata Preset"
             let field=NSTextField(string:"New Preset");field.frame=NSRect(x:0,y:0,width:280,height:28)
             alert.accessoryView=field;alert.addButton(withTitle:"Save");alert.addButton(withTitle:"Cancel")

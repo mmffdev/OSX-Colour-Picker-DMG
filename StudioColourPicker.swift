@@ -113,7 +113,7 @@ final class StudioColourPicker: NSView, Overlay {
     }
     override func layout() {
         super.layout()
-        let edge = railEdge, top = Design.App.header + AreaHeader.height
+        let edge = railEdge, top = Design.App.headerHeight(for:bounds.width) + AreaHeader.height
         scroll.frame = NSRect(x: LibraryRail.collapsedWidth, y: top, width: edge - LibraryRail.collapsedWidth, height: max(0, bounds.height - top - Design.App.footer))
         list.frame.size.width = scroll.contentSize.width
         for view in list.subviews { view.frame.size.width = max(1, list.bounds.width - 32) }
@@ -134,7 +134,7 @@ final class StudioColourPicker: NSView, Overlay {
         reset.frame=NSRect(x:select.frame.maxX+24,y:cancel.frame.minY,width:reset.intrinsicContentSize.width,height:32)
     }
     override func draw(_ dirtyRect: NSRect) {
-        let edge = railEdge, top = Design.App.header
+        let edge = railEdge, top = Design.App.headerHeight(for:bounds.width)
         fill(bounds, Design.card)
         fill(NSRect(x: 0, y: top, width: LibraryRail.collapsedWidth, height: bounds.height - top), Design.mist)
         hairline(x: 0, y: top, width: bounds.width)

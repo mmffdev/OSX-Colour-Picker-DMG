@@ -131,6 +131,8 @@ final class StudioWindowController: NSWindowController {
         if gridKey == nil {
             gridKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak c, weak library] e in
                 guard let c = c, e.window === c.window else { return e }
+                if e.keyCode == 53, c.frame.escapeTransformMode() { return nil }
+                if e.keyCode == 53, c.frame.endColourMode() { return nil }
                 if e.keyCode == 53, !Overlays.any, c.window?.attachedSheet == nil, c.frame.escapeInfoRail() { return nil }
                 if e.keyCode == 53, !Overlays.any, c.window?.attachedSheet == nil, c.frame.closeExpandedPanel() { return nil }
                 if e.keyCode == 53, !Overlays.any, (c.window?.firstResponder as? ShortcutsSettings)?.isRecordingShortcut != true, c.frame.leaveSettings() { return nil }
@@ -152,6 +154,9 @@ final class StudioWindowController: NSWindowController {
                 case "pick"?: library?.togglePicking(); return nil
                 case "sample"?: library?.sampleArea(); return nil
                 case "outputProof"?: if !e.isARepeat { Prefs.deltaWarningsEnabled.toggle() }; return nil
+                case "tags"?:
+                    if !e.isARepeat, c.window?.attachedSheet == nil, c.frame.splash == nil, c.frame.toggleTagsForSelection() { return nil }
+                    return e
                 case "rail1"?: if !e.isARepeat { c.frame.toggleRail(1) }; return nil
                 case "rail2"?: if !e.isARepeat { c.frame.toggleRail(2) }; return nil
                 default: return e
@@ -348,6 +353,7 @@ final class StudioFrame: NSView {
                 }
             }),
             addToCollectionAction(palettes.map{.palette($0.id,name:$0.name)}),
+            addToCustomColoursAction(palettes.flatMap{$0.entries.map(\.hex)}),
             HaloAction(id: "delete", label: "Delete Selected Palettes", symbol: "trash", disabled: locked,
                 confirmation: ("Slide to delete", "Hold the arrow key")) { [weak self] in self?.library.delete(palettes: ids, confirmed: true) }
         ]
@@ -439,7 +445,14 @@ final class StudioFrame: NSView {
             pageLayout.restoreSessionViews(saved.layout.tree,includePrimary:libraryLayoutAvailable){page.restoreLayoutView($0)}
             // Reapply the active tool's scroll after rail geometry has settled.
             if !libraryLayoutAvailable {page.restoreLayoutView(saved.page)}
+            viewportFooter.listMode=page.grid.listView
             for (rail,y) in zip(sessionRails,saved.railScroll){rail.sessionScroll=y}
+            if place == .designer {updateDesignerPaletteRail(mode:designerWorkspace.selectedMode)}
+            // Session restoration cancels the in-flight rail animation above. Snap the
+            // Designer settings rail to its requested state so a restored Palette page
+            // does not keep a zero-width RailInfo until the user switches tabs.
+            infoOpen=infoGoal
+            needsLayout=true
             return true
         } catch {routingPrimary=false;Diagnostics.log("workspace-session-restore",error:error);return false}
     }
@@ -449,10 +462,138 @@ final class StudioFrame: NSView {
     let history = HistoryRail()
     let footer = StudioFooter()
     private let cataloguePane = WorkspaceCatalogues()
+    private var treeGridScope:WorkspaceTreeGridScope?
+    private let fontSpecimen=FontSpecimenPage(frame:.zero)
+    private var fontEntries:[UUID:FontLibraryEntry]=[:]
+    private var fontDetailID:UUID?
+    private var fontListMode=(AppPreferences.shared.object(forKey:"FontLibrary.ListView") as? Bool) ?? true
+    private var inspectedFontID=AppPreferences.shared.string(forKey:"FontLibrary.InspectedFontID").flatMap(UUID.init(uuidString:))
+    private var fontInspectorNeedsOpen=false
+    private var fontFormatFilter="All Formats"
+    private var fontOrder="Group By Type"
+    private var previousAssetListMode:Bool?
+    private var showingFontList=false
+    private func applyFontListMode() {
+        let fontList=(place == .palettes && workspaceFilter == "fonts" && fontDetailID == nil) || treeGridScope?.fontBucket == true
+        if fontList != showingFontList {
+            if fontList {
+                previousAssetListMode=page.grid.listView
+                page.grid.listView=fontListMode
+                fontInspectorNeedsOpen=true
+            } else {
+                fontListMode=page.grid.listView
+                AppPreferences.shared.set(fontListMode,forKey:"FontLibrary.ListView")
+                if let previousAssetListMode {page.grid.listView=previousAssetListMode}
+                fontInspectorNeedsOpen=false
+                if infoPane is FontInfoPane {closeInfoRail()}
+            }
+            showingFontList=fontList
+        }
+        viewportFooter.listMode=page.grid.listView
+    }
+    private let colourMode=WorkspaceColourMode()
+    private let colourPickerPage=WorkspaceColourPickerPage(frame:.zero)
+    private let transformPage=WorkspaceTransformPage(frame:.zero)
+    private var transformSource:UUID?
+    private weak var workspacePanel:WorkspacePanel?
+    private func refreshColourModeChrome(){
+        let active=colourMode.isActive
+        let count=colourMode.selected.count
+        let selection=count == 0 ? "NO NODES SELECTED":count == 1 ? "1 NODE SELECTED":"\(count) NODES SELECTED"
+        page.colourPickerHeader=active ? ("SHIFT EXTENDS · COMMAND TOGGLES",selection):nil
+        pageLayout.pickerTitleOverride=active ? "Choose node colours":transformSource.flatMap{displayLibrary.swatch($0).map{"Transform · \($0.name)"}}
+        colourPickerPage.setSelection(colourMode.selected)
+        profileHeader.isHidden=active || transformSource != nil
+        viewportHeader.isHidden=active || transformSource != nil
+        viewportFooter.isHidden=active || transformSource != nil
+        pageLayout.needsLayout=true
+        page.needsDisplay=true
+        needsLayout=true
+    }
+    private func beginColourMode(selecting launchNode:()->Void){
+        if !colourMode.isActive {
+            colourMode.begin()
+            addSubview(colourPickerPage,positioned:.above,relativeTo:nil)
+            colourPickerPage.isHidden=false
+        }
+        // Context menus do not select their source row, so seed colour mode
+        // directly from the node that opened the menu.
+        launchNode()
+        refreshColourModeChrome()
+        layoutSubtreeIfNeeded()
+    }
+    @discardableResult func endColourMode()->Bool{
+        guard colourMode.isActive else{return false}
+        colourMode.end()
+        colourPickerPage.isHidden=true
+        refreshColourModeChrome()
+        return true
+    }
+    private func beginTransformMode(_ id:UUID) {
+        guard let swatch=displayLibrary.swatch(id) else{return}
+        if colourMode.isActive {_ = endColourMode()}
+        if !embeddedPage {
+            // A transform launched from the Library rail belongs to the active
+            // split pane when it has its own visible page.
+            if libraryLayoutAvailable,let active=pageLayout.active.controller {
+                active.beginTransformMode(id);return
+            }
+            // Designer and other non-Library routes have no visible Library
+            // content. Select its actual page before mounting the canvas.
+            pageLayout.selectPrimary()
+        }
+        // Transform is hosted by the Library palette page. A palette may launch it
+        // from Designer or another route, where primaryContent is not visible.
+        if case .palette(let current)=place,current == id {} else {
+            let wasTransforming=transformSource != nil
+            go(.palette(id))
+            if wasTransforming {return}
+        }
+        let existing=PaletteTransformStore.graph(for:id,in:library.store)
+        let keys=swatch.entries.map(\.hex)
+        var graph=existing ?? PaletteTransformGraph(sourcePaletteID:id,name:swatch.name,keys:keys,
+            definitions:keys.compactMap{displayLibrary.definition(of:$0)})
+        let upgraded=graph.restoreLegacySource{displayLibrary.definition(of:$0)}
+        if existing == nil || upgraded {
+            do {try PaletteTransformStore.save(graph,in:library.store)}
+            catch {Diagnostics.log("palette-transform-save",error:error);library.flash("Could not save Transform canvas");return}
+        }
+        transformSource=id;transformPage.graph=graph
+        // Library tabs render inside primaryContent. Attach the canvas to that
+        // viewport, above its page, rather than to the outer window frame.
+        let host: NSView = embeddedPage ? self : pageLayout.primaryContent
+        host.wantsLayer=true;host.layer?.masksToBounds=true
+        if transformPage.superview !== host {host.addSubview(transformPage,positioned:.above,relativeTo:nil)}
+        transformPage.frame=NSRect(x:0,y:AreaHeader.rule+1,width:host.bounds.width,height:max(0,host.bounds.height-AreaHeader.rule-1))
+        transformPage.isHidden=false
+        transformRightGoal=0
+        showTransformPalette(graph.root.id)
+        refreshColourModeChrome();slide();layoutSubtreeIfNeeded()
+    }
+    private func showTransformPalette(_ id:UUID) {
+        guard let node=transformPage.graph?.nodes.first(where:{$0.id==id}) else{return}
+        guard let graph=transformPage.graph else{return}
+        if let pane=infoPane as? TransformPaletteInspectorPane,infoGoal > 0 {pane.show(node,graph:graph)}
+        else {showInfoRail(TransformPaletteInspectorPane(node:node,graph:graph),title:"Palette Details")}
+    }
+    @discardableResult func escapeTransformMode()->Bool {
+        guard transformSource != nil else{return false}
+        if transformRightGoal == 0 {transformRightGoal=1;slide();return true}
+        return endTransformMode()
+    }
+    @discardableResult func endTransformMode()->Bool {
+        guard transformSource != nil else{return false}
+        transformSource=nil;transformPage.isHidden=true
+        transformRightGoal=1;slide()
+        if infoPane is TransformPaletteInspectorPane || infoPane is TransformInspectorPane || infoPane is DiagramPresetPane {closeInfoRail()}
+        if !embeddedPage {pageLayout.primaryContent.layer?.masksToBounds=false}
+        refreshColourModeChrome()
+        return true
+    }
     func configureAssetImport(_ form: WorkspaceImportPane) {
         form.onSourceFilesChanged = { [weak self] files in
             guard let self else{return}
-            self.importRenamePane.sampleFile=files.first ?? URL(fileURLWithPath:self.importKind == "ASE" ? "Palette.ase":"Palette.colpal")
+            self.importRenamePane.sampleFile=files.first ?? URL(fileURLWithPath:self.importKind == "Fonts" ? "Font.otf":self.importKind == "ASE" ? "Palette.ase":"Palette.colpal")
         }
         form.onOpenPalette = { [weak self] id in self?.openLinkedPalette(id) }
         form.onFilesChanged = { [weak self] in
@@ -550,6 +691,7 @@ final class StudioFrame: NSView {
     /// railInfo: the rail right of rail1 that is nothing until a pane opens it and pushes the viewport across (StudioInfoRail.swift).
     private let infoRail=WorkspaceRail(scrollbarOnLeft:false)
     private var infoOpen:CGFloat=0,infoGoal:CGFloat=0
+    private var transformRightOpen:CGFloat=1,transformRightGoal:CGFloat=1
     private var infoPane:(NSView & InfoRailContent)?
     private let profileEditor=ProfileRailPane(frame:.zero)
     private let profileHeader=WorkspacePanelHeader(frame:.zero)
@@ -604,6 +746,22 @@ final class StudioFrame: NSView {
             || node.kind?.trimmingCharacters(in:.whitespacesAndNewlines).caseInsensitiveCompare("Photography") == .orderedSame
             || SchemaTrial.type(of:node).caseInsensitiveCompare("Images") == .orderedSame
     }
+    private var carouselKind:WorkspaceFilmstrip.Kind? {
+        guard canvasWorkspace,!imageIntakeWorkspace,place != .designer,transformSource == nil,!colourMode.isActive else{return nil}
+        if case .palettes=place {return workspaceFilter == "fonts" ? .fonts:.palettes}
+        if case .palette=place {return .palettes}
+        if canImportImagesFromCurrentPlace(){return .images}
+        if case .group(let member,let node)=place,
+           let group=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first(where:{$0.node.id == node})?.node,
+           let role=SchemaTrial.role(of:group),role == .palettes || role == .typography {return .palettes}
+        if let scope=treeGridScope {
+            if scope.fontBucket {return .fonts}
+            if scope.key == "mylibrary-photography" || scope.key == "mylibrary-images" {return .images}
+            let assets=scope.sections.flatMap(\.assets)
+            if !assets.isEmpty && assets.allSatisfy({if case .palette=$0{return true};return false}) {return .palettes}
+        }
+        return nil
+    }
     private func photoRecords(project:UUID,bucket:UUID)->[(WorkspaceImportedAsset,URL)] {
         WorkspaceImport.records(store:library.store).filter{record,_ in
             record.member == project && record.bucket == bucket && (record.type == "Photographs" || record.type == "Images")
@@ -631,6 +789,7 @@ final class StudioFrame: NSView {
                     if self.failedPhotoThumbnails.count > 512 {self.failedPhotoThumbnails=self.failedPhotoThumbnails.filter{Date().timeIntervalSince($0.value)<10}}
                 }
                 self.page.grid.imagePreviewReady(at:path)
+                self.filmstrip.imagePreviewReady()
                 // A request may have been deferred while the decode queue was full.
                 self.page.grid.setNeedsDisplay(self.page.grid.visibleRect)
             }
@@ -649,7 +808,7 @@ final class StudioFrame: NSView {
             }
         }
     }
-    private func beginImageIntake(kind:String="Palettes"){
+    private func beginImageIntake(kind:String="Palettes",destination:Place?=nil){
         importKind=(WorkspaceImport.types+["Photographs","Images"]).contains(kind) ? kind:"Palettes"
         intakeReturnPlace=place;intakeLinking=false
         intakeFullView=false;page.grid.across=intakeGridColumns
@@ -662,16 +821,40 @@ final class StudioFrame: NSView {
         importPane.sourceFiles=[]
         importPane.requiresGridSelection=true
         intakeTargetPane.transfer = .copy
-        let preferred:(UUID,UUID)? = {if case .group(let member,let bucket)=intakeReturnPlace{return (member,bucket)};return nil}()
+        intakeTargetPane.clearSelection()
+        let preferred:(UUID,UUID)? = {if case .group(let member,let bucket)=destination ?? intakeReturnPlace{return (member,bucket)};return nil}()
         intakeTargetPane.configure(library:library.library,schema:library.store.schema,preselect:preferred,catalogueName:library.store.url.deletingPathExtension().lastPathComponent,assetKind:importKind)
         configureImportTarget()
         viewportHeader.setIntakeMode(true)
         go(.imageIntake)
+        if destination != nil || preferred != nil {
+            if importsImages {intakeTargetPane.selectDestination(member:preferred?.0,bucket:preferred?.1)}
+            else {importPane.selectDestination(member:preferred?.0,bucket:preferred?.1)}
+        }
         intakeSourcePane.assetKind=importKind
         intakeSourcePane.openAtImportLanding()
         intakeSourcePane.refreshSelectedSource()
     }
     func openImageImport(kind:String="Palettes"){beginImageIntake(kind:kind)}
+    private func addCurrentFontToCollection(){
+        guard let id=fontDetailID,let entry=fontEntries[id] else{return}
+        let modal=SwissFocusModal(title:"Add To Collection",message:"Enter an existing Collection name or create a new one. The font will also appear in the matching Font Book collection.")
+        let field=modal.field("Collection",value:"")
+        modal.button("Add",primary:true){ [weak self,weak modal] in
+            guard let self else{return}
+            let name=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+            guard !name.isEmpty else{self.library.flash("Enter a Collection name");return}
+            do {
+                let existing=AssetCollections.list(in:self.library.store).first{$0.name.caseInsensitiveCompare(name) == .orderedSame}
+                let collection=try existing?.id ?? AssetCollections.create(name,in:self.library.store)
+                try AssetCollections.add([entry.collectionItem],to:collection,in:self.library.store)
+                FontBookBridge.syncCollections(in:self.library.store)
+                modal?.dismissOverlay();self.library.flash("Added \(entry.info.family) To \(name)");self.reload()
+            } catch {self.library.flash(error.localizedDescription)}
+        }
+        modal.button("Cancel"){[weak modal] in modal?.dismissOverlay()}
+        modal.present(over:fontSpecimen)
+    }
     private func configureImportTarget(){
         guard let imageImportTargetPanel else{return}
         if importsImages {
@@ -930,15 +1113,135 @@ final class StudioFrame: NSView {
         sharePage = SharePage(library: library)
         prePressPage = PrePressPage(library: library)
         super.init(frame: NSRect(origin: .zero, size: A.size))
+        registerForDraggedTypes(DesignerImageDrop.types)
         wantsLayer = true
         layer?.backgroundColor = Design.paper.cgColor
         for v in [rail1, rail2, page, history, printPaletteRail, footer, strip, header, paletteWheel, overlay] { addSubview(v) }
         for view in [leftPanelRail, infoRail, rightPanelRail, railProfile, intakeSourceRail, intakeTargetRail, filmstrip, viewportHeader, viewportFooter] { addSubview(view) }
         let cataloguesPanel=WorkspacePanel(id: "catalogues", title: WorkspaceSidebarStructure.title, content: cataloguePane,resizable:false)
+        workspacePanel=cataloguesPanel
+        cataloguePane.installColourMode(colourMode)
+        collectionsPane.installColourMode(colourMode)
+        cataloguePane.onMultiColourSelect={[weak self] node,tree in
+            guard let self else{return};self.beginColourMode {self.cataloguePane.selectColourTarget(node,in:tree,mode:self.colourMode)}
+        }
+        collectionsPane.onMultiColourSelect={[weak self] node in
+            guard let self else{return};self.beginColourMode {self.collectionsPane.selectColourTarget(node,in:self.colourMode)}
+        }
+        cataloguePane.onBucketPick={ [weak self] scope in self?.go(.catalogue,treeBucket:scope) }
+        collectionsPane.onBucketPick={ [weak self] scope in self?.go(.catalogue,treeBucket:scope) }
+        colourMode.onChange={[weak self] _ in self?.refreshColourModeChrome()}
+        colourPickerPage.onChoose={[weak self] channel,hex in self?.colourMode.choose(hex,for:channel)}
+        colourPickerPage.onApplyDesign={[weak self] design in
+            self?.colourMode.apply(background:design.background,text:design.text,border:design.border)
+        }
+        colourPickerPage.onClose={[weak self] in _ = self?.endColourMode()}
+        colourPickerPage.isHidden=true;addSubview(colourPickerPage)
+        transformPage.onClose={[weak self] in _ = self?.endTransformMode()}
+        transformPage.onInspectStage={[weak self] stageID in
+            guard let self,let graph=self.transformPage.graph,
+                  let stage=graph.branches.flatMap(\.stages).first(where:{$0.id==stageID}),stage.formula != nil else{return}
+            let count=graph.root.definitions?.count ?? graph.root.hexes.count
+            let options=self.displayLibrary.swatches.compactMap { swatch -> (String,[XYZ])? in
+                let keys=swatch.entries.map(\.hex)
+                guard keys.count==count else{return nil}
+                let masters=keys.compactMap{self.displayLibrary.definition(of:$0)?.master}
+                return masters.count==count ? (swatch.name,masters):nil
+            }
+            let receiver=graph.branches.first(where:{$0.stages.contains(where:{$0.id==stageID})})
+            let mergeOptions=receiver.map{graph.mergeSources(for:$0.id).map{source in
+                (source.id,"\(graph.branchCode(source.id)) · \(graph.nodes.first(where:{$0.id==source.outputID})?.name ?? "Palette")")
+            }} ?? []
+            let pane=TransformInspectorPane(stage:stage,colourCount:count,store:self.library.store,referenceOptions:options,inputColours:graph.inputDefinitions(for:stageID) ?? [],mergeOptions:mergeOptions)
+            pane.onNotice={[weak self] message in self?.library.flash(message)}
+            pane.onUpdate={[weak self] value in
+                guard let self,var updated=self.transformPage.graph else{return}
+                updated.configure(stageID,amount:value.amount,settings:value.settings,mergeSourceBranchID:value.mergeSourceBranchID)
+                self.transformPage.graph=updated
+                do {try PaletteTransformStore.save(updated,in:self.library.store)}
+                catch {Diagnostics.log("palette-transform-save",error:error);self.library.flash("Could not save Transform changes")}
+            }
+            pane.onChooseSpectra={[weak self] light,count in
+                guard let self,let graph=self.transformPage.graph,
+                      let catalogue=CatalogueTree.catalogue(in:self.library.store.root)?.id,
+                      let illuminant=PaletteViewing.Illuminant(rawValue:light) else{return nil}
+                let keys=graph.root.sourceKeys
+                guard keys.count==count else{return nil}
+                let values=keys.compactMap { key -> XYZ? in
+                    guard let definition=self.displayLibrary.definition(of:key) else{return nil}
+                    return SpectralStore.shared.prediction(catalogue:catalogue,palette:graph.sourcePaletteID,colour:key,definition:definition,light:illuminant)?.displayMaster
+                }
+                return values.count==count ? values:nil
+            }
+            self.showInfoRail(pane,title:"Transform Controls")
+        }
+        transformPage.onSelectNode={[weak self] id,isTransform in
+            guard let self,self.infoGoal > 0 else{return}
+            if isTransform {self.transformPage.onInspectStage?(id)}
+            else {self.showTransformPalette(id)}
+        }
+        transformPage.onInspectDiagram={[weak self] in
+            guard let self,let graph=self.transformPage.graph else{return}
+            let pane=DiagramPresetPane(graph:graph,store:self.library.store)
+            pane.onNotice={[weak self] message in self?.library.flash(message)}
+            pane.onApply={[weak self] document in
+                guard let self,let current=self.transformPage.graph else{return}
+                let definitions=current.root.definitions ?? current.root.hexes.compactMap{ColourDefinition.of(hex:$0)}
+                let applied=document.graph.applied(to:current.sourcePaletteID,name:current.root.name,keys:current.root.sourceKeys,definitions:definitions)
+                self.transformPage.graph=applied
+                do {try PaletteTransformStore.save(applied,in:self.library.store);self.closeInfoRail()}
+                catch {Diagnostics.log("palette-transform-preset",error:error);self.library.flash("Could not apply Diagram preset")}
+            }
+            self.showInfoRail(pane,title:"Diagram Presets")
+        }
+        transformPage.onDeleteGraph={[weak self] in
+            guard let self,let id=self.transformSource else{return}
+            do {try PaletteTransformStore.remove(for:id,in:self.library.store);_ = self.endTransformMode()}
+            catch {Diagnostics.log("palette-transform-remove",error:error);self.library.flash("Could not remove Transform canvas")}
+        }
+        transformPage.onChange={[weak self] graph in
+            guard let self else{return}
+            (self.infoPane as? DiagramPresetPane)?.graph=graph
+            if let pane=self.infoPane as? TransformPaletteInspectorPane {
+                // The selected palette can change when any ancestor is edited.
+                if let selected=graph.nodes.first(where:{$0.id==self.transformPage.selectedPaletteID}) ?? graph.nodes.first {pane.show(selected,graph:graph)}
+            }
+            do {try PaletteTransformStore.save(graph,in:self.library.store)}
+            catch {Diagnostics.log("palette-transform-save",error:error);self.library.flash("Could not save Transform canvas")}
+        }
+        transformPage.onSaveDestinations={[weak self] in
+            self?.library.library.orderedProjects.filter{ !$0.isLocked }.map{($0.id,$0.name)} ?? []
+        }
+        transformPage.onSave={[weak self] id,destination in
+            guard let self,let node=self.transformPage.graph?.nodes.first(where:{$0.id==id}) else{return nil}
+            var saved:UUID?
+            self.library.apply("Save Transformed Palette") { library in
+                guard destination == nil || destination.map({library.project($0) != nil}) == true else{return}
+                let previousTarget=library.activeSwatchID
+                let id=library.createSwatch(named:node.name,hexes:[],custom:true)
+                let definitions=node.definitions ?? node.hexes.compactMap{ColourDefinition.of(hex:$0)}
+                let keys=definitions.compactMap{library.addColour($0)}
+                library.add(keys,toSwatch:id)
+                if let destination {library.move(id,to:destination,index:Int.max)}
+                library.activeSwatchID=previousTarget
+                saved=id
+            }
+            if saved != nil {
+                let name=destination.flatMap{self.library.library.project($0)?.name} ?? "My Library"
+                self.library.flash("Saved palette to \(name)")
+            }
+            return saved
+        }
+        transformPage.isHidden=true;addSubview(transformPage)
         cataloguePane.setCatalogueAction { [weak self] in self?.locateWorkspaceCatalogue() }
         leftPanelRail.add(cataloguesPanel)
         leftPanelRail.add(collectionsPanel)
         collectionsPane.onOpenAsset={[weak self] item in self?.openCollectedAsset(item)}
+        collectionsPane.customColoursAction={[weak self] item in
+            guard let self else{return nil}
+            let hexes=self.customColourHexes(for:item)
+            return hexes.isEmpty ? nil:self.addToCustomColoursAction(hexes)
+        }
         collectionsPane.onFavourite = { [weak self] id in self?.library.toggleFavourite(id) }
         collectionsPane.onRename = { [weak self] id,name in self?.library.rename(id,to:name) }
         collectionsPane.onTarget = { [weak self] id in guard let self else{return};self.library.setTarget(self.library.library.activeSwatchID == id ? nil:id) }
@@ -953,12 +1256,35 @@ final class StudioFrame: NSView {
             self.cataloguePane.configureCollections(AssetCollections.list(in:self.library.store),linkedPaletteRecords:self.linkedPalettes.sources.mapValues{$0.record.id})
         }
         cataloguePane.onImportLibrary = { [weak self] in guard let self else{return};MyLibraryFile.chooseImport(library:self.library,over:self) }
+        cataloguePane.onImportAsset = { [weak self] kind,destination in self?.openBucketIntake(kind:kind,destination:destination) }
         cataloguePane.onExportLibrary = { [weak self] in guard let self else{return};MyLibraryFile.chooseExport(over:self) }
+        cataloguePane.locationOfNode = { [weak self] node in self?.workspaceNodeLocation(node) }
+        cataloguePane.onRevealNode = { [weak self] node in
+            guard let self else{return}
+            AssetFileActions.reveal(self.workspaceNodeLocation(node),feedback:{ [weak self] message in self?.library.flash(message) })
+        }
+        cataloguePane.onRevealMyLibrary = { [weak self] in
+            guard let self else{return}
+            AssetFileActions.reveal(self.library.store.assetsHome.map{GlobalAssets(home:$0).root},feedback:{ [weak self] message in self?.library.flash(message) })
+        }
         cataloguePane.onCreateClient = { [weak self] in guard let self else{return};CatalogueJourneyView.present(library:self.library,over:self,kind:"client") }
         cataloguePane.onCreateWork = { [weak self] client in guard let self else{return};CatalogueJourneyView.present(library:self.library,over:self,client:client,kind:"work") }
-        cataloguePane.onAssetContext = { [weak self] id, view, point in self?.openContext(.palette(id), in: view, at: point) }
-        cataloguePane.onOpenImportedAsset = { [weak self] id in self?.importPane.open(id: id) }
+        cataloguePane.onAssetContext = { [weak self] id,node,tree,view,point in
+            guard let self else{return}
+            guard self.cataloguePane.isColourTargetTree(tree) else {self.openContext(.palette(id),in:view,at:point);return}
+            let colour=HaloAction(id:"multi-colour",label:"Multi Colour Select",symbol:"square.grid.2x2",onSelect:{[weak self] in
+                guard let self else{return};self.beginColourMode {self.cataloguePane.selectColourTarget(node,in:tree,mode:self.colourMode)}
+            })
+            self.openContext(.palette(id),in:view,at:point,extra:colour)
+        }
+        cataloguePane.onOpenImportedAsset = { [weak self] id in
+            guard let self else{return}
+            if WorkspaceImport.records(store:self.library.store).contains(where:{$0.0.id == id && $0.0.type == "Fonts"}) {
+                self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
+            } else {self.importPane.open(id:id)}
+        }
         configureAssetImport(importPane)
+        importPane.onOpenFont={ [weak self] id in guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload() }
         cataloguePane.installICCProfiles(iccProfilePane)
         rightPanelRail.add(WorkspacePanel(id:"metadata",title:"Metadata",content:metadataPane,resizable:false))
         metadataPane.onEdit={ [weak self] id in self?.editMetadata(for:id) }
@@ -1017,7 +1343,12 @@ final class StudioFrame: NSView {
                 self.fillPage()
             }
         }
-        addSubview(designerWorkspace);designerWorkspace.isHidden=true
+        addSubview(designerWorkspace);designerWorkspace.configure(library:library);designerWorkspace.isHidden=true
+        designerWorkspace.onModeChange={[weak self] mode in self?.updateDesignerPaletteRail(mode:mode)}
+        designerWorkspace.onPaletteImageChanged={[weak self] _ in
+            guard let self else{return}
+            self.updateDesignerPaletteRail(mode:self.designerWorkspace.selectedMode)
+        }
         addSubview(bloomWorkspace);bloomWorkspace.isHidden=true
         expandedBloom.expanded=true;expandedHistogram.expanded=true
         bloomPane.expandButton.run = { [weak self] in self?.expandAnalysis(.bloom) }
@@ -1074,6 +1405,7 @@ final class StudioFrame: NSView {
         page.grid.onImagePageChanged = { [weak self] index,total in
             guard let self,self.canImportImagesFromCurrentPlace() else{return}
             self.viewportFooter.configureImageBrowser(active:true,fullView:self.photoFullView,index:index,total:total,sort:self.photoSort)
+            self.filmstrip.select(self.page.grid.currentImagePath)
             self.loadFullPhoto()
         }
         viewportFooter.onImageSort = { [weak self] sort in
@@ -1106,6 +1438,18 @@ final class StudioFrame: NSView {
         }
         page.workspaceToolbar = viewportFooter
         page.workspaceActionbar = viewportHeader
+        viewportHeader.onFontBack={ [weak self] in self?.fontDetailID=nil;self?.reload() }
+        viewportHeader.onFontImport={ [weak self] in self?.beginImageIntake(kind:"Fonts") }
+        viewportHeader.onPaletteImport={ [weak self] in self?.beginImageIntake(kind:"Palettes") }
+        viewportHeader.onFontCollection={ [weak self] in self?.addCurrentFontToCollection() }
+        viewportHeader.onFontSave={ [weak self] in self?.fontSpecimen.saveDetails() }
+        viewportHeader.onFontFormat={ [weak self] format in
+            guard let self else{return}
+            self.fontFormatFilter=format
+            self.fontOrder=format == "All Formats" ? "Group By Type":"Name A–Z"
+            self.reload()
+        }
+        viewportHeader.onFontOrder={ [weak self] order in self?.fontOrder=order;self?.reload() }
         viewportHeader.onAssetOrder = { [weak self] order in self?.page.assetOrder=order;self?.needsLayout=true }
         let setPaletteFilter:(PaletteAssetHandler.Filter)->Void={ [weak self] value in
             guard let self else{return};self.paletteFilter=value
@@ -1115,7 +1459,13 @@ final class StudioFrame: NSView {
         cataloguePane.onPaletteFilter=setPaletteFilter
         page.paletteFilters.showsOrder=false
         page.paletteFilters.onChange=setPaletteFilter
-        viewportFooter.onMode = { [weak self] list in self?.closeExpandedPanel(); self?.page.grid.listView = list; self?.page.needsLayout = true }
+        viewportFooter.onMode = { [weak self] list in
+            guard let self else{return}
+            self.closeExpandedPanel()
+            self.page.grid.listView=list
+            if self.showingFontList {self.fontListMode=list;AppPreferences.shared.set(list,forKey:"FontLibrary.ListView")}
+            self.page.needsLayout=true
+        }
         viewportFooter.onLibraryRail = { [weak self] in self?.toggleRail(1) }
         viewportFooter.onAnalysisRail = { [weak self] in self?.toggleRail(2) }
         cataloguePane.onPick = { [weak self] in self?.go($0) }
@@ -1155,14 +1505,41 @@ final class StudioFrame: NSView {
         cataloguePane.onRating = { [weak self] id,rating in self?.library.apply("Rate Palette"){PaletteAssetHandler.setRating(rating,on:id,in:&$0)} }
         cataloguePane.onFlag = { [weak self] id,flag in self?.library.apply("Flag Palette"){PaletteAssetHandler.setFlag(flag,on:id,in:&$0)} }
         cataloguePane.onFilter = { [weak self] key in
-            guard let self else { return }; self.workspaceFilter=key; self.place = .palettes; self.reload(); self.needsLayout=true
+            guard let self else { return }; self.treeGridScope=nil;self.workspaceFilter=key; self.fontDetailID=nil; self.place = .palettes; self.reload(); self.needsLayout=true
+        }
+        cataloguePane.onOpenFont = { [weak self] id in
+            guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.fontDetailID=id;self.place = .palettes;self.reload()
+        }
+        cataloguePane.onFontContext = { [weak self] id,node,view,point in
+            let parts=node.key.components(separatedBy:":")
+            let assignment:(UUID,UUID)?=parts.count == 4 && parts[0] == "project-font" ? UUID(uuidString:parts[1]).flatMap{project in UUID(uuidString:parts[2]).map{(project,$0)}}:nil
+            self?.openFontContext(id,in:view,at:point,assignment:assignment)
+        }
+        cataloguePane.onFontUpdate = { [weak self] id,info in
+            guard let self,let entry=self.cataloguePane.fontEntries.first(where:{$0.id == id}) else{return}
+            do {try FontLibraryIndex.save(info,entry:entry);self.reload()}
+            catch {self.library.flash(error.localizedDescription)}
+        }
+        cataloguePane.onFontDrop = { [weak self] id,destination in
+            guard let self,let bucket=destination.bucket,
+                  let entry=self.cataloguePane.fontEntries.first(where:{$0.id == id}) else{return}
+            FontProjectAssignments.add(entry.info.family,project:destination.project,bucket:bucket)
+            self.reload()
         }
         cataloguePane.onCatalogueAction = { [weak self] name,action in
             guard let self,let window=self.window else{return}
             CatalogueRowActions.perform(action,name:name,library:self.library,window:window) { [weak self] in self?.needsLayout=true;if let library=self?.library {NotificationCenter.default.post(name:.appStateDidChange,object:library)} }
         }
         cataloguePane.onCatalogue = { [weak self] name in self?.library.open(catalogue: name); self?.go(.catalogue) }
-        filmstrip.onPick = { [weak self] id in self?.go(.palette(id)) }
+        filmstrip.imagePreview={ [weak self] path,date in self?.photoThumbnail(for:URL(fileURLWithPath:path),modifiedAt:date) }
+        filmstrip.onPick = { [weak self] entry in
+            guard let self else{return}
+            switch entry.content {
+            case .palette(let id,_):self.go(.palette(id))
+            case .font(let id,_):self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
+            case .image(let path,_):self.page.grid.onImageContextAction?(path,2)
+            }
+        }
         inspectorPane.onOpen = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.go(.palette(id)) }
         inspectorPane.onTarget = { [weak self] in guard let self, let id = self.inspectedPalette else { return }; self.library.setTarget(id) }
         if !embeddedPage {
@@ -1212,6 +1589,10 @@ final class StudioFrame: NSView {
         }
         header.onTab = { [weak self] i in
             guard let self else{return}
+            if i == 9 {
+                self.workspaceFilter="fonts";self.fontDetailID=nil;self.place = .palettes
+                self.pageLayout.updatePrimary(.palettes);self.reload();return
+            }
             if i == 8 {self.go(.designer);return}
             if i == 7 {if !self.imageIntakeWorkspace {self.beginImageIntake()};return}
             self.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge][i])
@@ -1292,7 +1673,9 @@ final class StudioFrame: NSView {
         page.grid.onImageHalo = { [weak self] path, rect in self?.openImageHalo(for: path, rect: rect) }
         page.grid.onNotes = { [weak self] item in self?.openNotes(for: item) }
         page.grid.onTags = { [weak self] item in
-            if let id=item.id {self?.tag(palette:id)}
+            if let id=item.id,item.fontFamily != nil,let self,let entry=self.fontEntries[id] {
+                TagPanel.fonts([entry],library:self.library,over:self.window){[weak self] in self?.reload()}
+            } else if let id=item.id {self?.tag(palette:id)}
             else if let hex=item.hex {self?.tag(swatches:[hex])}
         }
         rail1.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
@@ -1344,7 +1727,8 @@ final class StudioFrame: NSView {
         rail1.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
         rail2.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
         page.grid.onContext = { [weak self] hex, point in guard let self else { return }; self.openSwatchContext(hex, in: self.page.grid, at: point) }
-        page.grid.onAssetContext = { [weak self] id, point in guard let self else { return }; self.openContext(.palette(id), in: self.page.grid, at: point) }
+        page.grid.onAssetContext = { [weak self] id, point in guard let self else { return };if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.openFontContext(id,in:self.page.grid,at:point)}else{self.openContext(.palette(id), in: self.page.grid, at: point)} }
+        page.grid.onFontInfo = { [weak self] id in self?.showFontInformation(id,persist:true) }
         rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
         // A bucket opened or shut on either rail is remembered for this catalogue; rail2 is built from the state, so it is filled again.
         rail1.onShut = { [weak self] key, shut in guard let self = self else { return }; Prefs.setRailShut(key, shut, in: self.library.catalogue) }
@@ -1399,11 +1783,24 @@ final class StudioFrame: NSView {
         }
         header.onPick = { [weak self] in self?.library.togglePicking() }
         header.onSample = { [weak self] in self?.library.sampleArea() }
-        page.grid.onSelectPalette = { [weak self] id in self?.inspectPalette(id) }
+        page.grid.onSelectPalette = { [weak self] id in guard let self else{return};if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.workspaceFilter="fonts";self.treeGridScope=nil;self.place = .palettes;self.fontDetailID=id;self.reload()}else{self.inspectPalette(id)} }
+        fontSpecimen.onBack={ [weak self] in guard let self else{return};self.fontDetailID=nil;self.reload() }
+        fontSpecimen.onImport={ [weak self] in self?.beginImageIntake(kind:"Fonts") }
+        fontSpecimen.onSave={ [weak self] info in
+            guard let self,let id=self.fontDetailID,let entry=self.fontEntries[id] else{return}
+            do {try FontLibraryIndex.save(info,entry:entry);self.library.flash("Saved Font Details");self.reload()}
+            catch {self.library.flash(error.localizedDescription)}
+        }
+        fontSpecimen.onAddCollection={ [weak self] in self?.addCurrentFontToCollection() }
+        page.add(fontSpecimen,as:.fontSpecimen)
         page.paletteActions.back.target=self
         page.paletteActions.back.action=#selector(backToPaletteGrid)
         page.grid.onOpen = { [weak self] id in
             guard let self = self else { return }
+            if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.workspaceFilter="fonts";self.treeGridScope=nil;self.place = .palettes;self.fontDetailID=id;self.reload();return}
+            if self.cataloguePane.importedAssets.contains(where:{$0.id == id}) {
+                self.importPane.open(id:id);return
+            }
             if self.displayLibrary.swatch(id) != nil {
                 self.paletteGridReturn=(self.place,self.captureLayoutPage(),id,self.paletteFilter)
             }
@@ -1414,7 +1811,7 @@ final class StudioFrame: NSView {
         page.schema.library = library
         page.schema.onChange = { [weak self] in self?.reload() }
         // The New button makes a member where members are listed; on a member's Typography page, a typography palette, opened in Contrast for its first pairing.
-        page.onNew = { [weak self] in self?.newFromPage() }
+        page.onNew = { [weak self] in guard let self else{return};if self.workspaceFilter == "fonts" && self.place == .palettes {self.beginImageIntake(kind:"Fonts")}else{self.newFromPage()} }
         page.add(ShortcutsSettings(), as: .shortcuts)
         page.add(SoundsSettings(), as: .sounds)
         page.add(HaloSettings(), as: .halo)
@@ -1486,6 +1883,7 @@ final class StudioFrame: NSView {
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .schemaDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(historyChanged), name: .historyDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(pickerStateChanged), name: .appStateDidChange, object: library)
+        NotificationCenter.default.addObserver(self, selector: #selector(fontInventoryChanged), name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(flashed(_:)), name: .statusMessage, object: nil)
         if !embeddedPage { library.onReveal = { [weak self] hex in
             guard let self else { return }
@@ -1501,7 +1899,7 @@ final class StudioFrame: NSView {
             pageLayout.capturePrimary={ [weak self] in self?.captureLayoutPage() ?? .init() }
             pageLayout.restorePrimary={ [weak self] in self?.restoreLayoutPage($0) }
             pageLayout.resolveRoute={ [weak self] in self?.resolvedLayoutRoute($0) ?? .catalogue }
-            pageLayout.hidePageControls={ [weak self] in self?.onboardingActive == true }
+            pageLayout.hidePageControls={ [weak self] in self?.onboardingActive == true || self?.colourMode.isActive == true || self?.transformSource != nil }
             pageLayout.titleForPlace={ [weak self] place in self?.pageTitle(for:place) ?? "Library" }
             pageLayout.navigatePrimary={ [weak self] place in guard let self else{return};self.routingPrimary=true;self.go(place);self.routingPrimary=false }
             pageLayout.renamePrimary={ [weak self] name in self?.page.onRenamePalette?(name) }
@@ -1527,6 +1925,17 @@ final class StudioFrame: NSView {
     @objc private func flashed(_ n: Notification) { if let t = n.userInfo?["text"] as? String { footer.flash(t) } }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
+
+    override func draggingEntered(_ sender:NSDraggingInfo)->NSDragOperation {
+        place == .designer && !embeddedPage && DesignerImageDrop.supports(sender.draggingPasteboard) ? .copy:[]
+    }
+    override func draggingUpdated(_ sender:NSDraggingInfo)->NSDragOperation {draggingEntered(sender)}
+    override func performDragOperation(_ sender:NSDraggingInfo)->Bool {
+        guard place == .designer,!embeddedPage,
+              let payload=DesignerImageDrop.read(sender.draggingPasteboard) else{return false}
+        designerWorkspace.acceptDroppedImage(payload)
+        return true
+    }
 
     private var pendingPickerRefresh = false
     private var pendingSearchRefresh:DispatchWorkItem?
@@ -1560,6 +1969,13 @@ final class StudioFrame: NSView {
         pendingPickerRefresh = false; reload()
         page.grid.chosenHex = chosenHex
     }
+    @objc private func fontInventoryChanged() {
+        let current=FontLibraryIndex.list(in:library.store)
+        let previous=cataloguePane.fontEntries
+        guard current.map(\.id) != previous.map(\.id) else{return}
+        cataloguePane.fontEntries=current
+        reload()
+    }
 
     @objc private func openProfileRail(_ notification:Notification){guard !embeddedPage,let source=notification.object as? NSView,source.window === window else{return};showProfileRail()}
     private func showProfileRail(){guard !embeddedPage else{return};viewportHeader.channels.showProfiles()}
@@ -1567,9 +1983,14 @@ final class StudioFrame: NSView {
     private func slide() {
         if embeddedPage {open=goal;needsLayout=true;return}
         header.historyOpen = goal.history > 0
-        guard open != goal || profileOpen != profileGoal || infoOpen != infoGoal else { needsLayout = true; return }
+        guard open != goal || profileOpen != profileGoal || infoOpen != infoGoal || transformRightOpen != transformRightGoal else { needsLayout = true; return }
         guard slideClock == nil else { return }
         page.layoutFrozen = true
+        // The grid keeps its old layout until the rails finish moving. Clip that
+        // retained content to the moving viewport so it cannot cover Rail2.
+        page.layer?.masksToBounds = true
+        pageLayout.wantsLayer = true
+        pageLayout.layer?.masksToBounds = true
         lastSlide = Date()
         slideClock = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
@@ -1578,16 +1999,19 @@ final class StudioFrame: NSView {
             func toward(_ v: CGFloat, _ g: CGFloat) -> CGFloat { v < g ? min(g, v + step) : max(g, v - step) }
             self.profileOpen=toward(self.profileOpen,self.profileGoal)
             self.infoOpen=toward(self.infoOpen,self.infoGoal)
+            self.transformRightOpen=toward(self.transformRightOpen,self.transformRightGoal)
             self.open = (toward(self.open.rail1, self.goal.rail1), toward(self.open.rail2, self.goal.rail2), toward(self.open.history, self.goal.history))
             self.needsLayout = true
             self.layoutSubtreeIfNeeded()
             self.needsDisplay = true
-            if self.open == self.goal && self.profileOpen == self.profileGoal && self.infoOpen == self.infoGoal {
+            if self.open == self.goal && self.profileOpen == self.profileGoal && self.infoOpen == self.infoGoal && self.transformRightOpen == self.transformRightGoal {
                 t.invalidate(); self.slideClock = nil
                 let transition = CATransition(); transition.type = .fade; transition.duration = 0.12
                 if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { self.page.layer?.add(transition, forKey: "RailContentReflow") }
                 self.page.layoutFrozen = false; self.page.needsLayout = true
                 self.page.layoutSubtreeIfNeeded()
+                self.page.layer?.masksToBounds = false
+                self.pageLayout.layer?.masksToBounds = false
             }
         }
         RunLoop.main.add(slideClock!, forMode: .common)
@@ -1601,25 +2025,31 @@ final class StudioFrame: NSView {
         case .group(let project,let node),.overview(let project,let node):return SchemaTrial.rows(of:SchemaTrial.schema(for:project)).first(where:{$0.node.id == node})?.node.name ?? "Missing Section"
         case .collection(let id):return SchemaTrial.collections.first(where:{$0.id == id})?.name ?? "Collection"
         case .folder(let collection,let id):return SchemaTrial.collections.first(where:{$0.id == collection})?.folders.first(where:{$0.id == id})?.name ?? "Folder"
-        case .palettes:return "Library Palettes"
+        case .palettes:
+            if workspaceFilter == "fonts" {return fontDetailID.flatMap{fontEntries[$0]?.info.family} ?? "Fonts"}
+            return "Library Palettes"
         case .catalogue:return onboardingActive ? (SchemaTrial.personalMode ? "Personal":SchemaTrial.structure?.clientName ?? "Client")+" Onboarding":library.catalogue
         default:return "Library"
         }
     }
     private func arrangePageStack(in rect:NSRect){
         let width=rect.width,height=rect.height
-        page.isHidden=false;viewportHeader.isHidden=onboardingActive;viewportFooter.isHidden=onboardingActive
+        page.isHidden=false;viewportHeader.isHidden=onboardingActive || colourMode.isActive || transformSource != nil;viewportFooter.isHidden=onboardingActive || colourMode.isActive || transformSource != nil
         page.compactWorkspace=true;page.paneHeaderControls=true;page.inset=16;page.insetRight=16
         page.frame=NSRect(x:0,y:0,width:width,height:max(0,height-(onboardingActive ? 0:WorkspaceViewportBar.footerHeight)))
         viewportHeader.preferredHeight=page.actionbarHeight(for:width)
         viewportHeader.frame=NSRect(x:0,y:AreaHeader.rule,width:width,height:viewportHeader.preferredHeight)
         viewportFooter.frame=NSRect(x:0,y:max(0,height-WorkspaceViewportBar.footerHeight),width:width,height:WorkspaceViewportBar.footerHeight)
+        if transformSource != nil,transformPage.superview === (embeddedPage ? self : pageLayout.primaryContent) {
+            transformPage.frame=NSRect(x:0,y:AreaHeader.rule+1,width:width,height:max(0,height-AreaHeader.rule-1))
+        }
     }
 
     // Grid regions: three columns for the indexed library, two for the register, then the page.
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
+        let headerHeight = A.headerHeight(for:w)
         if embeddedPage {
             for view in [header,rail1,rail2,history,footer,strip,profileHeader,printPaletteRail,leftPanelRail,infoRail,rightPanelRail,railProfile,intakeSourceRail,intakeTargetRail,filmstrip,designerWorkspace,bloomWorkspace,overlay,settingsCurtainClip] as [NSView] {view.isHidden=true}
             arrangePageStack(in:bounds);return
@@ -1637,22 +2067,25 @@ final class StudioFrame: NSView {
             }
         }
         leftPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace
-        rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
+        let fontWorkspace = place == .palettes && workspaceFilter == "fonts"
+        rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer || fontWorkspace
         railProfile.isHidden=rightPanelRail.isHidden || profileOpen == 0
         designerWorkspace.isHidden = place != .designer
         page.isHidden = place == .designer
         intakeSourceRail.isHidden = !imageIntakeWorkspace
         intakeTargetRail.isHidden = !imageIntakeWorkspace
-        filmstrip.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
-        viewportHeader.isHidden = !canvasWorkspace || place == .designer
-        viewportFooter.isHidden = !canvasWorkspace || place == .designer
+        filmstrip.isHidden = carouselKind == nil
+        viewportHeader.isHidden = !canvasWorkspace || place == .designer || colourMode.isActive || transformSource != nil
+        viewportFooter.isHidden = !canvasWorkspace || place == .designer || colourMode.isActive || transformSource != nil
         bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil || place == .designer
         footer.isHidden = false
-        profileHeader.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
+        profileHeader.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer || colourMode.isActive || transformSource != nil || fontWorkspace
         if canvasWorkspace {
-            let adaptive = !imageIntakeWorkspace && place != .designer
+            let adaptive = !imageIntakeWorkspace
             let rails = WorkspaceResponsiveGeometry.rails(width:w, selection:compactRailSelection, library:wideLibraryRailVisible, analysis:wideAnalysisRailVisible)
-            let dock = adaptive ? rails.0:A.railWidth, right = adaptive ? rails.1:A.railWidth
+            let designerPalette=place == .designer && designerWorkspace.selectedMode == .palette
+            let dock:CGFloat=designerPalette ? 0:(adaptive ? rails.0:A.railWidth)
+            let right=(adaptive ? rails.1:A.railWidth)*(fontWorkspace ? 0:transformRightOpen)
             leftPanelRail.isHidden = leftPanelRail.isHidden || dock == 0
             rightPanelRail.isHidden = rightPanelRail.isHidden || right == 0
             railProfile.isHidden = rightPanelRail.isHidden || profileOpen == 0
@@ -1664,13 +2097,13 @@ final class StudioFrame: NSView {
             let proofWidth = right > 0 ? min(A.railWidth,max(0,w-left-right-280))*profileOpen:0
             let profileHeight:CGFloat=profileHeader.isHidden ? 0:viewportHeader.channels.headerHeight(forWidth:max(0,w-left-right-proofWidth-34))
             let intakeBarHeight:CGFloat=imageIntakeWorkspace ? page.actionbarHeight(for:max(0,w-left-right-proofWidth-2)):0
-            let top = A.header + 1 + profileHeight + intakeBarHeight, bottom: CGFloat = A.footer + (imageIntakeWorkspace || place == .designer ? 0 : 120)
+            let top = headerHeight + 1 + profileHeight + intakeBarHeight, bottom: CGFloat = A.footer + (carouselKind == nil ? 0 : 120)
             let workspaceFooterY=h-bottom-WorkspaceViewportBar.footerHeight
             footer.frame=NSRect(x:0,y:h-A.footer,width:w,height:A.footer)
             footer.grid=(A.column(1,in:w),A.columnWidth(in:w),A.column(5,in:w))
-            header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
+            header.frame = NSRect(x: 0, y: 0, width: w, height: headerHeight)
             header.grid = (16, A.columnWidth(in: w)); header.railEdge = imageIntakeWorkspace ? A.railWidth:dock
-            let railTop=A.header+1
+            let railTop=headerHeight+1
             profileHeader.frame=NSRect(x:left+1,y:railTop,width:w-left-right-proofWidth-2,height:profileHeight)
             profileHeaderContent.frame=NSRect(x:16,y:0,width:max(0,profileHeader.bounds.width-32),height:profileHeight)
             viewportHeader.channels.frame=profileHeaderContent.bounds
@@ -1682,7 +2115,7 @@ final class StudioFrame: NSView {
             intakeTargetRail.frame=rightPanelRail.frame
             designerWorkspace.frame=NSRect(x:left+1,y:top,width:w-left-1,height:h-top-bottom)
             page.frame = NSRect(x: left+1, y: top, width: w-left-right-proofWidth-2, height: max(0,workspaceFooterY-top))
-            viewportHeader.usesHeaderSurface=imageIntakeWorkspace
+            viewportHeader.usesHeaderSurface=imageIntakeWorkspace || page.showsPaletteFilters
             viewportHeader.preferredHeight=imageIntakeWorkspace ? intakeBarHeight:page.actionbarHeight(for:w-left-right-proofWidth-2)
             viewportHeader.frame=NSRect(x:left+1,y:imageIntakeWorkspace ? railTop:top+AreaHeader.rule,width:w-left-right-proofWidth-2,height:viewportHeader.preferredHeight)
             viewportFooter.frame=NSRect(x:left+1,y:workspaceFooterY,width:w-left-right-proofWidth-2,height:WorkspaceViewportBar.footerHeight)
@@ -1690,9 +2123,14 @@ final class StudioFrame: NSView {
             bloomWorkspace.frame=NSRect(x:left+1,y:viewportHeader.frame.maxY,width:w-left-right-proofWidth-2,height:max(0,viewportFooter.frame.minY-viewportHeader.frame.maxY))
             expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
             if libraryLayoutAvailable {
-                pageLayout.frame=NSRect(x:left+1,y:top,width:w-left-right-proofWidth-2,height:max(0,h-top-bottom))
+                pageLayout.frame=NSRect(x:left+1,y:top-WorkspaceTabContour.topOverlap,width:w-left-right-proofWidth-2,height:max(0,h-top-bottom+WorkspaceTabContour.topOverlap))
                 pageLayout.needsLayout=true;pageLayout.layoutSubtreeIfNeeded()
                 arrangePageStack(in:pageLayout.primaryContent.bounds)
+            }
+            if colourMode.isActive {
+                // Colour selection belongs to the whole workspace, including
+                // any split Library panes that were open when it began.
+                colourPickerPage.frame=pageLayout.frame
             }
             page.inset=16;page.insetRight=16
             page.compactWorkspace=true
@@ -1707,9 +2145,9 @@ final class StudioFrame: NSView {
         }
         page.compactWorkspace=false
         infoRail.isHidden=true
-        header.frame = NSRect(x: 0, y: 0, width: w, height: A.header)
+        header.frame = NSRect(x: 0, y: 0, width: w, height: headerHeight)
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
-        let top = A.header + 1, bodyH = h - A.header - A.footer - 2
+        let top = headerHeight + 1, bodyH = h - headerHeight - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
         // The same expanded dock widths serve legacy routes and the panel workspace.
         let r1Full=A.railWidth,r1Min=LibraryRail.collapsedWidth
@@ -1786,18 +2224,18 @@ final class StudioFrame: NSView {
         // Header and rail edges; StudioFooter owns its top border inside its own bounds.
         let w = bounds.width
         if canvasWorkspace {
-            hairline(x:0,y:A.header,width:w)
-            fill(NSRect(x:leftPanelRail.frame.maxX,y:A.header,width:1,height:leftPanelRail.frame.height),Design.rule)
-            if !infoRail.isHidden {fill(NSRect(x:infoRail.frame.maxX,y:A.header,width:1,height:infoRail.frame.height),Design.rule)}
-            fill(NSRect(x:rightPanelRail.frame.minX-1,y:A.header,width:1,height:rightPanelRail.frame.height),Design.rule)
+            hairline(x:0,y:header.frame.maxY,width:w)
+            fill(NSRect(x:leftPanelRail.frame.maxX,y:header.frame.maxY,width:1,height:leftPanelRail.frame.height),Design.rule)
+            if !infoRail.isHidden {fill(NSRect(x:infoRail.frame.maxX,y:header.frame.maxY,width:1,height:infoRail.frame.height),Design.rule)}
+            fill(NSRect(x:rightPanelRail.frame.minX-1,y:header.frame.maxY,width:1,height:rightPanelRail.frame.height),Design.rule)
             return
         }
-        hairline(x: 0, y: A.header, width: w)
+        hairline(x: 0, y: header.frame.maxY, width: w)
         var lines = [rail1.frame.maxX]
         if !rail2.isHidden { lines.append(rail2.frame.maxX) }
         if !history.isHidden { lines.append(history.frame.minX - 1) }
         if printWorkspace { lines.append(printPaletteRail.frame.maxX) }
-        for x in lines { fill(NSRect(x: x, y: A.header + 1, width: 1, height: rail1.frame.height), Design.rule) }
+        for x in lines { fill(NSRect(x: x, y: header.frame.maxY + 1, width: 1, height: rail1.frame.height), Design.rule) }
     }
 
     // MARK: What is shown
@@ -1874,7 +2312,16 @@ final class StudioFrame: NSView {
         needsLayout = true
     }
 
-    func go(_ requested: Place) {
+    func go(_ requested: Place, treeBucket:WorkspaceTreeGridScope?=nil) {
+        // A destination change ends node-colour selection. Keeping the mode
+        // active here locked the header routes behind a visible split pane.
+        if colourMode.isActive {_ = endColourMode()}
+        let nextTransformSource:UUID? = {
+            guard transformSource != nil,requested != place,
+                  case .palette(let id)=requested,displayLibrary.swatch(id) != nil else{return nil}
+            return id
+        }()
+        if transformSource != nil,requested != place,nextTransformSource == nil {_ = endTransformMode()}
         var p=requested
         let previousRoute=place
         if SchemaTrial.personalMode {switch p {case .collection,.folder:p = .catalogue;default:break}}
@@ -1885,13 +2332,14 @@ final class StudioFrame: NSView {
             switch p {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:break
             default:if let onOutsidePage{onOutsidePage(p);return}}
         }
-        if !embeddedPage, libraryLayoutAvailable,!routingPrimary {
+        if treeBucket == nil,!embeddedPage, libraryLayoutAvailable,!routingPrimary {
             switch p {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:
                 if pageLayout.navigate(p){return}
             default:break}
         }
         if place == .imageIntake && p != .imageIntake { viewportHeader.setIntakeMode(false) }
-        workspaceFilter=nil
+        treeGridScope=treeBucket
+        workspaceFilter=treeBucket?.key
         if place == .help, p != .help, let previous = beforeHelp {
             goal = previous; beforeHelp = nil
         }
@@ -1923,6 +2371,8 @@ final class StudioFrame: NSView {
             goal = (0, 0, 0)
         }
         place = p
+        if p == .designer {updateDesignerPaletteRail(mode:designerWorkspace.selectedMode)}
+        else if infoPane is ImagePaletteInspectorPane {closeInfoRail()}
         if !embeddedPage{pageLayout.updatePrimary(p)}
         saveLibraryPlace(p)
         slide()
@@ -1930,6 +2380,7 @@ final class StudioFrame: NSView {
             switch route {case .catalogue,.palettes,.palette,.collection,.folder,.project,.overview,.group:return true;default:return false}
         }
         reload(routeOnly:libraryRoute(previousRoute) && libraryRoute(p))
+        if let nextTransformSource {beginTransformMode(nextTransformSource)}
     }
 
     private func beginNewASE() {
@@ -1960,7 +2411,7 @@ final class StudioFrame: NSView {
     }
 
     /// The Lab has no rail2: its columns go to the page. Contrast keeps it, as the list of palettes to pick the pair from.
-    private var railTwo: CGFloat { expanded || place == .lab || place == .catalogue || place == .qrImport || place == .help ? 0 : 1 }
+    private var railTwo: CGFloat { expanded || place == .lab || place == .catalogue || place == .qrImport || place == .help || place == .designer ? 0 : 1 }
 
     private func choose(_ hex: String) {
         chosenHex = hex
@@ -1975,7 +2426,7 @@ final class StudioFrame: NSView {
     }
     func restoreLayoutPage(_ state:WorkspaceLayoutTemplate.Page){
         paletteFilter = .init(rating:state.rating,flag:state.flag,order:PaletteAssetHandler.Order(rawValue:state.order) ?? .newest);workspaceFilter=state.filter
-        reload();page.restoreLayoutView(state)
+        reload();page.restoreLayoutView(state);viewportFooter.listMode=page.grid.listView
     }
     private func resolvedLayoutRoute(_ route:Place)->Place {
         switch route {
@@ -2086,7 +2537,7 @@ final class StudioFrame: NSView {
         }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .palettes: return workspaceFilter == "fonts" ? 9:1; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -2178,6 +2629,28 @@ final class StudioFrame: NSView {
         if let colourIndex,palette.entries.indices.contains(colourIndex) {swatchViewer.presentSwatch(item,hex:palette.entries[colourIndex].hex)} else {swatchViewer.presentPalette(item)}
     }
     private let contextMenu = SwissContextMenu()
+    private func importedPaletteHexes(_ record:WorkspaceImportedAsset)->[String] {
+        guard let url=try? record.url(in:library.store.root),let data=try? Data(contentsOf:url) else{return []}
+        return PaletteImport.read(data,fallback:record.name).flatMap{$0.colours.map(\.hex)}
+    }
+    private func customColourHexes(for item:AssetCollectionItem)->[String] {
+        if item.kind == "Colour" {return [item.identity]}
+        guard let id=UUID(uuidString:item.identity) else{return []}
+        if let palette=library.library.swatch(id) {return palette.entries.map(\.hex)}
+        if let file=appbridge.files.first(where:{$0.id == id}) {return file.swatches.compactMap{hexOf($0.preview)}}
+        if let record=WorkspaceImport.records(store:library.store).first(where:{$0.0.id == id})?.0 {
+            return importedPaletteHexes(record)
+        }
+        return []
+    }
+    private func addToCustomColoursAction(_ hexes:[String])->HaloAction {
+        // Capture values now: Custom Colours stores copies, never links to assets.
+        HaloAction(id:"custom-colours",label:"Add To Custom Colours",symbol:"eyedropper",onSelect:{[weak self] in
+            guard let self else{return}
+            let added=self.colourPickerPage.addCustomColours(hexes)
+            self.library.flash(added == 0 ? "Already in Custom Colours." : "Added \(added) \(added == 1 ? "colour" : "colours") to Custom Colours.")
+        })
+    }
     private func addToCollectionAction(_ item:AssetCollectionItem)->HaloAction {addToCollectionAction([item])}
     private func addToCollectionAction(_ items:[AssetCollectionItem])->HaloAction {
         HaloAction(id:"collections",label:"Add To Collection",symbol:"square.grid.2x2",children:{[weak self] in
@@ -2207,6 +2680,11 @@ final class StudioFrame: NSView {
         })
     }
     private func openCollectedAsset(_ item:AssetCollectionItem){
+        if item.kind == "Font" || item.kind == "Fonts" {
+            if let entry=FontLibraryIndex.list(in:library.store).first(where:{item.kind == "Font" ? $0.info.family.caseInsensitiveCompare(item.identity) == .orderedSame : $0.id.uuidString == item.identity}) {
+                workspaceFilter="fonts";fontDetailID=entry.id;place = .palettes;reload();return
+            }
+        }
         if item.kind == "Palette",let id=UUID(uuidString:item.identity),library.library.swatch(id) != nil {go(.palette(id));return}
         if item.kind == "Colour" {go(.catalogue);showSwatchViewer(item.identity);return}
         if item.kind == "ICC Profile" {showProfileRail();iccProfilePane.locate(item.identity);return}
@@ -2215,9 +2693,48 @@ final class StudioFrame: NSView {
         if FileManager.default.fileExists(atPath:item.identity){NSWorkspace.shared.open(URL(fileURLWithPath:item.identity));return}
         library.flash("This asset is no longer available. Remove its Collection entry or locate the original.")
     }
-    private func openContext(_ place: Place, in view: NSView, at point: NSPoint) {
+    private func openFontContext(_ id:UUID,in view:NSView,at point:NSPoint,assignment:(UUID,UUID)?=nil) {
+        guard let entry=FontLibraryIndex.list(in:library.store).first(where:{$0.id == id}) else{return}
+        let selectedIDs=Set(page.grid.selectedItems.filter{$0.fontFamily != nil}.compactMap(\.id))
+        let selected=selectedIDs.contains(id) ? FontLibraryIndex.list(in:library.store).filter{selectedIDs.contains($0.id)}:[entry]
+        let file=entry.imported.flatMap{try? $0.0.url(in:$0.1.deletingLastPathComponent())}
+        let available=file.map{FileManager.default.fileExists(atPath:$0.path)} ?? false
+        let family=entry.info.family
+        var actions:[HaloAction]=[
+            HaloAction(id:"open",label:"Open Font",symbol:"textformat",onSelect:{[weak self] in
+                guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
+            }),
+            HaloAction(id:"favourite",label:entry.info.favourite == true ? "Remove Favourite":"Add Favourite",symbol:"star",onSelect:{[weak self] in
+                guard let self else{return}
+                var info=entry.info;info.favourite = !(info.favourite == true)
+                do {try FontLibraryIndex.save(info,entry:entry);self.reload()} catch {self.library.flash(error.localizedDescription)}
+            }),
+            addToCollectionAction(selected.map(\.collectionItem)),
+            HaloAction(id:"tags",label:selected.count == 1 ? "Tags…":"Tag \(selected.count) Fonts…",symbol:"tag",onSelect:{[weak self] in
+                guard let self else{return}
+                TagPanel.fonts(selected,library:self.library,over:self.window){[weak self] in self?.reload()}
+            }),
+            HaloAction(id:"divider-font-files",label:"",symbol:""),
+            HaloAction(id:"copy-name",label:"Copy Font Name",symbol:"doc.on.doc",onSelect:{
+                NSPasteboard.general.clearContents();NSPasteboard.general.setString(family,forType:.string)
+            }),
+            HaloAction(id:"reveal",label:"Reveal in Finder",symbol:"folder",disabled:!available,onSelect:{[weak self] in
+                AssetFileActions.reveal(file,feedback:{[weak self] message in self?.library.flash(message)})
+            }),
+            HaloAction(id:"copy-path",label:"Copy Path",symbol:"doc.on.doc",disabled:!available,onSelect:{
+                guard let file else{return};NSPasteboard.general.clearContents();NSPasteboard.general.setString(file.path,forType:.string)
+            })
+        ]
+        if let (project,bucket)=assignment {
+            actions.append(HaloAction(id:"remove-from-product",label:"Remove From Product",symbol:"minus.circle",onSelect:{[weak self] in
+                FontProjectAssignments.remove(family,project:project,bucket:bucket);self?.reload()
+            }))
+        }
+        contextMenu.open(actions,at:point,in:view)
+    }
+    private func openContext(_ place: Place, in view: NSView, at point: NSPoint,extra:HaloAction?=nil) {
         if view === page.grid {paletteSelection.ids=Set(selectedGridPalettes)}
-        let actions: [HaloAction]
+        var actions: [HaloAction]
         switch place {
         case .palette(let id):
             if library.library.swatch(id) != nil {
@@ -2230,13 +2747,20 @@ final class StudioFrame: NSView {
                     HaloAction(id: "duplicate", label: "Duplicate", symbol: "doc.on.doc", disabled: file.problem != nil) { [weak self] in self?.appbridge.duplicate(file) },
                     HaloAction(id: "locate", label: "Locate File…", symbol: "folder") { [weak self] in self?.appbridge.locate(file) { self?.reload() } },
                     addToCollectionAction(.init(kind:"ASE",identity:file.id.uuidString,name:file.url.lastPathComponent)),
+                    addToCustomColoursAction(file.swatches.compactMap{hexOf($0.preview)}),
                     HaloAction(id: "detach", label: "Detach", symbol: "minus.circle") { [weak self] in self?.appbridge.detach(file) },
                     HaloAction(id: "delete", label: "Move File To Trash…", symbol: "trash") { [weak self] in self?.appbridge.confirmDelete(file, over: view) }
                 ]
-            } else if let record=WorkspaceImport.records(store:library.store).first(where:{$0.0.id == id})?.0 {
+            } else if let located=WorkspaceImport.records(store:library.store).first(where:{$0.0.id == id}) {
+                let record=located.0
+                let file=try? record.url(in:located.1.deletingLastPathComponent())
                 actions=[
                     HaloAction(id:"open",label:"Open",symbol:"arrow.up.right",onSelect:{[weak self] in self?.importPane.open(id:id)}),
-                    addToCollectionAction(.imported(record))
+                    addToCollectionAction(.imported(record)),
+                    addToCustomColoursAction(importedPaletteHexes(record)),
+                    HaloAction(id:"reveal",label:"Reveal in Finder",symbol:"folder",disabled:!(file.map{FileManager.default.fileExists(atPath:$0.path)} ?? false),onSelect:{ [weak self] in
+                        AssetFileActions.reveal(file,feedback:{[weak self] message in self?.library.flash(message)})
+                    })
                 ]
             } else { return }
         case .project(let id), .overview(let id, _), .group(let id, _):
@@ -2248,19 +2772,20 @@ final class StudioFrame: NSView {
             ]
         default: return
         }
+        if let extra {actions.insert(extra,at:0);actions.insert(HaloAction(id:"divider-multi-colour",label:"",symbol:""),at:1)}
         contextMenu.open(actions, at: point, in: view)
     }
     func editMetadata(for id:UUID? = nil) {
         let target=id ?? { if case .palette(let id)=place{return id};return nil }()
         guard let target,let palette=library.library.swatch(target),let root=window?.contentView else{return}
         let targets=paletteSelection.ids.contains(target) && paletteSelection.ids.count>1 ? Array(paletteSelection.ids):[target]
-        AssetMetadataEditor.present(palette,selectedCount:targets.count,over:root){ [weak self] metadata,included in
+        AssetMetadataEditor.present(palette,selectedCount:targets.count,over:root){ [weak self] metadata,included,removed,sections in
             guard let self else{return}
             self.library.apply("Edit Asset Metadata") { lib in
                 for id in targets {
                     guard let index=lib.swatches.firstIndex(where:{$0.id==id}) else{continue}
                     var value=lib.swatches[index].metadata ?? AssetMetadata()
-                    AssetMetadataSchema.apply(metadata,to:&value,including:included)
+                    AssetMetadataSchema.apply(metadata,to:&value,including:included,removing:removed,removingSections:sections)
                     value.tidy();lib.swatches[index].metadata=value.isEmpty ? nil:value
                     if included.contains(10){lib.setTags(ofPalette:id,metadata.keywords ?? [])}
                 }
@@ -2271,9 +2796,9 @@ final class StudioFrame: NSView {
     func editMetadata(forColour hex:String) {
         guard let colour=library.library.colours.first(where:{$0.hex==hex}),let root=window?.contentView else{return}
         let sample=Swatch(id:UUID(),name:colourName(hex),createdAt:Date(),entries:[SwatchEntry(hex:hex,addedAt:Date())],metadata:colour.metadata)
-        AssetMetadataEditor.present(sample,over:root){ [weak self] metadata,included in
+        AssetMetadataEditor.present(sample,over:root){ [weak self] metadata,included,removed,sections in
             guard let self else{return}
-            self.library.apply("Edit Colour Metadata") { lib in if let i=lib.colours.firstIndex(where:{$0.hex==hex}){var value=lib.colours[i].metadata ?? AssetMetadata();AssetMetadataSchema.apply(metadata,to:&value,including:included);value.tidy();lib.colours[i].metadata=value.isEmpty ? nil:value} }
+            self.library.apply("Edit Colour Metadata") { lib in if let i=lib.colours.firstIndex(where:{$0.hex==hex}){var value=lib.colours[i].metadata ?? AssetMetadata();AssetMetadataSchema.apply(metadata,to:&value,including:included,removing:removed,removingSections:sections);value.tidy();lib.colours[i].metadata=value.isEmpty ? nil:value} }
         }
     }
     private func openSwatchContext(_ hex: String, in view: NSView, at point: NSPoint) {
@@ -2288,11 +2813,41 @@ final class StudioFrame: NSView {
         actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
         actions.append(HaloAction(id:"notes",label:"Add Notes…",symbol:"note.text",onSelect:{ [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.hex == hex})) }))
         actions.append(addToCollectionAction(.colour(hex,name:library.library.name(of:hex,in:nil))))
+        actions.append(addToCustomColoursAction([hex]))
         actions.append(HaloAction(id:"metadata",label:"Edit Metadata…",symbol:"info.circle",onSelect:{ [weak self] in self?.editMetadata(forColour:hex) }))
         contextMenu.open(actions, at: point, in: view)
     }
 
     private var halo: HaloMenu?
+
+    private func workspaceNodeLocation(_ node: WorkspaceCatalogues.Node) -> URL? {
+        let root=library.store.root
+        if let name=node.catalogue {return Catalogues.standard.directory(for:name)}
+        if node.key == "catalogue" {return library.store.assetsHome.map{GlobalAssets(home:$0).root}}
+        if node.key.hasPrefix("mylibrary-") {
+            guard let home=library.store.assetsHome else{return nil}
+            let assets=GlobalAssets(home:home).root
+            return assets.appendingPathComponent(node.title,isDirectory:true)
+        }
+        switch node.place {
+        case .collection(let id):return CatalogueTree.folder(ofCollection:id,in:root)
+        case .folder(_,let id),.project(let id),.overview(let id,_):
+            return CatalogueTree.folder(ofWorkGroup:id,in:root)
+        case .group(let member,let bucket):
+            guard let home=CatalogueTree.folder(ofWorkGroup:member,in:root),
+                  let entry=CatalogueTree.catalogue(in:root)?.collections.flatMap(\.allMembers).first(where:{$0.member.id == member})?.member else{return nil}
+            let schema=entry.schema ?? SchemaTrial.schema(for:member)
+            func find(_ group:SchemaNode,under parent:URL)->URL? {
+                let next=parent.appendingPathComponent(entry.buckets[group.id.uuidString] ?? filesystemName(group.name),isDirectory:true)
+                if group.id == bucket{return next}
+                return group.children.compactMap{find($0,under:next)}.first
+            }
+            return schema.children.compactMap{find($0,under:home)}.first
+        case .catalogue:return root
+        case .palettes:return library.store.assetsHome.map{GlobalAssets(home:$0).root.appendingPathComponent("Palettes",isDirectory:true)}
+        default:return nil
+        }
+    }
 
     private func paletteFileLocation(_ id: UUID) -> (file: URL?, root: URL?) {
         if let source = linkedPalettes.sources[id] {
@@ -2315,6 +2870,7 @@ final class StudioFrame: NSView {
         var actions: [HaloAction] = [
             HaloAction(id:"view",label:"View",symbol:"eye",onSelect:{ [weak self] in self?.showPaletteViewer(id) }),
             HaloAction(id:"swatches",label:"Open Swatches",symbol:"square.grid.2x2",onSelect:{ [weak self] in self?.go(.palette(id)) }),
+            HaloAction(id:"transform",label:"Transform",symbol:"wand.and.stars",onSelect:{ [weak self] in self?.beginTransformMode(id) }),
             HaloAction(id:"print-preview",label:"Output Proof",symbol:"exclamationmark.triangle",description:"Toggle output proof comparisons across palettes and swatches",onSelect:{ [weak self] in self?.page.grid.togglePrintPreview(palette:id) }),
             HaloAction(id: "rename", label: "Rename", symbol: "pencil", edit: (s.name, "Palette name", "Return keeps it", { library.rename(id, to: $0) })),
             HaloAction(id: "fav", label: s.favourite ? "Remove From Favourites" : "Add To Favourites", symbol: "star", checked: s.favourite) { library.toggleFavourite(id) },
@@ -2330,6 +2886,7 @@ final class StudioFrame: NSView {
                 return inner
             },
             addToCollectionAction(linkedPalettes.sources[id].map{.imported($0.record)} ?? .palette(id,name:s.name)),
+            addToCustomColoursAction(s.entries.map(\.hex)),
             HaloAction(id: "reveal", label: "Reveal in Finder", symbol: "folder", disabled: location.file == nil) {
                 AssetFileActions.reveal(location.file, feedback: feedback)
             },
@@ -2356,7 +2913,7 @@ final class StudioFrame: NSView {
         if let source = linkedPalettes.sources[id] {
             actions.insert(HaloAction(id: "reference", label: "Manage Reference…", symbol: "link", onSelect: { [weak self] in self?.importPane.manage(id: source.record.id) }), at: 0)
             if !linkedPalettes.canEdit(id) {
-                let allowed:Set<String> = ["view", "swatches", "print-preview", "reference", "reveal", "copy-path", "share", "copy-all", "export", "notes", "collections"]
+                let allowed:Set<String> = ["view", "swatches", "transform", "print-preview", "reference", "reveal", "copy-path", "share", "copy-all", "export", "notes", "collections", "custom-colours"]
                 actions = actions.filter { allowed.contains($0.id) }
             }
         }
@@ -2364,8 +2921,8 @@ final class StudioFrame: NSView {
     }
     private func paletteContextActions(for id: UUID) -> [HaloAction] {
         let sections: [String: Int] = [
-            "reference": 0, "open": 0, "view": 0, "swatches": 0, "print-preview": 0,
-            "rename": 1, "fav": 1, "target": 1, "tags": 1, "notes": 1, "duplicate": 1, "copy-to": 1, "collections": 1,
+            "reference": 0, "open": 0, "view": 0, "swatches": 0, "transform": 0, "print-preview": 0,
+            "rename": 1, "fav": 1, "target": 1, "tags": 1, "notes": 1, "duplicate": 1, "copy-to": 1, "collections": 1, "custom-colours": 1,
             "reveal": 2, "copy-path": 2, "share": 3, "copy-all": 4, "export": 4, "delete": 5
         ]
         return sectionedActions(paletteActions(for: id), sections: sections)
@@ -2461,6 +3018,7 @@ final class StudioFrame: NSView {
             HaloAction(id:"copy-selected",label:"Copy \(keys.count) Swatches",symbol:"doc.on.doc") { [weak self] in self?.library.copy(keys) },
             HaloAction(id:"tag-selected",label:"Tag \(keys.count) Swatches…",symbol:"tag",disabled:!canDeleteGridSelection) { [weak self] in guard let self else{return};TagPanel.colours(keys,library:self.library,over:self.window) },
             addToCollectionAction(keys.map{.colour($0,name:colourName($0))}),
+            addToCustomColoursAction(keys),
             HaloAction(id:"delete-selected",label:"Delete \(keys.count) Swatches…",symbol:"trash",disabled:!canDeleteGridSelection) { [weak self] in self?.deleteGridSelection() }
         ]
     }
@@ -2492,10 +3050,33 @@ final class StudioFrame: NSView {
         h.actions.append(HaloAction(id:"qr",label:"Share Swatch QR",symbol:"qrcode",onSelect:{ [weak self] in self?.shareQR(hex:hex) }))
         h.actions.append(HaloAction(id:"notes",label:"Add Notes…",symbol:"note.text",onSelect:{ [weak self] in self?.openNotes(for: self?.page.grid.items.first(where:{$0.hex == hex})) }))
         h.actions.append(addToCollectionAction(.colour(hex,name:colourName(hex))))
+        h.actions.append(addToCustomColoursAction([hex]))
         h.actions.append(HaloAction(id:"metadata",label:"Edit Metadata…",symbol:"info.circle",onSelect:{ [weak self] in self?.editMetadata(forColour:hex) }))
         h.open(centredOn: rect, in: page.grid)
     }
     /// Tags typed on the window's own panel, separated by commas, with the scope a new one takes (StudioTags.swift).
+    func toggleTagsForSelection() -> Bool {
+        if infoGoal > 0, infoPane is TagsInfoPane {closeInfoRail();return true}
+        let frame=activeAssetFrame
+        guard frame.canvasWorkspace,!frame.imageIntakeWorkspace,frame.place != .designer else{return false}
+        let selected=frame.page.grid.selectedItems
+        if !selected.isEmpty {
+            let palettes=frame.selectedGridPalettes
+            if !palettes.isEmpty {TagPanel.palettes(palettes,library:frame.library,over:frame.window);return true}
+            let colours=selected.compactMap(\.hex)
+            if colours.count == selected.count {TagPanel.colours(colours,library:frame.library,over:frame.window);return true}
+            return false
+        }
+        let palettes=frame.paletteSelection.ids.filter{frame.library.library.swatch($0) != nil}
+        if !palettes.isEmpty {TagPanel.palettes(palettes.sorted{ $0.uuidString < $1.uuidString },library:frame.library,over:frame.window);return true}
+        if case .palette(let id)=frame.place,frame.library.library.swatch(id) != nil {
+            TagPanel.palette(id,library:frame.library,over:frame.window);return true
+        }
+        if let id=frame.inspectedPalette,frame.library.library.swatch(id) != nil {
+            TagPanel.palette(id,library:frame.library,over:frame.window);return true
+        }
+        return false
+    }
     private func tag(swatches hexes: [String]) { TagPanel.colours(hexes, library: library, over: window) }
     private func tag(palette id: UUID) { TagPanel.palette(id, library: library, over: window) }
 
@@ -2683,6 +3264,7 @@ final class StudioFrame: NSView {
         cataloguePane.filter=paletteFilter
         cataloguePane.configureAssets(lib)
         cataloguePane.configureCollections(AssetCollections.list(in:library.store),linkedPaletteRecords:linkedPalettes.sources.mapValues{$0.record.id})
+        cataloguePane.fontEntries=FontLibraryIndex.list(in:library.store)
         cataloguePane.update(names: library.availableCatalogues(), active: library.catalogue, rows: rows, selected: treeSelection, selectedKey: workspaceFilter,allFavourites:lib.orderedFavourites)
         if printWorkspace {
             var allowedGroup = false
@@ -2973,8 +3555,8 @@ final class StudioFrame: NSView {
                 return TileGrid.Item(title:name+" / "+ColourFormat.hex.text(hex),caption:caption,colours:[shade[hex] ?? Design.hex(hex)],hex:hex,id:nil,paletteBars:paletteBars[hex] ?? [],createdAt:coloursByHex[hex]?.pickedAt,modifiedAt:coloursByHex[hex]?.tagsChangedAt)
             }
         }
-        func cards(_ list: [Swatch]) -> [TileGrid.Item] {
-            PaletteAssetHandler.filtered(list,by:paletteFilter,in:lib).compactMap { s in
+        func cards(_ list: [Swatch],applyFilter:Bool=true) -> [TileGrid.Item] {
+            (applyFilter ? PaletteAssetHandler.filtered(list,by:paletteFilter,in:lib) : list).compactMap { s in
                 AssetNotes.cache(s.assetNotes,for:"asset:"+s.id.uuidString)
                 let m=s.metadata
                 var metadata:[String:String]=[:]
@@ -2989,6 +3571,7 @@ final class StudioFrame: NSView {
             return (cards(list), list.reduce(0) { $0 + $1.entries.count })
         }
         var items: [TileGrid.Item] = [], title = "", meta = ("", "")
+        var gridSections:[TileGrid.Section]=[]
         page.show(.tiles)
         page.grid.note = nil
         switch place {
@@ -2998,6 +3581,9 @@ final class StudioFrame: NSView {
         }
         let photographPage=canImportImagesFromCurrentPlace()
         page.assetProps=photographPage ? .photographs:AssetPageProps()
+        page.fontLibraryMode=(place == .palettes && workspaceFilter == "fonts") || treeGridScope?.fontBucket == true
+        if page.fontLibraryMode {page.assetProps=AssetPageProps(renderer:.palette,pagination:.continuous,menus:[.sort],filters:[.metadata])}
+        applyFontListMode()
         page.showsPaletteFilters=page.showsPaletteFilters && page.assetProps.filters.contains(.paletteReview)
         page.paletteFilters.isHidden = !page.showsPaletteFilters
         page.showsFormat=page.assetProps.menus.contains(.colourFormat) && place != .appbridge && !imageIntakeWorkspace
@@ -3023,9 +3609,11 @@ final class StudioFrame: NSView {
                 let relative=path.hasPrefix(root+"/") ? String(path.dropFirst(root.count+1)):url.lastPathComponent
                 let parent=(relative as NSString).deletingLastPathComponent
                 let count=intakeAssetColourCounts[path]
-                return TileGrid.Item(title:importKind == "Palettes" ? url.deletingPathExtension().lastPathComponent:url.lastPathComponent,
+                var item=TileGrid.Item(title:importKind == "Palettes" ? url.deletingPathExtension().lastPathComponent:url.lastPathComponent,
                     caption:importKind == "Palettes" ? count.map{plural($0,"colour")} ?? "Reading…" : (parent == "." ? url.pathExtension.uppercased():parent),
                     colours:intakeAssetPreviews[path] ?? [],hex:nil,id:nil,imagePath:path,paletteColourCount:count ?? 0,selectionID:"import:"+path)
+                if importKind == "Fonts" {item.fontPreview=FontBookBridge.preview(url)}
+                return item
             }
             page.grid.note = !importsImages ? (items.isEmpty ? (intakeFolder == nil ? "Choose a source folder in Source to show its \(importKind) files here." : intakeNewOnly && !intakeAssetFiles.isEmpty ? "All compatible files in this folder have already been imported." : "No compatible \(importKind) files found in this folder.") : nil)
                 : intakeImageLoading ? "Reading image files and preparing previews…"
@@ -3198,20 +3786,80 @@ final class StudioFrame: NSView {
             items = made; title = f.name
             meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
         case .palettes:
-            let list: [Swatch]
-            switch workspaceFilter {
-            case "favourites": list=palettes(lib.orderedFavourites); title="Favourites"
-            case "claimed": list=palettes(lib.swatches.filter{$0.claim != nil}); title="Claimed Palettes"
-            case "palettes": list=palettes(lib.libraryPalettes); title="Unassigned Palettes"
-            case "typography": list=lib.libraryPalettes.filter(\.isTypography); title="Typography"
-            default: list=palettes(lib.swatches); title="All Palettes"
+            if workspaceFilter == "fonts" {
+                let entries=FontLibraryIndex.list(in:library.store)
+                fontEntries=Dictionary(uniqueKeysWithValues:entries.map{($0.id,$0)})
+                items=entries.filter{entry in
+                    (fontFormatFilter == "All Formats" || entry.formatLabel == fontFormatFilter) &&
+                    (search.isEmpty || entry.info.family.localizedCaseInsensitiveContains(search) || entry.info.tags.contains(where:{$0.localizedCaseInsensitiveContains(search)}) || (entry.info.metadata?.keywords ?? []).contains(where:{$0.localizedCaseInsensitiveContains(search)}))
+                }.map{entry in
+                    var item=TileGrid.Item(title:entry.info.family,caption:entry.sourceCaption,colours:[],hex:nil,id:entry.id)
+                    item.fontFamily=entry.info.family;item.fontSpecimen=entry.info.specimen;item.fontSourcePath=entry.fileURL?.path;item.fontFormat=entry.formatLabel;item.fontDetailCaption=entry.detailCaption;item.selectionID="font:"+entry.id.uuidString
+                    item.metadata["XMP.Title"]=entry.info.family
+                    let keywords=entry.info.tags+(entry.info.metadata?.keywords ?? [])
+                    if !keywords.isEmpty {item.metadata["IPTC.Keywords"]=keywords.joined(separator:", ")}
+                    if let description=entry.info.metadata?.description,!description.isEmpty {item.metadata["XMP.Description"]=description}
+                    if let rating=entry.info.review?.rating {item.metadata["XMP.Rating"]=String(rating)}
+                    if let flag=entry.info.review?.flag {item.metadata["Colorgain.Flag"]=flag.rawValue}
+                    return item
+                }
+                title="Fonts";meta=(plural(items.count,"font family"),"My Library")
+                // Import lives in the viewport actionbar for this route.
+            } else {
+                let list: [Swatch]
+                switch workspaceFilter {
+                case "favourites": list=palettes(lib.orderedFavourites); title="Favourites"
+                case "claimed": list=palettes(lib.swatches.filter{$0.claim != nil}); title="Claimed Palettes"
+                case "palettes": list=palettes(lib.libraryPalettes); title="Unassigned Palettes"
+                case "typography": list=lib.libraryPalettes.filter(\.isTypography); title="Typography"
+                default: list=palettes(lib.swatches); title="All Palettes"
+                }
+                items = cards(list)
+                meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
             }
-            items = cards(list)
-            meta = ("\(items.count) palettes", "\(lib.orderedProjects.count) projects")
         case .settings:
             let n = library.availableCatalogues().count
             title = "Catalogues"; meta = (library.catalogue, "\(n) " + (n == 1 ? "catalogue" : "catalogues"))
             page.show(.catalogues)
+        }
+        if let scope=treeGridScope {
+            page.show(.tiles)
+            page.showsPaletteFilters=false;page.paletteFilters.isHidden=true
+            items=[];gridSections=[]
+            let scopedFonts=Dictionary(uniqueKeysWithValues:FontLibraryIndex.list(in:library.store).map{($0.id,$0)})
+            fontEntries=scopedFonts
+            for section in scope.sections {
+                let start=items.count
+                for asset in section.assets {
+                    switch asset {
+                    case .palette(let id):
+                        guard let palette=lib.swatch(id) else{continue}
+                        if palette.isTypography {
+                            if keep(palette.name,nil){items.append(TileGrid.Item(title:palette.name,caption:plural(palette.styles?.count ?? 0,"style"),colours:[],hex:nil,id:id,createdAt:palette.createdAt,modifiedAt:[palette.createdAt,palette.nameChangedAt,palette.stylesChangedAt,palette.tagsChangedAt].compactMap{$0}.max()))}
+                        } else {items += cards([palette],applyFilter:false)}
+                    case .colour(let hex):items += tiles([hex],in:nil)
+                    case .font(let id):
+                        guard let entry=scopedFonts[id],keep(entry.info.family,nil),fontFormatFilter == "All Formats" || entry.formatLabel == fontFormatFilter else{continue}
+                        var item=TileGrid.Item(title:entry.info.family,caption:entry.sourceCaption,colours:[],hex:nil,id:id)
+                        item.fontFamily=entry.info.family;item.fontSpecimen=entry.info.specimen;item.fontSourcePath=entry.fileURL?.path;item.fontFormat=entry.formatLabel;item.fontDetailCaption=entry.detailCaption;item.selectionID="font:"+id.uuidString
+                        items.append(item)
+                    case .imported(let id):
+                        if let record=cataloguePane.importedAssets.first(where:{$0.id == id}),keep(record.name,nil) {
+                            items.append(TileGrid.Item(title:record.name,caption:record.type,colours:[],hex:nil,id:id,selectionID:"imported:"+id.uuidString))
+                        }
+                    case .other(let name,let kind,let identity):
+                        if keep(name,nil){items.append(TileGrid.Item(title:name,caption:kind,colours:[],hex:nil,id:nil,selectionID:"tree:"+identity))}
+                    }
+                }
+                if items.count > start {
+                    let sectionIndex=gridSections.count
+                    for index in start..<items.count {items[index].sectionIndex=sectionIndex}
+                    gridSections.append(TileGrid.Section(title:section.title,start:start))
+                }
+            }
+            title=scope.title
+            meta=(plural(items.count,"asset"),library.catalogue)
+            page.grid.note=items.isEmpty ? "No assets in this folder yet." : nil
         }
         switch place {
         case .collection(let id): if let c = SchemaTrial.collections.first(where: { $0.id == id }) { page.showNew(newWord(c)); page.showExport("Export Collection\u{2026}") }
@@ -3224,12 +3872,50 @@ final class StudioFrame: NSView {
         page.toolTip = place == .appbridge ? appbridge.current?.url.deletingLastPathComponent().path : nil
         analysisPalettes=items.compactMap{item in item.id.flatMap{palettesByID[$0]}}
         if case .palette(let selected)=place { metadataPane.palette=lib.swatch(selected) }
-        else { metadataPane.palette=paletteSelection.ids.count == 1 ? paletteSelection.ids.first.flatMap{lib.swatch($0)} : nil }
-        if page.showsPaletteFilters {meta.0=plural(items.count,"palette")}
-        page.grid.selectionScope=String(describing:place)
+        else {
+            let metadataID=paletteSelection.ids.count == 1 ? paletteSelection.ids.first:(paletteSelection.ids.isEmpty ? inspectedPalette:nil)
+            metadataPane.palette=metadataID.flatMap{lib.swatch($0)}
+        }
+        if page.showsPaletteFilters,treeGridScope == nil {meta.0=plural(items.count,"palette")}
+        if page.fontLibraryMode {
+            page.assetOrder=fontOrder == "Name Z–A" ? .nameReverse : fontOrder == "Group By Type" ? .original:.name
+            if fontFormatFilter == "All Formats" && fontOrder == "Group By Type" && treeGridScope == nil {
+                let all=items
+                items=[];gridSections=[]
+                for format in FontFormatStyle.groups {
+                    let members=all.filter{$0.fontFormat == format}.sorted{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
+                    guard !members.isEmpty else{continue}
+                    let sectionIndex=gridSections.count
+                    gridSections.append(TileGrid.Section(title:FontFormatStyle.heading(format),start:items.count))
+                    items += members.map{var item=$0;item.sectionIndex=sectionIndex;return item}
+                }
+            }
+        }
+        page.grid.selectionScope=treeGridScope?.key ?? String(describing:place)
         page.grid.notePaletteID = { if case .palette(let id) = place { return id }; return nil }()
         page.grid.noteScope = library.store.url.path
-        page.set(title: title, meta: meta, items: items,reuseGridIfSame:reuseGridIfSame)
+        page.set(title: title, meta: meta, items: items,reuseGridIfSame:reuseGridIfSame,sections:gridSections)
+        if showingFontList,fontDetailID == nil {
+            let first=items.first(where:{$0.fontFamily != nil})?.id
+            let chosen=inspectedFontID.flatMap{saved in items.first(where:{$0.id == saved && $0.fontFamily != nil})?.id} ?? first
+            page.grid.selectedFontInfoID=chosen
+            if fontInspectorNeedsOpen,let chosen {
+                fontInspectorNeedsOpen=false
+                showFontInformation(chosen,persist:false)
+                // A restored scroll position can otherwise show different cards
+                // from the one RailInfo is describing on entry.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,self.showingFontList,self.fontDetailID == nil else{return}
+                    self.page.grid.revealPalette(chosen)
+                }
+            }
+            else if let chosen,let pane=infoPane as? FontInfoPane,infoGoal > 0,let entry=fontEntries[chosen] {pane.configure(entry)}
+        } else {page.grid.selectedFontInfoID=nil}
+        if workspaceFilter == "fonts",place == .palettes,let id=fontDetailID,let entry=fontEntries[id] {
+            fontSpecimen.configure(entry.info,sourceURL:entry.fileURL,collectionEnabled:true)
+            page.show(.fontSpecimen)
+        }
+        if workspaceFilter == "fonts",place == .palettes {pageLayout.updatePrimary(.palettes)}
         page.grid.showsHalo = true
         let catalogueID=CatalogueTree.catalogue(in:library.store.root)?.id ?? UUID()
         page.configureMetadataFilters(store:MetadataFilterStore(catalogueURL:library.store.url),catalogueID:catalogueID)
@@ -3245,6 +3931,7 @@ final class StudioFrame: NSView {
         intakeTargetPane.selectedCount=intakeSelectedPaths.count
         intakeTargetPane.setContext(catalogue:library.store.url.deletingPathExtension().lastPathComponent,kind:importKind)
         viewportHeader.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
+        viewportHeader.configureFontActions(active:page.fontLibraryMode,detail:fontDetailID != nil,paletteImport:page.showsPaletteFilters && treeGridScope == nil,format:fontFormatFilter,order:fontOrder)
         viewportFooter.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
         viewportFooter.configureImageBrowser(active:photographPage,fullView:photoFullView,index:page.grid.currentImageIndex+1,total:items.count,
             sort:page.assetProps.menus.contains(.sort) && photographPage ? photoSort:nil,
@@ -3258,7 +3945,28 @@ final class StudioFrame: NSView {
         if case .palette(let id)=place{inspectedPalette=id}
         inspectorPane.palette=inspectedPalette.flatMap{lib.swatch($0)}
         page.grid.selectedPalette=inspectedPalette
-        filmstrip.update(palettes(lib.swatches),selected:inspectedPalette,colours:shade)
+        switch carouselKind {
+        case .some(.palettes):
+            filmstrip.update(palettes(lib.swatches),selected:inspectedPalette,colours:shade)
+        case .some(.fonts):
+            let entries=items.compactMap{item -> WorkspaceFilmstrip.Entry? in
+                guard let id=item.id,let family=item.fontFamily else{return nil}
+                return WorkspaceFilmstrip.Entry(title:item.title,content:.font(id,family))
+            }
+            filmstrip.update(kind:.fonts,entries:entries,selected:fontDetailID?.uuidString)
+        case .some(.images):
+            let importedPaths=WorkspaceImport.records(store:library.store).reduce(into:[UUID:URL]()){result,pair in
+                guard pair.0.type == "Photographs" || pair.0.type == "Images",
+                      let url=try? pair.0.url(in:pair.1.deletingLastPathComponent()) else{return}
+                result[pair.0.id]=url
+            }
+            let entries=items.compactMap{item -> WorkspaceFilmstrip.Entry? in
+                guard let path=item.imagePath ?? item.id.flatMap({importedPaths[$0]?.path}) else{return nil}
+                return WorkspaceFilmstrip.Entry(title:item.title,content:.image(path,item.modifiedAt))
+            }
+            filmstrip.update(kind:.images,entries:entries,selected:page.grid.currentImagePath)
+        case nil:break
+        }
         refreshAnalysis()
         if !embeddedPage,let active=pageLayout.active.controller{followPane(active)}
     }
@@ -3270,13 +3978,111 @@ final class StudioFrame: NSView {
         refreshAnalysis();needsLayout=true
     }
     // ---------- railInfo ----------
+    private func showFontInformation(_ id:UUID,persist:Bool){
+        guard let entry=fontEntries[id] else{return}
+        if persist {
+            inspectedFontID=id
+            AppPreferences.shared.set(id.uuidString,forKey:"FontLibrary.InspectedFontID")
+        }
+        page.grid.selectedFontInfoID=id
+        if let pane=infoPane as? FontInfoPane,infoGoal > 0 {pane.configure(entry)}
+        else {let pane=FontInfoPane(frame:.zero);pane.configure(entry);showInfoRail(pane,title:"Font Information")}
+    }
+
+    private func openBucketIntake(kind: String, destination: Place?) {
+        let images = kind == "Images" || kind == "Photographs"
+        guard WorkspaceImport.supportedTypes.contains(kind) || images else { return }
+        let store = library.store
+        enum Target { case files(WorkspaceImport.Destination),images(WorkspaceImport.ImageDestination) }
+        var targets:[String:Target]=[:]
+        var choices:[BucketIntakeInfoPane.DestinationChoice]=[]
+        func add(_ key:String,_ section:String,_ path:String,_ target:Target) {
+            guard targets[key] == nil else{return}
+            targets[key]=target;choices.append(.init(key:key,section:section,path:path))
+        }
+        if images {add("library","My Library","My Library / \(kind)",.images(.library))}
+        else {
+            let options=WorkspaceImport.destinations(library:library.library,schema:store.schema,type:kind)
+            if let home=options.first(where:{!$0.heading && $0.member == nil && $0.customPath == nil && $0.path.hasPrefix("My Library")}) {
+                add("library","My Library","My Library / \(kind)",.files(home))
+            }
+            for option in options where !option.heading && !option.locked && option.member != nil && option.bucket != nil && option.customPath == nil {
+                guard let member=option.member,let bucket=option.bucket,
+                      let node=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first(where:{$0.node.id == bucket})?.node else{continue}
+                let section=SchemaTrial.collection(of:member,among:store.schema.collections,places:store.schema.places).name
+                let path=option.path.hasSuffix(" / " + node.name) ? option.path:option.path + " / " + node.name
+                add(option.key,section,path,.files(option))
+            }
+        }
+        if images {
+            for member in library.library.orderedProjects where !member.isLocked {
+                let section=SchemaTrial.collection(of:member.id,among:store.schema.collections,places:store.schema.places).name
+                func visit(_ node:SchemaNode,_ names:[String]) {
+                    let path=names+[node.name]
+                    if SchemaTrial.type(of:node).caseInsensitiveCompare(kind) == .orderedSame {
+                        add(member.id.uuidString+"/"+node.id.uuidString,section,path.joined(separator:" / "),.images(.catalogue(member:member.id,bucket:node.id)))
+                    }
+                    for child in node.children {visit(child,path)}
+                }
+                let root=SchemaTrial.schema(for:member.id)
+                for child in root.children {visit(child,[section,member.name])}
+            }
+        }
+        let selectedKey:String
+        if case .group(let member,let bucket)=destination {
+            guard let choice=choices.first(where:{choice in
+                guard let target=targets[choice.key] else{return false}
+                switch target {
+                case .files(let target):return target.member == member && target.bucket == bucket
+                case .images(.catalogue(let owner,let node)):return owner == member && node == bucket
+                default:return false
+                }
+            }) else {library.flash("That \(kind) bucket cannot receive files.");return}
+            selectedKey=choice.key
+        } else if destination == .catalogue {selectedKey="library"}
+        else {
+            library.flash("Choose an asset bucket before adding files."); return
+        }
+        guard targets[selectedKey] != nil else {library.flash("The destination is unavailable.");return}
+        let pane = BucketIntakeInfoPane(kind:kind,destinations:choices,selectedKey:selectedKey) { [weak self] urls, transfer, selected, completion in
+            guard let self, self.library.store === store else { completion(.failure(failure("The catalogue changed. Choose the destination again."))); return }
+            guard let target=targets[selected] else {completion(.failure(failure("Choose a destination again.")));return}
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = Result<Int, Error> {
+                    switch target {
+                    case .images(let image):return try WorkspaceImport.addImages(urls,destination:image,kind:kind,transfer:transfer,store:store)
+                    case .files(let location):return try WorkspaceImport.perform(urls:urls,type:kind,transfer:transfer,targets:[location],allowBucket:false,store:store).count
+                    }
+                }
+                DispatchQueue.main.async {
+                    if case .success(let count) = result {
+                        WorkspaceImport.rememberSources(urls, in: store.root)
+                        self?.library.reload(); self?.reload()
+                        let path=choices.first(where:{$0.key == selected})?.path ?? "the selected destination"
+                        self?.library.flash("Added \(count) file(s) to \(path).")
+                    }
+                    completion(result)
+                }
+            }
+        }
+        showInfoRail(pane, title: "Add \(kind)")
+    }
+
+    private func updateDesignerPaletteRail(mode:DesignerWorkspace.Mode) {
+        guard !embeddedPage,place == .designer else{return}
+        if mode == .palette,let pane=designerWorkspace.paletteInspector {
+            if infoPane !== pane || infoGoal == 0 {showInfoRail(pane,title:"Image Palette")}
+        } else if infoPane is ImagePaletteInspectorPane {closeInfoRail()}
+    }
 
     /// Opens railInfo beside rail1 on `pane`, in place of whatever it held; the rail slides open and pushes the viewport across.
     func showInfoRail(_ pane:NSView & InfoRailContent,title:String="Options") {
         for old in infoRail.panels {infoRail.remove(old)}
         let panel=WorkspacePanel(id:"railInfo",title:title,content:pane,resizable:false,draggable:false)
         panel.fillsRail=true
-        panel.closeAction={[weak self] in self?.closeInfoRail()}
+        if !(pane is ImagePaletteInspectorPane) {
+            panel.closeAction={[weak self] in self?.closeInfoRail()}
+        }
         infoRail.add(panel);infoPane=pane
         infoGoal=1
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {infoOpen=1;needsLayout=true} else {slide()}
@@ -3305,6 +4111,7 @@ final class StudioFrame: NSView {
         let palette=pane.inspectedPalette.flatMap{pane.displayLibrary.swatch($0)}
         inspectedPalette=pane.inspectedPalette
         inspectorPane.palette=palette
+        metadataPane.palette=palette
         histogramPane.update(palette,library:pane.displayLibrary,selected:pane.analysisColour)
         bloomPane.update(palette,library:pane.displayLibrary,selected:pane.analysisColour)
     }
@@ -3314,6 +4121,7 @@ final class StudioFrame: NSView {
         if case .palette(let id)=place { inspectedPalette=id }
         else if !visible.contains(where:{$0.id==inspectedPalette}) {inspectedPalette=visible.first?.id;analysisColour=nil}
         let palette=inspectedPalette.flatMap{lib.swatch($0)}
+        if paletteSelection.ids.isEmpty && metadataPane.palette?.id != palette?.id {metadataPane.palette=palette}
         page.expandedPanelTitle=canvasWorkspace ? expandedAnalysis.map{($0 == .bloom ? "Delta Bloom":"Histograms")+" > "+(palette?.name ?? "Select A Palette")} : nil
         expandedBloom.spectrumWidth=page.grid.paletteTileWidth;expandedHistogram.spectrumWidth=page.grid.paletteTileWidth
         let key=AnalysisKey(revision:library.revision,palette:palette?.id,colour:analysisColour,channel:viewportHeader.channels.selectedChannel,print:PrintCondition.current,expanded:expandedAnalysis)

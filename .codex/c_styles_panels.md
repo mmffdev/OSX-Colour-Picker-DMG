@@ -14,7 +14,9 @@ Shared panel contract. Load through [styles.md](../styles.md) before changing a 
 
 Use WorkspacePanelHeader for the shared gradient and single bottom separator, including the Preset actionbar. Do not recreate the gradient or layer another frame over it.
 
-Use WorkspacePanel's 34 pt header, shared header/actions/help, disclosure, resize footer and WorkspaceRail layout. Do not draw duplicate top/side borders against existing frame rules. Tree/list selection backgrounds span the body; inset row contents instead of nesting scroll padding.
+Use WorkspacePanel's 40 pt header, shared header/actions/help, disclosure, resize footer and WorkspaceRail layout. `WorkspaceSectionHeader` uses that same height for inner subdivisions. Do not draw duplicate top/side borders against existing frame rules. Tree/list selection backgrounds span the body; inset row contents instead of nesting scroll padding.
+
+`WorkspaceRail` owns the seam between adjacent panels: the following `WorkspacePanelHeader` draws one top rule, and the preceding panel omits its bottom rule. The first panel in a rail draws no top rule, so moving a panel to the rail top cannot double the rail boundary. Collapsed headers use the same rule.
 
 Inner scroll lanes stay on the right, reserving the house lane and divider as documented by WorkspacePanelScroll. A wrapper around content that owns a scroll view must not reserve a second lane. Outer rail gutters retain their existing outside edge. Read the component registry for expanded-panel and drag/drop contracts.
 

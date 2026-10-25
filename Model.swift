@@ -1319,18 +1319,23 @@ final class LibraryStore {
 
     func save(_ lib: Library, schema f: SchemaTrial.SchemaFile, previous: Library? = nil) throws {
         let verifiedSnapshot=previous != nil && previous == cachedLibrary ? cachedFileVersions:nil
+        let removedCollectionKeys:Set<String> = previous.map { old in
+            let removedPalettes=Set(old.swatches.map(\.id)).subtracting(lib.swatches.map(\.id))
+            let removedColours=Set(old.colours.map(\.hex)).subtracting(lib.colours.map(\.hex))
+            return Set(removedPalettes.map{"Palette/"+$0.uuidString}).union(removedColours.map{"Colour/"+$0.uppercased()})
+        } ?? []
         lastWriteResult=nil
         cachedLibrary=nil;cachedFileVersions=nil
         // First-run creation establishes its transaction root inside saveOwned.
         // Only linked sources need an outer transaction spanning external writes.
         if linkedPalettes.sources.isEmpty {
-            try saveOwned(lib, schema: f, previous: previous, verifiedSnapshot:verifiedSnapshot)
+            try saveOwned(lib, schema: f, previous: previous, verifiedSnapshot:verifiedSnapshot, removedCollectionKeys:removedCollectionKeys)
             linkedPickerTarget = nil
             return
         }
         try Handler_File_Manager.shared.withTransaction(home: assetsHome ?? root) {
             let owned = try linkedPalettes.saveChanges(in: lib, owned: ownedAtLoad)
-            try saveOwned(owned, schema: f, previous: previous, verifiedSnapshot:nil)
+            try saveOwned(owned, schema: f, previous: previous, verifiedSnapshot:nil, removedCollectionKeys:removedCollectionKeys)
         }
         // Linked files are independently coordinated; reread their final state.
         lastWriteResult=nil
@@ -1348,7 +1353,7 @@ final class LibraryStore {
         }
         return dirty
     }
-    private func saveOwned(_ lib: Library, schema f: SchemaTrial.SchemaFile, previous: Library? = nil, verifiedSnapshot:DiskSnapshot? = nil) throws {
+    private func saveOwned(_ lib: Library, schema f: SchemaTrial.SchemaFile, previous: Library? = nil, verifiedSnapshot:DiskSnapshot? = nil, removedCollectionKeys:Set<String> = []) throws {
         let started=Date()
         defer {perf("saveOwned", since:started)}
         let cacheable=previous.map{old in
@@ -1392,6 +1397,7 @@ final class LibraryStore {
                             try CatalogueTree.write(parts.local, schema: f, index: url, name: name, poolDirectory: "Support", createEmptyPools: false,dirtyPalettes:localDirty,observed:observed)
                         }
                     }
+                    try AssetCollections.removeDeletedInTransaction(removedCollectionKeys,in:self)
                 }
                 globalAtLoad = next
                 lastWriteResult=GlobalAssets.joined(parts.local,next)
@@ -1399,9 +1405,13 @@ final class LibraryStore {
                 try Handler_File_Manager.shared.createDirectory(root)
                 let dirty=f == schema ? previous.map{Self.dirtyPalettes(from:$0,to:lib)}:nil
                 try Handler_File_Manager.shared.withTransaction(home: root) {
-                    if let previous,f == schema,try CatalogueTree.writePortableEdit(from:previous,to:lib,index:url,validated:true) {return}
-                    if let previous,f == schema,try CatalogueTree.writePortableRename(from:previous,to:lib,index:url,validated:true) {return}
-                    try CatalogueTree.write(lib, schema: f, index: url, name: name,dirtyPalettes:dirty,observed:observed)
+                    var wrotePortable=false
+                    if let previous,f == schema {
+                        wrotePortable=try CatalogueTree.writePortableEdit(from:previous,to:lib,index:url,validated:true)
+                        if !wrotePortable {wrotePortable=try CatalogueTree.writePortableRename(from:previous,to:lib,index:url,validated:true)}
+                    }
+                    if !wrotePortable {try CatalogueTree.write(lib, schema: f, index: url, name: name,dirtyPalettes:dirty,observed:observed)}
+                    try AssetCollections.removeDeletedInTransaction(removedCollectionKeys,in:self)
                 }
                 lastWriteResult=lib
             }

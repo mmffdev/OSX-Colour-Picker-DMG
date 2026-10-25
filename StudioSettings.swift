@@ -23,6 +23,7 @@ enum QuickKeys {
                            Command(id: "pick", title: "Picker", fallback: "2"),
                            Command(id: "sample", title: "Rectangle Picker", fallback: "3"),
                            Command(id: "outputProof", title: "Output Proof On/Off", fallback: "P"),
+                           Command(id: "tags", title: "Tags Panel", fallback: "T"),
                            Command(id: "rail1", title: "Rail 1 Open/Close", fallback: ","),
                            Command(id: "rail2", title: "Rail 2 Open/Close", fallback: ".")]
     static func key(for id: String) -> String { Prefs.quickKeys[id] ?? commands.first { $0.id == id }?.fallback ?? "" }

@@ -65,6 +65,7 @@ final class PaletteWheel: ClickCursorView, Overlay {
     var anchor = NSPoint.zero { didSet { needsLayout = true; needsDisplay = true } }
     private let notch = WheelNotch(frame: .zero)
     private let openButton = ClickCursorButton(title: "", target: nil, action: nil)
+    private let viewingControls = PaletteViewingControls(frame: .zero)
     private var snapshot: [Item] = []
     private var position: CGFloat = 0, destination: CGFloat = 0
     private var reveal: CGFloat = 0, revealFrom: CGFloat = 0, revealTo: CGFloat = 0
@@ -119,6 +120,10 @@ final class PaletteWheel: ClickCursorView, Overlay {
         openButton.font = .systemFont(ofSize: TextSize.caption, weight: .semibold)
         openButton.isHidden = true
         addSubview(openButton)
+        viewingControls.opensUpward = true
+        viewingControls.onChange = { [weak self] in self?.needsDisplay = true }
+        viewingControls.isHidden = true
+        addSubview(viewingControls)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Palette wheel")
         toolTip=nil
@@ -192,6 +197,8 @@ final class PaletteWheel: ClickCursorView, Overlay {
     func dismiss() {
         guard isOpen else { return }
         let window = self.window
+        viewingControls.dismissOverlay()
+        viewingControls.isHidden = true
         Overlays.closed(self)
         if monitorFullscreen { monitorFullscreen = false; window?.toggleFullScreen(nil) }
         isOpen = false; hovered = nil; showingDetails = false; openButton.isHidden = true
@@ -523,6 +530,18 @@ final class PaletteWheel: ClickCursorView, Overlay {
             text(item.name, rect: NSRect(x: spectrum.maxX + 8, y: meta.minY, width: meta.maxX - spectrum.maxX - 8, height: 18), size: TextSize.caption, colour: Design.ink)
             NSGraphicsContext.restoreGraphicsState()
         }
+        // The monitor view has its own lower control strip. Reuse the global proof and
+        // illuminant selectors so their state stays in sync with the viewport actionbar.
+        let showViewingControls = modalSwatch && monitorFullscreen
+        if showViewingControls {
+            let controlWidth = viewingControls.controlWidth
+            let x = monitorHit.minX - controlWidth - 16
+            let frame = NSRect(x: x, y: field.maxY + 10, width: controlWidth, height: 28)
+            if viewingControls.frame != frame { viewingControls.frame = frame }
+        } else if !viewingControls.isHidden {
+            viewingControls.dismissOverlay()
+        }
+        viewingControls.isHidden = !showViewingControls
     }
     override func draw(_ dirtyRect: NSRect) {
         guard reveal > 0.001 else { return }

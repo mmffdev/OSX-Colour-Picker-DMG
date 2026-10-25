@@ -5,6 +5,7 @@ Project-wide design entry point for Codex and Claude. Read this index before cre
 | When changing | Load |
 |---|---|
 | Any page, panel, rail, tree, grid, card or viewport section | [UI framework index](.codex/c_ui_framework.md), then its focused child contract |
+| Palette or other asset lowestnode in a tree | [Lowestnode contract](.codex/c_c_ui_lowestnode.md) |
 | Any dropdown, dropup, menu or selector | [Dropdown and dropup contract](.codex/c_styles_dropdowns.md) |
 | Any panel, section, content-height or padding change | [Panel contract](.codex/c_styles_panels.md) |
 | Region placement, headers, rails, panels or tabs | [Component registry](.codex/c_layout_registry.md) |

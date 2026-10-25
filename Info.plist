@@ -29,6 +29,24 @@
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colorgain.transform-preset</string>
+            <key>UTTypeDescription</key><string>Colorgain Transform Preset</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>coltra</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colorgain.diagram-preset</string>
+            <key>UTTypeDescription</key><string>Colorgain Diagram Preset</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colnode</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.mmffdev.colorgain.image-palette-recipe</string>
+            <key>UTTypeDescription</key><string>Colorgain Image Palette Recipe</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>colimg</string></array></dict>
+        </dict>
+        <dict>
             <key>UTTypeIdentifier</key>
             <string>com.mmffdev.colorgain.print-profile</string>
             <key>UTTypeDescription</key>

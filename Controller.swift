@@ -568,18 +568,22 @@ final class LibraryController: NSObject {
             guard let image = image else { return }
             let count = Prefs.imagePaletteSize, root = self.store.root
             Self.extractionQueue.async { [weak self] in
-                let hexes = extractPalette(from: image, count: count)
+                let definitions = extractPaletteDefinitions(from: image, count: count)
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.store.root.standardizedFileURL == root.standardizedFileURL else { return }
-                    guard !hexes.isEmpty else { self.flash("No colours found in that area"); return }
+                    guard !definitions.isEmpty else { self.flash("No colours found in that area"); return }
                     if sound { playShutter() }
-                    if rememberSamples { for hex in hexes { ColourCopies.remember(hex) } }
                     let id: UUID?
+                    var sampledKeys:[String]=[]
                     if let target, self.library.swatch(target) != nil, rememberSamples {
-                        self.add(hexes, to: target); id = target
-                    } else { id = self.createPalette(named: "Sampled", hexes: hexes, reveal: !rememberSamples) }
+                        sampledKeys=self.add(definitions, to: target); id = target
+                    } else {
+                        id = self.createPalette(named: "Sampled", definitions: definitions, reveal: !rememberSamples)
+                        sampledKeys=id.flatMap{self.library.swatch($0)?.entries.map(\.hex)} ?? []
+                    }
+                    if rememberSamples { for key in sampledKeys { ColourCopies.remember(key) } }
                     let name = id.flatMap { self.library.swatch($0)?.name } ?? "palette"
-                    self.flash("Sampled \(plural(hexes.count, "swatch", "swatches")) into \(name)")
+                    self.flash("Sampled \(plural(definitions.count, "swatch", "swatches")) into \(name)")
                 }
             }
         }
@@ -599,7 +603,10 @@ final class LibraryController: NSObject {
     /// Menu creation saves the target without navigating or restoring the main window.
     func createMenubarPalette() -> UUID? {
         var id: UUID?
-        apply("New Palette From Menubar") { id = $0.createSwatch() }
+        apply("New Palette From Menubar") { lib in
+            id=lib.createSwatch()
+            if let id {lib.placeInList([id]+lib.listedPalettes.map(\.id).filter{$0 != id})}
+        }
         return id.flatMap { library.swatch($0) == nil ? nil : $0 }
     }
 
@@ -607,7 +614,10 @@ final class LibraryController: NSObject {
         var id: UUID?
         apply("New Palette") { lib in
             id = lib.createSwatch()
-            if let id = id, let p = project { lib.move(id, to: p, index: Int.max) }
+            if let id {
+                if let p=project {lib.move(id,to:p,index:0)}
+                lib.placeInList([id]+lib.listedPalettes.map(\.id).filter{$0 != id})
+            }
         }
         if let id = id { onShow?(.palette(id), true) }
     }
@@ -1031,6 +1041,18 @@ final class LibraryController: NSObject {
         return id
     }
 
+    /// Image samples retain their floating-point colour definitions as catalogue records.
+    @discardableResult
+    func createPalette(named name:String,definitions:[ColourDefinition],reveal:Bool=true)->UUID? {
+        var id:UUID?
+        apply("Create Palette") { lib in
+            let keys=definitions.compactMap{lib.addColour($0)}
+            id=lib.createSwatch(named:name,hexes:keys)
+        }
+        if reveal,let id {onShow?(.palette(id),false)}
+        return id
+    }
+
     func rename(_ id: UUID, to name: String) {
         // Deferred: this is called while a name field is still ending its edit.
         DispatchQueue.main.async { [weak self] in self?.apply("Rename Palette") { $0.renameSwatch(id, to: name) } }
@@ -1113,6 +1135,18 @@ final class LibraryController: NSObject {
         apply("Add Colours") { added = $0.add(hexes, toSwatch: id) }
         let name = library.swatch(id)?.name ?? "palette"
         flash(added == 0 ? "Already in \(name)" : "Added \(plural(added, "swatch", "swatches")) to \(name)")
+    }
+
+    @discardableResult func add(_ definitions:[ColourDefinition],to id:UUID)->[String] {
+        var added=0
+        var keys:[String]=[]
+        apply("Add Colours") { lib in
+            keys=definitions.compactMap{lib.addColour($0)}
+            added=lib.add(keys,toSwatch:id)
+        }
+        let name=library.swatch(id)?.name ?? "palette"
+        flash(added == 0 ? "Already in \(name)" : "Added \(plural(added,"swatch","swatches")) to \(name)")
+        return keys
     }
 
     /// Set by the window: opens the Analysis page for some colours, named for the palette or swatch they are.
@@ -1203,11 +1237,11 @@ final class LibraryController: NSObject {
             flash("Couldn\u{2019}t read \(url.lastPathComponent) as an image")
             return
         }
-        let hexes = extractPalette(from: image, count: Prefs.imagePaletteSize)
-        guard !hexes.isEmpty else { flash("No colours found in \(url.lastPathComponent)"); return }
-        let id = createPalette(named: url.deletingPathExtension().lastPathComponent, hexes: hexes)
+        let definitions = extractPaletteDefinitions(from: image, count: Prefs.imagePaletteSize)
+        guard !definitions.isEmpty else { flash("No colours found in \(url.lastPathComponent)"); return }
+        let id = createPalette(named: url.deletingPathExtension().lastPathComponent, definitions: definitions)
         let name = id.flatMap { library.swatch($0)?.name } ?? "palette"
-        flash("Created \(name) with \(plural(hexes.count, "swatch", "swatches")) from the image")
+        flash("Created \(name) with \(plural(definitions.count, "swatch", "swatches")) from the image")
     }
 
     /// Finds every hex colour in whatever text is on the clipboard — CSS, JSON, a message.

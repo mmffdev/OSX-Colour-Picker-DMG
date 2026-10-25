@@ -42,7 +42,7 @@ enum Migration {
     /// store happened to read the catalogue first did the work, and the user is still told once.
     static var reports: [String: Report] = [:]
     /// What belongs to the app's home, not to the catalogue at its root.
-    private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", "colorgain.coldata", "Keys", "Assets", TreeFiles.backups]
+    private static let homeItems: Set<String> = ["Catalogues", "catalogues.json", "colorgain.coldata", "Keys", "Assets", GlobalAssets.folderName, TreeFiles.backups]
 
     /// Whether a folder holds a catalogue in an earlier layout: a version 2 tree, a version 1 index, or the one file.
     static func needed(in root: URL) -> Bool {

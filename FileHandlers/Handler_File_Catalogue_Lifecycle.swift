@@ -45,7 +45,7 @@ extension Handler_File_Manager {
             known["Projects"] = doc.collections.reduce(0) { $0 + $1.allMembers.count }
         }
         let protectedHome = root.standardizedFileURL == catalogues.root.standardizedFileURL
-        let native: Set<String> = ["colcat", "colpal", "coltyp", "colswa", "colinf", "colprf", "colhis", "colase", "colcal"]
+        let native: Set<String> = ["colcat", "colpal", "coltyp", "colswa", "colinf", "colprf", "colhis", "colase", "colcal", "coltra", "colnode"]
         let homeItems = protectedHome ? Set(Catalogues.catalogueItems(at: root)) : []
         var revisions: [String: FileRevision] = [AppDataStore(root: catalogues.root).url.path: try FileRevision.read(AppDataStore(root: catalogues.root).url)]
         for file in observed.files {

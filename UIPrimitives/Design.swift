@@ -166,7 +166,10 @@ enum Design {
     static let inactive = hex("#B8B5AF")
     static var card: NSColor { customGround ?? hex("#F8F7F5") }
     static var mist: NSColor { customGround.map { $0.blended(withFraction: 0.12, of: ink) ?? $0 } ?? hex("#E3E2DE") }
-    static var rule: NSColor { customGround.map { $0.blended(withFraction: 0.22, of: ink) ?? $0 } ?? hex("#CFCDC7") }
+    static var rule: NSColor {
+        if let background=Theme.fixedBackground?.uppercased(),background == "#000000" || background == "#242424" {return hex("#313131")}
+        return customGround.map { $0.blended(withFraction: 0.22, of: ink) ?? $0 } ?? hex("#CFCDC7")
+    }
     static var soft: NSColor { customGround.map { _ in ink } ?? hex("#A3A19B") }
     static var quiet: NSColor { customGround.map { _ in ink } ?? hex("#6B6964") }
     static var ink: NSColor { customGround.map { Theme.takesLightText(on: hexOf($0) ?? "#FFFFFF") ? NSColor.white : NSColor.black } ?? hex("#161616") }
@@ -214,7 +217,7 @@ enum Design {
         static func span(_ from: Int, _ to: Int) -> CGFloat { CGFloat(to - from + 1) * columnWidth + CGFloat(to - from) * gutter }
     }
     /// The app window's grid (c_c_c_design_grid_app.md): twelve columns inside 24 margins with 16 gutters,
-    /// a 94 header and a 48 footer. The window resizes, so every measure takes the width it is at.
+    /// a 48 pt single-row or 94 pt wrapped header, and a 48 pt footer.
     enum App {
         /// The height is chosen so the rows, from under the areas' rule to the footer, come to whole units: 25 at first, 17 at least.
         static let size = NSSize(width: 1440, height: 923)      // 94 + 1 + 80, then 25 units, then 48
@@ -230,6 +233,9 @@ enum Design {
         static var extra: CGFloat { areaGutter - gutter }
         static let columns = 12
         static let header: CGFloat = 94
+        /// The second header row is only used when navigation wraps. At wide
+        /// widths, keep the tab strip directly beneath the single control row.
+        static func headerHeight(for width: CGFloat) -> CGFloat { width < 1720 ? header : 48 }
         static let footer: CGFloat = 48
         /// The page's clear space above its title.
         static let pageTop: CGFloat = 34
@@ -396,6 +402,31 @@ enum RailBarberPole {
             path.line(to: NSPoint(x: x - box.height, y: box.maxY))
             path.close(); path.fill()
             x += period
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// Diagonal selection band shared by colour targets, swatches and image previews.
+/// The default is black on white; callers may leave the gaps transparent and choose a stripe colour.
+/// The band is clipped to the space around the content, leaving its own editable border visible.
+enum ColourTargetBarberPole {
+    static func draw(in rect:NSRect,radius:CGFloat,thickness:CGFloat=2,ground:NSColor? = .white,stripeColour:NSColor = .black) {
+        guard rect.width > thickness*2,rect.height > thickness*2 else{return}
+        let outer=NSBezierPath(roundedRect:rect,xRadius:radius,yRadius:radius)
+        let innerRect=rect.insetBy(dx:thickness,dy:thickness)
+        let inner=NSBezierPath(roundedRect:innerRect,xRadius:max(0,radius-thickness),yRadius:max(0,radius-thickness))
+        let band=NSBezierPath();band.windingRule = .evenOdd;band.append(outer);band.append(inner)
+        NSGraphicsContext.saveGraphicsState();band.addClip()
+        if let ground {ground.setFill();rect.fill()}
+        stripeColour.setFill()
+        let stripe:CGFloat=6,period:CGFloat=12
+        var x=rect.minX-rect.height-period
+        while x < rect.maxX+rect.height+period {
+            let path=NSBezierPath()
+            path.move(to:NSPoint(x:x,y:rect.minY));path.line(to:NSPoint(x:x+stripe,y:rect.minY))
+            path.line(to:NSPoint(x:x+stripe-rect.height,y:rect.maxY));path.line(to:NSPoint(x:x-rect.height,y:rect.maxY))
+            path.close();path.fill();x += period
         }
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -584,12 +615,29 @@ final class SwissCheckbox: ClickCursorButton {
             ink.withAlphaComponent(0.10).setFill()
             NSBezierPath(rect: square.insetBy(dx: -3, dy: -3)).fill()
         }
-        if state == .on { fill(square, ink) }
-        else {
+        if state == .on {
+            fill(square, ink)
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: square.minX + side * 0.20, y: square.minY + side * 0.51))
+            tick.line(to: NSPoint(x: square.minX + side * 0.43, y: square.minY + side * 0.74))
+            tick.line(to: NSPoint(x: square.minX + side * 0.82, y: square.minY + side * 0.27))
+            tick.lineWidth = max(1.5, side * 0.14)
+            tick.lineCapStyle = .round
+            tick.lineJoinStyle = .round
+            Design.card.setStroke(); tick.stroke()
+        } else {
             ink.setStroke()
             let outline = NSBezierPath(rect: square.insetBy(dx: 0.5, dy: 0.5))
             outline.lineWidth = hovering ? 2 : 1
             outline.stroke()
+            if state == .mixed {
+                let dash = NSBezierPath()
+                dash.move(to: NSPoint(x: square.minX + side * 0.22, y: square.midY))
+                dash.line(to: NSPoint(x: square.maxX - side * 0.22, y: square.midY))
+                dash.lineWidth = max(1.5, side * 0.12)
+                dash.lineCapStyle = .round
+                dash.stroke()
+            }
         }
         Design.attributed(title, .bodyStrong, colour: ink).draw(x: square.maxX + 8, baseline: baseline, width: max(0, bounds.width - square.maxX - 12))
         if window?.firstResponder === self {

@@ -12,7 +12,8 @@ final class Handler_File_Manager {
         [Handler_File_App_Data(), Handler_File_Catalogue(), Handler_File_Palette(), Handler_File_Typography(),
          Handler_File_Swatches(), Handler_File_Swatch(), Handler_File_Information(), Handler_File_Colour_Profiles(),
          Handler_File_Print_Profile(), Handler_File_Proof(), Handler_File_History(), Handler_File_Key_Profile(),
-         Handler_File_ASE_Registry(), Handler_File_Sidecar(), Handler_File_Share(), Handler_File_QR()]
+         Handler_File_ASE_Registry(), Handler_File_Sidecar(), Handler_File_Share(), Handler_File_QR(),
+         Handler_File_Transform_Preset(), Handler_File_Diagram_Preset(),Handler_File_Image_Palette_Recipe()]
     }
 
     init(filesystem: FileSystemAccess = FileSystemAccess(), metadata: FileMetadataProvider = FileMetadataProvider(), registerDefaults: Bool = true) {

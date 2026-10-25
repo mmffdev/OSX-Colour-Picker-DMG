@@ -5,6 +5,13 @@ import CoreGraphics
 // Run with: MMFFDevColour3 --self-test
 // Exercises the library logic against a throwaway folder. Never touches real data.
 
+private final class ColourModeTestSource:NSObject,NSOutlineViewDataSource {
+    let items=[NSObject(),NSObject()]
+    func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int {item == nil ? items.count:0}
+    func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any {items[index]}
+    func outlineView(_ outlineView:NSOutlineView,isItemExpandable item:Any)->Bool {false}
+}
+
 func runSelfTest() -> Never {
     var passed = 0, failed = 0
     func check(_ ok: Bool, _ what: String) {
@@ -22,6 +29,289 @@ func runSelfTest() -> Never {
           "self-test catalogue rename updates isolated preferences without probing the real workspace")
     preferences.set(savedCatalogue, forKey: Catalogues.currentKey)
     preferences.set(savedCatalogueID, forKey: "currentCatalogueID")
+
+    do {
+        let source=UUID()
+        var graph=PaletteTransformGraph(sourcePaletteID:source,name:"Original",keys:["#FF0000","#000000"])
+        let root=graph.root.id
+        let firstSlot=graph.branches[0].id
+        let secondSlot=graph.addBranch(after:root)
+        check(graph.nodes.count == 1 && graph.branches.count == 2 && graph.branches.allSatisfy{$0.outputID == nil},
+              "branching opens an independent empty row before any palette is transformed")
+        let first=graph.transform(.hueRotate,in:firstSlot)
+        let second=secondSlot.flatMap{graph.transform(.greyscale,in:$0)}
+        check(graph.nodes.count == 3 && graph.root.hexes == ["#FF0000","#000000"] && first != second,
+              "transform branches preserve their source snapshot and have independent identities")
+        check(graph.nodes[1].hexes[0] != graph.nodes[2].hexes[0] && graph.nodes[1].parentID == root && graph.nodes[2].parentID == root,
+              "each branch selector creates its own derived palette")
+        _ = graph.transform(.darker,in:firstSlot)
+        check(graph.nodes.count == 3 && graph.nodes[1].formula == .darker && graph.nodes[2].formula == .greyscale,
+              "changing one node formula recomputes only that branch")
+        let nested=first.flatMap{graph.append(.lighter,after:$0)}
+        check(nested != nil && graph.nodes.last?.parentID == first && graph.nodes[2].hexes == ["#808080","#000000"],
+              "extending one branch leaves its sibling unchanged")
+        if let stage=graph.branches.first(where:{$0.id==firstSlot})?.stages.first,
+           let inserted=graph.insertTransform(after:stage.id,in:firstSlot) {
+            _ = graph.transform(.lighter,in:firstSlot,stageID:stage.id)
+            let fork=graph.addBranch(after:root,from:firstSlot,stageID:stage.id,passThrough:true)
+            _ = graph.transform(.darker,in:firstSlot,stageID:inserted)
+            let forkHexes=fork.flatMap{id in graph.branches.first{$0.id==id}?.outputID}.flatMap{id in graph.nodes.first{$0.id==id}?.hexes}
+            check(forkHexes == ["#FF3333","#333333"] && graph.nodes.first(where:{$0.id==first})?.hexes != forkHexes,
+                  "a branch after a transform receives that stage's colours before later transforms")
+            graph.setAmount(50,in:firstSlot,stageID:stage.id)
+            let updatedFork=fork.flatMap{id in graph.branches.first{$0.id==id}?.outputID}.flatMap{id in graph.nodes.first{$0.id==id}?.hexes}
+            check(updatedFork != forkHexes && graph.nodes.first(where:{$0.id==second})?.hexes == ["#808080","#000000"],
+                  "a panel adjustment updates downstream palettes while independent siblings retain their colours")
+        }
+        let roundTrip=try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:ColourFiles.encoder().encode(graph))
+        check(roundTrip == graph && graph.nodes.allSatisfy{$0.savedPaletteID == nil},
+              "a transform graph saves and reloads without publishing results to Library")
+        if var old=try? JSONSerialization.jsonObject(with:ColourFiles.encoder().encode(graph)) as? [String:Any] {
+            old.removeValue(forKey:"branches")
+            let migrated=try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:JSONSerialization.data(withJSONObject:old))
+            check(migrated?.nodes.count == graph.nodes.count && migrated?.branches.filter{$0.outputID != nil}.count == graph.nodes.count-1,
+                  "existing canvases recover their generated branches and empty Node selectors")
+        }
+    }
+
+    do {
+        var graph=PaletteTransformGraph(sourcePaletteID:UUID(),name:"Hue source",keys:["#FF0000","#008000"])
+        let rootBranch=graph.branches[0].id,stageID=graph.branches[0].stages[0].id
+        let first=graph.transform(.hueRotate,in:rootBranch)!
+        let childBranch=graph.branches.first{$0.parentID==first}!.id
+        let second=graph.transform(.lighter,in:childBranch)!
+        let originalFirst=graph.nodes.first{$0.id==first}!.hexes
+        let originalSecond=graph.nodes.first{$0.id==second}!.hexes
+        graph.setPreviewDownstream(false,in:rootBranch,stageID:stageID)
+        graph.setAmount(91,in:rootBranch,stageID:stageID,previewOnly:true)
+        check(graph.nodes.first{$0.id==first}!.hexes != originalFirst && graph.nodes.first{$0.id==second}!.hexes == originalSecond,
+              "Hue preview always changes the next palette and can hold downstream palettes still")
+        graph.commitPreview(in:rootBranch)
+        check(graph.nodes.first{$0.id==second}!.hexes != originalSecond && graph.branches[0].stages[0].amount == 91,
+              "committing a one-degree Hue adjustment updates every downstream palette")
+        let reloaded=try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:ColourFiles.encoder().encode(graph))
+        check(reloaded?.branches[0].stages[0].previewDownstream == false && reloaded?.nodes == graph.nodes,
+              "Hue degrees and downstream-preview preference survive a canvas reload")
+        graph.removePalette(first)
+        check(graph.nodes.count == 1 && graph.branches[0].outputID == nil,
+              "removing an upstream palette removes its descendants from the canvas")
+        let replacement=graph.transform(.hueRotate,in:rootBranch)
+        check(replacement != nil && graph.nodes.count == 2,"an upstream panel can make a fresh output after removal")
+        if let later=graph.insertTransform(after:stageID,in:rootBranch) {
+            _ = graph.transform(.darker,in:rootBranch,stageID:later)
+            graph.removeTransform(later)
+            check(graph.nodes.count == 1 && graph.branches[0].stages.count == 1 && graph.branches[0].outputID == nil,
+                  "removing a chained transform prunes its output and retains earlier controls")
+        }
+        graph.removeBranch(rootBranch)
+        check(graph.nodes.count == 1 && graph.branches.count == 1 && graph.branches[0].outputID == nil,
+              "removing a branch prunes its flow and retains one empty control for the source")
+    }
+
+    do {
+        var graph=PaletteTransformGraph(sourcePaletteID:UUID(),name:"States",keys:["#FF0000"])
+        let branchID=graph.branches[0].id,stageID=graph.branches[0].stages[0].id
+        let first=graph.transform(.hueRotate,in:branchID)!
+        let childID=graph.branches.first{$0.parentID==first}!.id
+        let second=graph.transform(.darker,in:childID)!
+        let transformed=graph.nodes.first{$0.id==first}!.hexes
+        graph.setBypassed(true,stageID:stageID)
+        check(graph.nodes.first{$0.id==first}!.hexes == graph.root.hexes && graph.nodes.first{$0.id==second}!.hexes == ["#CC0000"],
+              "bypassing a transform preserves its panel but passes source colours into every downstream transform")
+        graph.setBypassed(false,stageID:stageID)
+        check(graph.nodes.first{$0.id==first}!.hexes == transformed,"resuming a bypass restores the formula across the graph")
+        graph.setTransformHidden(true,stageID:stageID)
+        check(graph.nodes.first{$0.id==first}!.hexes == graph.root.hexes && graph.nodes.count == 3,
+              "hiding a transform reconnects its input to the output without deleting downstream palettes")
+        graph.setPaletteHidden(true,paletteID:first)
+        check(graph.nodes.first{$0.id==first}!.hidden && graph.nodes.contains(where:{$0.id==second}),
+              "hiding a palette preserves its downstream flow")
+        let saved=try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:ColourFiles.encoder().encode(graph))
+        check(saved == graph,"bypass and visibility states survive a canvas reload")
+        graph.hideBranch(childID)
+        check(graph.nodes.count == 2 && graph.branches.first{$0.id==childID}?.hidden == true,
+              "hiding a branch clears its dependent output while preserving its location")
+        graph.showBranch(childID)
+        check(graph.nodes.count == 3 && graph.branches.first{$0.id==childID}?.hidden == false,
+              "showing a branch can create a fresh output")
+    }
+
+    do {
+        // Two distinct masters deliberately share one rounded sRGB preview.
+        let a=RGBSpace.srgb.master(of:[0.31400,0.4,0.6])
+        let b=RGBSpace.srgb.master(of:[0.31401,0.4,0.6])
+        func definition(_ master:XYZ)->ColourDefinition {
+            ColourDefinition(source:ColourSource(space:"xyz",values:[master.x,master.y,master.z]),master:master,kind:.surface)
+        }
+        let originals=[definition(a),definition(b)]
+        var graph=PaletteTransformGraph(sourcePaletteID:UUID(),name:"Precise",keys:["#506699","#506699"],definitions:originals)
+        let first=graph.transform(.hueRotate,in:graph.branches[0].id)!
+        let next=graph.branches.first{$0.parentID==first}!.id
+        let last=graph.transform(.lighter,in:next)!
+        let output=graph.nodes.first{$0.id==last}!
+        check(graph.root.definitions == originals && graph.root.hexes[0] == graph.root.hexes[1]
+              && output.definitions?.count == 2 && output.definitions![0].master != output.definitions![1].master,
+              "transform branches retain distinct Double masters even when their 8-bit previews match")
+        let decoded=(try? ColourFiles.encoder().encode(graph)).flatMap{try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:$0)}
+        check(decoded?.nodes.first{$0.id==last}?.definitions == output.definitions,
+              "saved transform canvases retain full-precision derived colour snapshots")
+        var library=Library()
+        let keys=output.definitions!.compactMap{library.addColour($0)}
+        check(keys.count == 2 && keys[0] != keys[1] && keys.allSatisfy(ColourKeys.isKey)
+              && library.definition(of:keys[0]) == output.definitions![0] && library.definition(of:keys[1]) == output.definitions![1],
+              "saving a derived palette uses its master definitions rather than its rounded preview")
+    }
+
+    do {
+        let original=[ColourDefinition.of(hex:"#375D91")!,ColourDefinition.of(hex:"#D2B070")!]
+        var graph=PaletteTransformGraph(sourcePaletteID:UUID(),name:"Reusable",keys:["#375D91","#D2B070"],definitions:original)
+        let branch=graph.branches[0].id
+        let first=graph.transform(.hueRotate,in:branch)!
+        let secondBranch=graph.branches.first{$0.parentID==first}!.id
+        let second=graph.transform(.exposure,in:secondBranch)!
+        let stageID=graph.branches.first{$0.id==secondBranch}!.stages[0].id
+        var settings=TransformSettings();settings.numbers["strength"]=0.75
+        graph.configure(stageID,amount:1,settings:settings)
+        let before=graph.nodes.first{$0.id==second}!.definitions!
+        graph.setAmount(60,in:branch,stageID:graph.branches[0].stages[0].id)
+        check(graph.nodes.first{$0.id==second}!.definitions != before && graph.root.definitions == original,
+              "a high-precision upstream edit recomputes every downstream master from its immediate parent")
+        let preset=ColnodeDocument(name:"Reusable Flow",graph:graph)
+        let decoded=(try? ColourFiles.encoder().encode(preset)).flatMap{try? ColourFiles.decoder().decode(ColnodeDocument.self,from:$0)}
+        let replacement=[ColourDefinition.of(hex:"#A42266")!,ColourDefinition.of(hex:"#21A37A")!]
+        let applied=decoded?.graph.applied(to:UUID(),name:"Another Palette",keys:["#A42266","#21A37A"],definitions:replacement)
+        check(decoded?.graph.root.definitions == [] && applied?.root.definitions == replacement
+              && applied?.branches.count == graph.branches.count && applied?.nodes.count == graph.nodes.count
+              && applied?.nodes.first{$0.id==second}?.definitions != graph.nodes.first{$0.id==second}?.definitions,
+              ".colnode embeds topology and settings, then evaluates against a different palette without carrying source colours")
+        let transformPreset=ColtraDocument(transformType:.exposure,name:"One Stop",amount:1,settings:settings)
+        let transformCopy=(try? ColourFiles.encoder().encode(transformPreset)).flatMap{try? ColourFiles.decoder().decode(ColtraDocument.self,from:$0)}
+        check(transformCopy?.transformType == .exposure && transformCopy?.settings == settings && transformCopy?.amount == 1,
+              ".coltra retains the owning transform type and its full-precision settings")
+    }
+
+    do {
+        let cube="""
+        LUT_3D_SIZE 2
+        0 0 0
+        1 0 0
+        0 1 0
+        1 1 0
+        0 0 1
+        1 0 1
+        0 1 1
+        1 1 1
+        """
+        let clf="""
+        <ProcessList id="Identity" compCLFversion="3">
+          <Description>Floating-point identity</Description>
+          <Matrix inBitDepth="32f" outBitDepth="32f"><Array dim="3 3">1 0 0 0 1 0 0 0 1</Array></Matrix>
+        </ProcessList>
+        """
+        let clfCube="""
+        <ProcessList id="Identity3D" compCLFversion="3">
+          <LUT3D inBitDepth="32f" outBitDepth="32f"><Array dim="2 2 2 3">
+            0 0 0
+            0 0 1
+            0 1 0
+            0 1 1
+            1 0 0
+            1 0 1
+            1 1 0
+            1 1 1
+          </Array></LUT3D>
+        </ProcessList>
+        """
+        let cubeTable=try? PaletteLUT.read(Data(cube.utf8),name:"identity.cube")
+        let clfTable=try? PaletteLUT.read(Data(clf.utf8),name:"identity.clf")
+        let clfCubeTable=try? PaletteLUT.read(Data(clfCube.utf8),name:"identity3d.clf")
+        let value=[0.123456789,0.423456789,0.723456789]
+        check(cubeTable?.sample(value).elementsEqual(value,by:{abs($0-$1)<1e-12}) == true
+              && clfTable?.sample(value).elementsEqual(value,by:{abs($0-$1)<1e-12}) == true
+              && clfCubeTable?.sample(value).elementsEqual(value,by:{abs($0-$1)<1e-12}) == true,
+              "floating-point .cube and CLF identity transforms preserve sub-byte colour values")
+        check((try? PaletteLUT.read(Data("<ProcessList><Gamma/></ProcessList>".utf8),name:"unsupported.clf")) == nil,
+              "unsupported CLF processes fail clearly instead of silently changing the palette")
+        let long1D="LUT_1D_SIZE 256\n" + (0..<256).map { index in
+            let value=Double(index)/255
+            return "\(value) \(value) \(value)"
+        }.joined(separator:"\n")
+        let longTable=try? PaletteLUT.read(Data(long1D.utf8),name:"precision.cube")
+        check(longTable?.sample(value).elementsEqual(value,by:{abs($0-$1)<1e-12}) == true,
+              "common 256-entry 1D LUTs interpolate without 8-bit rounding")
+    }
+
+    do {
+        let input=[ColourDefinition.of(hex:"#375D91")!,ColourDefinition.of(hex:"#D2B070")!]
+        let cube="""
+        LUT_1D_SIZE 2
+        0.1 0.2 0.3
+        0.9 0.8 0.7
+        """
+        var failures:[String]=[]
+        for formula in PaletteTransformGraph.Formula.allCases where formula != .merge {
+            var stage=PaletteTransformGraph.Stage(formula:formula)
+            switch formula {
+            case .levels:stage.settings.numbers=["black":0.1,"white":0.9,"gamma":1.4]
+            case .curves:stage.settings.curve=[TransformPoint(x:0.5,y:0.7)]
+            case .exposure:stage.amount=1
+            case .paletteSpacing:stage.settings.numbers=["low":0.1,"high":0.9,"strength":1]
+            case .contrastTarget:stage.settings.numbers=["foreground":0,"background":1,"ratio":7]
+            case .whiteBalance:stage.settings.choices=["sourceWhite":"D50","targetWhite":"A"]
+            case .referenceMatch,.spectralRelight:stage.settings.references=input.reversed().map(\.master)
+            case .ascCDL:stage.settings.numbers=["slope0":0.8,"offset1":0.03,"power2":1.2,"saturation":1.1]
+            case .applyLUT:stage.settings.sourceName="test.cube";stage.settings.sourceData=Data(cube.utf8)
+            default:break
+            }
+            let output=PaletteTransformEngine.apply(formula,to:input,stage:stage)
+            if output.count != input.count || output.contains(where:{$0.master.x.isNaN || $0.master.y.isNaN || $0.master.z.isNaN}) {failures.append(formula.rawValue)}
+            if formula != .gamutFit && output == input {failures.append("\(formula.rawValue) left its output unchanged")}
+        }
+        check(failures.isEmpty,"all 18 transform engines produce finite, live master-colour output: \(failures)")
+        let spacingInput=["#183047","#375D91","#809090","#D2B070","#F6E1B6"].compactMap{ColourDefinition.of(hex:$0)}
+        var spacing=PaletteTransformGraph.Stage(formula:.paletteSpacing)
+        spacing.settings.numbers=["low":0,"high":1,"strength":1]
+        spacing.settings.lockedIndices=[0,2,4]
+        let spaced=PaletteTransformEngine.apply(.paletteSpacing,to:spacingInput,stage:spacing)
+        check(spaced.count==5 && [0,2,4].allSatisfy{spaced[$0].master==spacingInput[$0].master}
+              && [1,3].contains{spaced[$0].master != spacingInput[$0].master},
+              "checked palette-spacing colours stay fixed while unchecked colours move")
+        let curvePoints=[TransformPoint(x:0,y:0),TransformPoint(x:0.3,y:0.8),TransformPoint(x:1,y:1)]
+        check(abs(PaletteTransformEngine.curveValue(0.3,curvePoints)-0.8)<1e-9
+              && PaletteTransformEngine.curveValue(0.15,curvePoints).isFinite,
+              "tone curve spline passes through its control points without losing precision")
+    }
+
+    do {
+        var graph=PaletteTransformGraph(sourcePaletteID:UUID(),name:"Merge Source",keys:["#C02020","#2070B0"])
+        let first=graph.branches[0].id
+        let firstOutput=graph.transform(.lighter,in:first)!
+        let receiver=graph.branches.first{$0.parentID==firstOutput}!.id
+        let side=graph.addBranch(after:graph.root.id)!
+        let sideOutput=graph.transform(.greyscale,in:side)!
+        check(graph.mergeSources(for:receiver).map(\.id)==[side] && graph.mergeSources(for:first).map(\.id)==[side],
+              "Merge appears for parallel branches and refuses ancestor or cyclic sources")
+        let merged=graph.transform(.merge,in:receiver)!
+        let stage=graph.branches.first{$0.id==receiver}!.stages[0]
+        var settings=stage.settings;settings.choices["blend"]="mix";settings.numbers["opacity"]=1
+        graph.configure(stage.id,settings:settings,mergeSourceBranchID:side)
+        let mergedValues=graph.nodes.first{$0.id==merged}?.definitions?.map(\.master)
+        let sourceValues=graph.nodes.first{$0.id==sideOutput}?.definitions?.map(\.master)
+        check(mergedValues != nil && sourceValues != nil && zip(mergedValues!,sourceValues!).allSatisfy{pair in abs(pair.0.x-pair.1.x)<1e-9 && abs(pair.0.y-pair.1.y)<1e-9 && abs(pair.0.z-pair.1.z)<1e-9},
+              "full-strength linear merge matches the selected branch's floating-point masters")
+        let before=graph.nodes.first{$0.id==merged}!.definitions
+        _ = graph.transform(.darker,in:side)
+        check(graph.nodes.first{$0.id==merged}!.definitions != before,
+              "editing a merge source recomputes the dependent output")
+        let path=graph.history(for:merged)
+        check(path.first?.id==graph.root.id && path.last?.id==merged && path.contains{$0.id==stage.id}
+              && path.contains{$0.id==graph.branches.first{$0.id==side}?.stages[0].id},
+              "palette history includes the source, merge input, transform and final output")
+        let copy=(try? ColourFiles.encoder().encode(graph)).flatMap{try? ColourFiles.decoder().decode(PaletteTransformGraph.self,from:$0)}
+        check(copy==graph && copy?.branches.first{$0.id==receiver}?.code==graph.branchCode(receiver)
+              && copy?.branches.first{$0.id==receiver}?.stages[0].mergeSourceBranchID==side,
+              "branch codes and merge connections survive a diagram round trip")
+    }
 
     do {
         let original:[NSColor]=[.red,.blue],proof:[NSColor]=[.orange,.cyan]
@@ -47,7 +337,53 @@ func runSelfTest() -> Never {
     check(analysisOnly.0 == 0 && analysisOnly.1 == Design.App.railWidth,"narrow workspace can switch to the full-width analysis rail")
     let neitherRail=WorkspaceResponsiveGeometry.rails(width:1200,selection:2,library:true,analysis:true)
     check(neitherRail.0 == 0 && neitherRail.1 == 0,"narrow workspace can reclaim both rails without changing wide-layout preferences")
-    check(PaletteFilterControls.height(for:600) == 32 && PaletteFilterControls.actionbarHeight(for:838) == 52,"filters remain one compact row in a narrow window with one full-width rail")
+    check(PaletteFilterControls.height(for:600) == 32 && PaletteFilterControls.actionbarHeight(for:838) == 58,"filters remain one compact row in a narrow window with one full-width rail")
+    do {
+        let source=ColourModeTestSource(),tree=WorkspaceBranchTree(frame:NSRect(x:0,y:0,width:300,height:100))
+        let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("colour-test"))
+        tree.addTableColumn(column);tree.outlineTableColumn=column;tree.dataSource=source;tree.reloadData()
+        var values:[[WorkspaceColourMode.Channel:String]]=[[:],[:]]
+        let mode=WorkspaceColourMode()
+        mode.register(tree){item in
+            guard let node=item as? NSObject,let index=source.items.firstIndex(where:{$0 === node}) else{return nil}
+            return WorkspaceColourMode.Target(id:String(index),name:String(index),read:{channel in values[index][channel].map(Design.hex)},write:{channel,hex in values[index][channel]=hex})
+        }
+        mode.begin();mode.select(source.items[0],in:tree)
+        mode.choose("#F94039",for:.background)
+        check(mode.selected.count == 1 && values[0][.background] == "#F94039","background pick keeps the node selected for its text colour")
+        mode.choose("#1C1B1B",for:.text)
+        check(values[0][.text] == "#1C1B1B","text pick applies to the same node after background")
+        mode.select(source.items[1],in:tree)
+        check(mode.selected.map(\.id) == ["1"] && values[1].isEmpty,"selecting the next node replaces the target without carrying colour")
+        mode.end()
+    }
+    do {
+        let saved=AppPreferences.shared.object(forKey:WorkspaceNodeAppearance.colourKey)
+        defer{AppPreferences.shared.set(saved,forKey:WorkspaceNodeAppearance.colourKey)}
+        let schema=UUID(),first=UUID(),second=UUID()
+        AppPreferences.shared.set([["id":schema.uuidString,"colour":"#F94039","textColour":"#FFFFFF","borderColour":"#1F1F1F"]],forKey:WorkspaceNodeAppearance.colourKey)
+        let firstKey=WorkspaceNodeAppearance.projectNodeKey(project:first,node:schema)
+        let secondKey=WorkspaceNodeAppearance.projectNodeKey(project:second,node:schema)
+        check(firstKey != secondKey && String(describing:StudioFrame.Place.project(first)) != String(describing:StudioFrame.Place.project(second)),
+              "project roots and seeded children have distinct appearance identities")
+        check(hexOf(WorkspaceNodeAppearance.colour(firstKey) ?? .clear) == "#F94039" && hexOf(WorkspaceNodeAppearance.colour(secondKey) ?? .clear) == "#F94039",
+              "legacy template appearance is preserved separately for each existing project child")
+        WorkspaceNodeAppearance.set("#287AF6",for:firstKey)
+        WorkspaceNodeAppearance.setText("#111111",for:firstKey)
+        WorkspaceNodeAppearance.setBorder("#FADF66",for:firstKey)
+        check(hexOf(WorkspaceNodeAppearance.colour(secondKey) ?? .clear) == "#F94039" &&
+              hexOf(WorkspaceNodeAppearance.textColour(secondKey) ?? .clear) == "#FFFFFF" &&
+              hexOf(WorkspaceNodeAppearance.borderColour(secondKey) ?? .clear) == "#1F1F1F",
+              "editing one project's child leaves another project's background, text and border untouched")
+    }
+    do {
+        let saved=AppPreferences.shared.object(forKey:WorkspaceCustomColours.key)
+        defer{AppPreferences.shared.set(saved,forKey:WorkspaceCustomColours.key)}
+        AppPreferences.shared.set([String](),forKey:WorkspaceCustomColours.key)
+        check(WorkspaceCustomColours.add(["#f94039","#287af6","#F94039"]) == 2 &&
+              WorkspaceCustomColours.all() == ["#F94039","#287AF6"],
+              "palette and swatch colours copy into Custom Colours in order without duplicate links")
+    }
     runSpectralTests(check:check)
     runColourTargetTests(check:check)
     runICCProfileTests(check:check)
@@ -112,6 +448,41 @@ func runSelfTest() -> Never {
     check(lib.colours.contains { $0.hex == "#00FF00" }, "imported hex is normalised to uppercase")
     check(lib.swatches.isEmpty && lib.activeSwatchID == nil, "starts with no swatches")
     check(fm.fileExists(atPath: store.url.path), "v2 library file is created")
+
+    do {
+        let scope=TransformPresetStore.Scope.catalogue(store)
+        let settings=TransformSettings(numbers:["gamma":1.23456789])
+        let preset=ColtraDocument(transformType:.levels,name:"Precise Levels",amount:20,settings:settings)
+        let item=try TransformPresetStore.save(preset,scope:scope)
+        let indexed=try TransformPresetStore.list(scope,kind:.transform,type:.levels)
+        let otherType=try TransformPresetStore.list(scope,kind:.transform,type:.curves)
+        let loadedTransform=try TransformPresetStore.transform(item,scope:scope)
+        check(indexed.map(\.id)==[item.id] && otherType.isEmpty && loadedTransform.settings==settings,
+              "catalogue .colcat indexes only matching .coltra types and opens their data on selection")
+        let document=ColnodeDocument(name:"Starter Flow",graph:PaletteTransformGraph(sourcePaletteID:UUID(),name:"A",keys:["#203040"]))
+        let diagram=try TransformPresetStore.save(document,scope:scope)
+        let loadedDiagram=try TransformPresetStore.diagram(diagram,scope:scope)
+        let indexedDiagrams=try TransformPresetStore.list(scope,kind:.diagram)
+        check(loadedDiagram.graph.root.definitions == [] && indexedDiagrams.map(\.id)==[diagram.id],
+              "catalogue .colcat indexes a portable .colnode flow without embedding its source colours")
+        let portable=root.appendingPathComponent("portable-flow.colnode")
+        try TransformPresetStore.exportedData(diagram,scope:scope).write(to:portable)
+        let importedDiagram=try TransformPresetStore.importFile(portable,scope:scope)
+        let importedFlow=try TransformPresetStore.diagram(importedDiagram,scope:scope)
+        let reapplied=importedFlow.graph.applied(
+            to:UUID(),name:"Another Source",keys:["#114488"],definitions:[ColourDefinition.of(hex:"#114488")!])
+        check(reapplied.root.name=="Another Source" && reapplied.root.definitions?.count==1,
+              "an exported .colnode imports and applies to another palette")
+        try TransformPresetStore.rename(item,to:"Renamed Levels",scope:scope)
+        let renamed=try TransformPresetStore.list(scope,kind:.transform,type:.levels)
+        let renamedFile=try TransformPresetStore.transform(item,scope:scope)
+        check(renamed.first?.name=="Renamed Levels" && renamedFile.name=="Renamed Levels",
+              "renaming a transform preset updates its index and portable file")
+        try TransformPresetStore.remove(item,scope:scope)
+        let afterRemoval=try TransformPresetStore.list(scope,kind:.transform,type:.levels)
+        check(afterRemoval.isEmpty,
+              "removing a transform preset clears its catalogue index")
+    } catch {check(false,"transform preset store round trip: \(error)")}
 
     let safetySlide = SwissSlide(frame: NSRect(x: 0, y: 0, width: 440, height: SwissSlide.height))
     for _ in 0..<9 { _ = safetySlide.accessibilityPerformIncrement() }
@@ -457,6 +828,87 @@ func runSelfTest() -> Never {
     let accents = extractPalette(from: dialog, count: 8)
     check(accents.count == 3 && accents.contains { near($0, "#B3252F") },
           "a small accent colour is kept and lookalikes are not padded in: \(accents)")
+
+    var imageRecipe=ImagePaletteRecipe()
+    imageRecipe.sourcePath="/linked/Sunset.cr2";imageRecipe.sourceName="Sunset.cr2"
+    imageRecipe.minimumColours=2;imageRecipe.maximumColours=4;imageRecipe.targetColours=4
+    for method in ImagePaletteRecipe.Method.allCases {
+        imageRecipe.method=method
+        let result=ImagePaletteExtractor.extract(twoTone,recipe:imageRecipe)
+        let swatches=result.colours.map{RGBSpace.srgb.text($0.source.values)}
+        check(result.colours.count == 2 && swatches.contains{near($0,"#FF0000")} && swatches.contains{near($0,"#0000FF")},
+              "\(method.rawValue) keeps both actual colours in a two-tone image: \(swatches)")
+        check(abs(result.shares.reduce(0,+)-1)<0.001,
+              "\(method.rawValue) reports coverage across the whole image")
+    }
+    imageRecipe.maximumColours=2;imageRecipe.targetColours=32
+    check(ImagePaletteExtractor.extract(dialog,recipe:imageRecipe).colours.count <= 2,
+          "image extraction always obeys the maximum colour count")
+    imageRecipe.method = .perceptual;imageRecipe.minimumColours=1;imageRecipe.maximumColours=8;imageRecipe.targetColours=2
+    check(ImagePaletteExtractor.extract(dialog,recipe:imageRecipe).colours.count <= 2,
+          "perceptual extraction obeys the target count even when the maximum is higher")
+    // Small textured subjects should survive the area threshold as whole colour
+    // regions; no single fine RGB bin contains enough pixels on its own.
+    let texturedAccents=testImage(width:240,height:200) {x,y in
+        let variation=UInt8((x*37+y*19)%35)
+        if (35..<75).contains(x) && (25..<50).contains(y) {return (170+variation,25+variation/2,28+variation/3)}
+        if (85..<120).contains(x) && (75..<100).contains(y) {return (222+variation/2,100+variation,18+variation/3)}
+        if (150..<185).contains(x) && (115..<140).contains(y) {return (50+variation/3,135+variation,38+variation/3)}
+        return (188,186,183)
+    }
+    var texturedRecipe=ImagePaletteRecipe();texturedRecipe.minimumColours=1
+    let texturedResult=ImagePaletteExtractor.extract(texturedAccents,recipe:texturedRecipe)
+    let textured=texturedResult.colours.map{$0.source.values}
+    let hasRed=textured.contains{$0.count>=3 && $0[0]>$0[1]*1.5 && $0[0]>$0[2]*1.5 && $0[1]<$0[0]*0.35}
+    let hasOrange=textured.contains{$0.count>=3 && $0[0]>$0[1]*1.3 && $0[1]>$0[2]*2 && $0[1]>$0[0]*0.35}
+    let hasGreen=textured.contains{$0.count>=3 && $0[1]>$0[0]*1.5 && $0[1]>$0[2]*1.5}
+    check(hasRed && hasOrange && hasGreen,"textured red, orange and green accents survive perceptual extraction")
+    check(texturedResult.targets.count == texturedResult.colours.count &&
+          texturedResult.targets.allSatisfy{(0...1).contains($0.x) && (0...1).contains($0.y)},
+          "each extracted swatch has a position inside the adjusted image")
+    if let redIndex=textured.firstIndex(where:{$0.count>=3 && $0[0]>$0[1]*1.5 && $0[0]>$0[2]*1.5 && $0[1]<$0[0]*0.35}),
+       texturedResult.targets.indices.contains(redIndex) {
+        let redTarget=texturedResult.targets[redIndex]
+        check((0.13...0.33).contains(Double(redTarget.x)) && (0.10...0.27).contains(Double(redTarget.y)),
+              "red target marks the red image region")
+    }
+    for area in [false,true] {
+        let sample=ImagePaletteExtractor.sampleColour(texturedAccents,at:CGPoint(x:0.23,y:0.18),area:area)?.source.values ?? []
+        check(sample.count == 3 && sample[0]>sample[1]*1.5 && sample[0]>sample[2]*1.5,
+              "\(area ? "area" : "point") picker samples the selected image region")
+    }
+    let isolatedYellow=testImage(width:40,height:40) {x,y in
+        (x == 20 && (y == 19 || y == 20)) ? (235,190,26):(148,121,99)
+    }
+    let centre=CGPoint(x:20.0/40.0,y:20.0/40.0)
+    let centrePixel=ImagePaletteExtractor.sampleColour(isolatedYellow,at:centre,area:false)?.source.values ?? []
+    let centreAverage=ImagePaletteExtractor.sampleColour(isolatedYellow,at:centre,area:true)?.source.values ?? []
+    check(centrePixel.count == 3 && centrePixel[0]>0.80 && centrePixel[1]>0.65 && centrePixel[2]<0.25 &&
+          centreAverage.count == 3 && centreAverage[1]<centrePixel[1]-0.08,
+          "target movement reads the exact centre pixel instead of averaging surrounding colour")
+    let dropPasteboard=NSPasteboard(name:NSPasteboard.Name("image-palette-drop-"+UUID().uuidString))
+    dropPasteboard.clearContents()
+    let dropPNG=NSBitmapImageRep(cgImage:isolatedYellow).representation(using:.png,properties:[:])
+    if let dropPNG {dropPasteboard.setData(dropPNG,forType:.png)}
+    let dropPayload=DesignerImageDrop.read(dropPasteboard)
+    let decodedDrop:CGImage? = {
+        guard case .imageData(let data)? = dropPayload else{return nil}
+        return ImagePaletteExtractor.decode(data)
+    }()
+    check(DesignerImageDrop.supports(dropPasteboard) && decodedDrop?.width == 40 && decodedDrop?.height == 40,
+          "an in-memory image drag opens a bounded preview without a Library file")
+    let imageInspector=ImagePaletteInspectorPane(frame:NSRect(x:0,y:0,width:320,height:1400))
+    let imageSliders=imageInspector.subviews.compactMap{$0 as? NSSlider}
+    check(imageSliders.count == 13 && imageSliders.allSatisfy{$0.target === imageInspector && $0.action != nil},
+          "image grade and extraction sliders retain their actions after custom cell setup")
+    let preset=ImagePalettePreset(name:"Sunset Grade",settings:ImagePaletteSettings(imageRecipe))
+    let presetData=try? JSONEncoder().encode(preset)
+    let savedRecipe=presetData.flatMap{try? JSONDecoder().decode(ImagePalettePreset.self,from:$0)}
+    var anotherImage=ImagePaletteRecipe();anotherImage.sourcePath="/another/Photograph.heic"
+    savedRecipe?.settings.apply(to:&anotherImage)
+    check(savedRecipe?.settings.method == imageRecipe.method && anotherImage.sourcePath == "/another/Photograph.heic" &&
+          !(presetData.flatMap{String(data:$0,encoding:.utf8)} ?? "").contains("/linked/Sunset.cr2"),
+          "a .colimg recipe stores settings only and applies them to the current image")
 
     runSyncTests(in: root, check: check)
     runColourTests(in: root, check: check)
@@ -2655,6 +3107,15 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let vividKey = wideLib.addColour(vivid, at: t) ?? "", plainKey = wideLib.addColour(plainRGB, at: t) ?? ""
     check(ColourKeys.isKey(vividKey) && plainKey == "#4F8093" && wideLib.addColour(vivid, at: t) == vividKey && wideLib.colours.count == 2 && !vivid.fitsSRGB && plainRGB.fitsSRGB,
           "a colour sRGB cannot hold gets a key of its own, a plain sRGB colour keeps its hex, and the same colour twice is one colour")
+    let preciseRGB = ColourDefinition(source: ColourSource(space: RGBSpace.srgb.rawValue, values: [0.5, 0.25, 0.75]),
+                                      master: RGBSpace.srgb.master(of: [0.5, 0.25, 0.75]), kind: .surface)
+    let closeRGB = ColourDefinition(source: ColourSource(space: RGBSpace.srgb.rawValue, values: [0.50001, 0.25, 0.75]),
+                                    master: RGBSpace.srgb.master(of: [0.50001, 0.25, 0.75]), kind: .surface)
+    let preciseKey = wideLib.addColour(preciseRGB, at: t) ?? "", closeKey = wideLib.addColour(closeRGB, at: t) ?? ""
+    check(ColourKeys.isKey(preciseKey) && ColourKeys.isKey(closeKey) && preciseKey != closeKey
+          && displayHex(preciseKey) == displayHex(closeKey)
+          && wideLib.definition(of: preciseKey) == preciseRGB && wideLib.definition(of: closeKey) == closeRGB,
+          "sRGB masters differing below one display byte retain separate identities")
     check(wideLib.definition(of: vividKey) == vivid && displayHex(vividKey) == "#FF0000" && colourKey(vividKey) == vividKey && colourKey("c:nothing") == nil && colourKey("4f8093") == "#4F8093"
           && ColourKeys.label(vividKey) == "P3 " + RGBSpace.displayP3.text([1, 0, 0]) && ColourKeys.label("#4F8093") == "#4F8093",
           "the key gives back the whole definition, shows as its nearest sRGB, and is labelled by its source: \(ColourKeys.label(vividKey))")
@@ -2690,9 +3151,9 @@ func runSwatchNameTests(check: (Bool, String) -> Void) {
     let plainPick = ColourDefinition.picked(NSColor(srgbRed: 79.0 / 255, green: 128.0 / 255, blue: 147.0 / 255, alpha: 1))
     let plainPickKey = plainPick.flatMap { wideLib.addColour($0, at: t) }
     check(ColourDefinition.picked(NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1))?.source.space == RGBSpace.displayP3.rawValue
-          && plainPick?.source.space == RGBSpace.displayP3.rawValue && plainPickKey == "#4F8093"
-          && wideLib.colours.first { $0.hex == "#4F8093" }?.source?.space == RGBSpace.displayP3.rawValue,
-          "a pick is kept whole as the Display P3 the screen showed; one sRGB can hold is keyed by its hex, as ever, with its exact values on the record")
+          && plainPick?.source.space == RGBSpace.displayP3.rawValue && plainPickKey.map(ColourKeys.isKey) == true
+          && plainPickKey.flatMap { wideLib.definition(of: $0) } == plainPick,
+          "a Display P3 pick retains its precise source and receives an independent colour key")
     check(vivid.master.display.colorSpace == .displayP3 && near(Double(vivid.master.display.redComponent), 1, 0.001) && near(Double(vivid.master.display.greenComponent), 0, 0.001)
           && vivid.master.fits(.displayP3) && !vivid.master.fits(.srgb) && !RGBSpace.rec2020.master(of: [0, 1, 0]).fits(.displayP3) && plainRGB.master.shows(on: nil) && !vivid.master.shows(on: nil),
           "a proof chip is painted in Display P3, so a colour beyond sRGB is not flattened; a colour beyond the screen is known to be so")
@@ -3256,7 +3717,7 @@ private func runGlobalAssetsTests(check: (Bool, String) -> Void) {
     do {
         let cats = Catalogues(root: root, legacyURL: nil)
         let first = try CatalogueSetup.createBlank("A", under: cats.folder, catalogues: cats)
-        check(fm.fileExists(atPath: root.appendingPathComponent("Assets/my_library.collib").path) && fm.fileExists(atPath: root.appendingPathComponent("Keys/default.colkeys").path) && fm.fileExists(atPath: root.appendingPathComponent("Global.colhis").path), "setup seeds Assets, Keys and global history before catalogue use")
+        check(fm.fileExists(atPath: root.appendingPathComponent("My Library/my_library.collib").path) && fm.fileExists(atPath: root.appendingPathComponent("Keys/default.colkeys").path) && fm.fileExists(atPath: root.appendingPathComponent("Global.colhis").path), "setup seeds My Library, Keys and global history before catalogue use")
         let store = cats.store(for: first)
         var lib = try store.load()
         let palette = Swatch(id: UUID(), name: "Global Test", createdAt: Date(), entries: [])
@@ -3417,9 +3878,17 @@ private func runWorkspaceStartupTests(check: (Bool, String) -> Void) {
         check((try? WorkspaceInventory.read(root:root)) == nil && !fm.fileExists(atPath:root.path), "Reading absent app data does not create a workspace or Main catalogue")
         try AppHomeSeed.ensure(at:root)
         let empty=try WorkspaceInventory.read(root:root)
-        check(empty.genuinelyEmpty && fm.fileExists(atPath:root.appendingPathComponent("Assets/my_library.collib").path), "App-wide Assets.colcat is excluded from an empty user catalogue list")
-        let internalEntry=WorkspaceInventory.probe(name:"Assets",folder:root.appendingPathComponent("Assets"))
+        check(empty.genuinelyEmpty && fm.fileExists(atPath:root.appendingPathComponent("My Library/my_library.collib").path), "App-wide My Library index is excluded from an empty user catalogue list")
+        let internalEntry=WorkspaceInventory.probe(name:"My Library",folder:root.appendingPathComponent("My Library"))
         check(internalEntry.state != .ready, "A standalone library is not offered as a client catalogue")
+        let renamedLibrary=root.appendingPathComponent("My Library"),oldLibrary=root.appendingPathComponent("Assets")
+        let beforeLibraryMove=try FileHandlerFixture.snapshot(renamedLibrary)
+        try fm.moveItem(at:renamedLibrary,to:oldLibrary)
+        try AppDataStore(root:root).update{$0["assets"]="Assets/my_library.collib"}
+        try AppHomeSeed.ensure(at:root)
+        let afterLibraryMove=try FileHandlerFixture.snapshot(renamedLibrary)
+        let movedManifest=try AppDataStore(root:root).read()
+        check(!fm.fileExists(atPath:oldLibrary.path) && afterLibraryMove == beforeLibraryMove && movedManifest["assets"] as? String == "My Library/my_library.collib", "Existing Assets library moves to My Library without changing its files")
         let first=try CatalogueSetup.createBlank("First",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
         let second=try CatalogueSetup.createBlank("Second",under:root.appendingPathComponent("Catalogues"),catalogues:Catalogues(root:root,legacyURL:nil))
         var inventory=try WorkspaceInventory.read(root:root)
@@ -3616,8 +4085,8 @@ private func runHelpHandlerTests(check:(Bool,String)->Void){
         }
         check(valid,"Help links resolve to registered pages and anchors: "+page.title)
     }
-    let panel=Help_HexButton.frame(width:360,height:34),section=Help_HexButton.frame(width:360,height:28)
-    check(panel.midX == section.midX && panel.height == 28 && section.height == 28,"Panel and section help align without changing header heights")
+    let panel=Help_HexButton.frame(width:360,height:WorkspacePanel.headerHeight),section=Help_HexButton.frame(width:360,height:WorkspaceSectionHeader.height)
+    check(panel.midX == section.midX && panel.midY == section.midY && panel.height == 28 && section.height == 28,"Panel and section help align in the shared 40 pt headers")
     let libraryURL=Help_Handler.page("catalogues").flatMap{Help_Handler.resource($0)} ?? resources.appendingPathComponent("Help_Library.html")
     let library=(try? String(contentsOf:libraryURL,encoding:.utf8)) ?? ""
     check(library.contains("<svg") && library.contains("aria-label") && library.contains(".coldata"),"Library help bundles accessible graphical explanations and workspace guidance")
@@ -3640,7 +4109,8 @@ private func runLibraryPageLayoutTests(check:(Bool,String)->Void){
     rightSide.belowButton.run?();let rightBottom=capped.active
     rightBottom.belowButton.run?();rightBottom.splitButton.run?();capped.layoutSubtreeIfNeeded()
     check(capped.paneIDs.count == 4 && rightSide.belowButton.isHidden && rightBottom.belowButton.isHidden,"four panes is the enforced maximum")
-    check(rightBottom.newButton.frame.minY == 0 && rightBottom.closeButton.frame.minY == 0 && abs(rightBottom.closeButton.frame.maxX-(rightBottom.bounds.width-16)) < 0.5 && abs(rightBottom.closeButton.frame.minX-rightBottom.newButton.frame.maxX-4) < 0.5,"pane controls touch the top border and pack to the right without missing-icon gaps")
+    let centredTabControlY=(WorkspaceTabContour.height-32)/2+WorkspaceTabContour.topOverlap
+    check(abs(rightBottom.newButton.frame.minY-centredTabControlY)<0.5 && abs(rightBottom.closeButton.frame.minY-centredTabControlY)<0.5 && abs(rightBottom.closeButton.frame.maxX-(rightBottom.bounds.width-16)) < 0.5 && abs(rightBottom.closeButton.frame.minX-rightBottom.newButton.frame.maxX-4) < 0.5,"pane controls align below the tab overlap and pack to the right without missing-icon gaps")
     check(Layout_Handler.supportsSplitTree(capped.snapshot()),"four-pane layout remains restorable")
     check(capped.setTargetPane(rightSide.id) && capped.targetPaneID == rightSide.id && capped.active === rightSide,"setting the target retains its stable pane UUID and focuses it")
     check(!capped.setTargetPane(UUID()) && capped.targetPaneID == rightSide.id,"unknown target pane IDs leave the target unchanged")

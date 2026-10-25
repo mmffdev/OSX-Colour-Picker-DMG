@@ -3,11 +3,13 @@ import AppKit
 /// Flat, full-width sub-panel header for Library and Import. The outer panel alone owns the gradient.
 /// A preference key opts into persisted disclosure; transient sections omit it.
 final class WorkspaceSectionHeader:ClickCursorButton {
+    static let height:CGFloat=WorkspacePanel.headerHeight
     private let preferenceKey:String?
     private let help:Help_HexButton?
     private let actionButton=ClickCursorButton()
     var trailingControl:NSView? {didSet{oldValue?.removeFromSuperview();if let trailingControl{addSubview(trailingControl)};needsLayout=true}}
     private var headerAction:(()->Void)?
+    var onContext:((NSPoint,NSView)->Void)?
     var changed:(()->Void)?
     var expanded:Bool {get{state == .on} set{state=newValue ? .on:.off;needsDisplay=true}}
     func restoreLayoutPreference(){guard let preferenceKey else{return};expanded = !AppPreferences.shared.bool(forKey:preferenceKey);changed?()}
@@ -35,6 +37,10 @@ final class WorkspaceSectionHeader:ClickCursorButton {
         if !actionButton.isHidden,actionButton.frame.contains(point){actionButton.performClick(nil);return}
         super.mouseDown(with:event)
     }
+    override func rightMouseDown(with event:NSEvent){
+        if let onContext {onContext(convert(event.locationInWindow,from:nil),self)}
+        else {super.rightMouseDown(with:event)}
+    }
     @objc private func toggled(){if let preferenceKey{AppPreferences.shared.set(!expanded,forKey:preferenceKey)};changed?()}
     func setAction(symbol:String,title:String,run:@escaping()->Void){
         headerAction=run;actionButton.image=NSImage(systemSymbolName:symbol,accessibilityDescription:title)
@@ -50,15 +56,10 @@ final class WorkspaceSectionHeader:ClickCursorButton {
     override func draw(_ dirtyRect:NSRect){
         fill(bounds,Design.card)
         if isHighlighted {fill(bounds,Design.mist)}
-        let shift=bounds.midY-14
-        let path=NSBezierPath()
-        if expanded {
-            path.move(to:NSPoint(x:14,y:13+shift));path.line(to:NSPoint(x:22,y:13+shift));path.line(to:NSPoint(x:18,y:19+shift))
-        } else {
-            path.move(to:NSPoint(x:15,y:12+shift));path.line(to:NSPoint(x:21,y:16+shift));path.line(to:NSPoint(x:15,y:20+shift))
-        }
-        path.close();Design.ink.setFill();path.fill()
-        Design.attributed(title,.bodyStrong).draw(x:30,baseline:19+shift,width:max(0,(trailingControl?.frame.minX ?? (bounds.width-(actionButton.isHidden ? (help == nil ? 20:44):68)))-38))
+        WorkspaceHeaderChevron.draw(expanded ? .down:.right,
+                                    at:NSPoint(x:18,y:bounds.midY),colour:Design.ink)
+        let trailing=trailingControl?.frame.minX ?? (actionButton.isHidden ? bounds.width-(help == nil ? 20:44):actionButton.frame.minX)
+        Design.attributed(title,.bodyStrong).draw(x:30,baseline:bounds.midY+5,width:max(0,trailing-38))
         hairline(x:0,y:0,width:bounds.width,Design.rule)
         hairline(x:0,y:bounds.height-1,width:bounds.width,Design.rule)
     }

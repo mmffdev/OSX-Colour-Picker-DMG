@@ -15,7 +15,7 @@ struct SimpleCatalogueStructure: Codable, Equatable {
     var customAssetFamilies:[String]?
     var customAssetTypes:[SimpleCustomAssetType]?
     var clientName:String {clientLabel ?? "Client"}
-    var assetTypes = ["palettes", "typography", "icc"]
+    var assetTypes = SimpleAssetType.defaultAssetIDs
     func validate() throws {
         guard family == "client-work-assets", version == 1 else { throw failure("This catalogue uses a structure this version cannot open.") }
         try SimpleCatalogue.validateLabel(clientName);try SimpleCatalogue.validateLabel(singular); try SimpleCatalogue.validateLabel(plural)
@@ -44,14 +44,17 @@ struct SimpleAssetType {
     let id:String, title:String, symbol:String
     let role:SchemaRole?
     let family:String
-    /// Only the colour-work import categories are offered for new setup and settings choices.
+    /// New setup and import categories; other registered IDs keep existing catalogues readable.
     /// Historical IDs remain in `all` so existing catalogues still decode and display their assets.
-    static let setupImportIDs=["documents","palettes","fonts","typography","ase","luts","icc","css"]
+    static let defaultAssetIDs=["palettes","fonts","typography","images","photography"]
+    static let defaultLibraryIDs=["information"]+defaultAssetIDs
+    static let setupImportIDs=["palettes","fonts","typography","images","photography","documents","ase","luts","icc","css"]
     static var setupImportTypes:[SimpleAssetType] {setupImportIDs.compactMap(find)}
     var selectable:Bool {Self.setupImportIDs.contains(id)}
     var setupTitle:String {id == "typography" ? "Typography Packs":title}
     var setupFamily:String {selectable ? "Import":family}
     static let all:[SimpleAssetType] = [
+        .init(id:"information",title:"Information",symbol:"info.circle",role:nil,family:"Documents & Rights"),
         .init(id:"palettes",title:"Palettes",symbol:"swatchpalette",role:.palettes,family:"Colour & Measurement"),
         .init(id:"icc",title:"ICC Profiles",symbol:"slider.horizontal.3",role:nil,family:"Colour & Measurement"),
         .init(id:"device-link-profiles",title:"Device Link Profiles",symbol:"slider.horizontal.3",role:nil,family:"Colour & Measurement"),
@@ -246,7 +249,7 @@ enum SimpleCatalogue {
         try manager.createDirectory(home)
         return try manager.withTransaction(home:home) {
             try AppHomeSeed.ensure(at:home)
-            let libraryTypes=existing ? GlobalAssets(home:home).assetTypes : []
+            let libraryTypes=existing ? GlobalAssets(home:home).assetTypes : ["information"]
             let combined=libraryTypes+allTypes.filter{!libraryTypes.contains($0)}
             try GlobalAssets(home:home).setAssetTypes(combined,custom:config.customAssetTypes ?? [])
             var schema=SchemaTrial.SchemaFile(collections:[],places:[:],structure:defaults)
@@ -274,7 +277,7 @@ enum SimpleCatalogue {
             try store.save(library,schema:schema)
             try HistoryStore.save(StepHistory(),beside:store.url)
             // Empty categories are real destinations, even before their content adapter is available.
-            for type in allTypes.compactMap({SimpleAssetType.find($0,in:config)}) {try manager.createDirectory(GlobalAssets(home:home).root.appendingPathComponent(type.title))}
+            for type in combined.compactMap({SimpleAssetType.find($0,in:config)}) {try manager.createDirectory(GlobalAssets(home:home).root.appendingPathComponent(type.title))}
             try cats.registerChecked(name,at:destination)
             let cat=try CatalogueTree.read(root:destination).catalogue
             try AppDataStore(root:home).update {manifest in
@@ -320,7 +323,6 @@ final class SimpleSetupController:NSWindowController,WKNavigationDelegate,NSWind
         }
         draft.step=min(7,max(0,draft.step))
         if draft.assetSelectionsInitialized != true {
-            draft.config.assetTypes=[]
             draft.assetSelectionsInitialized=true
             SetupDraft.save(draft,key:Self.draftKey)
         }
@@ -425,14 +427,13 @@ final class SimpleSetupController:NSWindowController,WKNavigationDelegate,NSWind
     }
     private func openWorkspace(){
         guard let window else{return}
-        let panel=NSOpenPanel();panel.title="Open Workspace";panel.prompt="Open Workspace";panel.canChooseFiles=true;panel.canChooseDirectories=false;panel.allowedContentTypes=[UTType(filenameExtension:"coldata") ?? .json]
+        let panel=NSOpenPanel();panel.title="Open Workspace";panel.prompt="Open Workspace";panel.message="Choose the workspace folder containing colorgain.coldata.";panel.canChooseFiles=false;panel.canChooseDirectories=true
         panel.beginSheetModal(for:window){[weak self] result in
-            guard let self,result == .OK,let url=panel.url else{return}
+            guard let self,result == .OK,let folder=panel.url else{return}
             do {
-                guard url.pathExtension.lowercased() == "coldata" else{throw failure("Choose a .coldata workspace file.")}
-                try FolderAccess.authorize(url.deletingLastPathComponent())
-                _ = try AppDataStore(root:url.deletingLastPathComponent()).read()
-                preferences.removeObject(forKey:Self.requestKey);self.finished=true;self.close();self.onOpenExisting(url)
+                try FolderAccess.authorize(folder)
+                _ = try AppDataStore(root:folder).read()
+                preferences.removeObject(forKey:Self.requestKey);self.finished=true;self.close();self.onOpenExisting(folder)
             }catch{self.showError(error)}
         }
     }

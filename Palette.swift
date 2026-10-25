@@ -16,8 +16,12 @@ import ImageIO
 /// Up to `count` distinct colours from the image, most prominent first.
 /// Returns fewer when the image has fewer clearly different colours.
 func extractPalette(from cgImage: CGImage, count: Int, passes: Int = 12) -> [String] {
-    guard count > 0, let bitmap = SRGBBitmap(cgImage, maxSide: 640), let image = bitmap.ciImage else { return [] }
+    extractPaletteDefinitions(from:cgImage,count:count,passes:passes).map { RGBSpace.srgb.text($0.source.values) }
+}
 
+/// The same extraction without quantising its chosen colours to display hex.
+func extractPaletteDefinitions(from cgImage: CGImage, count: Int, passes: Int = 12) -> [ColourDefinition] {
+    guard count > 0, let bitmap = SRGBBitmap(cgImage, maxSide: 640), let image = bitmap.ciImage else { return [] }
     let k = min(max(count * 3, 16), 32)
     let seeds = kMeansPlusPlusSeeds(bitmap.sample(limit: 4096), k: k)
     guard let means = stripImage(seeds), let filter = CIFilter(name: "CIKMeans") else { return [] }
@@ -28,20 +32,16 @@ func extractPalette(from cgImage: CGImage, count: Int, passes: Int = 12) -> [Str
     filter.setValue(passes, forKey: "inputPasses")
     filter.setValue(false, forKey: "inputPerceptual")
     guard let output = filter.outputImage else { return [] }
-
-    // One pixel per cluster: RGB is the cluster colour, alpha its share of the pixels.
-    let n = seeds.count
-    var px = [Float](repeating: 0, count: n * 4)
-    CIContext(options: [.workingColorSpace: NSNull()]).render(
-        output, toBitmap: &px, rowBytes: n * 16,
-        bounds: CGRect(x: 0, y: 0, width: n, height: 1), format: .RGBAf, colorSpace: nil)
-
-    var centres: [RGB] = []
-    for i in 0..<n where px[i * 4 + 3] > 0 {
-        centres.append((min(max(px[i * 4], 0), 1), min(max(px[i * 4 + 1], 0), 1), min(max(px[i * 4 + 2], 0), 1)))
+    let n=seeds.count
+    var px=[Float](repeating:0,count:n*4)
+    CIContext(options:[.workingColorSpace:NSNull()]).render(output,toBitmap:&px,rowBytes:n*16,bounds:CGRect(x:0,y:0,width:n,height:1),format:.RGBAf,colorSpace:nil)
+    let centres=(0..<n).filter{px[$0*4+3]>0}.map{index -> RGB in
+        (min(max(px[index*4],0),1),min(max(px[index*4+1],0),1),min(max(px[index*4+2],0),1))
     }
-    let clusters = bitmap.clusters(around: centres)
-    return pickDistinct(withoutBlends(merged(clusters)), count: count).map { $0.hex }
+    return pickDistinct(withoutBlends(merged(bitmap.clusters(around:centres))),count:count).map { cluster in
+        let values=[cluster.rgb.r,cluster.rgb.g,cluster.rgb.b]
+        return ColourDefinition(source:ColourSource(space:RGBSpace.srgb.rawValue,values:values),master:RGBSpace.srgb.master(of:values),kind:.surface)
+    }
 }
 
 func loadCGImage(_ url: URL) -> CGImage? {
@@ -135,48 +135,50 @@ private typealias RGB = (r: Float, g: Float, b: Float)
 /// (Display P3 screenshots) come out as the sRGB hex values a user would expect.
 private final class SRGBBitmap {
     let width: Int, height: Int
-    private let context: CGContext // owns its pixel memory
+    private let pixels:[Float]
 
     init?(_ cg: CGImage, maxSide: Int) {
         let scale = min(1, CGFloat(maxSide) / CGFloat(max(cg.width, cg.height)))
         width = max(1, Int(CGFloat(cg.width) * scale))
         height = max(1, Int(CGFloat(cg.height) * scale))
-        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
-                                  bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        ctx.interpolationQuality = .medium
-        ctx.setFillColor(CGColor(gray: 1, alpha: 1)) // transparent areas read as white
-        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        context = ctx
+        guard let space=CGColorSpace(name:CGColorSpace.sRGB) else{return nil}
+        let image=CIImage(cgImage:cg).transformed(by:CGAffineTransform(scaleX:CGFloat(width)/CGFloat(cg.width),y:CGFloat(height)/CGFloat(cg.height)))
+        let white=CIImage(color:CIColor(red:1,green:1,blue:1,alpha:1)).cropped(to:CGRect(x:0,y:0,width:width,height:height))
+        var data=[Float](repeating:0,count:width*height*4)
+        CIContext(options:[.workingColorSpace:space]).render(image.composited(over:white),toBitmap:&data,rowBytes:width*16,bounds:CGRect(x:0,y:0,width:width,height:height),format:.RGBAf,colorSpace:space)
+        pixels=data
     }
 
-    var ciImage: CIImage? { context.makeImage().map { CIImage(cgImage: $0, options: [.colorSpace: NSNull()]) } }
+    var ciImage: CIImage? {
+        pixels.withUnsafeBytes { bytes in
+            CIImage(bitmapData:Data(bytes),bytesPerRow:width*16,size:CGSize(width:width,height:height),format:.RGBAf,colorSpace:nil)
+        }
+    }
 
     /// Assigns every pixel to its nearest centre. Each cluster reports its most common actual
     /// colour (pixels bucketed at 5 bits a channel) rather than its average.
     func clusters(around centres: [RGB]) -> [Cluster] {
         guard !centres.isEmpty else { return [] }
-        struct Bin { var n = 0, r = 0, g = 0, b = 0, interior = 0 }
+        struct Bin { var n = 0; var r = 0.0, g = 0.0, b = 0.0; var interior = 0 }
         var bins = [[Int: Bin]](repeating: [:], count: centres.count)
         var counts = [Int](repeating: 0, count: centres.count)
-        let data = context.data!.assumingMemoryBound(to: UInt8.self)
+        let data = pixels
         let total = width * height
         func pixelKey(at p: Int) -> Int {
-            (Int(data[p * 4]) >> 3) << 10 | (Int(data[p * 4 + 1]) >> 3) << 5 | (Int(data[p * 4 + 2]) >> 3)
+            Int(min(31,max(0,data[p*4]*32))) << 10 | Int(min(31,max(0,data[p*4+1]*32))) << 5 | Int(min(31,max(0,data[p*4+2]*32)))
         }
         for p in 0..<total {
-            let r = Int(data[p * 4]), g = Int(data[p * 4 + 1]), b = Int(data[p * 4 + 2])
-            let px: RGB = (Float(r) / 255, Float(g) / 255, Float(b) / 255)
+            let r = min(1,max(0,data[p * 4])), g = min(1,max(0,data[p * 4 + 1])), b = min(1,max(0,data[p * 4 + 2]))
+            let px: RGB = (r,g,b)
             var nearest = 0, best = Float.greatestFiniteMagnitude
             for (i, c) in centres.enumerated() {
                 let d = distance2(px, c)
                 if d < best { best = d; nearest = i }
             }
             counts[nearest] += 1
-            let key = (r >> 3) << 10 | (g >> 3) << 5 | (b >> 3)
+            let key = Int(min(31,r*32)) << 10 | Int(min(31,g*32)) << 5 | Int(min(31,b*32))
             var bin = bins[nearest][key] ?? Bin()
-            bin.n += 1; bin.r += r; bin.g += g; bin.b += b
+            bin.n += 1; bin.r += Double(r); bin.g += Double(g); bin.b += Double(b)
             let x = p % width, y = p / width
             if x > 0, x < width - 1, y > 0, y < height - 1 {
                 var solid = true
@@ -189,7 +191,7 @@ private final class SRGBBitmap {
         }
         return centres.indices.compactMap { i in
             guard let mode = bins[i].values.max(by: { $0.n < $1.n }) else { return nil }
-            let n = Double(mode.n) * 255
+            let n = Double(mode.n)
             return Cluster(rgb: (Double(mode.r) / n, Double(mode.g) / n, Double(mode.b) / n),
                            weight: Double(counts[i]) / Double(total),
                            hasSolidInterior: mode.interior >= max(4, Int(ceil(Double(total) * 0.0005))))
@@ -197,10 +199,10 @@ private final class SRGBBitmap {
     }
 
     func sample(limit: Int) -> [RGB] {
-        let data = context.data!.assumingMemoryBound(to: UInt8.self)
+        let data = pixels
         let total = width * height, step = max(1, total / limit)
         return stride(from: 0, to: total, by: step).map {
-            (Float(data[$0 * 4]) / 255, Float(data[$0 * 4 + 1]) / 255, Float(data[$0 * 4 + 2]) / 255)
+            (data[$0 * 4], data[$0 * 4 + 1], data[$0 * 4 + 2])
         }
     }
 }
@@ -232,13 +234,15 @@ private func kMeansPlusPlusSeeds(_ pixels: [RGB], k: Int) -> [RGB] {
 
 /// A `seeds.count` x 1 image, one opaque pixel per seed, for CIKMeans's inputMeans.
 private func stripImage(_ seeds: [RGB]) -> CIImage? {
-    var bytes = [UInt8](repeating: 255, count: seeds.count * 4)
+    var bytes = [Float](repeating: 1, count: seeds.count * 4)
     for (i, s) in seeds.enumerated() {
-        bytes[i * 4] = UInt8((s.r * 255).rounded())
-        bytes[i * 4 + 1] = UInt8((s.g * 255).rounded())
-        bytes[i * 4 + 2] = UInt8((s.b * 255).rounded())
+        bytes[i * 4] = s.r
+        bytes[i * 4 + 1] = s.g
+        bytes[i * 4 + 2] = s.b
     }
     // The image must own its pixels: Core Image reads them later, after `bytes` is gone.
-    return CIImage(bitmapData: Data(bytes), bytesPerRow: seeds.count * 4,
-                   size: CGSize(width: seeds.count, height: 1), format: .RGBA8, colorSpace: nil)
+    return bytes.withUnsafeBytes { raw in
+        CIImage(bitmapData:Data(raw),bytesPerRow:seeds.count*16,
+                size:CGSize(width:seeds.count,height:1),format:.RGBAf,colorSpace:nil)
+    }
 }

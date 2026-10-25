@@ -29,7 +29,7 @@ enum AssetCollections {
     static func rootColour(in store:LibraryStore)->String? {
         CatalogueTree.catalogue(in:store.root)?.assetCollectionsRootColour
     }
-    static func setRootColour(_ hex:String,in store:LibraryStore)throws {
+    static func setRootColour(_ hex:String?,in store:LibraryStore)throws {
         try Handler_File_Manager.shared.withTransaction(home:store.root) {
             try Handler_File_Manager.shared.update(store.url) { object in
                 object["assetCollectionsRootColour"]=hex
@@ -45,6 +45,7 @@ enum AssetCollections {
         try Handler_File_Manager.shared.withTransaction(home:store.root) {
             try mutateDocument(in:store,change)
         }
+        FontBookBridge.syncCollections(in:store)
     }
     static func mutateDocument(in store:LibraryStore,_ change:(inout [AssetCollectionEntry]) throws -> Void)throws {
         try Handler_File_Manager.shared.update(store.url) { object in
@@ -52,6 +53,31 @@ enum AssetCollections {
             var collections=try data.map{try ColourFiles.decoder().decode([AssetCollectionEntry].self,from:$0)} ?? []
             try change(&collections)
             object["assetCollections"]=try JSONSerialization.jsonObject(with:ColourFiles.encoder().encode(collections))
+        }
+    }
+    /// Called inside the asset's owning transaction after its catalogue write.
+    /// A deleted identity must not survive in any Collection that linked it.
+    static func removeDeletedInTransaction(_ keys:Set<String>,in store:LibraryStore)throws {
+        guard !keys.isEmpty,
+              let collections=CatalogueTree.catalogue(in:store.root)?.assetCollections,
+              collections.contains(where:{$0.items.contains(where:{keys.contains($0.key)})}) else{return}
+        try mutateDocument(in:store){rows in
+            for index in rows.indices {rows[index].items.removeAll{keys.contains($0.key)}}
+        }
+    }
+    /// Repair membership left by older builds after a palette has disappeared.
+    /// Keep records for linked sources whose file is temporarily unavailable.
+    static func removeMissingPalettes(in store:LibraryStore,library:Library)throws {
+        let live=Set(library.swatches.map(\.id))
+        let linked=Set(WorkspaceImport.records(store:store).map{$0.0.id})
+        let missing=Set(list(in:store).flatMap(\.items).compactMap{item -> String? in
+            guard item.kind == "Palette",let id=UUID(uuidString:item.identity),
+                  !live.contains(id),!linked.contains(id) else{return nil}
+            return item.key
+        })
+        guard !missing.isEmpty else{return}
+        try Handler_File_Manager.shared.withTransaction(home:store.root){
+            try removeDeletedInTransaction(missing,in:store)
         }
     }
     static func appendInTransaction(_ items:[AssetCollectionItem],to id:UUID,in store:LibraryStore)throws {
@@ -85,6 +111,12 @@ enum AssetCollections {
         try update(in:store){ rows in
             guard !rows.contains(where:{$0.id != id && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame}),let index=rows.firstIndex(where:{$0.id == id}) else{throw failure("This Collection is missing or its name is taken.")}
             rows[index].name=trimmed;rows[index].colour=colour
+        }
+    }
+    static func setColour(_ hex:String?,for id:UUID,in store:LibraryStore)throws {
+        try update(in:store){rows in
+            guard let index=rows.firstIndex(where:{$0.id == id}) else{throw failure("This Collection is missing.")}
+            rows[index].colour=hex
         }
     }
     static func reorderCollections(_ ids:[UUID],in store:LibraryStore)throws {
@@ -140,18 +172,102 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     private let contextMenu=SwissContextMenu()
     private let root=Node(.root)
     private var rootColour:String?
+    private func assetColourKey(_ item:AssetCollectionItem,_ collection:UUID)->String{"collection-link:\(collection.uuidString):\(item.key)"}
+    private func appearanceKey(_ node:Node)->String? {
+        switch node.value {
+        case .root:return "collections-root"
+        case .collection(let entry):return "collection:"+entry.id.uuidString
+        case .asset(let asset,let collection):return assetColourKey(asset,collection)
+        case .add:return nil
+        }
+    }
+    func installColourMode(_ mode:WorkspaceColourMode){
+        mode.register(tree){[weak self] item in
+            guard let self,let node=item as? Node else{return nil}
+            switch node.value {
+            case .add:return nil
+            case .root:
+                return WorkspaceColourMode.Target(id:"collections-root",name:"Collections",read:{[weak self] channel in
+                    switch channel {
+                    case .background:return self?.rootColour.map(Design.hex)
+                    case .text:return WorkspaceNodeAppearance.textColour("collections-root")
+                    case .border:return WorkspaceNodeAppearance.borderColour("collections-root")
+                    }
+                },write:{[weak self] channel,hex in
+                    guard let self,let controller=self.controller else{return}
+                    switch channel {
+                    case .text:WorkspaceNodeAppearance.setText(hex,for:"collections-root");self.tree.repaintColours()
+                    case .border:WorkspaceNodeAppearance.setBorder(hex,for:"collections-root");self.tree.repaintColours()
+                    case .background:
+                        do{try AssetCollections.setRootColour(hex,in:controller.store);self.rootColour=hex;self.tree.repaintColours()}
+                        catch{controller.flash(error.localizedDescription)}
+                    }
+                })
+            case .collection(let entry):
+                let key="collection:"+entry.id.uuidString
+                return WorkspaceColourMode.Target(id:key,name:entry.name,read:{[weak self] channel in
+                    switch channel {
+                    case .background:return self?.root.children.compactMap{node -> NSColor? in if case .collection(let current)=node.value,current.id == entry.id{return current.colour.map(Design.hex)};return nil}.first
+                    case .text:return WorkspaceNodeAppearance.textColour(key)
+                    case .border:return WorkspaceNodeAppearance.borderColour(key)
+                    }
+                },write:{[weak self] channel,hex in
+                    guard let self,let controller=self.controller else{return}
+                    switch channel {
+                    case .text:WorkspaceNodeAppearance.setText(hex,for:key);self.tree.repaintColours()
+                    case .border:WorkspaceNodeAppearance.setBorder(hex,for:key);self.tree.repaintColours()
+                    case .background:
+                        do{try AssetCollections.setColour(hex,for:entry.id,in:controller.store);self.repaintCollection(entry.id,colour:hex)}
+                        catch{controller.flash(error.localizedDescription)}
+                    }
+                })
+            case .asset(let asset,let collection):
+                let key=self.assetColourKey(asset,collection)
+                return WorkspaceColourMode.Target(id:key,name:asset.name,read:{channel in
+                    switch channel {
+                    case .background:return WorkspaceNodeAppearance.colour(key)
+                    case .text:return WorkspaceNodeAppearance.textColour(key)
+                    case .border:return WorkspaceNodeAppearance.borderColour(key)
+                    }
+                },write:{[weak self] channel,hex in
+                    switch channel {
+                    case .background:WorkspaceNodeAppearance.set(hex,for:key)
+                    case .text:WorkspaceNodeAppearance.setText(hex,for:key)
+                    case .border:WorkspaceNodeAppearance.setBorder(hex,for:key)
+                    }
+                    self?.tree.repaintColours()
+                })
+            }
+        }
+    }
     private weak var controller:LibraryController?
+    private var fontEntries:[FontLibraryEntry]=[]
+    private func fontEntry(_ asset:AssetCollectionItem)->FontLibraryEntry? {
+        if asset.kind == "Font" {return fontEntries.first{$0.info.family.caseInsensitiveCompare(asset.identity) == .orderedSame}}
+        if asset.kind == "Fonts",let id=UUID(uuidString:asset.identity) {return fontEntries.first{$0.id == id}}
+        return nil
+    }
+    private func saveFont(_ entry:FontLibraryEntry,_ change:(inout FontAssetInfo)->Void) {
+        guard let controller else{return}
+        var info=entry.info;change(&info)
+        do {try FontLibraryIndex.save(info,entry:entry);refresh();onChanged?()}
+        catch {controller.flash(error.localizedDescription)}
+    }
     private var loadedCataloguePath=""
     private var importedPalettePreviews:[String:ImportedPalette]=[:]
     private var importedPaletteLoading:Set<String>=[]
     var onOpenAsset:((AssetCollectionItem)->Void)?
+    var customColoursAction:((AssetCollectionItem)->HaloAction?)?
+    var onBucketPick:((WorkspaceTreeGridScope)->Void)?
+    var onMultiColourSelect:((Node)->Void)?
+    func selectColourTarget(_ node:Node,in mode:WorkspaceColourMode){mode.select(node,in:tree)}
     var onChanged:(()->Void)?
     var onColourChanged:(()->Void)?
-    private func repaintCollection(_ id:UUID,colour:String) {
+    private func repaintCollection(_ id:UUID,colour:String?) {
         guard let node=root.children.first(where:{if case .collection(let entry)=$0.value{return entry.id == id};return false}),
               case .collection(var entry)=node.value else{return}
         entry.colour=colour;node.value = .collection(entry)
-        for child in node.children {child.accent=Design.hex(colour)}
+        for child in node.children {child.accent=colour.map(Design.hex)}
         tree.repaintColours()
         onColourChanged?()
     }
@@ -161,14 +277,14 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     var onTags:((UUID)->Void)?
     var onRating:((UUID,Int)->Void)?
     var onFlag:((UUID,PaletteReview.Flag?)->Void)?
-    private var rowsHeight:CGFloat {(0..<tree.numberOfRows).reduce(0){sum,index in sum+outlineView(tree,heightOfRowByItem:tree.item(atRow:index)!)}}
-    var minimumContentHeight:CGFloat {max(38,rowsHeight+4)}
+    private var rowsHeight:CGFloat {(0..<tree.numberOfRows).reduce(0){sum,index in sum+outlineView(tree,heightOfRowByItem:tree.item(atRow:index)!)}+CGFloat(max(0,tree.numberOfRows-1))*WorkspaceBranchTree.rowSpacing}
+    var minimumContentHeight:CGFloat {max(34,rowsHeight)+2*WorkspaceBranchTree.edgePadding}
     override var isFlipped:Bool{true}
     init(controller:LibraryController){
         self.controller=controller;super.init(frame:.zero)
         let column=NSTableColumn(identifier:.init("Collections"))
         tree.addTableColumn(column);tree.outlineTableColumn=column;tree.headerView=nil
-        tree.rowHeight=34;tree.intercellSpacing = .zero;tree.indentationPerLevel=0
+        tree.rowHeight=34;tree.intercellSpacing = NSSize(width:0,height:WorkspaceBranchTree.rowSpacing);tree.indentationPerLevel=0
         tree.backgroundColor=Design.card;tree.style = .plain;tree.focusRingType = .none
         tree.leadingDisclosure=true;tree.expandsOnSelection=false;tree.allowsEmptySelection=true
         tree.swatchFamily = .charcoal;tree.outlinedRows=true
@@ -177,41 +293,46 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
             guard let node=item as? Node else{return nil}
             switch node.value {
             case .root:return self?.rootColour.map(Design.hex)
-            case .collection(let entry):return Design.hex(entry.colour ?? AssetCollections.defaultColour)
-            default:return nil
+            case .collection(let entry):return entry.colour.map(Design.hex)
+            case .asset(let asset,let collection):return WorkspaceNodeAppearance.colour(self?.assetColourKey(asset,collection) ?? "")
+            case .add:return nil
             }
         }
         tree.rowFill={[weak self] item in
             guard let node=item as? Node else{return false}
             switch node.value {
             case .root:return self?.rootColour != nil
-            case .collection:return true
-            case .add,.asset:return false
+            case .collection(let entry):return entry.colour != nil
+            case .asset(let asset,let collection):return WorkspaceNodeAppearance.colour(self?.assetColourKey(asset,collection) ?? "") != nil
+            case .add:return false
             }
         }
-        tree.rowLeadingAccent={item in
-            guard let node=item as? Node,case .asset=node.value else{return nil}
+        tree.rowLeadingAccent={[weak self] item in
+            guard let self,let node=item as? Node,case .asset(let asset,let collection)=node.value else{return nil}
+            if WorkspaceNodeAppearance.colour(self.assetColourKey(asset,collection)) != nil{return nil}
             return node.accent
         }
-        tree.rowClear={item in
-            guard let node=item as? Node,case .asset=node.value else{return false}
-            return true
+        tree.rowClear={[weak self] item in
+            guard let self,let node=item as? Node,case .asset(let asset,let collection)=node.value else{return false}
+            return WorkspaceNodeAppearance.colour(self.assetColourKey(asset,collection)) == nil
+        }
+        tree.rowInk={[weak self] item in
+            guard let self,let node=item as? Node,let key=self.appearanceKey(node) else{return nil}
+            if let ink=WorkspaceNodeAppearance.textColour(key){return ink}
+            if case .asset(let asset,let collection)=node.value{return WorkspaceNodeAppearance.ink(self.assetColourKey(asset,collection))}
+            return nil
+        }
+        tree.rowBorder={[weak self] item in
+            guard let self,let node=item as? Node,let key=self.appearanceKey(node) else{return nil}
+            return WorkspaceNodeAppearance.borderColour(key)
         }
         tree.onContext={[weak self] item,point,view in
             guard let self,let node=item as? Node else{return}
-            let actions:[HaloAction]
+            var actions:[HaloAction]
             switch node.value {
             case .root:
                 var colour=HaloAction(id:"colour",label:"Colour",symbol:"square.fill",onSelect:{[weak self] in
-                    guard let self,let controller=self.controller,let root=self.window?.contentView else{return}
-                    let target=StudioColourPicker.Target(group:"Collections",name:"Collections",key:"collections-root",
-                        read:{Design.hex(self.rootColour ?? (hexOf(Design.card) ?? "#F8F7F5"))},
-                        write:{[weak self] hex in
-                            guard let self else{return}
-                            do {try AssetCollections.setRootColour(hex,in:controller.store);self.rootColour=hex;self.tree.repaintColours()}
-                            catch {controller.flash(error.localizedDescription)}
-                        })
-                    StudioColourPicker(target:"collections-root",targets:[target],commitOnPick:true).present(over:root)
+                    self?.onMultiColourSelect?(node)
                 })
                 colour.menuSwatch=Design.hex(self.rootColour ?? (hexOf(Design.card) ?? "#F8F7F5"))
                 actions=[colour,HaloAction(id:"divider-colour",label:"",symbol:""),
@@ -222,15 +343,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                 actions=[
                     { () -> HaloAction in
                         var action=HaloAction(id:"colour",label:"Colour",symbol:"square.fill",onSelect:{[weak self] in
-                            guard let self,let controller=self.controller,let root=self.window?.contentView else{return}
-                            let target=StudioColourPicker.Target(group:"Collection",name:collection.name,key:collection.id.uuidString,
-                                read:{Design.hex(collection.colour ?? AssetCollections.defaultColour)},
-                                write:{[weak self] hex in
-                                    guard let self else{return}
-                                    do {try AssetCollections.edit(collection.id,name:collection.name,colour:hex,in:controller.store);self.repaintCollection(collection.id,colour:hex)}
-                                    catch {controller.flash(error.localizedDescription)}
-                                })
-                            StudioColourPicker(target:collection.id.uuidString,targets:[target],commitOnPick:true).present(over:root)
+                            self?.onMultiColourSelect?(node)
                         })
                         action.menuSwatch=Design.hex(collection.colour ?? AssetCollections.defaultColour)
                         return action
@@ -244,14 +357,40 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                     })
                 ]
             case .asset(let asset,let collectionID):
-                actions=[
-                    HaloAction(id:"open",label:"Open",symbol:"arrow.up.right",onSelect:{[weak self] in self?.onOpenAsset?(asset)}),
-                    HaloAction(id:"remove",label:"Remove From Collection",symbol:"minus.circle",onSelect:{[weak self] in
-                        guard let self,let controller=self.controller else{return}
-                        do{try AssetCollections.remove(asset,from:collectionID,in:controller.store);self.refresh();self.onChanged?()}
-                        catch{controller.flash(error.localizedDescription)}
-                    })
-                ]
+                let remove=HaloAction(id:"remove",label:"Remove From Collection",symbol:"minus.circle",onSelect:{[weak self] in
+                    guard let self,let controller=self.controller else{return}
+                    do{try AssetCollections.remove(asset,from:collectionID,in:controller.store);self.refresh();self.onChanged?()}
+                    catch{controller.flash(error.localizedDescription)}
+                })
+                if let font=fontEntry(asset) {
+                    let file=font.imported.flatMap{try? $0.0.url(in:$0.1.deletingLastPathComponent())}
+                    let available=file.map{FileManager.default.fileExists(atPath:$0.path)} ?? false
+                    actions=[
+                        HaloAction(id:"open",label:"Open Font",symbol:"textformat",onSelect:{[weak self] in self?.onOpenAsset?(asset)}),
+                        HaloAction(id:"favourite",label:font.info.favourite == true ? "Remove Favourite":"Add Favourite",symbol:"star",onSelect:{[weak self] in
+                            guard let self,let controller=self.controller else{return}
+                            var info=font.info;info.favourite = !(info.favourite == true)
+                            do {try FontLibraryIndex.save(info,entry:font);self.refresh();self.onChanged?()} catch {controller.flash(error.localizedDescription)}
+                        }),
+                        HaloAction(id:"copy-name",label:"Copy Font Name",symbol:"doc.on.doc",onSelect:{
+                            NSPasteboard.general.clearContents();NSPasteboard.general.setString(font.info.family,forType:.string)
+                        }),
+                        HaloAction(id:"reveal",label:"Reveal in Finder",symbol:"folder",disabled:!available,onSelect:{[weak self] in
+                            AssetFileActions.reveal(file,feedback:{[weak self] message in self?.controller?.flash(message)})
+                        }),
+                        HaloAction(id:"copy-path",label:"Copy Path",symbol:"doc.on.doc",disabled:!available,onSelect:{
+                            guard let file else{return};NSPasteboard.general.clearContents();NSPasteboard.general.setString(file.path,forType:.string)
+                        }),remove
+                    ]
+                } else {
+                    actions=[HaloAction(id:"open",label:"Open",symbol:"arrow.up.right",onSelect:{[weak self] in self?.onOpenAsset?(asset)}),remove]
+                    if let custom=customColoursAction?(asset){actions.insert(custom,at:1)}
+                }
+            }
+            let isFontAsset:Bool={if case .asset(let item,_)=node.value{return self.fontEntry(item) != nil};return false}()
+            if case .add=node.value {} else if !isFontAsset {
+                actions.insert(HaloAction(id:"multi-colour",label:"Multi Colour Select",symbol:"square.grid.2x2",onSelect:{[weak self] in self?.onMultiColourSelect?(node)}),at:0)
+                actions.insert(HaloAction(id:"divider-multi-colour",label:"",symbol:""),at:1)
             }
             self.contextMenu.open(actions,at:point,in:view)
         }
@@ -261,8 +400,10 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     required init?(coder:NSCoder){fatalError()}
     func refresh(){
         guard let controller else{return}
+        fontEntries=FontLibraryIndex.list(in:controller.store)
         loadedCataloguePath=controller.store.root.standardizedFileURL.path
         do{try AssetCollections.seedIfNeeded(in:controller.store)}catch{controller.flash(error.localizedDescription)}
+        do{try AssetCollections.removeMissingPalettes(in:controller.store,library:controller.library)}catch{controller.flash(error.localizedDescription)}
         rootColour=AssetCollections.rootColour(in:controller.store)
         let imports=Dictionary(WorkspaceImport.records(store:controller.store).map{($0.0.id.uuidString,$0.0)},uniquingKeysWith:{first,_ in first})
         let previewRecords=AssetCollections.list(in:controller.store).flatMap(\.items).filter{$0.kind == "Palettes" && importedPalettePreviews[$0.identity] == nil && !importedPaletteLoading.contains($0.identity)}.compactMap{imports[$0.identity]}
@@ -289,6 +430,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         func current(_ saved:AssetCollectionItem)->AssetCollectionItem {
             var item=saved
             if item.kind == "Palette",let id=UUID(uuidString:item.identity),let palette=controller.library.swatch(id){item.name=palette.name}
+            else if let font=fontEntry(item){item.name=font.info.family}
             else if item.kind == "Colour" {item.name=controller.library.name(of:item.identity,in:nil)}
             else if let record=imports[item.identity] {item.name=record.name}
             else if item.kind == "ICC Profile",let profile=ICCProfileLibrary.shared.profiles.first(where:{$0.id == item.identity}) {item.name=profile.name}
@@ -296,7 +438,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         }
         root.children=[Node(.add)]+AssetCollections.list(in:controller.store).map{ collection in
             let node=Node(.collection(collection))
-            let accent=Design.hex(collection.colour ?? AssetCollections.defaultColour)
+            let accent=collection.colour.map(Design.hex)
             node.children=collection.items.map{item in
                 let asset=Node(.asset(current(item),collection.id));asset.accent=accent;return asset
             }
@@ -311,13 +453,16 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         guard let controller,loadedCataloguePath != controller.store.root.standardizedFileURL.path else{return}
         refresh()
     }
-    override func layout(){super.layout();tree.frame=NSRect(x:0,y:4,width:bounds.width,height:max(34,rowsHeight));tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()}
+    override func layout(){super.layout();tree.frame=NSRect(x:0,y:WorkspaceBranchTree.edgePadding,width:bounds.width,height:max(34,rowsHeight));tree.tableColumns.first?.width=bounds.width;tree.layoutConnectors()}
     func outlineView(_ outlineView:NSOutlineView,numberOfChildrenOfItem item:Any?)->Int{(item as? Node)?.children.count ?? 1}
     func outlineView(_ outlineView:NSOutlineView,child index:Int,ofItem item:Any?)->Any{(item as? Node)?.children[index] ?? root}
     func outlineView(_ outlineView:NSOutlineView,isItemExpandable item:Any)->Bool{!(item as! Node).children.isEmpty}
     func outlineView(_ outlineView:NSOutlineView,heightOfRowByItem item:Any)->CGFloat {
-        guard let node=item as? Node,case .asset(let asset,_)=node.value else{return 34}
-        return asset.kind == "Palette" || asset.kind == "Palettes" ? 56:34
+        let base:CGFloat
+        if let node=item as? Node,case .asset(let asset,_)=node.value {
+            base=["Palette","Palettes","Font","Fonts"].contains(asset.kind) ? WorkspaceBranchTree.paletteRowHeight:34
+        } else {base=34}
+        return (outlineView as? WorkspaceBranchTree)?.colourTargetRowHeight(for:item,base:base) ?? base
     }
     func outlineView(_ outlineView:NSOutlineView,rowViewForItem item:Any)->NSTableRowView?{let row=WorkspaceBranchTree.Row();row.accordion=tree;return row}
     func outlineView(_ outlineView:NSOutlineView,viewFor tableColumn:NSTableColumn?,item:Any)->NSView?{
@@ -364,6 +509,20 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                     let row=self.tree.row(forItem:node)
                     if row >= 0{self.tree.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}
                 }
+            } else if let font=fontEntry(asset) {
+                cell.compactMetadata=false;cell.isPalette=true;cell.twoLines=true;cell.symbol="textformat"
+                cell.fontFamily=font.info.family
+                cell.target.isHidden=true;cell.countLabel.stringValue="";cell.countLabel.isHidden=true
+                cell.review.configure(name:font.info.family,review:font.info.review)
+                cell.review.onRating={[weak self] rating in self?.saveFont(font){$0.review=PaletteReview(rating:rating,flag:$0.review?.flag)}}
+                cell.review.onFlag={[weak self] flag in self?.saveFont(font){$0.review=PaletteReview(rating:$0.review?.rating ?? 0,flag:flag)}}
+                cell.star.isHidden=false;cell.star.favourite=font.info.favourite == true
+                cell.star.setAccessibilityLabel((cell.star.favourite ? "Remove Favourite: ":"Add Favourite: ")+font.info.family)
+                cell.star.run={[weak self] in self?.saveFont(font){$0.favourite = !($0.favourite == true)}}
+                cell.tagIcon.setAccessibilityLabel("Tags: "+font.info.family)
+                cell.tagIcon.run={[weak self] in self?.onOpenAsset?(asset)}
+                cell.fontDrag=(font.id,font.info.family)
+                cell.selectFont={[weak self] in self?.onOpenAsset?(asset)}
             } else if asset.kind == "Palettes" {
                 cell.compactMetadata=false;cell.isPalette=true;cell.twoLines=true;cell.symbol="swatchpalette"
                 if let preview=importedPalettePreviews[asset.identity] {
@@ -391,17 +550,40 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
             cell.reorderDrag={[weak self,weak node] event in guard let self,let node else{return};self.dragNode(node,from:event)}
         case .root,.add,.asset:break
         }
-        let label=NSTextField(labelWithString:title);label.font=Design.Text.body.font();label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
+        let label=NSTextField(labelWithString:title)
+        if case .asset(let asset,_)=node.value,let font=fontEntry(asset) {
+            label.font=NSFontManager.shared.font(withFamily:font.info.family,traits:[],weight:5,size:TextSize.body) ?? Design.Text.body.font()
+        } else {label.font=Design.Text.body.font()}
+        label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
         cell.addSubview(label);cell.textField=label;cell.toolTip=title;return cell
     }
     func outlineViewSelectionDidChange(_ notification:Notification){
+        if tree.colourModeActive{return}
         guard tree.selectedRow >= 0,let node=tree.item(atRow:tree.selectedRow) as? Node else{return}
         switch node.value {
         case .add:
             tree.deselectAll(nil)
             DispatchQueue.main.async{[weak self] in self?.createCollection()}
         case .asset(let item,_):onOpenAsset?(item)
-        case .root,.collection:break
+        case .root,.collection:
+            func sections(in parent:Node)->[WorkspaceTreeGridSection] {
+                let direct:[WorkspaceTreeGridAsset]=parent.children.compactMap{child in
+                    guard case .asset(let item,_)=child.value else{return nil}
+                    if item.kind == "Palette",let id=UUID(uuidString:item.identity){return .palette(id)}
+                    if item.kind == "Colour" {return .colour(item.identity)}
+                    if let font=fontEntry(item){return .font(font.id)}
+                    if let id=UUID(uuidString:item.identity){return .imported(id)}
+                    return .other(name:item.name,kind:item.kind,identity:item.identity)
+                }
+                let title:String
+                switch parent.value {case .root:title="Collections";case .collection(let entry):title=entry.name;default:title="Assets"}
+                var result=direct.isEmpty ? []:[WorkspaceTreeGridSection(title:title,assets:direct)]
+                for child in parent.children where !child.children.isEmpty {result += sections(in:child)}
+                return result
+            }
+            let title:String,key:String
+            switch node.value {case .root:title="Collections";key="collections-root";case .collection(let entry):title=entry.name;key="collection:"+entry.id.uuidString;default:return}
+            onBucketPick?(WorkspaceTreeGridScope(key:key,title:title,sections:sections(in:node)))
         }
     }
     private func dragNode(_ node:Node,from start:NSEvent){

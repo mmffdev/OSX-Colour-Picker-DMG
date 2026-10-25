@@ -38,7 +38,7 @@ enum FileRecoveryPresenter {
         }
         let workspace = Catalogues.standard.root
         let workspaceIssue = report.issues.contains { issue in
-            issue.url.pathExtension == "coldata" || ["Assets", "Keys"].contains(where: { issue.url.standardizedFileURL.path.hasPrefix(workspace.appendingPathComponent($0).standardizedFileURL.path + "/") })
+            issue.url.pathExtension == "coldata" || ["Assets", GlobalAssets.folderName, "Keys"].contains(where: { issue.url.standardizedFileURL.path.hasPrefix(workspace.appendingPathComponent($0).standardizedFileURL.path + "/") })
         }
         let registration = Catalogues.standard.registry.first { row in row.url(in: workspace) == report.root.standardizedFileURL }
         let catalogueName = registration?.name ?? (report.root.standardizedFileURL == workspace.standardizedFileURL ? Catalogues.mainName : report.root.lastPathComponent)

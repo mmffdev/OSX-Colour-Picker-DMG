@@ -82,7 +82,7 @@ func runFileHandlerManagerTests(check: (Bool, String) -> Void) {
             application: { FileApplicationIdentity(bundleIdentifier: "test.colorgain", name: "Test", version: "1.2", build: "34") },
             creator: { FileCreatorIdentity(displayName: "Test Creator", accountName: "fixture") })
         let manager = Handler_File_Manager(metadata: metadata)
-        check(manager.descriptors.count == 16, "Manager registers one class per native document format")
+        check(manager.descriptors.count == 19, "Manager registers one class per native document format")
         do { try manager.register(Handler_File_Palette()); check(false, "Duplicate format registration rejected") }
         catch { check(true, "Duplicate format registration rejected") }
         let unknown = root.appendingPathComponent("unknown.colfuture")

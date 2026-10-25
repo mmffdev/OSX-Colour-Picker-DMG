@@ -215,11 +215,36 @@ enum KeyProfiles {
 /// App-wide unassigned assets. Member-owned work is never stored here.
 struct GlobalAssets {
     let home: URL
-    var root: URL { home.appendingPathComponent("Assets") }
+    static let folderName = "My Library"
+    var root: URL { home.appendingPathComponent(Self.folderName,isDirectory:true) }
+    private var oldRoot: URL { home.appendingPathComponent("Assets",isDirectory:true) }
     var libraryIndex:URL {root.appendingPathComponent("my_library.collib")}
     var legacyIndex:URL {root.appendingPathComponent("Assets.colcat")}
     var index:URL {FileManager.default.fileExists(atPath:libraryIndex.path) ? libraryIndex : FileManager.default.fileExists(atPath:legacyIndex.path) ? legacyIndex:libraryIndex}
-    var assetTypes:[String] {CatalogueTree.catalogue(in:root)?.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleCatalogueStructure().assetTypes}
+    /// Move the app-wide library only when its index identifies the old Assets folder.
+    /// A catalogue's own Assets pool is unrelated and must stay in place.
+    func migrateWorkspaceDirectory() throws {
+        let fm=FileManager.default
+        let oldIndex=oldRoot.appendingPathComponent("my_library.collib")
+        let oldLegacy=oldRoot.appendingPathComponent("Assets.colcat")
+        let hasOldLibrary=fm.fileExists(atPath:oldIndex.path) || fm.fileExists(atPath:oldLegacy.path)
+        let hasNewLibrary=fm.fileExists(atPath:libraryIndex.path) || fm.fileExists(atPath:legacyIndex.path)
+        if hasOldLibrary && fm.fileExists(atPath:root.path) {
+            throw FileIssue(url:root,state:.ambiguous,message:"Both Assets and My Library contain workspace files. They were left untouched so you can resolve the duplicate safely.")
+        }
+        if hasOldLibrary {
+            try Handler_File_Manager.shared.withTransaction(home:home) {
+                try Handler_File_Manager.shared.move(oldRoot,to:root)
+                try AppDataStore(root:home).update{$0["assets"]=Self.folderName+"/my_library.collib"}
+            }
+        } else if hasNewLibrary {
+            let manifest=try AppDataStore(root:home).read()
+            if manifest["assets"] as? String != Self.folderName+"/my_library.collib" {
+                try AppDataStore(root:home).update{$0["assets"]=Self.folderName+"/my_library.collib"}
+            }
+        }
+    }
+    var assetTypes:[String] {CatalogueTree.catalogue(in:root)?.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleAssetType.defaultLibraryIDs}
     func setAssetTypes(_ types:[String],custom:[SimpleCustomAssetType]=[])throws {
         let known=Set(SimpleAssetType.all.map(\.id)+custom.map(\.id)+SimpleAssetType.workspaceCustomTypes(home:home).map(\.id))
         guard Set(types).count == types.count,types.allSatisfy({known.contains($0)}) else{throw failure("Unsupported library asset categories.")}
@@ -230,19 +255,20 @@ struct GlobalAssets {
     }
     /// Changes only the index and manifest reference; payload paths and library identity stay stable.
     func migrateLibraryIndex()throws {
+        try migrateWorkspaceDirectory()
         let fm=FileManager.default,manager=Handler_File_Manager.shared
         guard fm.fileExists(atPath:legacyIndex.path),!fm.fileExists(atPath:libraryIndex.path) else{return}
         try manager.requireAvailableCatalogue(legacyIndex)
         let original=try manager.read(legacyIndex)
         var doc=try ColourFiles.decoder().decode(CatalogueFile.self,from:original)
-        doc.libraryAssetTypes=doc.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleCatalogueStructure().assetTypes
+        doc.libraryAssetTypes=doc.libraryAssetTypes ?? ((try? AppDataStore(root:home).read()["libraryAssetTypes"]) as? [String]) ?? SimpleAssetType.defaultLibraryIDs
         try manager.withTransaction(home:home) {
             let backup=home.appendingPathComponent("Backups/My Library Migration/"+UUID().uuidString+"/Assets.colcat")
             try manager.createDirectory(backup.deletingLastPathComponent())
             try manager.write(original,to:backup)
             try manager.write(ColourFiles.encoder().encode(doc),to:libraryIndex)
             try manager.requireAvailableCatalogue(libraryIndex)
-            try AppDataStore(root:home).update{$0["assets"]="Assets/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes")}
+            try AppDataStore(root:home).update{$0["assets"]=Self.folderName+"/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes")}
             try manager.move(legacyIndex,to:backup.deletingLastPathComponent().appendingPathComponent("Original.colcat"))
         }
     }
@@ -274,9 +300,9 @@ struct GlobalAssets {
         try migrateLibraryIndex()
         if let previous,try CatalogueTree.writePortableEdit(from:previous,to:lib,index:libraryIndex,validated:true) {return}
         if let previous,try CatalogueTree.writePortableRename(from:previous,to:lib,index:libraryIndex,validated:true) {return}
-        try CatalogueTree.write(lib, schema: .init(collections: [], places: [:]), index: libraryIndex, name: "Assets", poolDirectory: "",dirtyPalettes:dirtyPalettes)
+        try CatalogueTree.write(lib, schema: .init(collections: [], places: [:]), index: libraryIndex, name: Self.folderName, poolDirectory: "",dirtyPalettes:dirtyPalettes)
         if CatalogueTree.catalogue(in:root)?.libraryAssetTypes == nil {try setAssetTypes(assetTypes)}
-        try AppDataStore(root: home).update { $0["assets"] = "Assets/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes") }
+        try AppDataStore(root: home).update { $0["assets"] = Self.folderName+"/my_library.collib";$0.removeValue(forKey:"libraryAssetTypes") }
     }
     static func split(_ lib: Library) -> (local: Library, global: Library) {
         var local = lib, global = lib
@@ -319,7 +345,7 @@ enum AssetTransaction {
     static func directory(_ home: URL) -> URL { home.appendingPathComponent("Backups/Asset Transaction") }
     static func items(_ root: URL, home: URL) throws -> [URL] {
         let protected: Set<String> = root.standardizedFileURL == home.standardizedFileURL
-            ? ["Backups", "Assets", "Catalogues", "Keys", "colorgain.coldata", "catalogues.json", "Global.colhis"] : ["Backups"]
+            ? ["Backups", "Assets", GlobalAssets.folderName, "Catalogues", "Keys", "colorgain.coldata", "catalogues.json", "Global.colhis"] : ["Backups"]
         return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).filter { !protected.contains($0.lastPathComponent) }
     }
     static func recover(home: URL) throws {
@@ -345,7 +371,7 @@ enum AppHomeSeed {
         let store = AppDataStore(root: root)
         let creating = !fm.fileExists(atPath: store.url.path)
         if creating {
-            if fm.fileExists(atPath: root.appendingPathComponent("Assets").path) || CatalogueFiles.anyIndex(in: root) != nil || fm.fileExists(atPath: root.appendingPathComponent("catalogues.json").path) {
+            if fm.fileExists(atPath: root.appendingPathComponent("Assets").path) || fm.fileExists(atPath: root.appendingPathComponent(GlobalAssets.folderName).path) || CatalogueFiles.anyIndex(in: root) != nil || fm.fileExists(atPath: root.appendingPathComponent("catalogues.json").path) {
                 throw FileIssue(url: store.url, state: .missing, message: "Existing workspace files were found without their manifest. Locate/restore app data or explicitly update a legacy workspace; no fresh manifest was created.")
             }
             try Handler_File_Manager.shared.createDirectory(root)
@@ -353,6 +379,7 @@ enum AppHomeSeed {
         }
         let migrating = (try store.read())["legacyMigrationPending"] as? Bool == true
         let seeding = creating || migrating
+        try GlobalAssets(home:root).migrateWorkspaceDirectory()
         if !seeding {
             try GlobalAssets(home:root).migrateLibraryIndex()
             let manifest = try store.read()
@@ -360,7 +387,7 @@ enum AppHomeSeed {
             return
         }
         try AppDataStore(root: root).update { value in
-            value["assets"] = "Assets/my_library.collib"
+            value["assets"] = GlobalAssets.folderName+"/my_library.collib"
             value["history"] = "Global.colhis"
             if value["appbridge"] == nil { value["appbridge"] = [] }
         }

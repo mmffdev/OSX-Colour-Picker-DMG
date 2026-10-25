@@ -6,6 +6,8 @@ When Rick invokes `<userjourney>` or asks to document an app journey, read the [
 
 Shared style authority: [styles.md](../styles.md). Read this lazy-loading index before any UI work and load its dropdown/dropup contract before creating or changing any selector. It supersedes conflicting older control examples.
 
+Palette tree rows use the shared [lowestnode contract](../.codex/c_c_ui_lowestnode.md) across Codex and Claude.
+
 App layout lookup: [Component registry](c_layout_registry.md) — canonical region names, hierarchy, source symbols and panel primitive. Read it before locating or changing app sections.
 
 **UI start hook:** Before creating or changing a native page, panel, rail, tree, grid, card, palette, swatch or control, read the [UI framework index](c_ui_framework.md). Load only the child contract for the region being changed. Select the existing primitive and its props before coding. An edge case extends the shared primitive; update its focused contract, the component registry and the [HTML catalogue](../design/ui-primitives-catalogue/index.html) in the same change. Verify Library and the changed route in the installed app. Never create a second local actionbar, tab, barberpole, panel frame, tree renderer or grid engine.
