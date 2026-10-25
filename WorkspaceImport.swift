@@ -13,7 +13,6 @@ struct WorkspaceImportedAsset: Codable, Equatable, Identifiable {
     var external: Bool
     var member: UUID?
     var bucket: UUID?
-    var font: FontAssetInfo? = nil
     func url(in root: URL) throws -> URL {
         if external {
             guard path.hasPrefix("/") else { throw failure("The linked file has an invalid location.") }
@@ -52,7 +51,7 @@ enum WorkspaceImport {
         /// Files live in this user-selected folder; the active catalogue tracks the references.
         case custom(URL)
     }
-    static let supportedTypes: Set<String> = ["Palettes", "ASE", "Fonts"]
+    static let supportedTypes: Set<String> = ["Palettes", "ASE"]
     static let types = SimpleAssetType.setupImportTypes.map(\.setupTitle)
     private static func seenSourcesKey(_ catalogue:URL)->String {
         let digest=SHA256.hash(data:Data(catalogue.standardizedFileURL.path.utf8))
@@ -68,7 +67,7 @@ enum WorkspaceImport {
         AppPreferences.shared.set(paths.sorted(),forKey:key)
     }
     static func importExtensions(for kind:String)->[String] {
-        kind == "ASE" ? ["ase"] : kind == "Fonts" ? ["otf","ttf","ttc","otc"] : kind == "Palettes" ? ["colpal","colpalette","colplt","css","scss","json"] : []
+        kind == "ASE" ? ["ase"] : kind == "Palettes" ? ["colpal","colpalette","colplt","css","scss","json"] : []
     }
     struct Destination: Equatable {
         var title: String
@@ -91,7 +90,7 @@ enum WorkspaceImport {
         }
     }
     static func matches(_ node: SchemaNode, type: String) -> Bool {
-        type == "ASE" ? SchemaTrial.type(of: node).caseInsensitiveCompare("ASE") == .orderedSame : type == "Fonts" ? SchemaTrial.type(of: node).caseInsensitiveCompare("Fonts") == .orderedSame : SchemaTrial.role(of: node) == .palettes
+        type == "ASE" ? SchemaTrial.type(of: node).caseInsensitiveCompare("ASE") == .orderedSame : SchemaTrial.role(of: node) == .palettes
     }
     /// Project the actual hierarchy into destination rows. Asset buckets are implicit.
     /// Typed leaf pages are hidden; containers with a matching bucket remain addressable.
@@ -198,11 +197,14 @@ enum WorkspaceImport {
         next.stacks = stacks
         return (next, bucket.id)
     }
+    static func supportsRecord(_ type:String)->Bool {
+        supportedTypes.contains(type) || ["Images","Photographs"].contains(type)
+    }
     static func records(store: LibraryStore) -> [(WorkspaceImportedAsset, URL)] {
         var indexes = [store.url]
         if let home = store.assetsHome { indexes.insert(GlobalAssets(home: home).index, at: 0) }
         return indexes.flatMap { index in
-            (CatalogueTree.catalogue(in: index.deletingLastPathComponent())?.importedAssets ?? []).map { ($0, index) }
+            (CatalogueTree.catalogue(in: index.deletingLastPathComponent())?.importedAssets ?? []).filter { supportsRecord($0.type) }.map { ($0, index) }
         }
     }
     /// Compatibility entry point for the image page's existing bucket action.
@@ -320,10 +322,7 @@ enum WorkspaceImport {
                 try ASERegistry.write(sources, root: store.root)
             }
         }
-        if record.type == "Fonts" {
-            if let replacement {_ = FontBookBridge.register(replacement)}
-            FontBookBridge.syncCollections(in:store)
-        }
+
     }
     static func perform(urls: [URL], type: String, reference: Bool, target: Destination, allowBucket: Bool, store: LibraryStore, fault: ((String) throws -> Void)? = nil) throws {
         _ = try perform(urls: urls, type: type, transfer: reference ? .reference:.copy, targets: [target], allowBucket: allowBucket, store: store, fault: fault)
@@ -346,7 +345,6 @@ enum WorkspaceImport {
             let data = try Data(contentsOf: url)
             guard data.count <= 16 * 1024 * 1024 else { throw failure("\(url.lastPathComponent) exceeds the 16 MB import limit.") }
             if type == "ASE" { _ = try AdobeASE.read(data); return (url, data, []) }
-            if type == "Fonts" { _ = try FontBookBridge.describe(url); return (url, data, []) }
             let palettes = PaletteImport.read(data, fallback: url.deletingPathExtension().lastPathComponent)
             guard !palettes.isEmpty, palettes.allSatisfy({ $0.asset?.palette.isTypography != true }) else { throw failure("No supported colour palettes found in \(url.lastPathComponent).") }
             return (url, data, palettes)
@@ -362,7 +360,6 @@ enum WorkspaceImport {
         }
         let manager = Handler_File_Manager.shared
         var copiedASE: [URL] = []
-        var fontDestinations: [URL] = []
         var skippedSources=Set<String>()
         var importedSources=Set<String>()
         var collectedItems:[AssetCollectionItem]=[]
@@ -418,7 +415,7 @@ enum WorkspaceImport {
                     if type == "Palettes" && !reference && target.customPath == nil { continue }
                     let index = target.customPath != nil ? store.url : target.member == nil ? store.assetsHome.map { GlobalAssets(home: $0).index } ?? store.url : store.url
                     let root = index.deletingLastPathComponent()
-                    var directory = target.customPath.map{URL(fileURLWithPath:$0,isDirectory:true)} ?? root.appendingPathComponent(type == "Fonts" ? "Fonts" : ASERegistry.directory)
+                    var directory = target.customPath.map{URL(fileURLWithPath:$0,isDirectory:true)} ?? root.appendingPathComponent(ASERegistry.directory)
                     if let member = target.member, let bucket {
                         guard let cat = CatalogueTree.catalogue(in: store.root),
                               let entry = cat.collections.flatMap({ $0.allMembers.map(\.member) }).first(where: { $0.id == member }),
@@ -458,8 +455,6 @@ enum WorkspaceImport {
                         let external = reference || target.customPath != nil
                         let path = external ? destination.path : String(destination.path.dropFirst(root.path.count + 1))
                         var record=WorkspaceImportedAsset(name: destination.deletingPathExtension().lastPathComponent, type: type, path: path, external: external, member: target.member, bucket: bucket)
-                        if type == "Fonts" {record.font=try FontBookBridge.describe(destination)}
-                        if type == "Fonts" {fontDestinations.append(destination)}
                         records.append(record);collectedItems.append(.imported(record))
                         importedSources.insert(source.standardizedFileURL.path)
                         if type == "ASE", !aseSources.contains(where: { $0.url.standardizedFileURL == destination.standardizedFileURL }) { aseSources.append(.init(path: destination.path, folder: false)) }
@@ -481,10 +476,7 @@ enum WorkspaceImport {
                 }
             }
             copiedASE.forEach { ASEIcon.apply(to: $0) }
-            if type == "Fonts" {
-                for url in fontDestinations {_ = FontBookBridge.register(url)}
-                FontBookBridge.syncCollections(in:store)
-            }
+
         } catch {
             // A failed transaction may have rolled back a just-created schema override.
             _ = try? store.load()
@@ -648,7 +640,6 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
     var typeInActionbar = false { didSet { typeLabel.isHidden=typeInActionbar;type.isHidden=typeInActionbar;refreshExtent() } }
     var onOpenASE: ((URL) -> Void)?
     var onOpenPalette: ((UUID) -> Void)?
-    var onOpenFont: ((UUID) -> Void)?
     private var treeHeight: CGFloat { ready ? WorkspaceBranchTree.rowsHeight(destination.numberOfRows)+2*WorkspaceBranchTree.edgePadding : 0 }
     private var methodTop:CGFloat{typeInActionbar ? 12:80}
     private var noteTop:CGFloat{methodTop+56}
@@ -760,7 +751,7 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         importButton.symbol=transfer == .reference ? "link":"square.and.arrow.down"
         destinationLabel.stringValue = targets.isEmpty ? "Destinations" : "Destinations · \(targets.count) Selected"
         if selectedType == "Choose Artefact Type" { note.stringValue = "Choose an artefact type to see its available destinations." }
-        else if !ready { note.stringValue = "\(selectedType) import is not connected yet. Choose Palettes, ASE or Fonts." }
+        else if !ready { note.stringValue = "\(selectedType) import is not connected yet. Choose Palettes or ASE." }
         else {
             let missing = targets.filter { $0.member != nil && $0.bucket == nil }.count
             let action=transfer == .copy ? "Copy keeps the originals." : transfer == .move ? "Move removes the originals after every destination succeeds." : "Reference links to the originals in place."
@@ -957,7 +948,6 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
         guard records.indices.contains(assets.indexOfSelectedItem) else { return }
         let (record, index) = records[assets.indexOfSelectedItem]
         if record.type == "Palettes" { onOpenPalette?(record.id); return }
-        if record.type == "Fonts" { onOpenFont?(record.id); return }
         do {
             let url = try record.url(in: index.deletingLastPathComponent())
             guard FileManager.default.isReadableFile(atPath: url.path) else { throw failure("The file is offline or unavailable. Use Manage to locate it again.") }
@@ -991,7 +981,6 @@ final class WorkspaceImportPane: NSView, WorkspacePanelContentMetrics, NSOutline
                     do {
                         let data = try Data(contentsOf: url)
                         if record.type == "ASE" { _ = try AdobeASE.read(data) }
-                        else if record.type == "Fonts" { _ = try FontBookBridge.describe(url) }
                         else if PaletteImport.read(data, fallback: record.name).isEmpty { throw failure("This file contains no supported palettes.") }
                         try FolderAccess.authorize(url)
                         guard let controller = self.controller else { return }
@@ -1048,7 +1037,6 @@ final class WorkspaceLinkedPalettes {
         cache.removeValue(forKey: source.record.id)
         originals[source.record.id] = try Data(contentsOf: url)
     }
-
 
     static func paletteID(record: UUID, offset: Int) -> UUID {
         if offset == 0 { return record }

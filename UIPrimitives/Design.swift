@@ -233,9 +233,8 @@ enum Design {
         static var extra: CGFloat { areaGutter - gutter }
         static let columns = 12
         static let header: CGFloat = 94
-        /// The second header row is only used when navigation wraps. At wide
-        /// widths, keep the tab strip directly beneath the single control row.
-        static func headerHeight(for width: CGFloat) -> CGFloat { width < 1720 ? header : 48 }
+        /// Keep the protected header height when navigation wraps or becomes a single row.
+        static func headerHeight(for width: CGFloat) -> CGFloat { header }
         static let footer: CGFloat = 48
         /// The page's clear space above its title.
         static let pageTop: CGFloat = 34

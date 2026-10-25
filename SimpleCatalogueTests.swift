@@ -2,11 +2,16 @@ import Foundation
 
 func runSimpleCatalogueTests(check:(Bool,String)->Void){
     print("Simplified ownership, setup, migration and catalogue exchange")
-    check(SimpleAssetType.setupImportTypes.map(\.id) == ["palettes","fonts","typography","images","photography","documents","ase","luts","icc","css"] && SimpleAssetType.setupImportTypes.map(\.setupTitle) == WorkspaceImport.types,"Setup and Import offer the ten focused asset types in the same order")
-    check(SimpleCatalogueStructure().assetTypes == SimpleAssetType.defaultAssetIDs && SimpleAssetType.defaultLibraryIDs == ["information","palettes","fonts","typography","images","photography"],"New clients and My Library seed the six requested sections in order")
+    check(SimpleAssetType.setupImportTypes.map(\.id) == ["palettes","typography","images","photography","documents","ase","luts","icc","css"] && SimpleAssetType.setupImportTypes.map(\.setupTitle) == WorkspaceImport.types,"Setup and Import offer the nine focused asset types in the same order")
+    check(SimpleCatalogueStructure().assetTypes == SimpleAssetType.defaultAssetIDs && SimpleAssetType.defaultLibraryIDs == ["information","palettes","typography","images","photography"],"New clients and My Library seed the five requested sections in order")
     let defaultStack=SimpleCatalogue.stack(SimpleCatalogueStructure())
-    check(defaultStack.children.first?.name == "Information" && defaultStack.children.first(where:{$0.kind == "Simple Assets"})?.children.map(\.name) == ["Palettes","Fonts","Typography","Images","Photographs"],"New client stacks contain Information then the five default asset buckets in order")
+    check(defaultStack.children.first?.name == "Information" && defaultStack.children.first(where:{$0.kind == "Simple Assets"})?.children.map(\.name) == ["Palettes","Typography","Images","Photographs"],"New client stacks contain Information then the four default asset buckets in order")
     check(SimpleAssetType.find("photography")?.selectable == true && SimpleAssetType.find("images")?.selectable == true && SimpleAssetType.find("audio")?.selectable == false,"Images and Photographs are setup choices; historical broad types stay readable")
+    let retired=SchemaNode(name:"Retired Asset",kind:"Retired Asset")
+    let stored=SchemaNode(name:"Owner",children:[SchemaNode(name:"Assets",children:[SimpleAssetType.find("palettes")!.node,retired],kind:"Simple Assets")])
+    let displayed=SimpleAssetType.visibleStack(stored,types:SimpleAssetType.all)
+    check(displayed.children[0].children.count == 1 && stored.children[0].children.count == 2,"Unregistered asset buckets stay out of navigation without modifying the stored schema")
+    check(!WorkspaceImport.supportsRecord("Retired Asset") && WorkspaceImport.supportsRecord("Palettes") && WorkspaceImport.supportsRecord("Images"),"Import listings exclude retired records and retain supported assets")
     let fm=FileManager.default
     do {
         let root=fm.temporaryDirectory.appendingPathComponent("Colorgain-Simple-"+UUID().uuidString,isDirectory:true)

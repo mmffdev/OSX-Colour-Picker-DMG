@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 /// One status item keeps the swatches, shared copy format and app icon together as a single movable cluster.
 final class AppleMenubar: NSObject {
@@ -60,7 +61,13 @@ final class AppleMenubar: NSObject {
                 (slot.entry.flatMap{colorFromHex($0.key)} ?? NSColor.quaternaryLabelColor).setFill();box.fill()
                 foreground.withAlphaComponent(0.3).setStroke();let border=NSBezierPath(rect:box);border.lineWidth=0.5;border.stroke()
             }
-            label.draw(at:NSPoint(x:formatRect.minX+4,y:6))
+            // Centre the visible glyphs, including the arrow, rather than the font's line box.
+            let line=CTLineCreateWithAttributedString(label)
+            let ink=CTLineGetBoundsWithOptions(line,.useGlyphPathBounds)
+            if let context=NSGraphicsContext.current?.cgContext {
+                context.textPosition=CGPoint(x:formatRect.minX+4,y:formatRect.midY-ink.midY)
+                CTLineDraw(line,context)
+            }
             NSImage(named:NSImage.applicationIconName)?.draw(in:iconRect)
             image.unlockFocus()
         }

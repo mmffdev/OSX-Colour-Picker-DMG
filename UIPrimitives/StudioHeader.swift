@@ -179,15 +179,15 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
     var onAcross: ((Int) -> Void)?
     var search: String { field.stringValue }
     func clearFilter() { hideSearch() }
-    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import", "Designer", "Fonts"]
+    private let tabs = ["Library", "Palettes", "Lab", "PrePress", "Contrast", "Projects", "Appbridge", "Import", "Designer"]
     static let secondaryNavigation:[(index:Int,title:String)]=[(2,"Lab"),(4,"Contrast"),(5,"Projects"),(3,"PrePress"),(6,"Appbridge")]
-    private let primaryButtons=[HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero),HeaderNavigationButton(frame:.zero)]
-    private let primaryIndices=[0,1,9,8,7]
+    private let primaryButtons=(0..<4).map{_ in HeaderNavigationButton(frame:.zero)}
+    private let primaryIndices=[0,1,8,7]
     private let toolsButton=HeaderToolsButton(frame:.zero)
     private let field = NSTextField(string: "")
     static let baseline: CGFloat = 40
     private var compactHeader:Bool { bounds.width < 1720 }
-    private var headerCentre:CGFloat { compactHeader ? 28:bounds.height - 18 }
+    private var headerCentre:CGFloat { compactHeader ? 28:bounds.midY }
     private var headerBaseline:CGFloat { let font=Design.Text.body.font();return headerCentre+(font.ascender+font.descender)/2 }
 
     init() {
@@ -207,7 +207,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
         field.isHidden = true
         addSubview(field)
         for (i,button) in primaryButtons.enumerated(){
-            button.title=tabs[primaryIndices[i]];button.symbol=["books.vertical","square.stack","textformat","pencil.and.outline","square.and.arrow.down"][i]
+            button.title=tabs[primaryIndices[i]];button.symbol=["books.vertical","square.stack","pencil.and.outline","square.and.arrow.down"][i]
             button.setAccessibilityLabel(button.title);button.toolTip=button.title
             button.run={ [weak self] in self?.onTab?(self?.primaryIndices[i] ?? i) };addSubview(button)
         }
@@ -234,7 +234,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
             button.frame=NSRect(x:x,y:headerCentre-18,width:button.contentWidth,height:36)
             x=button.frame.maxX+28
         }
-        toolsButton.active=live.map{$0 > 1 && $0 != 7 && $0 != 8 && $0 != 9} ?? false
+        toolsButton.active=live.map{$0 > 1 && $0 != 7 && $0 != 8} ?? false
         let font=Design.Text.body.font(),textCentre=headerBaseline-(font.ascender+font.descender)/2
         paletteHalo.frame=NSRect(x:x-6,y:textCentre-14,width:28,height:28)
         toolsButton.frame=NSRect(x:bounds.width-Design.App.margin-97,y:textCentre-18,width:36,height:36)
@@ -262,7 +262,7 @@ final class StudioHeader: ClickCursorView, Overlay, NSTextFieldDelegate {
         let g = Design.App.gutter, b = headerBaseline
         func col(_ c: Int) -> CGFloat { grid.x + CGFloat(c - 1) * (grid.column + g) }
         func span(_ n: Int) -> CGFloat { CGFloat(n) * grid.column + CGFloat(n - 1) * g }
-        Logo.drawHeader(centredOver:Design.App.railWidth,centreY:bounds.midY,height:compactHeader ? 46:44)
+        Logo.drawHeader(centredOver:Design.App.railWidth,centreY:bounds.midY)
         let font = Design.Text.body.font()
         let centreY = b - (font.ascender + font.descender) / 2
         // Centre the picker pair in the full header, using the utility icon renderer.

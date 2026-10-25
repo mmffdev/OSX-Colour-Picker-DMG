@@ -46,9 +46,9 @@ struct SimpleAssetType {
     let family:String
     /// New setup and import categories; other registered IDs keep existing catalogues readable.
     /// Historical IDs remain in `all` so existing catalogues still decode and display their assets.
-    static let defaultAssetIDs=["palettes","fonts","typography","images","photography"]
+    static let defaultAssetIDs=["palettes","typography","images","photography"]
     static let defaultLibraryIDs=["information"]+defaultAssetIDs
-    static let setupImportIDs=["palettes","fonts","typography","images","photography","documents","ase","luts","icc","css"]
+    static let setupImportIDs=["palettes","typography","images","photography","documents","ase","luts","icc","css"]
     static var setupImportTypes:[SimpleAssetType] {setupImportIDs.compactMap(find)}
     var selectable:Bool {Self.setupImportIDs.contains(id)}
     var setupTitle:String {id == "typography" ? "Typography Packs":title}
@@ -89,7 +89,6 @@ struct SimpleAssetType {
         .init(id:"models-3d",title:"3D Models",symbol:"cube",role:nil,family:"3D & Materials"),
         .init(id:"multilayer-exr",title:"Multi-layer EXR Render Passes",symbol:"square.stack.3d.up",role:nil,family:"3D & Materials"),
         .init(id:"typography",title:"Typography",symbol:"textformat",role:.typography,family:"Brand & Design"),
-        .init(id:"fonts",title:"Fonts",symbol:"textformat",role:nil,family:"Brand & Design"),
         .init(id:"photography",title:"Photographs",symbol:"camera",role:nil,family:"Brand & Design"),
         .init(id:"images",title:"Images",symbol:"photo",role:nil,family:"Brand & Design"),
         .init(id:"vector-artwork",title:"Vector Artwork & Logos",symbol:"pencil",role:nil,family:"Brand & Design"),
@@ -119,6 +118,19 @@ struct SimpleAssetType {
     }
     static func types(in config:SimpleCatalogueStructure)->[SimpleAssetType] {
         all+(config.customAssetTypes ?? []).map{SimpleAssetType(id:$0.id,title:$0.title,symbol:"folder",role:nil,family:$0.family)}
+    }
+    /// Display only registered asset buckets; keep the original schema for persistence.
+    static func visibleStack(_ root:SchemaNode,types:[SimpleAssetType])->SchemaNode {
+        var visible=root
+        if root.kind == "Simple Assets" {
+            visible.children=visible.children.filter { node in
+                types.contains { type in
+                    SchemaTrial.type(of:node) == SchemaTrial.type(of:type.node)
+                }
+            }
+        }
+        visible.children=visible.children.map{visibleStack($0,types:types)}
+        return visible
     }
     static func workspaceCustomTypes(home:URL)->[SimpleCustomAssetType] {
         guard let values=(try? AppDataStore(root:home).read()["customAssetTypes"]) as? [[String:String]] else{return []}

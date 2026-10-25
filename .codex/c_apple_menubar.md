@@ -3,7 +3,7 @@
 One shared macOS status item in both the direct-download and App Store editions. It is bound after the workspace opens and retains the app menu-bar settings route in each edition.
 
 A single movable status item groups recent swatches, the shared `Prefs.copyFormat` selector and the Colorgain icon. The icon menu reuses `LibraryController` Picker and Rectangle Picker. Ten slots are shown initially; Settings → Apple Menubar → 01 Settings can hide them, choose 1–20, and mute menubar sounds. Empty slots remain disabled until real samples arrive.
-The composite status image draws a rounded pill around the cluster. It resolves the copy-format text against the status button's effective light or dark appearance and rerenders when that appearance changes.
+The composite status image draws a rounded pill around the cluster. The format label and arrow share a baseline whose visible glyph bounds are vertically centred within the 24 pt status image. It resolves the copy-format text against the status button's effective light or dark appearance and rerenders when that appearance changes.
 
 `ColourCopies` retains twenty entries in portable app data; the footer displays its latest ten. Rectangle samples entered through the menubar are remembered without changing the clipboard. Clicking a swatch uses the selected format and preserves source CMYK where available. Format changes notify both surfaces. Sound uses the existing Copy/Pick effects and respects Sounds master/event switches.
 

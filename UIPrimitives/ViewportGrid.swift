@@ -12,16 +12,13 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
         visibleItemIndices(in:visibleRect).filter{items[$0].hex != nil || items[$0].id != nil || displaysImages}.map{rect($0)}+markHits.map{$0.0}+noteHits.map{$0.0}+tagHits.map{$0.0}
     }
 
-    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil; var image:NSImage? = nil; var imagePath:String? = nil; var fontFamily:String? = nil; var fontSpecimen:String? = nil; var fontPreview:NSFont? = nil; var fontSourcePath:String? = nil; var fontFormat:String? = nil; var fontDetailCaption:String? = nil; var captureDate:Date? = nil; var metadata:[String:String] = [:]; var paletteColourCount:Int=0; var paletteBars:[NSColor]=[]; var linkedReference=false; var editingLocked=false; var createdAt:Date?=nil; var modifiedAt:Date?=nil; var selectionID:String?=nil; var sectionIndex:Int?=nil }
+    struct Item { let title: String; let caption: String; let colours: [NSColor]; let hex: String?; let id: UUID?; var sourceCMYK: String? = nil; var image:NSImage? = nil; var imagePath:String? = nil; var captureDate:Date? = nil; var metadata:[String:String] = [:]; var paletteColourCount:Int=0; var paletteBars:[NSColor]=[]; var linkedReference=false; var editingLocked=false; var createdAt:Date?=nil; var modifiedAt:Date?=nil; var selectionID:String?=nil; var sectionIndex:Int?=nil }
     struct Section {let title:String;let start:Int}
     var sections:[Section]=[] {didSet{onResize?();needsLayout=true;needsDisplay=true}}
     var paletteReview:((UUID)->(name:String,review:PaletteReview)?)?
     var onPaletteRating:((UUID,Int)->Void)?
     var onPaletteFlag:((UUID,PaletteReview.Flag?)->Void)?
     private var reviews:[UUID:PaletteReviewControls]=[:]
-    private var fontInfoButtons:[UUID:PaletteAssetIcon]=[:]
-    var selectedFontInfoID:UUID? {didSet{syncReviewControls();needsDisplay=true}}
-    var onFontInfo:((UUID)->Void)?
     private struct CopyRow:Hashable {let item:Int;let row:Int}
     private var valueCopyButtons:[CopyRow:PaletteAssetIcon]=[:]
     private var cardPreferenceObserver:NSObjectProtocol?
@@ -82,7 +79,7 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
     }
 
     private var clipObserver:NSObjectProtocol?
-    private func clearReviewControls(){reviews.values.forEach{$0.dismissOverlay();$0.removeFromSuperview()};reviews=[:];fontInfoButtons.values.forEach{$0.removeFromSuperview()};fontInfoButtons=[:];valueCopyButtons.values.forEach{$0.removeFromSuperview()};valueCopyButtons=[:]}
+    private func clearReviewControls(){reviews.values.forEach{$0.dismissOverlay();$0.removeFromSuperview()};reviews=[:];valueCopyButtons.values.forEach{$0.removeFromSuperview()};valueCopyButtons=[:]}
     deinit{pendingBandClick?.invalidate();if let cardPreferenceObserver{NotificationCenter.default.removeObserver(cardPreferenceObserver)};if let clipObserver{NotificationCenter.default.removeObserver(clipObserver)}}
     override func viewDidMoveToWindow(){
         super.viewDidMoveToWindow()
@@ -99,20 +96,9 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
     private func syncReviewControls(){
         guard window != nil,!displaysImages else{clearReviewControls();return}
         let visible=visibleRect
-        var keep=Set<UUID>(),keepFont=Set<UUID>(),copyKeep=Set<CopyRow>()
+        var keep=Set<UUID>(),copyKeep=Set<CopyRow>()
         for i in visibleItemIndices(in:visible) {
-            if let id=items[i].id,items[i].fontFamily != nil {
-                keepFont.insert(id)
-                let button=fontInfoButtons[id] ?? PaletteAssetIcon(frame:.zero)
-                if fontInfoButtons[id] == nil {fontInfoButtons[id]=button;addSubview(button)}
-                button.symbol="info.circle"
-                button.ink=id == selectedFontInfoID ? Design.houseYellow:Design.quiet
-                button.setAccessibilityLabel("Show Font Information For \(items[i].title)")
-                button.toolTip="Show Font Information"
-                let r=rect(i)
-                button.frame=NSRect(x:r.maxX-cardInset-24,y:r.maxY-cardInset-24,width:24,height:24)
-                button.run={ [weak self] in self?.onFontInfo?(id) }
-            }
+
             if let hex=items[i].hex {
                 for (row,text) in valueRows(for:items[i]).enumerated() {
                     let key=CopyRow(item:i,row:row);copyKeep.insert(key)
@@ -143,7 +129,6 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
         }
         for i in Array(valueCopyButtons.keys) where !copyKeep.contains(i){valueCopyButtons[i]?.removeFromSuperview();valueCopyButtons.removeValue(forKey:i)}
         for id in Array(reviews.keys) where !keep.contains(id){reviews[id]?.dismissOverlay();reviews[id]?.removeFromSuperview();reviews.removeValue(forKey:id)}
-        for id in Array(fontInfoButtons.keys) where !keepFont.contains(id){fontInfoButtons[id]?.removeFromSuperview();fontInfoButtons.removeValue(forKey:id)}
     }
     func refreshReviewControls(){syncReviewControls();setNeedsDisplay(visibleRect)}
     private var selection = AssetSelection<String>()
@@ -420,26 +405,23 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
     private var captionMinimumWidth:CGFloat=0
     private var framedGrid:Bool {!listView && (!displaysImages || importPaletteCards)}
     private var cardInset:CGFloat {framedGrid ? 12:6}
-    private var fontGridCards:Bool {framedGrid && items.first?.fontFamily != nil}
-    private var cardHeader:CGFloat {fontGridCards ? cardInset:framedGrid ? 36:0}
+    private var cardHeader:CGFloat {framedGrid ? 36:0}
     private var swatchBarHeight:CGFloat {hasSwatches && showsPaletteBars ? 8:0}
     private var titleRowHeight:CGFloat {hasSwatches && !cardShowsNames ? 0:Design.App.unit}
-    private var fontListRows:Bool {listView && items.first?.fontFamily != nil}
-    private var listRowHeight:CGFloat {fontListRows ? 96:hasSwatches ? max(64,16+Design.App.unit+CGFloat(maximumValueRows)*Design.App.unit):64}
+    private var listRowHeight:CGFloat {hasSwatches ? max(64,16+Design.App.unit+CGFloat(maximumValueRows)*Design.App.unit):64}
     private var gridCardHeight:CGFloat {
         if hasSwatches && !imageIntake{return cardHeader+swatchBlockHeight+swatchBarHeight+titleRowHeight+CGFloat(maximumValueRows)*Design.App.unit+12}
-        if fontGridCards {return cardHeader+Self.block+Design.App.unit+22+cardInset}
         return Self.block+Self.words+(framedGrid ? (items.first?.id != nil || importPaletteCards ? 12:48):0)
     }
     private var gridStride:CGFloat {gridCardHeight+(imageIntake ? 24:Self.rowGap)}
     private func colourBlock(_ r:NSRect)->NSRect {
-        if listView{return NSRect(x:r.minX+8,y:r.minY+8,width:min(240,r.width*0.4),height:fontListRows ? listRowHeight-16:hasSwatches ? max(40,listRowHeight-16-swatchBarHeight):48)}
+        if listView{return NSRect(x:r.minX+8,y:r.minY+8,width:min(240,r.width*0.4),height:hasSwatches ? max(40,listRowHeight-16-swatchBarHeight):48)}
         if displaysImages && imageFullView{return NSRect(x:r.minX+8,y:r.minY+8,width:max(0,r.width-16),height:max(0,r.height-64))}
         return NSRect(x:r.minX+(framedGrid ? cardInset:0),y:r.minY+cardHeader,width:max(0,r.width-(framedGrid ? cardInset*2:0)),height:hasSwatches && !imageIntake ? swatchBlockHeight:Self.block)
     }
     private func captionBaseline(_ r:NSRect)->CGFloat {
         if hasSwatches && !imageIntake{return (listView ? r.minY+8+Design.App.unit:colourBlock(r).maxY+swatchBarHeight+titleRowHeight)+Design.App.textBaseline}
-        return listView ? r.minY+(fontListRows ? 82:45):r.minY+cardHeader+Self.block+Design.App.unit+Design.App.textBaseline
+        return listView ? r.minY+45:r.minY+cardHeader+Self.block+Design.App.unit+Design.App.textBaseline
     }
     private func statusBaseline(_ r:NSRect)->CGFloat {framedGrid || (listView && hasSwatches) ? r.minY+24:captionBaseline(r)}
     private func importCheckbox(_ r:NSRect,_ block:NSRect)->NSRect {
@@ -542,7 +524,7 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
             let it=items[i]
             if displaysImages && imageFullView && i != currentImageIndex { continue }
             let r = rect(i)
-            let hasNotch = it.fontFamily == nil && !imageIntake && !listView && !(displaysImages && imageFullView)
+            let hasNotch = !imageIntake && !listView && !(displaysImages && imageFullView)
                 && AssetNotes.key(for:it,palette:notePaletteID,scope:noteScope) != nil
             let notchRect = NSRect(x:r.midX-62-WorkspaceTabContour.curve,y:r.maxY-1,
                                    width:124+2*WorkspaceTabContour.curve,height:24)
@@ -577,15 +559,15 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
             // The grid card owns its frame, padded colour block and separate proof-status row.
             if isSelected(it) && !importPaletteCards && !imageIntake {
                 fill(r, Design.mist)
-                (fontListRows ? Design.rule : Design.ink.withAlphaComponent(0.65)).setStroke()
-                let selectedBorder = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); selectedBorder.lineWidth = fontListRows ? 1 : 3; selectedBorder.stroke()
+                Design.ink.withAlphaComponent(0.65).setStroke()
+                let selectedBorder = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)); selectedBorder.lineWidth = 3; selectedBorder.stroke()
             }
             if framedGrid {(imageIntake ? Design.rule.withAlphaComponent(0.5):Design.rule).setStroke();let border=NSBezierPath(rect:r.insetBy(dx:0.5,dy:0.5));border.lineWidth=1;border.stroke()}
             let block = colourBlock(r)
             if it.linkedReference {
                 RowMark.image("link", colour: Design.orange).draw(in: NSRect(x: r.maxX-cardInset-18, y: r.minY+9, width: 18, height: 18), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }
-            let thumbnail=it.fontPreview == nil ? (it.image ?? it.imagePath.flatMap{onImagePreview?($0,it.modifiedAt)}):nil
+            let thumbnail=it.image ?? it.imagePath.flatMap{onImagePreview?($0,it.modifiedAt)}
             let preview=displaysImages && imageFullView && fullResolutionPath == it.imagePath ? (fullResolutionImage ?? thumbnail):thumbnail
             if let image=preview, image.size.width > 0, image.size.height > 0 {
                 if displaysImages {
@@ -599,22 +581,6 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
                     let size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
                     image.draw(in:NSRect(x:block.midX-size.width/2,y:block.midY-size.height/2,width:size.width,height:size.height))
                 }
-            } else if let font=it.fontPreview {
-                fill(block,Design.mist.withAlphaComponent(0.6))
-                let style=NSMutableParagraphStyle();style.lineBreakMode = .byTruncatingTail;style.lineSpacing=3
-                let specimen=NSAttributedString(string:"The quick brown fox\njumps over the lazy dog.",attributes:[.font:font,.foregroundColor:Design.ink,.paragraphStyle:style])
-                specimen.draw(in:NSRect(x:block.minX+16,y:block.minY+34,width:max(0,block.width-32),height:max(0,block.height-42)))
-            } else if let family=it.fontFamily {
-                fill(block, Design.mist)
-                let word="Colorgain",available=max(0,block.width-24)
-                var point=min(fontListRows ? 42:48,max(26,block.height*0.48))
-                var specimen=NSAttributedString(string:word,attributes:[.font:NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:point) ?? NSFont.systemFont(ofSize:point),.foregroundColor:Design.ink])
-                while specimen.size().width > available && point > 18 {
-                    point-=2
-                    let font=NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:point) ?? NSFont.systemFont(ofSize:point)
-                    specimen=NSAttributedString(string:word,attributes:[.font:font,.foregroundColor:Design.ink])
-                }
-                specimen.draw(in:NSRect(x:block.minX+max(12,(block.width-specimen.size().width)/2),y:block.midY-specimen.size().height/2,width:available,height:specimen.size().height+4))
             } else if it.colours.isEmpty {
                 fill(block, Design.mist)
                 if imageIntake { RowMark.image("doc.text",colour:Design.quiet).draw(in:NSRect(x:block.midX-22,y:block.midY-22,width:44,height:44),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil) }
@@ -644,13 +610,7 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
             if it.hex == nil || cardShowsNames {
             Design.attributed(it.hex == nil ? it.title:it.title.components(separatedBy:" / ").first ?? it.title, .bodyStrong, colour: primaryInk).draw(x:textX,baseline:listView ? r.minY+25 : block.maxY+swatchBarHeight+Design.App.textBaseline,width:listView ? max(0,r.maxX-textX-(it.hex != nil ? 130:(it.id.flatMap{reviews[$0]} == nil ? 0:PaletteReviewControls.width+14)-(it.linkedReference ? 24:0))) : max(0,r.width-cardInset*2-(it.id.flatMap{reviews[$0]} == nil ? 0:PaletteReviewControls.width+12)))
             }
-            if listView,let family=it.fontFamily {
-                let font=NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:22) ?? NSFont.systemFont(ofSize:22)
-                let style=NSMutableParagraphStyle();style.lineBreakMode = .byTruncatingTail
-                let words=it.fontSpecimen?.trimmingCharacters(in:.whitespacesAndNewlines)
-                let specimen=NSAttributedString(string:(words?.isEmpty == false ? words:nil) ?? "The quick brown fox jumps over the lazy dog.",attributes:[.font:font,.foregroundColor:primaryInk,.paragraphStyle:style])
-                specimen.draw(in:NSRect(x:textX,y:r.minY+34,width:max(0,r.maxX-textX-32),height:29))
-            }
+
             if it.hex != nil,showsPaletteBars,!it.paletteBars.isEmpty {
                 let width=block.width/CGFloat(it.paletteBars.count)
                 for (index,colour) in it.paletteBars.enumerated(){fill(NSRect(x:block.minX+CGFloat(index)*width,y:block.maxY+2,width:width,height:4),colour)}
@@ -672,13 +632,6 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
                     let trailing=r.maxX-cardInset
                     Design.attributed(text,.caption,colour:secondaryInk).draw(x:valueX,baseline:capB+CGFloat(row)*Design.App.unit,width:max(0,trailing-valueX))
                 }
-            } else if let format=it.fontFormat {
-                let label=Design.attributed(format,.caption,colour:primaryInk)
-                let chip=NSRect(x:textX,y:capB-16,width:ceil(label.size().width)+18,height:21)
-                FontFormatStyle.colour(format).setStroke()
-                let border=NSBezierPath(roundedRect:chip.insetBy(dx:0.75,dy:0.75),xRadius:10,yRadius:10);border.lineWidth=1.5;border.stroke()
-                label.draw(x:chip.minX+9,baseline:capB,width:chip.width-18)
-                Design.attributed(it.fontDetailCaption ?? it.caption,.caption,colour:secondaryInk).draw(x:chip.maxX+8,baseline:capB,width:max(0,r.maxX-cardInset-chip.maxX-8))
             } else {
                 Design.attributed(it.caption,.caption,colour:secondaryInk).draw(x:paletteCountInHeader ? r.minX+cardInset:valueX,baseline:paletteCountInHeader ? statusB:capB,width:max(0,(paletteCountInHeader ? deltaX-8:(framedGrid ? r.maxX-cardInset:deltaX-8))-(paletteCountInHeader ? r.minX+cardInset:valueX)))
             }
@@ -706,8 +659,6 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
         let p = convert(event.locationInWindow, from: nil)
         if let i = itemIndex(at:p), items[i].hex != nil {
             toolTip = nil
-        } else if let i=itemIndex(at:p),items[i].fontFamily != nil {
-            toolTip=items[i].fontSourcePath ?? items[i].caption
         } else if let i=itemIndex(at:p),items[i].id != nil,!imageIntake {
             toolTip=nil
         } else if displaysImages,let i=itemIndex(at:p) {
@@ -774,8 +725,7 @@ final class TileGrid: ClickCursorView, NSDraggingSource {
     override func mouseDragged(with event:NSEvent){
         guard let item=pressedPalette,let id=item.id,PaletteDrag.counts(event,from:palettePress) else{return}
         pressedPalette=nil
-        if item.fontFamily != nil {FontDrag.begin(id,name:item.title,event:event,in:self)}
-        else if canHover?(item) == true {PaletteDrag.begin(id,name:item.title,colours:item.colours,event:event,in:self)}
+        if canHover?(item) == true {PaletteDrag.begin(id,name:item.title,colours:item.colours,event:event,in:self)}
     }
     override func mouseUp(with event:NSEvent){
         defer{pressedPalette=nil}

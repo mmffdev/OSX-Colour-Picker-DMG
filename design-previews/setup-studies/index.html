@@ -71,7 +71,7 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const variants=[['Reference','Closest to your composition. Quiet, compact examples.'],['Folder map','Explains the workspace and catalogue as two distinct homes.'],['Live tree','Shows the structure responding to your choices.'],['Colour study','Uses palettes and typography to demonstrate the selected assets.'],['Setup proof','Keeps an evolving summary of what will be created.']];
 const pages=['Welcome','Workspace','Catalogue','Clients','Projects','Assets','Review'];
-const types=['Palettes','ICC Profiles','Fonts','Photographs','Images','ASE','Swatches','Colour Presets','LUTs','Video','Audio Clips','Colour Measurements','Typography','Documents','Catalogues & Collections','Application Presets'];
+const types=['Palettes','ICC Profiles','Photographs','Images','ASE','Swatches','Colour Presets','LUTs','Video','Audio Clips','Colour Measurements','Typography','Documents','Catalogues & Collections','Application Presets'];
 const state={variant:2,page:0,folder:'~/Documents/Colorgain',name:'Master Catalogue',singular:'Project',plural:'Projects',clientSingular:'Client',clientPlural:'Clients',assets:new Set(['Palettes','Typography','Photographs','ICC Profiles']),guides:false,returning:false,loaded:null,closed:false,created:false};
 const swatches=['#e5d5bc','#85a2a5','#183e44','#aa3339','#f4be00','#242627'];
 const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

@@ -463,34 +463,6 @@ final class StudioFrame: NSView {
     let footer = StudioFooter()
     private let cataloguePane = WorkspaceCatalogues()
     private var treeGridScope:WorkspaceTreeGridScope?
-    private let fontSpecimen=FontSpecimenPage(frame:.zero)
-    private var fontEntries:[UUID:FontLibraryEntry]=[:]
-    private var fontDetailID:UUID?
-    private var fontListMode=(AppPreferences.shared.object(forKey:"FontLibrary.ListView") as? Bool) ?? true
-    private var inspectedFontID=AppPreferences.shared.string(forKey:"FontLibrary.InspectedFontID").flatMap(UUID.init(uuidString:))
-    private var fontInspectorNeedsOpen=false
-    private var fontFormatFilter="All Formats"
-    private var fontOrder="Group By Type"
-    private var previousAssetListMode:Bool?
-    private var showingFontList=false
-    private func applyFontListMode() {
-        let fontList=(place == .palettes && workspaceFilter == "fonts" && fontDetailID == nil) || treeGridScope?.fontBucket == true
-        if fontList != showingFontList {
-            if fontList {
-                previousAssetListMode=page.grid.listView
-                page.grid.listView=fontListMode
-                fontInspectorNeedsOpen=true
-            } else {
-                fontListMode=page.grid.listView
-                AppPreferences.shared.set(fontListMode,forKey:"FontLibrary.ListView")
-                if let previousAssetListMode {page.grid.listView=previousAssetListMode}
-                fontInspectorNeedsOpen=false
-                if infoPane is FontInfoPane {closeInfoRail()}
-            }
-            showingFontList=fontList
-        }
-        viewportFooter.listMode=page.grid.listView
-    }
     private let colourMode=WorkspaceColourMode()
     private let colourPickerPage=WorkspaceColourPickerPage(frame:.zero)
     private let transformPage=WorkspaceTransformPage(frame:.zero)
@@ -593,7 +565,7 @@ final class StudioFrame: NSView {
     func configureAssetImport(_ form: WorkspaceImportPane) {
         form.onSourceFilesChanged = { [weak self] files in
             guard let self else{return}
-            self.importRenamePane.sampleFile=files.first ?? URL(fileURLWithPath:self.importKind == "Fonts" ? "Font.otf":self.importKind == "ASE" ? "Palette.ase":"Palette.colpal")
+            self.importRenamePane.sampleFile=files.first ?? URL(fileURLWithPath:self.importKind == "ASE" ? "Palette.ase":"Palette.colpal")
         }
         form.onOpenPalette = { [weak self] id in self?.openLinkedPalette(id) }
         form.onFilesChanged = { [weak self] in
@@ -748,14 +720,13 @@ final class StudioFrame: NSView {
     }
     private var carouselKind:WorkspaceFilmstrip.Kind? {
         guard canvasWorkspace,!imageIntakeWorkspace,place != .designer,transformSource == nil,!colourMode.isActive else{return nil}
-        if case .palettes=place {return workspaceFilter == "fonts" ? .fonts:.palettes}
+        if case .palettes=place {return .palettes}
         if case .palette=place {return .palettes}
         if canImportImagesFromCurrentPlace(){return .images}
         if case .group(let member,let node)=place,
            let group=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first(where:{$0.node.id == node})?.node,
            let role=SchemaTrial.role(of:group),role == .palettes || role == .typography {return .palettes}
         if let scope=treeGridScope {
-            if scope.fontBucket {return .fonts}
             if scope.key == "mylibrary-photography" || scope.key == "mylibrary-images" {return .images}
             let assets=scope.sections.flatMap(\.assets)
             if !assets.isEmpty && assets.allSatisfy({if case .palette=$0{return true};return false}) {return .palettes}
@@ -836,25 +807,7 @@ final class StudioFrame: NSView {
         intakeSourcePane.refreshSelectedSource()
     }
     func openImageImport(kind:String="Palettes"){beginImageIntake(kind:kind)}
-    private func addCurrentFontToCollection(){
-        guard let id=fontDetailID,let entry=fontEntries[id] else{return}
-        let modal=SwissFocusModal(title:"Add To Collection",message:"Enter an existing Collection name or create a new one. The font will also appear in the matching Font Book collection.")
-        let field=modal.field("Collection",value:"")
-        modal.button("Add",primary:true){ [weak self,weak modal] in
-            guard let self else{return}
-            let name=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-            guard !name.isEmpty else{self.library.flash("Enter a Collection name");return}
-            do {
-                let existing=AssetCollections.list(in:self.library.store).first{$0.name.caseInsensitiveCompare(name) == .orderedSame}
-                let collection=try existing?.id ?? AssetCollections.create(name,in:self.library.store)
-                try AssetCollections.add([entry.collectionItem],to:collection,in:self.library.store)
-                FontBookBridge.syncCollections(in:self.library.store)
-                modal?.dismissOverlay();self.library.flash("Added \(entry.info.family) To \(name)");self.reload()
-            } catch {self.library.flash(error.localizedDescription)}
-        }
-        modal.button("Cancel"){[weak modal] in modal?.dismissOverlay()}
-        modal.present(over:fontSpecimen)
-    }
+
     private func configureImportTarget(){
         guard let imageImportTargetPanel else{return}
         if importsImages {
@@ -1277,14 +1230,8 @@ final class StudioFrame: NSView {
             })
             self.openContext(.palette(id),in:view,at:point,extra:colour)
         }
-        cataloguePane.onOpenImportedAsset = { [weak self] id in
-            guard let self else{return}
-            if WorkspaceImport.records(store:self.library.store).contains(where:{$0.0.id == id && $0.0.type == "Fonts"}) {
-                self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
-            } else {self.importPane.open(id:id)}
-        }
+        cataloguePane.onOpenImportedAsset = { [weak self] id in self?.importPane.open(id:id) }
         configureAssetImport(importPane)
-        importPane.onOpenFont={ [weak self] id in guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload() }
         cataloguePane.installICCProfiles(iccProfilePane)
         rightPanelRail.add(WorkspacePanel(id:"metadata",title:"Metadata",content:metadataPane,resizable:false))
         metadataPane.onEdit={ [weak self] id in self?.editMetadata(for:id) }
@@ -1438,18 +1385,8 @@ final class StudioFrame: NSView {
         }
         page.workspaceToolbar = viewportFooter
         page.workspaceActionbar = viewportHeader
-        viewportHeader.onFontBack={ [weak self] in self?.fontDetailID=nil;self?.reload() }
-        viewportHeader.onFontImport={ [weak self] in self?.beginImageIntake(kind:"Fonts") }
         viewportHeader.onPaletteImport={ [weak self] in self?.beginImageIntake(kind:"Palettes") }
-        viewportHeader.onFontCollection={ [weak self] in self?.addCurrentFontToCollection() }
-        viewportHeader.onFontSave={ [weak self] in self?.fontSpecimen.saveDetails() }
-        viewportHeader.onFontFormat={ [weak self] format in
-            guard let self else{return}
-            self.fontFormatFilter=format
-            self.fontOrder=format == "All Formats" ? "Group By Type":"Name A–Z"
-            self.reload()
-        }
-        viewportHeader.onFontOrder={ [weak self] order in self?.fontOrder=order;self?.reload() }
+
         viewportHeader.onAssetOrder = { [weak self] order in self?.page.assetOrder=order;self?.needsLayout=true }
         let setPaletteFilter:(PaletteAssetHandler.Filter)->Void={ [weak self] value in
             guard let self else{return};self.paletteFilter=value
@@ -1463,7 +1400,6 @@ final class StudioFrame: NSView {
             guard let self else{return}
             self.closeExpandedPanel()
             self.page.grid.listView=list
-            if self.showingFontList {self.fontListMode=list;AppPreferences.shared.set(list,forKey:"FontLibrary.ListView")}
             self.page.needsLayout=true
         }
         viewportFooter.onLibraryRail = { [weak self] in self?.toggleRail(1) }
@@ -1505,27 +1441,9 @@ final class StudioFrame: NSView {
         cataloguePane.onRating = { [weak self] id,rating in self?.library.apply("Rate Palette"){PaletteAssetHandler.setRating(rating,on:id,in:&$0)} }
         cataloguePane.onFlag = { [weak self] id,flag in self?.library.apply("Flag Palette"){PaletteAssetHandler.setFlag(flag,on:id,in:&$0)} }
         cataloguePane.onFilter = { [weak self] key in
-            guard let self else { return }; self.treeGridScope=nil;self.workspaceFilter=key; self.fontDetailID=nil; self.place = .palettes; self.reload(); self.needsLayout=true
+            guard let self else { return }; self.treeGridScope=nil;self.workspaceFilter=key;  self.place = .palettes; self.reload(); self.needsLayout=true
         }
-        cataloguePane.onOpenFont = { [weak self] id in
-            guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.fontDetailID=id;self.place = .palettes;self.reload()
-        }
-        cataloguePane.onFontContext = { [weak self] id,node,view,point in
-            let parts=node.key.components(separatedBy:":")
-            let assignment:(UUID,UUID)?=parts.count == 4 && parts[0] == "project-font" ? UUID(uuidString:parts[1]).flatMap{project in UUID(uuidString:parts[2]).map{(project,$0)}}:nil
-            self?.openFontContext(id,in:view,at:point,assignment:assignment)
-        }
-        cataloguePane.onFontUpdate = { [weak self] id,info in
-            guard let self,let entry=self.cataloguePane.fontEntries.first(where:{$0.id == id}) else{return}
-            do {try FontLibraryIndex.save(info,entry:entry);self.reload()}
-            catch {self.library.flash(error.localizedDescription)}
-        }
-        cataloguePane.onFontDrop = { [weak self] id,destination in
-            guard let self,let bucket=destination.bucket,
-                  let entry=self.cataloguePane.fontEntries.first(where:{$0.id == id}) else{return}
-            FontProjectAssignments.add(entry.info.family,project:destination.project,bucket:bucket)
-            self.reload()
-        }
+
         cataloguePane.onCatalogueAction = { [weak self] name,action in
             guard let self,let window=self.window else{return}
             CatalogueRowActions.perform(action,name:name,library:self.library,window:window) { [weak self] in self?.needsLayout=true;if let library=self?.library {NotificationCenter.default.post(name:.appStateDidChange,object:library)} }
@@ -1536,7 +1454,6 @@ final class StudioFrame: NSView {
             guard let self else{return}
             switch entry.content {
             case .palette(let id,_):self.go(.palette(id))
-            case .font(let id,_):self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
             case .image(let path,_):self.page.grid.onImageContextAction?(path,2)
             }
         }
@@ -1589,10 +1506,7 @@ final class StudioFrame: NSView {
         }
         header.onTab = { [weak self] i in
             guard let self else{return}
-            if i == 9 {
-                self.workspaceFilter="fonts";self.fontDetailID=nil;self.place = .palettes
-                self.pageLayout.updatePrimary(.palettes);self.reload();return
-            }
+
             if i == 8 {self.go(.designer);return}
             if i == 7 {if !self.imageIntakeWorkspace {self.beginImageIntake()};return}
             self.go([Place.catalogue, .palettes, .lab, .prepress(0), .contrast, .projects, .appbridge][i])
@@ -1673,9 +1587,7 @@ final class StudioFrame: NSView {
         page.grid.onImageHalo = { [weak self] path, rect in self?.openImageHalo(for: path, rect: rect) }
         page.grid.onNotes = { [weak self] item in self?.openNotes(for: item) }
         page.grid.onTags = { [weak self] item in
-            if let id=item.id,item.fontFamily != nil,let self,let entry=self.fontEntries[id] {
-                TagPanel.fonts([entry],library:self.library,over:self.window){[weak self] in self?.reload()}
-            } else if let id=item.id {self?.tag(palette:id)}
+            if let id=item.id {self?.tag(palette:id)}
             else if let hex=item.hex {self?.tag(swatches:[hex])}
         }
         rail1.onPaletteSelection = { [weak self] id, order, modifiers in self?.selectPalette(id, order: order, modifiers: modifiers) }
@@ -1727,8 +1639,7 @@ final class StudioFrame: NSView {
         rail1.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
         rail2.onContext = { [weak self] place, view, point in self?.openContext(place, in: view, at: point) }
         page.grid.onContext = { [weak self] hex, point in guard let self else { return }; self.openSwatchContext(hex, in: self.page.grid, at: point) }
-        page.grid.onAssetContext = { [weak self] id, point in guard let self else { return };if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.openFontContext(id,in:self.page.grid,at:point)}else{self.openContext(.palette(id), in: self.page.grid, at: point)} }
-        page.grid.onFontInfo = { [weak self] id in self?.showFontInformation(id,persist:true) }
+        page.grid.onAssetContext = { [weak self] id, point in guard let self else {return};self.openContext(.palette(id),in:self.page.grid,at:point) }
         rail1.onGear = { [weak self] id, view, rect in self?.openHalo(for: id, from: view, rect: rect) }
         // A bucket opened or shut on either rail is remembered for this catalogue; rail2 is built from the state, so it is filled again.
         rail1.onShut = { [weak self] key, shut in guard let self = self else { return }; Prefs.setRailShut(key, shut, in: self.library.catalogue) }
@@ -1783,21 +1694,12 @@ final class StudioFrame: NSView {
         }
         header.onPick = { [weak self] in self?.library.togglePicking() }
         header.onSample = { [weak self] in self?.library.sampleArea() }
-        page.grid.onSelectPalette = { [weak self] id in guard let self else{return};if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.workspaceFilter="fonts";self.treeGridScope=nil;self.place = .palettes;self.fontDetailID=id;self.reload()}else{self.inspectPalette(id)} }
-        fontSpecimen.onBack={ [weak self] in guard let self else{return};self.fontDetailID=nil;self.reload() }
-        fontSpecimen.onImport={ [weak self] in self?.beginImageIntake(kind:"Fonts") }
-        fontSpecimen.onSave={ [weak self] info in
-            guard let self,let id=self.fontDetailID,let entry=self.fontEntries[id] else{return}
-            do {try FontLibraryIndex.save(info,entry:entry);self.library.flash("Saved Font Details");self.reload()}
-            catch {self.library.flash(error.localizedDescription)}
-        }
-        fontSpecimen.onAddCollection={ [weak self] in self?.addCurrentFontToCollection() }
-        page.add(fontSpecimen,as:.fontSpecimen)
+        page.grid.onSelectPalette = { [weak self] id in self?.inspectPalette(id) }
+
         page.paletteActions.back.target=self
         page.paletteActions.back.action=#selector(backToPaletteGrid)
         page.grid.onOpen = { [weak self] id in
             guard let self = self else { return }
-            if self.fontEntries[id] != nil,self.page.grid.items.contains(where:{$0.id == id && $0.fontFamily != nil}) {self.workspaceFilter="fonts";self.treeGridScope=nil;self.place = .palettes;self.fontDetailID=id;self.reload();return}
             if self.cataloguePane.importedAssets.contains(where:{$0.id == id}) {
                 self.importPane.open(id:id);return
             }
@@ -1811,7 +1713,7 @@ final class StudioFrame: NSView {
         page.schema.library = library
         page.schema.onChange = { [weak self] in self?.reload() }
         // The New button makes a member where members are listed; on a member's Typography page, a typography palette, opened in Contrast for its first pairing.
-        page.onNew = { [weak self] in guard let self else{return};if self.workspaceFilter == "fonts" && self.place == .palettes {self.beginImageIntake(kind:"Fonts")}else{self.newFromPage()} }
+        page.onNew = { [weak self] in self?.newFromPage() }
         page.add(ShortcutsSettings(), as: .shortcuts)
         page.add(SoundsSettings(), as: .sounds)
         page.add(HaloSettings(), as: .halo)
@@ -1883,7 +1785,6 @@ final class StudioFrame: NSView {
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .schemaDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(historyChanged), name: .historyDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(pickerStateChanged), name: .appStateDidChange, object: library)
-        NotificationCenter.default.addObserver(self, selector: #selector(fontInventoryChanged), name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(flashed(_:)), name: .statusMessage, object: nil)
         if !embeddedPage { library.onReveal = { [weak self] hex in
             guard let self else { return }
@@ -1969,13 +1870,6 @@ final class StudioFrame: NSView {
         pendingPickerRefresh = false; reload()
         page.grid.chosenHex = chosenHex
     }
-    @objc private func fontInventoryChanged() {
-        let current=FontLibraryIndex.list(in:library.store)
-        let previous=cataloguePane.fontEntries
-        guard current.map(\.id) != previous.map(\.id) else{return}
-        cataloguePane.fontEntries=current
-        reload()
-    }
 
     @objc private func openProfileRail(_ notification:Notification){guard !embeddedPage,let source=notification.object as? NSView,source.window === window else{return};showProfileRail()}
     private func showProfileRail(){guard !embeddedPage else{return};viewportHeader.channels.showProfiles()}
@@ -2026,7 +1920,6 @@ final class StudioFrame: NSView {
         case .collection(let id):return SchemaTrial.collections.first(where:{$0.id == id})?.name ?? "Collection"
         case .folder(let collection,let id):return SchemaTrial.collections.first(where:{$0.id == collection})?.folders.first(where:{$0.id == id})?.name ?? "Folder"
         case .palettes:
-            if workspaceFilter == "fonts" {return fontDetailID.flatMap{fontEntries[$0]?.info.family} ?? "Fonts"}
             return "Library Palettes"
         case .catalogue:return onboardingActive ? (SchemaTrial.personalMode ? "Personal":SchemaTrial.structure?.clientName ?? "Client")+" Onboarding":library.catalogue
         default:return "Library"
@@ -2067,8 +1960,7 @@ final class StudioFrame: NSView {
             }
         }
         leftPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace
-        let fontWorkspace = place == .palettes && workspaceFilter == "fonts"
-        rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer || fontWorkspace
+        rightPanelRail.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer
         railProfile.isHidden=rightPanelRail.isHidden || profileOpen == 0
         designerWorkspace.isHidden = place != .designer
         page.isHidden = place == .designer
@@ -2079,13 +1971,13 @@ final class StudioFrame: NSView {
         viewportFooter.isHidden = !canvasWorkspace || place == .designer || colourMode.isActive || transformSource != nil
         bloomWorkspace.isHidden = !canvasWorkspace || expandedAnalysis == nil || place == .designer
         footer.isHidden = false
-        profileHeader.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer || colourMode.isActive || transformSource != nil || fontWorkspace
+        profileHeader.isHidden = !canvasWorkspace || imageIntakeWorkspace || place == .designer || colourMode.isActive || transformSource != nil
         if canvasWorkspace {
             let adaptive = !imageIntakeWorkspace
             let rails = WorkspaceResponsiveGeometry.rails(width:w, selection:compactRailSelection, library:wideLibraryRailVisible, analysis:wideAnalysisRailVisible)
             let designerPalette=place == .designer && designerWorkspace.selectedMode == .palette
             let dock:CGFloat=designerPalette ? 0:(adaptive ? rails.0:A.railWidth)
-            let right=(adaptive ? rails.1:A.railWidth)*(fontWorkspace ? 0:transformRightOpen)
+            let right=(adaptive ? rails.1:A.railWidth)*transformRightOpen
             leftPanelRail.isHidden = leftPanelRail.isHidden || dock == 0
             rightPanelRail.isHidden = rightPanelRail.isHidden || right == 0
             railProfile.isHidden = rightPanelRail.isHidden || profileOpen == 0
@@ -2097,13 +1989,13 @@ final class StudioFrame: NSView {
             let proofWidth = right > 0 ? min(A.railWidth,max(0,w-left-right-280))*profileOpen:0
             let profileHeight:CGFloat=profileHeader.isHidden ? 0:viewportHeader.channels.headerHeight(forWidth:max(0,w-left-right-proofWidth-34))
             let intakeBarHeight:CGFloat=imageIntakeWorkspace ? page.actionbarHeight(for:max(0,w-left-right-proofWidth-2)):0
-            let top = headerHeight + 1 + profileHeight + intakeBarHeight, bottom: CGFloat = A.footer + (carouselKind == nil ? 0 : 120)
+            let top = headerHeight + profileHeight + intakeBarHeight, bottom: CGFloat = A.footer + (carouselKind == nil ? 0 : 120)
             let workspaceFooterY=h-bottom-WorkspaceViewportBar.footerHeight
             footer.frame=NSRect(x:0,y:h-A.footer,width:w,height:A.footer)
             footer.grid=(A.column(1,in:w),A.columnWidth(in:w),A.column(5,in:w))
             header.frame = NSRect(x: 0, y: 0, width: w, height: headerHeight)
             header.grid = (16, A.columnWidth(in: w)); header.railEdge = imageIntakeWorkspace ? A.railWidth:dock
-            let railTop=headerHeight+1
+            let railTop=headerHeight
             profileHeader.frame=NSRect(x:left+1,y:railTop,width:w-left-right-proofWidth-2,height:profileHeight)
             profileHeaderContent.frame=NSRect(x:16,y:0,width:max(0,profileHeader.bounds.width-32),height:profileHeight)
             viewportHeader.channels.frame=profileHeaderContent.bounds
@@ -2147,7 +2039,7 @@ final class StudioFrame: NSView {
         infoRail.isHidden=true
         header.frame = NSRect(x: 0, y: 0, width: w, height: headerHeight)
         footer.frame = NSRect(x: 0, y: h - A.footer, width: w, height: A.footer)
-        let top = headerHeight + 1, bodyH = h - headerHeight - A.footer - 2
+        let top = headerHeight, bodyH = h - headerHeight - A.footer - 2
         func ease(_ v: CGFloat) -> CGFloat { v <= 0 ? 0 : v >= 1 ? 1 : 1 - pow(1 - v, 3) }
         // The same expanded dock widths serve legacy routes and the panel workspace.
         let r1Full=A.railWidth,r1Min=LibraryRail.collapsedWidth
@@ -2537,7 +2429,7 @@ final class StudioFrame: NSView {
         }
         fillHistory()
         fillFooter()
-        header.live = { switch place { case .catalogue, .palette: return 0; case .palettes: return workspaceFilter == "fonts" ? 9:1; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
+        header.live = { switch place { case .catalogue, .palette: return 0; case .palettes: return 1; case .imageIntake: return 7; case .designer: return 8; case .help, .settings, .schema, .shortcuts, .halo, .sounds, .general, .colourManagement, .appleMenubar, .sharingSettings, .librarySettings, .tags, .share, .appbridgeSettings: return nil; case .group, .overview: return 0; case .lab: return 2; case .prepress: return 3; case .contrast: return 4; case .projects: return 5; case .appbridge: return 6; case .qrImport: return 7; default: return 1 } }()
     }
 
     private func palettes(_ list: [Swatch]) -> [Swatch] { list.filter { !$0.isTypography } }
@@ -2680,11 +2572,7 @@ final class StudioFrame: NSView {
         })
     }
     private func openCollectedAsset(_ item:AssetCollectionItem){
-        if item.kind == "Font" || item.kind == "Fonts" {
-            if let entry=FontLibraryIndex.list(in:library.store).first(where:{item.kind == "Font" ? $0.info.family.caseInsensitiveCompare(item.identity) == .orderedSame : $0.id.uuidString == item.identity}) {
-                workspaceFilter="fonts";fontDetailID=entry.id;place = .palettes;reload();return
-            }
-        }
+
         if item.kind == "Palette",let id=UUID(uuidString:item.identity),library.library.swatch(id) != nil {go(.palette(id));return}
         if item.kind == "Colour" {go(.catalogue);showSwatchViewer(item.identity);return}
         if item.kind == "ICC Profile" {showProfileRail();iccProfilePane.locate(item.identity);return}
@@ -2693,45 +2581,7 @@ final class StudioFrame: NSView {
         if FileManager.default.fileExists(atPath:item.identity){NSWorkspace.shared.open(URL(fileURLWithPath:item.identity));return}
         library.flash("This asset is no longer available. Remove its Collection entry or locate the original.")
     }
-    private func openFontContext(_ id:UUID,in view:NSView,at point:NSPoint,assignment:(UUID,UUID)?=nil) {
-        guard let entry=FontLibraryIndex.list(in:library.store).first(where:{$0.id == id}) else{return}
-        let selectedIDs=Set(page.grid.selectedItems.filter{$0.fontFamily != nil}.compactMap(\.id))
-        let selected=selectedIDs.contains(id) ? FontLibraryIndex.list(in:library.store).filter{selectedIDs.contains($0.id)}:[entry]
-        let file=entry.imported.flatMap{try? $0.0.url(in:$0.1.deletingLastPathComponent())}
-        let available=file.map{FileManager.default.fileExists(atPath:$0.path)} ?? false
-        let family=entry.info.family
-        var actions:[HaloAction]=[
-            HaloAction(id:"open",label:"Open Font",symbol:"textformat",onSelect:{[weak self] in
-                guard let self else{return};self.treeGridScope=nil;self.workspaceFilter="fonts";self.place = .palettes;self.fontDetailID=id;self.reload()
-            }),
-            HaloAction(id:"favourite",label:entry.info.favourite == true ? "Remove Favourite":"Add Favourite",symbol:"star",onSelect:{[weak self] in
-                guard let self else{return}
-                var info=entry.info;info.favourite = !(info.favourite == true)
-                do {try FontLibraryIndex.save(info,entry:entry);self.reload()} catch {self.library.flash(error.localizedDescription)}
-            }),
-            addToCollectionAction(selected.map(\.collectionItem)),
-            HaloAction(id:"tags",label:selected.count == 1 ? "Tags…":"Tag \(selected.count) Fonts…",symbol:"tag",onSelect:{[weak self] in
-                guard let self else{return}
-                TagPanel.fonts(selected,library:self.library,over:self.window){[weak self] in self?.reload()}
-            }),
-            HaloAction(id:"divider-font-files",label:"",symbol:""),
-            HaloAction(id:"copy-name",label:"Copy Font Name",symbol:"doc.on.doc",onSelect:{
-                NSPasteboard.general.clearContents();NSPasteboard.general.setString(family,forType:.string)
-            }),
-            HaloAction(id:"reveal",label:"Reveal in Finder",symbol:"folder",disabled:!available,onSelect:{[weak self] in
-                AssetFileActions.reveal(file,feedback:{[weak self] message in self?.library.flash(message)})
-            }),
-            HaloAction(id:"copy-path",label:"Copy Path",symbol:"doc.on.doc",disabled:!available,onSelect:{
-                guard let file else{return};NSPasteboard.general.clearContents();NSPasteboard.general.setString(file.path,forType:.string)
-            })
-        ]
-        if let (project,bucket)=assignment {
-            actions.append(HaloAction(id:"remove-from-product",label:"Remove From Product",symbol:"minus.circle",onSelect:{[weak self] in
-                FontProjectAssignments.remove(family,project:project,bucket:bucket);self?.reload()
-            }))
-        }
-        contextMenu.open(actions,at:point,in:view)
-    }
+
     private func openContext(_ place: Place, in view: NSView, at point: NSPoint,extra:HaloAction?=nil) {
         if view === page.grid {paletteSelection.ids=Set(selectedGridPalettes)}
         var actions: [HaloAction]
@@ -3190,7 +3040,8 @@ final class StudioFrame: NSView {
         func memberRows(_ p: Project, indent: Int) -> [LibraryRail.Row] {
             let held = lib.palettes(in: p.id), colours = palettes(held), type = held.filter { $0.isTypography }
             var out: [LibraryRail.Row] = [.row(p.name, colours.count, .project(p.id), indent)]
-            let stack = SchemaTrial.rows(of: SchemaTrial.schema(for: p.id)).filter { $0.level >= 2 }
+            let visible=SimpleAssetType.visibleStack(SchemaTrial.schema(for:p.id),types:SimpleAssetType.types(in:SimpleAssetType.includingWorkspace(library.store.schema.structure ?? SimpleCatalogueStructure(),home:Catalogues.standard.root)))
+            let stack = SchemaTrial.rows(of:visible).filter { $0.level >= 2 }
             if stack.isEmpty { return out + colours.map { two($0, in: p.id, indent: indent + 1) } }
             for (node, level) in stack {
                 let at = indent + level - 1
@@ -3264,7 +3115,6 @@ final class StudioFrame: NSView {
         cataloguePane.filter=paletteFilter
         cataloguePane.configureAssets(lib)
         cataloguePane.configureCollections(AssetCollections.list(in:library.store),linkedPaletteRecords:linkedPalettes.sources.mapValues{$0.record.id})
-        cataloguePane.fontEntries=FontLibraryIndex.list(in:library.store)
         cataloguePane.update(names: library.availableCatalogues(), active: library.catalogue, rows: rows, selected: treeSelection, selectedKey: workspaceFilter,allFavourites:lib.orderedFavourites)
         if printWorkspace {
             var allowedGroup = false
@@ -3581,9 +3431,6 @@ final class StudioFrame: NSView {
         }
         let photographPage=canImportImagesFromCurrentPlace()
         page.assetProps=photographPage ? .photographs:AssetPageProps()
-        page.fontLibraryMode=(place == .palettes && workspaceFilter == "fonts") || treeGridScope?.fontBucket == true
-        if page.fontLibraryMode {page.assetProps=AssetPageProps(renderer:.palette,pagination:.continuous,menus:[.sort],filters:[.metadata])}
-        applyFontListMode()
         page.showsPaletteFilters=page.showsPaletteFilters && page.assetProps.filters.contains(.paletteReview)
         page.paletteFilters.isHidden = !page.showsPaletteFilters
         page.showsFormat=page.assetProps.menus.contains(.colourFormat) && place != .appbridge && !imageIntakeWorkspace
@@ -3612,7 +3459,6 @@ final class StudioFrame: NSView {
                 var item=TileGrid.Item(title:importKind == "Palettes" ? url.deletingPathExtension().lastPathComponent:url.lastPathComponent,
                     caption:importKind == "Palettes" ? count.map{plural($0,"colour")} ?? "Reading…" : (parent == "." ? url.pathExtension.uppercased():parent),
                     colours:intakeAssetPreviews[path] ?? [],hex:nil,id:nil,imagePath:path,paletteColourCount:count ?? 0,selectionID:"import:"+path)
-                if importKind == "Fonts" {item.fontPreview=FontBookBridge.preview(url)}
                 return item
             }
             page.grid.note = !importsImages ? (items.isEmpty ? (intakeFolder == nil ? "Choose a source folder in Source to show its \(importKind) files here." : intakeNewOnly && !intakeAssetFiles.isEmpty ? "All compatible files in this folder have already been imported." : "No compatible \(importKind) files found in this folder.") : nil)
@@ -3786,26 +3632,7 @@ final class StudioFrame: NSView {
             items = made; title = f.name
             meta = ("\(m.count) " + SchemaTrial.plural(SchemaTrial.memberName(of: c)).lowercased(), "\(colours) colours")
         case .palettes:
-            if workspaceFilter == "fonts" {
-                let entries=FontLibraryIndex.list(in:library.store)
-                fontEntries=Dictionary(uniqueKeysWithValues:entries.map{($0.id,$0)})
-                items=entries.filter{entry in
-                    (fontFormatFilter == "All Formats" || entry.formatLabel == fontFormatFilter) &&
-                    (search.isEmpty || entry.info.family.localizedCaseInsensitiveContains(search) || entry.info.tags.contains(where:{$0.localizedCaseInsensitiveContains(search)}) || (entry.info.metadata?.keywords ?? []).contains(where:{$0.localizedCaseInsensitiveContains(search)}))
-                }.map{entry in
-                    var item=TileGrid.Item(title:entry.info.family,caption:entry.sourceCaption,colours:[],hex:nil,id:entry.id)
-                    item.fontFamily=entry.info.family;item.fontSpecimen=entry.info.specimen;item.fontSourcePath=entry.fileURL?.path;item.fontFormat=entry.formatLabel;item.fontDetailCaption=entry.detailCaption;item.selectionID="font:"+entry.id.uuidString
-                    item.metadata["XMP.Title"]=entry.info.family
-                    let keywords=entry.info.tags+(entry.info.metadata?.keywords ?? [])
-                    if !keywords.isEmpty {item.metadata["IPTC.Keywords"]=keywords.joined(separator:", ")}
-                    if let description=entry.info.metadata?.description,!description.isEmpty {item.metadata["XMP.Description"]=description}
-                    if let rating=entry.info.review?.rating {item.metadata["XMP.Rating"]=String(rating)}
-                    if let flag=entry.info.review?.flag {item.metadata["Colorgain.Flag"]=flag.rawValue}
-                    return item
-                }
-                title="Fonts";meta=(plural(items.count,"font family"),"My Library")
-                // Import lives in the viewport actionbar for this route.
-            } else {
+            do {
                 let list: [Swatch]
                 switch workspaceFilter {
                 case "favourites": list=palettes(lib.orderedFavourites); title="Favourites"
@@ -3826,8 +3653,6 @@ final class StudioFrame: NSView {
             page.show(.tiles)
             page.showsPaletteFilters=false;page.paletteFilters.isHidden=true
             items=[];gridSections=[]
-            let scopedFonts=Dictionary(uniqueKeysWithValues:FontLibraryIndex.list(in:library.store).map{($0.id,$0)})
-            fontEntries=scopedFonts
             for section in scope.sections {
                 let start=items.count
                 for asset in section.assets {
@@ -3838,11 +3663,6 @@ final class StudioFrame: NSView {
                             if keep(palette.name,nil){items.append(TileGrid.Item(title:palette.name,caption:plural(palette.styles?.count ?? 0,"style"),colours:[],hex:nil,id:id,createdAt:palette.createdAt,modifiedAt:[palette.createdAt,palette.nameChangedAt,palette.stylesChangedAt,palette.tagsChangedAt].compactMap{$0}.max()))}
                         } else {items += cards([palette],applyFilter:false)}
                     case .colour(let hex):items += tiles([hex],in:nil)
-                    case .font(let id):
-                        guard let entry=scopedFonts[id],keep(entry.info.family,nil),fontFormatFilter == "All Formats" || entry.formatLabel == fontFormatFilter else{continue}
-                        var item=TileGrid.Item(title:entry.info.family,caption:entry.sourceCaption,colours:[],hex:nil,id:id)
-                        item.fontFamily=entry.info.family;item.fontSpecimen=entry.info.specimen;item.fontSourcePath=entry.fileURL?.path;item.fontFormat=entry.formatLabel;item.fontDetailCaption=entry.detailCaption;item.selectionID="font:"+id.uuidString
-                        items.append(item)
                     case .imported(let id):
                         if let record=cataloguePane.importedAssets.first(where:{$0.id == id}),keep(record.name,nil) {
                             items.append(TileGrid.Item(title:record.name,caption:record.type,colours:[],hex:nil,id:id,selectionID:"imported:"+id.uuidString))
@@ -3877,45 +3697,12 @@ final class StudioFrame: NSView {
             metadataPane.palette=metadataID.flatMap{lib.swatch($0)}
         }
         if page.showsPaletteFilters,treeGridScope == nil {meta.0=plural(items.count,"palette")}
-        if page.fontLibraryMode {
-            page.assetOrder=fontOrder == "Name Z–A" ? .nameReverse : fontOrder == "Group By Type" ? .original:.name
-            if fontFormatFilter == "All Formats" && fontOrder == "Group By Type" && treeGridScope == nil {
-                let all=items
-                items=[];gridSections=[]
-                for format in FontFormatStyle.groups {
-                    let members=all.filter{$0.fontFormat == format}.sorted{$0.title.localizedStandardCompare($1.title) == .orderedAscending}
-                    guard !members.isEmpty else{continue}
-                    let sectionIndex=gridSections.count
-                    gridSections.append(TileGrid.Section(title:FontFormatStyle.heading(format),start:items.count))
-                    items += members.map{var item=$0;item.sectionIndex=sectionIndex;return item}
-                }
-            }
-        }
+
         page.grid.selectionScope=treeGridScope?.key ?? String(describing:place)
         page.grid.notePaletteID = { if case .palette(let id) = place { return id }; return nil }()
         page.grid.noteScope = library.store.url.path
         page.set(title: title, meta: meta, items: items,reuseGridIfSame:reuseGridIfSame,sections:gridSections)
-        if showingFontList,fontDetailID == nil {
-            let first=items.first(where:{$0.fontFamily != nil})?.id
-            let chosen=inspectedFontID.flatMap{saved in items.first(where:{$0.id == saved && $0.fontFamily != nil})?.id} ?? first
-            page.grid.selectedFontInfoID=chosen
-            if fontInspectorNeedsOpen,let chosen {
-                fontInspectorNeedsOpen=false
-                showFontInformation(chosen,persist:false)
-                // A restored scroll position can otherwise show different cards
-                // from the one RailInfo is describing on entry.
-                DispatchQueue.main.async { [weak self] in
-                    guard let self,self.showingFontList,self.fontDetailID == nil else{return}
-                    self.page.grid.revealPalette(chosen)
-                }
-            }
-            else if let chosen,let pane=infoPane as? FontInfoPane,infoGoal > 0,let entry=fontEntries[chosen] {pane.configure(entry)}
-        } else {page.grid.selectedFontInfoID=nil}
-        if workspaceFilter == "fonts",place == .palettes,let id=fontDetailID,let entry=fontEntries[id] {
-            fontSpecimen.configure(entry.info,sourceURL:entry.fileURL,collectionEnabled:true)
-            page.show(.fontSpecimen)
-        }
-        if workspaceFilter == "fonts",place == .palettes {pageLayout.updatePrimary(.palettes)}
+
         page.grid.showsHalo = true
         let catalogueID=CatalogueTree.catalogue(in:library.store.root)?.id ?? UUID()
         page.configureMetadataFilters(store:MetadataFilterStore(catalogueURL:library.store.url),catalogueID:catalogueID)
@@ -3931,7 +3718,7 @@ final class StudioFrame: NSView {
         intakeTargetPane.selectedCount=intakeSelectedPaths.count
         intakeTargetPane.setContext(catalogue:library.store.url.deletingPathExtension().lastPathComponent,kind:importKind)
         viewportHeader.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
-        viewportHeader.configureFontActions(active:page.fontLibraryMode,detail:fontDetailID != nil,paletteImport:page.showsPaletteFilters && treeGridScope == nil,format:fontFormatFilter,order:fontOrder)
+        viewportHeader.configurePaletteImport(active:page.showsPaletteFilters && treeGridScope == nil)
         viewportFooter.configureImageIntake(imageIntakeWorkspace,kind:importKind,linking:intakeLinking,selectAll:intakeSelectAll,newOnly:intakeNewOnly,fullView:intakeFullView,sort:intakeSort,imageCount:importsImages ? intakeImages.count:visibleImportFiles().count,selectedCount:intakeSelectedPaths.count,columns:intakeGridColumns)
         viewportFooter.configureImageBrowser(active:photographPage,fullView:photoFullView,index:page.grid.currentImageIndex+1,total:items.count,
             sort:page.assetProps.menus.contains(.sort) && photographPage ? photoSort:nil,
@@ -3948,12 +3735,6 @@ final class StudioFrame: NSView {
         switch carouselKind {
         case .some(.palettes):
             filmstrip.update(palettes(lib.swatches),selected:inspectedPalette,colours:shade)
-        case .some(.fonts):
-            let entries=items.compactMap{item -> WorkspaceFilmstrip.Entry? in
-                guard let id=item.id,let family=item.fontFamily else{return nil}
-                return WorkspaceFilmstrip.Entry(title:item.title,content:.font(id,family))
-            }
-            filmstrip.update(kind:.fonts,entries:entries,selected:fontDetailID?.uuidString)
         case .some(.images):
             let importedPaths=WorkspaceImport.records(store:library.store).reduce(into:[UUID:URL]()){result,pair in
                 guard pair.0.type == "Photographs" || pair.0.type == "Images",
@@ -3978,16 +3759,6 @@ final class StudioFrame: NSView {
         refreshAnalysis();needsLayout=true
     }
     // ---------- railInfo ----------
-    private func showFontInformation(_ id:UUID,persist:Bool){
-        guard let entry=fontEntries[id] else{return}
-        if persist {
-            inspectedFontID=id
-            AppPreferences.shared.set(id.uuidString,forKey:"FontLibrary.InspectedFontID")
-        }
-        page.grid.selectedFontInfoID=id
-        if let pane=infoPane as? FontInfoPane,infoGoal > 0 {pane.configure(entry)}
-        else {let pane=FontInfoPane(frame:.zero);pane.configure(entry);showInfoRail(pane,title:"Font Information")}
-    }
 
     private func openBucketIntake(kind: String, destination: Place?) {
         let images = kind == "Images" || kind == "Photographs"

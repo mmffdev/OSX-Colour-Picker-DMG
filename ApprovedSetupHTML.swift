@@ -139,7 +139,7 @@ const builtinAssetCatalog=\#(assetTypesJSON);
 let assetCatalog=[...builtinAssetCatalog];
 let types=assetCatalog.map(type=>type.title);
 let assetFamilies=[...new Set(assetCatalog.map(type=>type.family))];
-const defaultAssetTitles=['Palettes','Fonts','Typography Packs','Images','Photographs'];
+const defaultAssetTitles=['Palettes','Typography Packs','Images','Photographs'];
 const state={variant:2,page:0,folder:'~/Documents/Colorgain',name:'',singular:'',plural:'',clientSingular:'',clientPlural:'',clientName:'',projectName:'',clients:[],activeClientIndex:0,workPreset:'Project',clientPreset:'Client',personalMode:false,assets:new Set(defaultAssetTitles),customAssetFamilies:[],customAssetTypes:[],assetEditor:null,assetEditorError:'',guides:false,returning:false,loaded:null,closed:false,created:false,enteringClientIndex:null};
 const swatches=['#e5d5bc','#85a2a5','#183e44','#aa3339','#f4be00','#242627'];
 const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

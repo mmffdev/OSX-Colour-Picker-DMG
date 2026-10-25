@@ -45,7 +45,6 @@ enum AssetCollections {
         try Handler_File_Manager.shared.withTransaction(home:store.root) {
             try mutateDocument(in:store,change)
         }
-        FontBookBridge.syncCollections(in:store)
     }
     static func mutateDocument(in store:LibraryStore,_ change:(inout [AssetCollectionEntry]) throws -> Void)throws {
         try Handler_File_Manager.shared.update(store.url) { object in
@@ -241,18 +240,6 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         }
     }
     private weak var controller:LibraryController?
-    private var fontEntries:[FontLibraryEntry]=[]
-    private func fontEntry(_ asset:AssetCollectionItem)->FontLibraryEntry? {
-        if asset.kind == "Font" {return fontEntries.first{$0.info.family.caseInsensitiveCompare(asset.identity) == .orderedSame}}
-        if asset.kind == "Fonts",let id=UUID(uuidString:asset.identity) {return fontEntries.first{$0.id == id}}
-        return nil
-    }
-    private func saveFont(_ entry:FontLibraryEntry,_ change:(inout FontAssetInfo)->Void) {
-        guard let controller else{return}
-        var info=entry.info;change(&info)
-        do {try FontLibraryIndex.save(info,entry:entry);refresh();onChanged?()}
-        catch {controller.flash(error.localizedDescription)}
-    }
     private var loadedCataloguePath=""
     private var importedPalettePreviews:[String:ImportedPalette]=[:]
     private var importedPaletteLoading:Set<String>=[]
@@ -362,33 +349,12 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                     do{try AssetCollections.remove(asset,from:collectionID,in:controller.store);self.refresh();self.onChanged?()}
                     catch{controller.flash(error.localizedDescription)}
                 })
-                if let font=fontEntry(asset) {
-                    let file=font.imported.flatMap{try? $0.0.url(in:$0.1.deletingLastPathComponent())}
-                    let available=file.map{FileManager.default.fileExists(atPath:$0.path)} ?? false
-                    actions=[
-                        HaloAction(id:"open",label:"Open Font",symbol:"textformat",onSelect:{[weak self] in self?.onOpenAsset?(asset)}),
-                        HaloAction(id:"favourite",label:font.info.favourite == true ? "Remove Favourite":"Add Favourite",symbol:"star",onSelect:{[weak self] in
-                            guard let self,let controller=self.controller else{return}
-                            var info=font.info;info.favourite = !(info.favourite == true)
-                            do {try FontLibraryIndex.save(info,entry:font);self.refresh();self.onChanged?()} catch {controller.flash(error.localizedDescription)}
-                        }),
-                        HaloAction(id:"copy-name",label:"Copy Font Name",symbol:"doc.on.doc",onSelect:{
-                            NSPasteboard.general.clearContents();NSPasteboard.general.setString(font.info.family,forType:.string)
-                        }),
-                        HaloAction(id:"reveal",label:"Reveal in Finder",symbol:"folder",disabled:!available,onSelect:{[weak self] in
-                            AssetFileActions.reveal(file,feedback:{[weak self] message in self?.controller?.flash(message)})
-                        }),
-                        HaloAction(id:"copy-path",label:"Copy Path",symbol:"doc.on.doc",disabled:!available,onSelect:{
-                            guard let file else{return};NSPasteboard.general.clearContents();NSPasteboard.general.setString(file.path,forType:.string)
-                        }),remove
-                    ]
-                } else {
+                do {
                     actions=[HaloAction(id:"open",label:"Open",symbol:"arrow.up.right",onSelect:{[weak self] in self?.onOpenAsset?(asset)}),remove]
                     if let custom=customColoursAction?(asset){actions.insert(custom,at:1)}
                 }
             }
-            let isFontAsset:Bool={if case .asset(let item,_)=node.value{return self.fontEntry(item) != nil};return false}()
-            if case .add=node.value {} else if !isFontAsset {
+            if case .add=node.value {} else {
                 actions.insert(HaloAction(id:"multi-colour",label:"Multi Colour Select",symbol:"square.grid.2x2",onSelect:{[weak self] in self?.onMultiColourSelect?(node)}),at:0)
                 actions.insert(HaloAction(id:"divider-multi-colour",label:"",symbol:""),at:1)
             }
@@ -400,7 +366,6 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     required init?(coder:NSCoder){fatalError()}
     func refresh(){
         guard let controller else{return}
-        fontEntries=FontLibraryIndex.list(in:controller.store)
         loadedCataloguePath=controller.store.root.standardizedFileURL.path
         do{try AssetCollections.seedIfNeeded(in:controller.store)}catch{controller.flash(error.localizedDescription)}
         do{try AssetCollections.removeMissingPalettes(in:controller.store,library:controller.library)}catch{controller.flash(error.localizedDescription)}
@@ -430,7 +395,6 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         func current(_ saved:AssetCollectionItem)->AssetCollectionItem {
             var item=saved
             if item.kind == "Palette",let id=UUID(uuidString:item.identity),let palette=controller.library.swatch(id){item.name=palette.name}
-            else if let font=fontEntry(item){item.name=font.info.family}
             else if item.kind == "Colour" {item.name=controller.library.name(of:item.identity,in:nil)}
             else if let record=imports[item.identity] {item.name=record.name}
             else if item.kind == "ICC Profile",let profile=ICCProfileLibrary.shared.profiles.first(where:{$0.id == item.identity}) {item.name=profile.name}
@@ -439,7 +403,9 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         root.children=[Node(.add)]+AssetCollections.list(in:controller.store).map{ collection in
             let node=Node(.collection(collection))
             let accent=collection.colour.map(Design.hex)
-            node.children=collection.items.map{item in
+            node.children=collection.items.filter{item in
+                ["Palette","Colour","ICC Profile"].contains(item.kind) || WorkspaceImport.supportsRecord(item.kind)
+            }.map{item in
                 let asset=Node(.asset(current(item),collection.id));asset.accent=accent;return asset
             }
             return node
@@ -460,7 +426,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
     func outlineView(_ outlineView:NSOutlineView,heightOfRowByItem item:Any)->CGFloat {
         let base:CGFloat
         if let node=item as? Node,case .asset(let asset,_)=node.value {
-            base=["Palette","Palettes","Font","Fonts"].contains(asset.kind) ? WorkspaceBranchTree.paletteRowHeight:34
+            base=["Palette","Palettes"].contains(asset.kind) ? WorkspaceBranchTree.paletteRowHeight:34
         } else {base=34}
         return (outlineView as? WorkspaceBranchTree)?.colourTargetRowHeight(for:item,base:base) ?? base
     }
@@ -509,20 +475,6 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                     let row=self.tree.row(forItem:node)
                     if row >= 0{self.tree.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}
                 }
-            } else if let font=fontEntry(asset) {
-                cell.compactMetadata=false;cell.isPalette=true;cell.twoLines=true;cell.symbol="textformat"
-                cell.fontFamily=font.info.family
-                cell.target.isHidden=true;cell.countLabel.stringValue="";cell.countLabel.isHidden=true
-                cell.review.configure(name:font.info.family,review:font.info.review)
-                cell.review.onRating={[weak self] rating in self?.saveFont(font){$0.review=PaletteReview(rating:rating,flag:$0.review?.flag)}}
-                cell.review.onFlag={[weak self] flag in self?.saveFont(font){$0.review=PaletteReview(rating:$0.review?.rating ?? 0,flag:flag)}}
-                cell.star.isHidden=false;cell.star.favourite=font.info.favourite == true
-                cell.star.setAccessibilityLabel((cell.star.favourite ? "Remove Favourite: ":"Add Favourite: ")+font.info.family)
-                cell.star.run={[weak self] in self?.saveFont(font){$0.favourite = !($0.favourite == true)}}
-                cell.tagIcon.setAccessibilityLabel("Tags: "+font.info.family)
-                cell.tagIcon.run={[weak self] in self?.onOpenAsset?(asset)}
-                cell.fontDrag=(font.id,font.info.family)
-                cell.selectFont={[weak self] in self?.onOpenAsset?(asset)}
             } else if asset.kind == "Palettes" {
                 cell.compactMetadata=false;cell.isPalette=true;cell.twoLines=true;cell.symbol="swatchpalette"
                 if let preview=importedPalettePreviews[asset.identity] {
@@ -551,9 +503,7 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
         case .root,.add,.asset:break
         }
         let label=NSTextField(labelWithString:title)
-        if case .asset(let asset,_)=node.value,let font=fontEntry(asset) {
-            label.font=NSFontManager.shared.font(withFamily:font.info.family,traits:[],weight:5,size:TextSize.body) ?? Design.Text.body.font()
-        } else {label.font=Design.Text.body.font()}
+        label.font=Design.Text.body.font()
         label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
         cell.addSubview(label);cell.textField=label;cell.toolTip=title;return cell
     }
@@ -571,7 +521,6 @@ final class WorkspaceCollectionsPane:NSView,NSOutlineViewDataSource,NSOutlineVie
                     guard case .asset(let item,_)=child.value else{return nil}
                     if item.kind == "Palette",let id=UUID(uuidString:item.identity){return .palette(id)}
                     if item.kind == "Colour" {return .colour(item.identity)}
-                    if let font=fontEntry(item){return .font(font.id)}
                     if let id=UUID(uuidString:item.identity){return .imported(id)}
                     return .other(name:item.name,kind:item.kind,identity:item.identity)
                 }

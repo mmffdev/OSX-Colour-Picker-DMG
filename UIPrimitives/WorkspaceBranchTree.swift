@@ -113,9 +113,9 @@ final class WorkspaceBranchTree: NSOutlineView {
         let disclosure=leadingDisclosure && isExpandable(item(atRow:row))
         let start:CGFloat=(showsConnectors ? Self.lane(visualDepth(row))+21:16)+(disclosure ? 22:0)
         let isPalette:Bool={
-            if let node=item(atRow:row) as? WorkspaceCatalogues.Node {if case .palette=node.place{return true};return node.fontID != nil}
+            if let node=item(atRow:row) as? WorkspaceCatalogues.Node {if case .palette=node.place{return true};return false}
             if let node=item(atRow:row) as? WorkspaceCollectionsPane.Node,case .asset(let asset,_)=node.value {
-                return ["Palette","Palettes","Font","Fonts"].contains(asset.kind)
+                return ["Palette","Palettes"].contains(asset.kind)
             }
             return false
         }()
@@ -178,16 +178,13 @@ final class WorkspaceBranchTree: NSOutlineView {
         private var editingName=false
         override var isFlipped:Bool{true}
         var paletteDrag:(UUID,String,[NSColor])?
-        var fontDrag:(UUID,String)?
-        var fontFamily:String?
         var selectPalette:(()->Void)?
-        var selectFont:(()->Void)?
         var dragChanged:((Bool)->Void)?
         private var press:(NSPoint,TimeInterval)?
         override func hitTest(_ point:NSPoint)->NSView? {
             let hit=super.hitTest(point)
             if !grip.isHidden,grip.frame.insetBy(dx:-4,dy:-7).contains(convert(point,from:superview)){return self}
-            guard paletteDrag != nil || fontDrag != nil,let hit else{return hit}
+            guard paletteDrag != nil,let hit else{return hit}
             if hit === star || hit === colourButton || hit === target || hit === tagIcon || hit === pin || hit.isDescendant(of:review) || hit is InlineName {return hit}
             return self
         }
@@ -196,7 +193,7 @@ final class WorkspaceBranchTree: NSOutlineView {
                 reorderDrag?(event);return
             }
             if activate(at:convert(event.locationInWindow,from:nil)){press=nil;return}
-            guard paletteDrag != nil || fontDrag != nil else{super.mouseDown(with:event);return}
+            guard paletteDrag != nil else{super.mouseDown(with:event);return}
             if event.clickCount == 2,beginRenaming(with:event){return}
             press=(event.locationInWindow,event.timestamp)
         }
@@ -204,11 +201,10 @@ final class WorkspaceBranchTree: NSOutlineView {
             guard let press,PaletteDrag.counts(event,from:press) else{return}
             self.press=nil;dragChanged?(true)
             if let (id,name,colours)=paletteDrag {PaletteDrag.begin(id,name:name,colours:colours,event:event,in:self)}
-            else if let (id,name)=fontDrag {FontDrag.begin(id,name:name,event:event,in:self)}
         }
         override func mouseUp(with event:NSEvent){
             defer{press=nil}
-            if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {if fontDrag != nil {selectFont?()}else{selectPalette?()}}
+            if press != nil,bounds.contains(convert(event.locationInWindow,from:nil)) {selectPalette?()}
         }
         func activate(at point:NSPoint)->Bool {
             for button in [star,colourButton,target,tagIcon,catalogueAction,pin] as [NSButton] where !button.isHidden && button.frame.contains(point){button.performClick(nil);return true}
@@ -453,9 +449,7 @@ final class WorkspaceBranchTree: NSOutlineView {
     func refreshCell(_ index:Int) {
         guard index >= 0,let item=item(atRow:index),let cell=view(atColumn:0,row:index,makeIfNecessary:false) as? Cell else{return}
         let currentInk=ink(index,item:item)
-        if let family=cell.fontFamily {
-            cell.textField?.font=NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:TextSize.body) ?? Design.Text.body.font()
-        } else {
+        do {
             cell.textField?.font=(isItemExpanded(item) ? Design.Text.bodyStrong:Design.Text.body).font()
         }
         cell.textField?.textColor=currentInk

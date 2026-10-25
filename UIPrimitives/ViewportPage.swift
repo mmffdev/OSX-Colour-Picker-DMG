@@ -56,7 +56,6 @@ final class StudioPage: ClickCursorView, Overlay {
         needsLayout=true
     }}
     var showsPaletteFilters=false {didSet{if oldValue != showsPaletteFilters{window?.contentView?.needsLayout=true}}}
-    var fontLibraryMode=false
     var paletteSwatchCount:Int? {didSet{needsLayout=true;needsDisplay=true}}
     var imageIntakeMode=false {didSet{subjectTabHeader.isHidden = !imageIntakeMode;grid.imageIntake=imageIntakeMode;if imageIntakeMode{grid.listView=false};needsLayout=true;needsDisplay=true}}
     private var intakeGridColumns=6
@@ -190,7 +189,7 @@ final class StudioPage: ClickCursorView, Overlay {
         guard acceptsPaletteDrop, let id = PaletteDrag.palette(on: sender.draggingPasteboard) else { return false }
         return onPaletteDrop?(id) ?? false
     }
-    enum Section: Hashable { case tiles, fontSpecimen, welcome, catalogues, schema, shortcuts, halo, sounds, general, colourManagement(Int), appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
+    enum Section: Hashable { case tiles, welcome, catalogues, schema, shortcuts, halo, sounds, general, colourManagement(Int), appleMenubar, sharingSettings, qrImport, help, librarySettings, tags, lab, prepress, contrast, share, appbridge }
     var settingsDestination: StudioFrame.Place? { didSet { needsLayout = true; needsDisplay = true } }
     var onSettingsTab: ((StudioFrame.Place) -> Void)?
     private var navigationTabs: [(String, StudioFrame.Place)] { settingsDestination.flatMap { SettingsNavigation.group(for: $0)?.tabs } ?? [] }
@@ -423,7 +422,7 @@ final class StudioPage: ClickCursorView, Overlay {
     private func canShowDelta(_ item:TileGrid.Item)->Bool { grid.canHover?(item) ?? (item.hex != nil || item.id != nil) }
     func set(title: String, meta: (String, String), items: [TileGrid.Item],reuseGridIfSame:Bool=false,sections:[TileGrid.Section]=[]) {
         self.title = title; self.meta = meta;subjectTabHeader.title=title
-        showsDeltaTools = !fontLibraryMode && (showsPaletteFilters || paletteSwatchCount != nil || items.contains{canShowDelta($0)})
+        showsDeltaTools = (showsPaletteFilters || paletteSwatchCount != nil || items.contains{canShowDelta($0)})
         applyDeltaState(Prefs.deltaWarningsEnabled)
         basePageItems=items
         filteredPageItems=items

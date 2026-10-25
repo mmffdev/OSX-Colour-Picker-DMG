@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import ImageIO
 
 enum WorkspaceTreeGridAsset {
-    case palette(UUID), colour(String), font(UUID), imported(UUID), other(name:String,kind:String,identity:String)
+    case palette(UUID), colour(String), imported(UUID), other(name:String,kind:String,identity:String)
 }
 struct WorkspaceTreeGridSection {
     let title:String
@@ -13,7 +13,6 @@ struct WorkspaceTreeGridScope {
     let key:String
     let title:String
     let sections:[WorkspaceTreeGridSection]
-    var fontBucket:Bool=false
 }
 
 /// Portable favourite records include their display colour, rather than a separate colour map.
@@ -111,9 +110,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         var pulse=false
         var colours:[NSColor]=[]
         var importedAssetID:UUID?
-        var fontID:UUID?
-        var fontFamily:String?
-        var fontDestination:LibraryRail.DropDestination?
         var assetTypeID: String?
         var isAssetContainer=false
         var destination:LibraryRail.DropDestination?
@@ -215,11 +211,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     var onTags:((UUID)->Void)?
     var onRating:((UUID,Int)->Void)?
     var onFlag:((UUID,PaletteReview.Flag?)->Void)?
-    var onOpenFont:((UUID)->Void)?
-    var onFontContext:((UUID,Node,NSView,NSPoint)->Void)?
-    var onFontUpdate:((UUID,FontAssetInfo)->Void)?
-    var onFontDrop:((UUID,LibraryRail.DropDestination)->Void)?
-    var fontEntries:[FontLibraryEntry]=[]
     private var assets=Library()
     private var assetsByID:[UUID:Swatch]=[:]
     private var renderedAssets:Library?
@@ -238,7 +229,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         for tree in [outline,myPalettes,favourites] {tree.repaintColours()}
     }
     private func assetColour(_ node:Node)->NSColor? {
-        if let family=node.fontFamily {return collectionAssetColours["Font/"+family]}
         if case .palette(let id)=node.place {return collectionAssetColours["Palette/"+id.uuidString]}
         if let id=node.importedAssetID,let asset=importedAssets.first(where:{$0.id == id}) {
             return collectionAssetColours[asset.type+"/"+id.uuidString]
@@ -247,13 +237,10 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     }
     private func isAsset(_ node:Node)->Bool {
         if case .palette=node.place{return true}
-        return node.importedAssetID != nil || node.fontID != nil
+        return node.importedAssetID != nil
     }
     private func nodeMenu(_ node:Node,at point:NSPoint,in view:NSView,tree:WorkspaceBranchTree) {
-        if let id=node.fontID {
-            onFontContext?(id,node,view,point)
-            return
-        }
+
         if let id=node.importedAssetID {onAssetContext?(id,node,tree,view,point);return}
         if case .palette(let id)=node.place {onAssetContext?(id,node,tree,view,point);return}
         var actions:[HaloAction]=[]
@@ -278,7 +265,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         actions.append(colour)
         var rest:[HaloAction]=[]
         if let kind=importKind(for:node) {
-            let label=kind == "Palettes" ? "Palette" : kind == "Fonts" ? "Font" : kind == "Images" ? "Image" : kind == "Photographs" ? "Photograph" : kind == "Typography Packs" ? "Typography Pack" : kind == "ICC Profiles" ? "ICC Profile" : kind
+            let label=kind == "Palettes" ? "Palette" : kind == "Images" ? "Image" : kind == "Photographs" ? "Photograph" : kind == "Typography Packs" ? "Typography Pack" : kind == "ICC Profiles" ? "ICC Profile" : kind
             rest.append(HaloAction(id:"import-asset",label:"Import \(label)…",symbol:"square.and.arrow.down",disabled:!WorkspaceImport.supportedTypes.contains(kind) && kind != "Images" && kind != "Photographs",onSelect:{[weak self] in
                 self?.onImportAsset?(kind,node.key.hasPrefix("mylibrary-") ? .catalogue : node.place)
             }))
@@ -307,7 +294,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     }
     private func importKind(for node:Node)->String? {
         guard !isAsset(node) else{return nil}
-        let libraryKinds=["mylibrary-palettes":"Palettes","mylibrary-fonts":"Fonts","mylibrary-images":"Images","mylibrary-photography":"Photographs","mylibrary-typography":"Typography Packs","mylibrary-ase":"ASE"]
+        let libraryKinds=["mylibrary-palettes":"Palettes","mylibrary-images":"Images","mylibrary-photography":"Photographs","mylibrary-typography":"Typography Packs","mylibrary-ase":"ASE"]
         if let kind=libraryKinds[node.key] {return kind}
         guard case .group(let member,let bucket)=node.place,
               let schema=SchemaTrial.rows(of:SchemaTrial.schema(for:member)).first(where:{$0.node.id == bucket})?.node else{return nil}
@@ -317,7 +304,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     }
     private func refreshFavouriteColours(){favouriteColours=Dictionary(WorkspaceFavourites.records(favouritesKey).compactMap{record in guard let id=record["id"],let hex=record["colour"] else{return nil};return (id,Design.hex(hex))},uniquingKeysWith:{_,last in last})}
     private func sameNodes(_ a:[Node],_ b:[Node])->Bool {
-        a.count == b.count && zip(a,b).allSatisfy{x,y in x.key == y.key && x.title == y.title && x.count == y.count && x.place == y.place && x.catalogue == y.catalogue && x.symbol == y.symbol && x.pulse == y.pulse && x.creationClient == y.creationClient && x.createClient == y.createClient && x.destination == y.destination && x.fontID == y.fontID && x.fontDestination == y.fontDestination && x.colours == y.colours && sameNodes(x.children,y.children)}
+        a.count == b.count && zip(a,b).allSatisfy{x,y in x.key == y.key && x.title == y.title && x.count == y.count && x.place == y.place && x.catalogue == y.catalogue && x.symbol == y.symbol && x.pulse == y.pulse && x.creationClient == y.creationClient && x.createClient == y.createClient && x.destination == y.destination && x.colours == y.colours && sameNodes(x.children,y.children)}
     }
     private let paletteFilters=PaletteFilterControls(frame:.zero)
     var filter=PaletteAssetHandler.Filter() {didSet{paletteFilters.value=filter}}
@@ -391,8 +378,8 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             addSubview(tree);tree.installConnectors(in:self)
         }
         for tree in [outline,myPalettes] {
-            tree.registerForDraggedTypes([PaletteDrag.type,FontDrag.type])
-            tree.isDropTarget={ item in guard let node=item as? Node else{return false};return node.destination != nil || node.fontDestination != nil }
+            tree.registerForDraggedTypes([PaletteDrag.type])
+            tree.isDropTarget={ item in guard let node=item as? Node else{return false};return node.destination != nil }
         }
         for tree in [outline,myPalettes,favourites] {
             tree.onContext={ [weak self,weak tree] item,point,view in
@@ -496,9 +483,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                     node=Node(scopedKey,title,count:count,place:.group(project,id),symbol:symbol);level=indent+1
                     if let schema = SchemaTrial.rows(of: SchemaTrial.schema(for: project)).first(where: { $0.node.id == id })?.node {
                         node.isAssetContainer=schema.kind == "Simple Assets"
-                        if SchemaTrial.type(of:schema).caseInsensitiveCompare("Fonts") == .orderedSame {
-                            node.fontDestination=LibraryRail.DropDestination(project:project,bucket:id)
-                        }
+
                     }
                     if acceptsPalette {node.destination=LibraryRail.DropDestination(project:project,bucket:id)}
                 case .tag:continue
@@ -576,19 +561,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         typographyNode.count=typographyNode.children.count;palettesNode.count=palettesNode.children.count
         let iccNode=Node("mylibrary-icc",WorkspaceSidebarStructure.iccTitle,symbol:"slider.horizontal.3")
         iccNode.children=[Node("icc-content","ICC Profiles")]
-        let fontsNode=Node("mylibrary-fonts","Fonts",symbol:"textformat.abc")
-        let indexedFonts=Dictionary(uniqueKeysWithValues:fontEntries.map{($0.id,$0)})
-        fontsNode.children=fontEntries.map { entry in
-            let leaf=Node("font:"+entry.id.uuidString,entry.info.family,symbol:"textformat")
-            leaf.fontID=entry.id;leaf.fontFamily=entry.info.family
-            return leaf
-        }
-        fontsNode.count=fontsNode.children.count
-        favouriteRoots += fontEntries.filter{$0.info.favourite == true}.map { entry in
-            let leaf=Node("favourite-font:"+entry.id.uuidString,entry.info.family,symbol:"textformat")
-            leaf.fontID=entry.id;leaf.fontFamily=entry.info.family
-            return leaf
-        }
         let aseNode=Node("mylibrary-ase","ASE",symbol:"doc")
         let photosNode=Node("mylibrary-photography","Photographs",symbol:"camera")
         let imagesNode=Node("mylibrary-images","Images",symbol:"photo")
@@ -600,43 +572,25 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             return nil
         }
         for asset in importedAssets where asset.type != "Palettes" {
-            let leaf=Node("imported:"+asset.id.uuidString,asset.name,symbol:asset.type == "Fonts" ? "textformat" : asset.external ? "link":"doc")
+            let leaf=Node("imported:"+asset.id.uuidString,asset.name,symbol:asset.external ? "link":"doc")
             leaf.importedAssetID=asset.id
-            if asset.type == "Fonts",let entry=indexedFonts[asset.id] {leaf.fontID=entry.id;leaf.fontFamily=entry.info.family}
             if let member=asset.member {find(roots,member:member,bucket:asset.bucket)?.children.append(leaf)}
             else if asset.type == "ASE" {aseNode.children.append(leaf)}
-            else if asset.type == "Fonts" {continue}
             else if asset.type == "Photographs" {photosNode.children.append(leaf)}
             else if asset.type == "Images" {imagesNode.children.append(leaf)}
             else {palettesNode.children.append(leaf)}
         }
-        func assignFonts(_ node:Node) {
-            if let destination=node.fontDestination,let bucket=destination.bucket {
-                for family in FontProjectAssignments.families(project:destination.project,bucket:bucket) {
-                    guard let entry=fontEntries.first(where:{$0.info.family.caseInsensitiveCompare(family) == .orderedSame}),
-                          !node.children.contains(where:{$0.fontFamily?.caseInsensitiveCompare(family) == .orderedSame}) else {continue}
-                    let leaf=Node("project-font:"+destination.project.uuidString+":"+bucket.uuidString+":"+entry.id.uuidString,entry.info.family,symbol:"textformat")
-                    leaf.fontID=entry.id;leaf.fontFamily=entry.info.family;node.children.append(leaf)
-                }
-            }
-            node.children.forEach(assignFonts)
-        }
-        roots.forEach(assignFonts)
         do {
             let enabled = GlobalAssets(home:Catalogues.standard.root).assetTypes
-            let special:[String:Node]=["information":informationNode,"palettes":palettesNode,"typography":typographyNode,"fonts":fontsNode,"ase":aseNode,"icc":iccNode,"photography":photosNode,"images":imagesNode]
+            let special:[String:Node]=["information":informationNode,"palettes":palettesNode,"typography":typographyNode,"ase":aseNode,"icc":iccNode,"photography":photosNode,"images":imagesNode]
             let types=SimpleAssetType.workspaceTypes(home:Catalogues.standard.root)
             for id in enabled {
                 guard let type=types.first(where:{$0.id == id}) else{continue}
                 let node=special[id] ?? Node("mylibrary-"+id,type.title,symbol:type.symbol)
                 node.assetTypeID=id;libraryRoot.children.append(node)
             }
-            for id in ["palettes","typography","fonts","ase","photography","images"] where !enabled.contains(id) {
+            for id in ["palettes","typography","ase","photography","images"] where !enabled.contains(id) {
                 if let node=special[id],!node.children.isEmpty {node.assetTypeID=id;libraryRoot.children.append(node)}
-            }
-            if !libraryRoot.children.contains(where:{$0.key == "mylibrary-fonts"}) {
-                fontsNode.assetTypeID="fonts"
-                libraryRoot.children.append(fontsNode)
             }
             if !AppPreferences.shared.bool(forKey:"Workspace.AssetTree.ManualOrder.Library") {
                 libraryRoot.children.sort{ left,right in
@@ -650,7 +604,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         myLibraryRoots=libraryRoot.children
         func aggregateFolderCounts(_ node:Node)->Int {
             if case .palette=node.place {return 1}
-            if node.fontID != nil {return 1}
             if node.importedAssetID != nil {return 1}
             guard !node.children.isEmpty else{return node.count}
             let total=node.children.reduce(0){$0+aggregateFolderCounts($1)}
@@ -725,7 +678,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     }
     func outlineView(_ tree:NSOutlineView,heightOfRowByItem item:Any)->CGFloat {
         if (item as? Node)?.key == "icc-content"{return (iccContent?.minimumContentHeight ?? 128)+16}
-        let base:CGFloat = {if let node=item as? Node {if case .palette=node.place{return WorkspaceBranchTree.paletteRowHeight};if node.fontID != nil{return WorkspaceBranchTree.paletteRowHeight}};return 34}()
+        let base:CGFloat = {if let node=item as? Node {if case .palette=node.place{return WorkspaceBranchTree.paletteRowHeight}};return 34}()
         return (tree as? WorkspaceBranchTree)?.colourTargetRowHeight(for:item,base:base) ?? base
     }
     func outlineView(_ tree:NSOutlineView,viewFor column:NSTableColumn?,item:Any)->NSView? {
@@ -733,7 +686,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         if node.key == "icc-content",let iccContent{return iccContent}
         let cell=WorkspaceBranchTree.Cell(frame:NSRect(x:0,y:0,width:tree.tableColumns[0].width,height:34))
         cell.symbol=node.symbol
-        cell.fontFamily=node.fontFamily
         cell.isAssetCategory=node.assetTypeID != nil
         if tree === outline || tree === myPalettes || tree === favourites {
             cell.trailingGearAndCount=true
@@ -758,7 +710,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         let label=NSTextField(labelWithString:node.title)
         cell.countLabel.stringValue=node.count == 0 ? "(0)":String(node.count)
         cell.countLabel.isHidden = node.key == backNode.key
-        label.font=node.fontFamily.flatMap{NSFontManager.shared.font(withFamily:$0,traits:[],weight:5,size:TextSize.body)} ?? Design.Text.body.font()
+        label.font=Design.Text.body.font()
         label.textColor=Design.ink;label.lineBreakMode = .byTruncatingTail
         cell.addSubview(label);cell.textField=label;cell.toolTip=node.key.hasPrefix("schema-preview-") ? "Catalogue structure — add a \(SchemaTrial.structure?.clientName ?? "Client") to start using this structure.":node.title
         if tree === catalogueList, let name=node.catalogue {
@@ -774,32 +726,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                 self.catalogueMenu.open(actions,at:NSPoint(x:cell.catalogueAction.frame.minX,y:cell.catalogueAction.frame.maxY),in:cell)
             }
         }
-        if let id=node.fontID,let entry=fontEntries.first(where:{$0.id == id}) {
-            cell.isPalette=true;cell.twoLines=true;cell.target.isHidden=true
-            cell.fontDrag=(id,entry.info.family)
-            cell.selectFont={ [weak self] in self?.onOpenFont?(id) }
-            cell.dragChanged={ [weak self] active in self?.outline.paletteDragActive=active }
-            cell.countLabel.stringValue="";cell.countLabel.isHidden=true
-            cell.review.configure(name:entry.info.family,review:entry.info.review)
-            cell.review.onRating={ [weak self] rating in
-                var info=entry.info;info.review=PaletteReview(rating:rating,flag:info.review?.flag)
-                self?.onFontUpdate?(id,info)
-            }
-            cell.review.onFlag={ [weak self] flag in
-                var info=entry.info;info.review=PaletteReview(rating:info.review?.rating ?? 0,flag:flag)
-                self?.onFontUpdate?(id,info)
-            }
-            cell.star.favourite=entry.info.favourite == true
-            cell.star.setAccessibilityLabel((cell.star.favourite ? "Remove Favourite: ":"Add Favourite: ")+entry.info.family)
-            cell.star.run={ [weak self] in var info=entry.info;info.favourite = !(info.favourite == true);self?.onFontUpdate?(id,info) }
-            cell.tagIcon.setAccessibilityLabel("Tags: "+entry.info.family)
-            cell.tagIcon.run={ [weak self] in self?.onOpenFont?(id) }
-            cell.catalogueAction.run={ [weak self,weak cell,weak tree] in
-                guard let self,let cell,let tree=tree as? WorkspaceBranchTree else{return}
-                let anchor=cell.convert(NSPoint(x:cell.catalogueAction.frame.minX,y:cell.catalogueAction.frame.maxY),to:tree)
-                self.nodeMenu(node,at:anchor,in:tree,tree:tree)
-            }
-        } else if case .palette(let id)=node.place {
+        if case .palette(let id)=node.place {
             cell.isPalette=true
             cell.twoLines=true
             cell.renamePalette=lockedPaletteIDs.contains(id) ? nil : { [weak self] name in self?.onRename?(id,name) }
@@ -835,7 +762,6 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
     func outlineView(_ tree:NSOutlineView,pasteboardWriterForItem item:Any)->NSPasteboardWriting? {
         guard let node=item as? Node else{return nil}
         let writer=NSPasteboardItem()
-        if let id=node.fontID {writer.setString(id.uuidString,forType:FontDrag.type);return writer}
         guard case .palette(let id)=node.place else{return nil}
         writer.setString(id.uuidString,forType:PaletteDrag.type);return writer
     }
@@ -849,15 +775,13 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
         guard tree === outline || tree === myPalettes else{return []}
         let row=tree.row(at:tree.convert(info.draggingLocation,from:nil))
         guard row >= 0,let node=tree.item(atRow:row) as? Node else{return []}
-        let hasFont=FontDrag.font(on:info.draggingPasteboard) != nil
-        guard hasFont ? node.fontDestination != nil : (PaletteDrag.palette(on:info.draggingPasteboard) != nil && node.destination != nil) else{return []}
+        guard PaletteDrag.palette(on:info.draggingPasteboard) != nil && node.destination != nil else{return []}
         tree.setDropItem(node,dropChildIndex:NSOutlineViewDropOnItemIndex)
         return .copy
     }
     func outlineView(_ tree:NSOutlineView,acceptDrop info:NSDraggingInfo,item:Any?,childIndex:Int)->Bool {
         defer{outline.paletteDragActive=false;myPalettes.paletteDragActive=false}
         guard let node=item as? Node,tree === outline else{return false}
-        if let id=FontDrag.font(on:info.draggingPasteboard),let destination=node.fontDestination {onFontDrop?(id,destination);return true}
         guard let id=PaletteDrag.palette(on:info.draggingPasteboard),let destination=node.destination else{return false}
         onDrop?(id,destination);return true
     }
@@ -909,13 +833,11 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
             guard let self,let tree,let selected=tree.item(atRow:tree.selectedRow) as? Node,selected.key == node.key else{return}
             if node.pulse {
                 if node.createClient{self.onCreateClient?()}else if let id=node.creationClient{self.onCreateWork?(id)}
-            } else if node.key == "mylibrary-fonts" {self.onFilter?("fonts")}
-            else if let id=node.fontID {self.onOpenFont?(id)}
-            else if tree !== self.catalogueList,(!node.children.isEmpty || node.fontDestination != nil || node.assetTypeID == "fonts"),node.key != "icc-content" {
+            }
+            else if tree !== self.catalogueList,(!node.children.isEmpty),node.key != "icc-content" {
                 func sections(in parent:Node)->[WorkspaceTreeGridSection] {
                     let direct:[WorkspaceTreeGridAsset]=parent.children.compactMap{child in
                         if case .palette(let id)=child.place{return .palette(id)}
-                        if let id=child.fontID{return .font(id)}
                         if let id=child.importedAssetID{return .imported(id)}
                         return nil
                     }
@@ -923,7 +845,7 @@ final class WorkspaceCatalogues: NSView, NSOutlineViewDataSource, NSOutlineViewD
                     for child in parent.children where !child.children.isEmpty {result += sections(in:child)}
                     return result
                 }
-                self.onBucketPick?(WorkspaceTreeGridScope(key:node.key,title:node.title,sections:sections(in:node),fontBucket:node.fontDestination != nil || node.assetTypeID == "fonts"))
+                self.onBucketPick?(WorkspaceTreeGridScope(key:node.key,title:node.title,sections:sections(in:node)))
             } else if let id=node.importedAssetID {self.onOpenImportedAsset?(id)}
             else if let catalogue=node.catalogue {if catalogue != self.current {self.onCatalogue?(catalogue)}else{self.onPick?(.catalogue)}}
             else if ["favourites","claimed","palettes"].contains(node.key){self.onFilter?(node.key)}

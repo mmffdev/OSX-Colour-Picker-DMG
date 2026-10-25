@@ -184,42 +184,17 @@ final class WorkspaceViewportBar:NSView {
         }
     }
     private let pageHelp=Help_HexButton(page:"palette-page",title:"Palette Page")
-    private let fontBack=SwissButton("Back To Fonts",.secondary)
-    private let assetImport=SwissButton("Import Fonts…",.secondary)
-    private let fontCollection=SwissButton("Add To Collection…",.secondary)
-    private let fontSave=SwissButton("Save Font Details",.primary)
-    private let fontFormatMenu=AnalysisMenu("Format",["All Formats","OTF","TTF","TTC","OTC","System"])
-    var onFontBack:(()->Void)?,onFontImport:(()->Void)?,onPaletteImport:(()->Void)?,onFontCollection:(()->Void)?,onFontSave:(()->Void)?
-    var onFontFormat:((String)->Void)?
-    var onFontOrder:((String)->Void)?
-    private var fontActionsActive=false
+    private let assetImport=SwissButton("Import Palettes…",.secondary)
+    var onPaletteImport:(()->Void)?
     private var paletteImportActive=false
-    func configureFontActions(active:Bool,detail:Bool,paletteImport:Bool=false,format:String="All Formats",order:String="Group By Type"){
+    func configurePaletteImport(active:Bool){
         guard !isFooter else{return}
-        fontActionsActive=active
-        paletteImportActive=paletteImport
-        fontBack.isHidden = !active || !detail
-        assetImport.title=active ? "Import Fonts…":"Import Palettes…"
-        assetImport.isHidden = !active && !paletteImport
-        fontCollection.isHidden = !active || !detail
-        fontSave.isHidden = !active || !detail
-        fontFormatMenu.isHidden = !active || detail
-        fontFormatMenu.selectItem(withTitle:format)
-        if active {
-            let choices=format == "All Formats" ? ["Group By Type","Name A–Z","Name Z–A"]:["Name A–Z","Name Z–A"]
-            assetOrderMenu.options(choices,selected:choices.firstIndex(of:order) ?? 0)
-        } else {assetOrderMenu.options(GridAssetOrder.allCases.map(\.rawValue),selected:0)}
-        pageHelp.isHidden=intake || (active && detail)
-        pageHelp.pageID=active ? "catalogues":"palette-page"
-        pageHelp.toolTip=active ? "Help: Library":"Help: Palette Page"
-        pageHelp.setAccessibilityLabel(pageHelp.toolTip ?? "Help")
-        if active && detail {assetOrderMenu.isHidden=true;metadataFilterButton.isHidden=true}
+        paletteImportActive=active
+        assetImport.isHidden = !active
+        pageHelp.isHidden=intake
         needsLayout=true
     }
-    @objc private func fontBackPressed(){onFontBack?()}
-    @objc private func assetImportPressed(){if fontActionsActive {onFontImport?()} else if paletteImportActive {onPaletteImport?()}}
-    @objc private func fontCollectionPressed(){onFontCollection?()}
-    @objc private func fontSavePressed(){onFontSave?()}
+    @objc private func assetImportPressed(){if paletteImportActive {onPaletteImport?()}}
     let channels=WorkspaceChannelControls(frame:.zero)
     private let cancelButton=SwissButton("Cancel", .quiet)
     private let allImages=SwissCheckbox("Select All")
@@ -231,7 +206,7 @@ final class WorkspaceViewportBar:NSView {
     private let assetOrderMenu=AnalysisMenu("Filter By",GridAssetOrder.allCases.map(\.rawValue))
     var onAssetOrder:((GridAssetOrder)->Void)?
     var filtersNewRow=false {didSet{needsLayout=true}}
-    func setAssetOrder(_ order:GridAssetOrder){if !fontActionsActive {assetOrderMenu.selectItem(withTitle:order.rawValue)};needsLayout=true}
+    func setAssetOrder(_ order:GridAssetOrder){assetOrderMenu.selectItem(withTitle:order.rawValue);needsLayout=true}
 
     private let importLinkChoice=WorkspaceToggleChoiceControl(labels:["Import","Link"])
     private let importTypeMenu=AnalysisMenu("Artefact Type",WorkspaceImport.types)
@@ -262,20 +237,9 @@ final class WorkspaceViewportBar:NSView {
         assetOrderMenu.borderless=true;assetOrderMenu.isHidden=footer
         assetOrderMenu.changed={ [weak self] index in
             guard let self else{return}
-            if self.fontActionsActive {
-                let choices=self.fontFormatMenu.titleOfSelectedItem == "All Formats" ? ["Group By Type","Name A–Z","Name Z–A"]:["Name A–Z","Name Z–A"]
-                if choices.indices.contains(index){self.onFontOrder?(choices[index])}
-            } else if GridAssetOrder.allCases.indices.contains(index) {self.onAssetOrder?(GridAssetOrder.allCases[index])}
+            if GridAssetOrder.allCases.indices.contains(index) {self.onAssetOrder?(GridAssetOrder.allCases[index])}
         }
         if !footer {addSubview(assetOrderMenu)}
-        fontFormatMenu.borderless=true; fontFormatMenu.isHidden=true
-        fontFormatMenu.pillBorders=Dictionary(uniqueKeysWithValues:(["All Formats"]+FontFormatStyle.groups).map{($0,FontFormatStyle.colour($0))})
-        fontFormatMenu.changed={ [weak self] index in
-            let choices=["All Formats","OTF","TTF","TTC","OTC","System"]
-            guard choices.indices.contains(index) else{return}
-            self?.onFontFormat?(choices[index])
-        }
-        if !footer {addSubview(fontFormatMenu)}
         metadataFilterButton.title="Filter by Meta"
         metadataFilterButton.onPress={[weak self] in self?.onMetadataFilter?()}
         if footer {
@@ -304,7 +268,7 @@ final class WorkspaceViewportBar:NSView {
             intakeView.isHidden=true;sortButton.isHidden=true;metadataFilterButton.isHidden=true
             updateButtons()
         } else {
-            for (button,action) in [(fontBack,#selector(fontBackPressed)),(assetImport,#selector(assetImportPressed)),(fontCollection,#selector(fontCollectionPressed)),(fontSave,#selector(fontSavePressed))] {
+            for (button,action) in [(assetImport,#selector(assetImportPressed))] {
                 button.target=self;button.action=action;button.isHidden=true;addSubview(button)
             }
             allImages.target=self;allImages.action=#selector(selectAllChanged)
@@ -340,7 +304,7 @@ final class WorkspaceViewportBar:NSView {
     func configureCustomControls() {
         guard !isFooter else { return }
         customControls=true
-        [pageHelp,allImages,imageFilter,imageCount,metadataFilterButton,importLinkChoice,importTypeMenu,assetOrderMenu,fontFormatMenu].forEach { $0.isHidden=true }
+        [pageHelp,allImages,imageFilter,imageCount,metadataFilterButton,importLinkChoice,importTypeMenu,assetOrderMenu].forEach { $0.isHidden=true }
         needsLayout=true
     }
     func configureImageIntake(_ active:Bool,kind:String="Photographs",linking:Bool=false,selectAll:Bool,newOnly:Bool,fullView:Bool,sort:WorkspaceImageSort,imageCount:Int,selectedCount:Int,columns:Int){
@@ -475,19 +439,8 @@ final class WorkspaceViewportBar:NSView {
             imageFilter.frame=NSRect(x:allImages.frame.maxX+12,y:centreY,width:188,height:28)
             imageCount.frame=NSRect(x:bounds.width-rightInset-220,y:(bounds.height-20)/2,width:220,height:20)
         }
-        if !isFooter && (fontActionsActive || paletteImportActive) {
-            let y=((contentHeight-32)/2).rounded()
-            fontBack.frame=NSRect(x:leftInset,y:y,width:148,height:32)
-            assetImport.frame=NSRect(x:fontBack.isHidden ? leftInset:fontBack.frame.maxX+12,y:y,width:150,height:32)
-            fontSave.frame=NSRect(x:bounds.width-rightInset-174,y:y,width:174,height:32)
-            fontCollection.frame=NSRect(x:fontSave.frame.minX-192,y:y,width:180,height:32)
-            if fontActionsActive && fontBack.isHidden {
-                let filterY=filtersNewRow ? contentHeight+6 : ((contentHeight-28)/2).rounded()
-                let filterRight=pageHelp.isHidden ? bounds.width-rightInset : pageHelp.frame.minX-16
-                metadataFilterButton.frame=NSRect(x:filterRight-156,y:filterY,width:156,height:28)
-                assetOrderMenu.frame=NSRect(x:metadataFilterButton.frame.minX-192,y:filterY,width:180,height:28)
-                fontFormatMenu.frame=NSRect(x:assetOrderMenu.frame.minX-142,y:filterY,width:130,height:28)
-            }
+        if !isFooter && paletteImportActive {
+            assetImport.frame=NSRect(x:leftInset,y:((contentHeight-32)/2).rounded(),width:150,height:32)
         }
     }
     override func draw(_ dirtyRect:NSRect){
@@ -497,7 +450,6 @@ final class WorkspaceViewportBar:NSView {
             let border=NSBezierPath(rect:bounds.insetBy(dx:0.5,dy:0.5));border.lineWidth=1;border.stroke();return
         }
         if usesHeaderSurface{fill(bounds,Design.card);WorkspacePanelSurface.draw(in:bounds,selected:false)}
-        if !isFooter && fontActionsActive {hairline(x:0,y:0,width:bounds.width,Design.rule)}
         hairline(x:0,y:isFooter ? 0:bounds.height-1,width:bounds.width)
         if !isFooter && intake {hairline(x:0,y:bounds.height-1,width:bounds.width,Design.rule)}
         if isFooter {

@@ -155,7 +155,6 @@
 		8EA7D35BC57AF3C35BEA4FE6 /* WorkspaceAssetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DBD485472B36E80F931FDAE /* WorkspaceAssetViews.swift */; };
 		8F4F36F74EA00815693440AC /* PageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140C95002BB44DE858F09C5C /* PageHeader.swift */; };
 		8F75E11CC85D471C05D5A817 /* StudioSplash.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB802EBC2DFC294E5D236516 /* StudioSplash.swift */; };
-		8FDAD3370BDA6EC9A065E762 /* FontLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB111B87F937171A955E864 /* FontLibrary.swift */; };
 		910F21DFBBC59BC136840EAB /* Handler_File_Print_Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 382DFB669B87BFC061653772 /* Handler_File_Print_Profile.swift */; };
 		92BDBE68646D7B503587433D /* TransformInspectorPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4473CB2F690F180D3E05B0F /* TransformInspectorPane.swift */; };
 		944806E6F493E2E34E623943 /* SwissFocusModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22903EEFE6C0AED8AA377D75 /* SwissFocusModal.swift */; };
@@ -254,7 +253,6 @@
 		F19B22FE195C552B3F15BA8E /* Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E79C58437A8675901EF69A /* Migration.swift */; };
 		F1D01E039FD0BA0E2C56F7D1 /* WorkspaceImportControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D10EF27721A939A510308C /* WorkspaceImportControls.swift */; };
 		F22A16CD8EBBBE51E7BB8FBD /* HaloTrainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8ABED4D9440C67CBA4620AE /* HaloTrainer.swift */; };
-		F248EED3274518CC94524A24 /* FontSpecimenPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873BFED580524321C8A0EDD2 /* FontSpecimenPage.swift */; };
 		F37BAFE69ECCCCD9A4FF80D6 /* CatalogueJourney.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F2EE9168632CFA59830F72 /* CatalogueJourney.swift */; };
 		F5AD5C7F67DC6F5158B5A092 /* ViewportGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836F08F91B5572AD59653EF8 /* ViewportGrid.swift */; };
 		F6F2DF95E20456E5C331B4D7 /* Handler_File_Copy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C23F7AC645B34D7F29808E /* Handler_File_Copy.swift */; };
@@ -402,7 +400,6 @@
 		838E1CF56DFF8D433E7883F5 /* colproject.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = colproject.icns; sourceTree = "<group>"; };
 		83F1F67B07B471E97C4CD3CE /* SplashTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashTree.swift; sourceTree = "<group>"; };
 		8558A16E8B828EAFDE6E6A3A /* Handler_File_Manager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Handler_File_Manager.swift; sourceTree = "<group>"; };
-		873BFED580524321C8A0EDD2 /* FontSpecimenPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontSpecimenPage.swift; sourceTree = "<group>"; };
 		87B6D8977CCE759A98338C62 /* DeltaWarningButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeltaWarningButton.swift; sourceTree = "<group>"; };
 		89D8551B44660B78DFE2171F /* Wts-1931-A-380-10-780nm.csv */ = {isa = PBXFileReference; path = "Wts-1931-A-380-10-780nm.csv"; sourceTree = "<group>"; };
 		89E6C3082E3D0F284B755EF7 /* DesignerImageDrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignerImageDrop.swift; sourceTree = "<group>"; };
@@ -442,7 +439,6 @@
 		AC97802B2ADD08E741E0BDA1 /* MetadataFilters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataFilters.swift; sourceTree = "<group>"; };
 		ACD8E9AC8869A3A11048A748 /* getting-started.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "getting-started.md"; sourceTree = "<group>"; };
 		ADB0056B89982DD8394CCBF4 /* ColourProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourProfiles.swift; sourceTree = "<group>"; };
-		ADB111B87F937171A955E864 /* FontLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontLibrary.swift; sourceTree = "<group>"; };
 		AE00BECDB1FCDFBE1EC6539A /* AdobeHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdobeHelper.swift; sourceTree = "<group>"; };
 		AE7347A1D885A19F020F5D88 /* ColourQRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColourQRTests.swift; sourceTree = "<group>"; };
 		AEEBC872061E5C8CD3CBD86B /* SetupFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupFrame.swift; sourceTree = "<group>"; };
@@ -734,8 +730,6 @@
 				73F342387B9D8CD62D47640A /* FileHandlerTests.swift */,
 				38196DDA242B7142C3F2761B /* FileManagementUI.swift */,
 				A1709329933DB3572ED846D4 /* FileVersion.swift */,
-				ADB111B87F937171A955E864 /* FontLibrary.swift */,
-				873BFED580524321C8A0EDD2 /* FontSpecimenPage.swift */,
 				722CA791E5DD7E6EE8E66AA9 /* FormMemory.swift */,
 				B8AF682BBF9CA3DC89E71F7F /* GamutMap.swift */,
 				0935519BEDFCEE303705ACC5 /* HaloDemo.swift */,
@@ -1074,8 +1068,6 @@
 				342254ED669E77180B276995 /* FileHandlerTests.swift in Sources */,
 				CE72B0BC8CF28A4F9ED330AC /* FileManagementUI.swift in Sources */,
 				C02F4A81DAEBE31E0BA36C81 /* FileVersion.swift in Sources */,
-				8FDAD3370BDA6EC9A065E762 /* FontLibrary.swift in Sources */,
-				F248EED3274518CC94524A24 /* FontSpecimenPage.swift in Sources */,
 				2D92733039594F61140B7498 /* FormMemory.swift in Sources */,
 				73C9E393CB091075670C8E18 /* GamutMap.swift in Sources */,
 				D52E7A9518B40454433F541C /* HaloDemo.swift in Sources */,

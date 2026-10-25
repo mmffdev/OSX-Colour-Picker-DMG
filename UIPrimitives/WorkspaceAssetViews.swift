@@ -1,5 +1,4 @@
 import AppKit
-import CoreText
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -34,13 +33,13 @@ final class WorkspaceInspector:NSView,WorkspaceScrollableContent {
 }
 
 final class WorkspaceFilmstrip:NSView {
-    enum Kind:Equatable {case palettes,fonts,images}
+    enum Kind:Equatable {case palettes,images}
     struct Entry {
-        enum Content {case palette(UUID,[String]),font(UUID,String),image(String,Date?)}
+        enum Content {case palette(UUID,[String]),image(String,Date?)}
         let title:String,content:Content
         var identity:String {
             switch content {
-            case .palette(let id,_),.font(let id,_):return id.uuidString
+            case .palette(let id,_):return id.uuidString
             case .image(let path,_):return path
             }
         }
@@ -74,20 +73,6 @@ final class WorkspaceFilmstrip:NSView {
                 case .palette(_,let colours):
                     if colours.isEmpty{fill(box,Design.mist)}
                     for (j,hex) in colours.enumerated(){fill(NSRect(x:box.minX+CGFloat(j)*box.width/CGFloat(max(1,colours.count)),y:box.minY,width:box.width/CGFloat(max(1,colours.count))+0.5,height:box.height),displayColours[hex] ?? Design.hex(hex))}
-                case .font(_,let family):
-                    fill(box,Design.mist)
-                    let font=NSFont(name:family,size:32) ?? NSFontManager.shared.font(withFamily:family,traits:[],weight:5,size:32) ?? NSFont.systemFont(ofSize:32)
-                    let face=CTFontCreateWithName(font.fontName as CFString,32,nil)
-                    let sample=NSAttributedString(string:"Aa",attributes:[kCTFontAttributeName as NSAttributedString.Key:face,.foregroundColor:Design.ink])
-                    let line=CTLineCreateWithAttributedString(sample)
-                    let ink=CTLineGetImageBounds(line,nil)
-                    if let context=NSGraphicsContext.current?.cgContext,ink.width > 0,ink.height > 0 {
-                        context.saveGState()
-                        context.textMatrix=CGAffineTransform(scaleX:1,y:-1)
-                        context.textPosition=CGPoint(x:box.midX-ink.midX,y:box.midY+ink.midY)
-                        CTLineDraw(line,context)
-                        context.restoreGState()
-                    }
                 case .image(let path,let modified):
                     fill(box,Design.mist)
                     if let image=imagePreview?(path,modified) {
@@ -133,7 +118,7 @@ final class WorkspaceFilmstrip:NSView {
     required init?(coder:NSCoder){fatalError()}
     func update(kind:Kind,entries:[Entry],selected:String?,colours:[String:NSColor] = [:]){
         self.kind=kind;strip.displayColours=colours;strip.entries=entries;strip.selected=selected
-        setAccessibilityLabel(kind == .palettes ? "Palette Carousel":kind == .fonts ? "Font Carousel":"Image Carousel")
+        setAccessibilityLabel(kind == .palettes ? "Palette Carousel":"Image Carousel")
         needsLayout=true;needsDisplay=true
     }
     func update(_ palettes:[Swatch],selected:UUID?,colours:[String:NSColor] = [:]){
@@ -144,7 +129,7 @@ final class WorkspaceFilmstrip:NSView {
     override func layout(){super.layout();scroll.frame=NSRect(x:8,y:24,width:bounds.width-16,height:bounds.height-24);strip.frame=NSRect(x:0,y:0,width:max(scroll.contentSize.width,CGFloat(strip.entries.count)*112+8),height:84)}
     override func draw(_ dirtyRect:NSRect){
         hairline(x:0,y:0,width:bounds.width)
-        let noun=kind == .palettes ? "Palettes":kind == .fonts ? "Fonts":"Images"
+        let noun=kind == .palettes ? "Palettes":"Images"
         Design.attributed("\(noun) · \(strip.entries.count)",.body,colour:Design.quiet).draw(x:16,baseline:19)
     }
 }
